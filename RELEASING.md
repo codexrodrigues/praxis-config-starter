@@ -61,6 +61,39 @@ Para alterar o timeout do stream no smoke local:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart -StreamProcessingTimeoutSeconds 360
 ```
 
+Para depurar localmente apenas a observabilidade do planejamento pre-intent do
+turn stream, sem Angular/browser e sem Render, suba o `praxis-api-quickstart`
+local em `http://localhost:8088` empacotado contra o starter em desenvolvimento
+e rode:
+
+```bash
+BASE_URL=http://localhost:8088 tools/local-e2e/run-agentic-turn-pre-intent-local.sh
+```
+
+Esse smoke chama diretamente
+`POST /api/praxis/config/ai/authoring/turn/stream/start`, consome o SSE bruto e
+falha se `tool.plan` ou `tool.plan.skipped` nao aparecer antes de
+`intent.resolved` para o prompt
+`quero criar algo que mostre informacoes dos empregados`. Quando `tool.plan`
+executa, encontra candidatos e a resolucao semantica final falha por provider,
+o smoke tambem exige `consultative.grounded-clarification`, resultado terminal
+com `canApply=false` e
+`decisionDiagnostics.resourceDiscoveryGroundedClarification=true`.
+
+Para validar o mesmo fluxo com prompts abertos, sinonimos, erro de digitacao e
+um caso fora de RH, use a matriz local:
+
+```bash
+BASE_URL=http://localhost:8088 tools/local-e2e/run-agentic-turn-pre-intent-matrix-local.sh
+```
+
+A matriz reutiliza o mesmo contrato do smoke unitario e grava um
+`matrix-summary.json` consolidado com `expectedResourceRank`,
+`expectedResourceRecovered`, top candidatos, recurso selecionado,
+`reviewReason`, quick replies e `unexpectedApplyCount`. Ela deve ser usada
+durante investigacoes do authoring pre-intent para provocar limites de recall,
+ranking e materializacao segura, nao apenas para confirmar o prompt feliz.
+
 Quando a versao ja estiver publicada no Maven Central, valide tambem o consumidor sem override local:
 
 ```powershell

@@ -531,6 +531,46 @@ Regra de aplicacao:
 - `keywordFallbackApplied=true` deve forcar
   `decisionDiagnostics.requiresReview=true`,
   `reviewReason=keyword-fallback-fail-safe` e `canApply=false`.
+- Quando a LLM selecionar um recurso abaixo do candidato governado mais forte
+  recuperado, sem o prompt nomear explicitamente esse recurso escolhido, a
+  decisao deve retornar `reviewReason=llm-selection-lower-ranked-than-governed-candidate`
+  e `canApply=false`. Isso preserva a LLM como autora da escolha, mas impede
+  materializacao automatica quando a evidencia governada ranqueada contradiz a
+  selecao.
+- Quando a selecao final escolher uma projecao analitica/perfil para uma
+  necessidade operacional generica enquanto existe candidato operacional
+  governado no conjunto, a decisao deve retornar
+  `reviewReason=resource-selection-role-mismatch-with-governed-candidate` e
+  `canApply=false`. Esse bloqueio usa apenas roles/evidencias canonicas ja
+  recuperadas; nao introduz aliases de dominio nem roteamento por sinonimos.
+- Quando um prompt narrativo e aberto resultar em recurso selecionado sem
+  ancoragem explicita no texto e com confianca moderada, a decisao deve
+  retornar `reviewReason=resource-selection-unanchored-low-confidence` e
+  `canApply=false`. Esse bloqueio preserva a recuperacao semantica como
+  evidencia, mas evita aplicar automaticamente uma faceta estreita quando a
+  intencao de colecao operacional ainda nao esta confirmada.
+- Uma `visualizationDecision` de `single_chart` so deve materializar um
+  `artifactKind=chart` quando o prompt carregar intencao analitica ou visual
+  explicita, como grafico, indicador, metrica, comparacao, ranking ou agregacao.
+  Para pedidos operacionais abertos, o backend deve preservar a decisao como
+  pagina/dashboard operacional e emitir
+  `llm-single-chart-decision-requires-explicit-analytical-intent`.
+- Quando a LLM selecionar um candidato fraco ou amplo abaixo de um candidato
+  operacional governado mais forte, sem ancoragem explicita no prompt, o backend
+  pode normalizar a selecao para o candidato governado e emitir
+  `llm-resource-selection-overridden-by-governed-ranking`. Esse caso nao deve
+  forcar review, porque a decisao final foi corrigida por evidencia recuperada
+  e ranqueada, nao por alias textual de dominio.
+- Quando a LLM classificar como `api_catalog` um pedido que continua sendo de
+  criacao de superficie operacional e ja possui candidatos governados, o backend
+  deve normalizar para `page/create_artifact` e emitir
+  `llm-api-catalog-authoring-drift-normalized`.
+- Quando o provider falhar depois de `searchApiResources` ja ter retornado
+  candidatos governados fortes para um pedido de authoring de superficie de
+  negocio, o backend pode recuperar a rota materializavel usando essa evidencia
+  e emitir `llm-provider-failure-recovered-by-grounded-candidates`. Esse caminho
+  nao deve reaplicar warnings de fail-safe/clarificacao como se a evidencia
+  tivesse desaparecido.
 - `page-apply` deve exigir `semanticDecision`; aplicar apenas
   `compiledFormPatch` sem decisao canonica e um bypass de contrato.
 - `page-apply` deve rejeitar `semanticDecision.reviewRequired=true`, mesmo que

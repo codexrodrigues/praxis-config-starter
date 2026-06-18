@@ -7,6 +7,7 @@ WORKSPACE_ROOT="$(cd "$STARTER_ROOT/.." && pwd)"
 
 QUICKSTART_ROOT="${QUICKSTART_ROOT:-$WORKSPACE_ROOT/praxis-api-quickstart}"
 ENV_FILE="${ENV_FILE:-$STARTER_ROOT/.env.openai.local.sh}"
+QUICKSTART_ENV_FILE="${QUICKSTART_ENV_FILE:-$QUICKSTART_ROOT/.env.dev}"
 JAVA_HOME="${JAVA_HOME:-${PRAXIS_JAVA_HOME:-}}"
 PORT="${PORT:-8088}"
 PROVIDER="${PROVIDER:-openai}"
@@ -50,6 +51,14 @@ trim_env_value() {
 
 load_env_file() {
   local env_file="$1"
+  local mode="${2:-overwrite}"
+  if [[ "$mode" == "overwrite" || "$mode" == "if-unset" ]]; then
+    shift 2 || true
+  else
+    mode="overwrite"
+    shift || true
+  fi
+  local allowed_names=("$@")
   local normalized_line name value
   while IFS= read -r normalized_line || [[ -n "$normalized_line" ]]; do
     normalized_line="${normalized_line#"${normalized_line%%[![:space:]]*}"}"
@@ -69,9 +78,47 @@ load_env_file() {
       value="${value:1:${#value}-2}"
     fi
     if [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      if [[ "${#allowed_names[@]}" -gt 0 ]]; then
+        local allowed=false
+        local allowed_name
+        for allowed_name in "${allowed_names[@]}"; do
+          if [[ "$name" == "$allowed_name" ]]; then
+            allowed=true
+            break
+          fi
+        done
+        if [[ "$allowed" != "true" ]]; then
+          continue
+        fi
+      fi
+      if [[ "$mode" == "if-unset" && -n "${!name:-}" ]]; then
+        continue
+      fi
       export "$name=$value"
     fi
   done < <(LC_ALL=C perl -pe 's/^\xEF\xBB\xBF// if $. == 1; s/\r$//;' "$env_file")
+}
+
+require_env() {
+  local name="$1"
+  if [[ -z "${!name:-}" ]]; then
+    echo "Missing required local E2E env var: $name" >&2
+    echo "Loaded ENV_FILE=$ENV_FILE" >&2
+    echo "Loaded QUICKSTART_ENV_FILE=$QUICKSTART_ENV_FILE" >&2
+    echo "Set QUICKSTART_ENV_FILE to a quickstart env file with datasource settings, or export the datasource env vars before running." >&2
+    exit 1
+  fi
+}
+
+require_jdbc_env() {
+  local name="$1"
+  require_env "$name"
+  if [[ "${!name}" != jdbc:* ]]; then
+    echo "Invalid local E2E datasource env var: $name must start with jdbc:" >&2
+    echo "Loaded ENV_FILE=$ENV_FILE" >&2
+    echo "Loaded QUICKSTART_ENV_FILE=$QUICKSTART_ENV_FILE" >&2
+    exit 1
+  fi
 }
 
 JAR_PATH="${JAR_PATH:-}"
@@ -99,12 +146,24 @@ if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/
   exit 1
 fi
 
-# Normalize secrets file at runtime only. Do not modify, expand, or print its contents.
-load_env_file "$ENV_FILE"
+# Normalize env files at runtime only. Do not modify, expand, or print their contents.
+if [[ -f "$QUICKSTART_ENV_FILE" && "$QUICKSTART_ENV_FILE" != "$ENV_FILE" ]]; then
+  load_env_file "$QUICKSTART_ENV_FILE" if-unset \
+    SPRING_DATASOURCE_URL SPRING_DATASOURCE_USERNAME SPRING_DATASOURCE_PASSWORD \
+    CONFIG_DATASOURCE_URL CONFIG_DATASOURCE_USERNAME CONFIG_DATASOURCE_PASSWORD
+fi
+load_env_file "$ENV_FILE" overwrite
 
 export CONFIG_DATASOURCE_URL="${CONFIG_DATASOURCE_URL:-${SPRING_DATASOURCE_URL:-}}"
 export CONFIG_DATASOURCE_USERNAME="${CONFIG_DATASOURCE_USERNAME:-${SPRING_DATASOURCE_USERNAME:-}}"
 export CONFIG_DATASOURCE_PASSWORD="${CONFIG_DATASOURCE_PASSWORD:-${SPRING_DATASOURCE_PASSWORD:-}}"
+
+require_jdbc_env SPRING_DATASOURCE_URL
+require_env SPRING_DATASOURCE_USERNAME
+require_env SPRING_DATASOURCE_PASSWORD
+require_jdbc_env CONFIG_DATASOURCE_URL
+require_env CONFIG_DATASOURCE_USERNAME
+require_env CONFIG_DATASOURCE_PASSWORD
 
 export JAVA_HOME
 export PATH="$JAVA_HOME/bin:$PATH"

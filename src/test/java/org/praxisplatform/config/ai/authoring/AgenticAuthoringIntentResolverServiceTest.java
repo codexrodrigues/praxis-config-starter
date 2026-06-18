@@ -791,6 +791,89 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void openOperationalPromptDoesNotPromoteLlmSingleChartDecisionWithoutExplicitAnalyticalIntent() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeCandidate = withEvidence(candidateWithEvidence(
+                        "/api/human-resources/funcionarios",
+                        0.63d,
+                        List.of("pessoas", "nome", "email", "cargo", "departamento")),
+                "semantic-role:operational-resource");
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "single chart overview",
+                "single_chart",
+                "praxis-chart",
+                List.of(new AgenticAuthoringVisualizationAxisDecision(
+                        "status atual",
+                        "status",
+                        "Status",
+                        "bar",
+                        "vertical",
+                        "count",
+                        null,
+                        null,
+                        "llm")),
+                false,
+                false,
+                List.of("praxis-table", "praxis-filter", "praxis-kpi-strip"),
+                false,
+                false,
+                "llm");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(employeeCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "chart",
+                        "create_chart",
+                        "/api/human-resources/funcionarios",
+                        null,
+                        "none",
+                        "Vou criar uma visão do pessoal.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-single-chart-decision"),
+                        null,
+                        visualizationDecision)));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "preciso ver como esta meu pessoal",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.visualizationDecision()).isNull();
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.warnings())
+                .contains("llm-single-chart-decision-requires-explicit-analytical-intent");
+    }
+
+    @Test
     void fallbackKeepsPainelAsDashboardInsteadOfGenericTable() {
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "quero uma tela pra ve os pagamento dos funcionario, tipo um painel bonito",
@@ -8362,7 +8445,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void humanDashboardPromptFailsClosedWhenPrimaryLlmIntentTimesOut() {
+    void humanDashboardPromptRecoversFromPrimaryLlmTimeoutWhenGovernedCandidatesAreAvailable() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         Mockito.when(llmIntentResolver.resolve(
@@ -8404,19 +8487,23 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.valid()).isFalse();
-        assertThat(result.operationKind()).isEqualTo("unknown");
-        assertThat(result.artifactKind()).isEqualTo("unknown");
-        assertThat(result.changeKind()).isEqualTo("provider_error");
-        assertThat(result.gate().status()).isEqualTo("clarification_required");
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.warnings())
                 .contains(
                         "llm-intent-resolution-used",
-                        "llm-intent-resolution-provider-failed-clarification-required",
                         "llm-intent-resolution-failed",
                         "llm-provider-timeout",
+                        "llm-provider-failure-recovered-by-grounded-candidates",
                         "pre-llm-governed-resource-choice-ranked")
-                .doesNotContain("keyword-fallback-applied", "pre-llm-governed-resource-choice-applied");
+                .doesNotContain(
+                        "llm-intent-resolution-provider-failed-clarification-required",
+                        "keyword-fallback-applied",
+                        "pre-llm-governed-resource-choice-applied");
         Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
@@ -9525,7 +9612,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void businessRulePromptUsesCanonicalSchemaEvidenceWhenWeakLexicalScoresFavorRelationshipEndpoint() {
+    void businessRulePromptKeepsBestSchemaEvidenceWhenCanonicalSchemaEvidenceFavorsRelationshipEndpoint() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of(
                 apiMetadataWithSchemas(
@@ -9585,9 +9672,697 @@ class AgenticAuthoringIntentResolverServiceTest {
 
         assertThat(result.valid()).isFalse();
         assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/contracts");
         assertThat(result.gate().status()).isEqualTo("route_required");
         assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
+    }
+
+    @Test
+    void llmSelectedSemanticCandidateIsNotOverriddenByWeakLexicalPromptAlignment() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate weakLexicalCandidate = weakLexicalCandidate(
+                "/api/operations/bases",
+                0.91d,
+                "tela acompanhar colaboradores",
+                "Base operacional mencionada apenas por fallback lexical.");
+        AgenticAuthoringCandidate semanticEmployeeCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter/cursor",
+                "post",
+                0.56d,
+                "api_metadata semantic retrieval",
+                List.of("api-metadata", "semantic-retrieval", "schema-available", "tool-search-api-resources"));
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(weakLexicalCandidate, semanticEmployeeCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "page",
+                        "create_artifact",
+                        "/api/human-resources/funcionarios",
+                        null,
+                        "none",
+                        "Vou criar uma tela para acompanhar colaboradores.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "quero uma tela para acompanhar colaboradores",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.selectedCandidate().evidence()).contains("semantic-retrieval", "tool-search-api-resources");
+        assertThat(result.warnings()).doesNotContain("llm-resource-selection-overridden-by-prompt-alignment");
+    }
+
+    @Test
+    void lowerRankedLlmResourceSelectionRequiresSemanticReviewBeforeApply() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeCandidate = withEvidence(candidateWithEvidence(
+                "/api/human-resources/funcionarios",
+                0.59d,
+                List.of("funcionarios", "nome", "email", "cargo", "departamento")),
+                "tool-search-api-resources");
+        AgenticAuthoringCandidate reputationCandidate = withEvidence(candidateWithEvidence(
+                "/api/human-resources/vw-ranking-reputacao",
+                0.53d,
+                List.of("ranking", "reputacao", "funcionarios")),
+                "tool-search-api-resources");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(employeeCandidate, reputationCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "table",
+                        "create_artifact",
+                        "/api/human-resources/vw-ranking-reputacao",
+                        null,
+                        "none",
+                        "Vou criar uma tabela com informações dos funcionários.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "quero uma tela para consolidar dados do time",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/vw-ranking-reputacao");
+        assertThat(result.warnings()).contains("llm-resource-selection-lower-ranked-than-governed-candidate");
+        assertThat(result.semanticDecision()).isNotNull();
+        assertThat(result.semanticDecision().reviewRequired()).isTrue();
+        assertThat(result.semanticDecision().reviewReason())
+                .isEqualTo("llm-selection-lower-ranked-than-governed-candidate");
+    }
+
+    @Test
+    void weakLowerRankedLlmResourceSelectionIsOverriddenByStrongGovernedCandidate() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/human-resources/funcionarios",
+                        0.65d,
+                        List.of("pessoas", "time", "nome", "email", "cargo", "departamento")),
+                        "semantic-retrieval"),
+                "semantic-role:operational-resource");
+        AgenticAuthoringCandidate weakSkillCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/human-resources/funcionario-habilidades",
+                        0.48d,
+                        List.of("habilidades", "competencias")),
+                        "broad-artifact-discovery"),
+                "semantic-role:operational-resource");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(employeeCandidate, weakSkillCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "page",
+                        "create_artifact",
+                        "/api/human-resources/funcionario-habilidades",
+                        null,
+                        "none",
+                        "Vou criar uma página para visualizar o pessoal.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "preciso ver como esta meu pessoal",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.warnings()).contains("llm-resource-selection-overridden-by-governed-ranking");
+        assertThat(result.warnings()).doesNotContain("llm-resource-selection-overridden-by-prompt-alignment");
+        assertThat(result.warnings()).doesNotContain("llm-resource-selection-lower-ranked-than-governed-candidate");
+        assertThat(result.semanticDecision()).isNotNull();
+        assertThat(result.semanticDecision().reviewRequired()).isFalse();
+    }
+
+    @Test
+    void apiCatalogLlmDriftForOpenPageAuthoringIsNormalizedToPageAuthoring() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/human-resources/funcionarios",
+                        0.65d,
+                        List.of("pessoas", "time", "nome", "email", "cargo", "departamento")),
+                        "semantic-retrieval"),
+                "semantic-role:operational-resource");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(employeeCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question",
+                        null,
+                        null,
+                        "none",
+                        "Encontrei fontes candidatas para escolher.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "queria uma tela para acompanhar o time da empresa",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.warnings()).contains("llm-api-catalog-authoring-drift-normalized");
+    }
+
+    @Test
+    void projectionSelectionForGenericOperationalNeedIsOverriddenByStrongerGovernedCandidate() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/human-resources/funcionarios",
+                        0.62d,
+                        List.of("pessoas", "time", "nome", "email", "cargo", "departamento")),
+                        "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        AgenticAuthoringCandidate analyticsProjection = withEvidence(candidateWithEvidence(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        0.45d,
+                        List.of("colaboradores", "departamento", "folha", "analytics")),
+                "semantic-role:analytics-projection");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(employeeCandidate, analyticsProjection));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "table",
+                        "create_artifact",
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        null,
+                        "none",
+                        "Vou criar uma tela para acompanhar colaboradores.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "quero uma tela para acompanhar colaboradores",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.warnings()).contains("llm-resource-selection-overridden-by-governed-ranking");
+        assertThat(result.warnings()).doesNotContain("llm-resource-selection-overridden-by-prompt-alignment");
+        assertThat(result.warnings()).doesNotContain("resource-selection-role-mismatch-with-governed-candidate");
+        assertThat(result.semanticDecision()).isNotNull();
+        assertThat(result.semanticDecision().reviewRequired()).isFalse();
+    }
+
+    @Test
+    void broadFallbackSelectionIsOverriddenByStrongerSemanticRetrievalCandidate() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate contractCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/procurement/contracts",
+                        0.59d,
+                        List.of("fornecedores", "contratos", "status", "compras")),
+                        "semantic-retrieval"),
+                "semantic-role:operational-resource");
+        AgenticAuthoringCandidate broadOperationsCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/operations/acordos-regulatorios",
+                        0.48d,
+                        List.of("acordos", "regulatorios")),
+                        "broad-artifact-discovery"),
+                "semantic-role:operational-resource");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(contractCandidate, broadOperationsCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "page",
+                        "create_artifact",
+                        "/api/operations/acordos-regulatorios",
+                        null,
+                        "none",
+                        "Vou criar uma página para acompanhar contratos e informações dos fornecedores.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "preciso de uma tela para acompanhar nossos parceiros externos com contratos, status e informacoes principais",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/contracts");
+        assertThat(result.warnings()).contains("llm-resource-selection-overridden-by-governed-ranking");
+        assertThat(result.warnings()).doesNotContain("llm-resource-selection-overridden-by-prompt-alignment");
+        assertThat(result.semanticDecision()).isNotNull();
+        assertThat(result.semanticDecision().reviewRequired()).isFalse();
+    }
+
+    @Test
+    void providerFailureWithOnlyBroadDiscoveryCandidatesDoesNotMaterialize() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate broadSkillCandidate = withEvidence(
+                broadArtifactCandidate(
+                        "/api/human-resources/funcionario-habilidades",
+                        0.48d,
+                        "Matriz de habilidades por funcionario"),
+                "semantic-role:operational-resource");
+        AgenticAuthoringCandidate broadEmployeeCandidate = withEvidence(
+                broadArtifactCandidate(
+                        "/api/human-resources/funcionarios",
+                        0.42d,
+                        "Cadastro completo de funcionarios"),
+                "semantic-role:operational-resource");
+        AgenticAuthoringCandidate weakLexicalRelatedCandidate = withEvidence(
+                weakLexicalCandidate(
+                        "/api/human-resources/dependentes",
+                        0.61d,
+                        "acompanhar colaboradores dependentes",
+                        "Dependentes relacionados a colaboradores."),
+                "semantic-role:operational-resource");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(broadSkillCandidate, broadEmployeeCandidate, weakLexicalRelatedCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        false,
+                        "unknown",
+                        "unknown",
+                        "provider_error",
+                        null,
+                        null,
+                        "provider_error",
+                        "Não consegui confirmar a intenção agora.",
+                        List.of(),
+                        List.of(),
+                        List.of(
+                                "llm-intent-resolution-used",
+                                "llm-intent-resolution-failed",
+                                "llm-provider-error"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "quero uma tela para acompanhar colaboradores",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.warnings()).contains("llm-provider-error");
+        assertThat(result.warnings()).doesNotContain("llm-provider-failure-recovered-by-grounded-candidates");
+    }
+
+    @Test
+    void profileProjectionSelectionForOperationalDetailsLaterPromptRequiresSemanticReviewBeforeApply() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/human-resources/funcionarios",
+                        0.45d,
+                        List.of("pessoas", "time", "area", "detalhes")),
+                        "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        AgenticAuthoringCandidate profileProjection = withEvidence(candidateWithEvidence(
+                        "/api/human-resources/vw-perfil-heroi",
+                        0.99d,
+                        List.of("perfil", "visao", "detalhes")),
+                "semantic-role:profile-projection");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(profileProjection, employeeCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "page",
+                        "create_page",
+                        "/api/human-resources/vw-perfil-heroi",
+                        null,
+                        "none",
+                        "Vou criar uma tela para acompanhar o time.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "quero acompanhar o time por area e abrir detalhes depois",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/vw-perfil-heroi");
+        assertThat(result.warnings()).contains("resource-selection-role-mismatch-with-governed-candidate");
+        assertThat(result.semanticDecision()).isNotNull();
+        assertThat(result.semanticDecision().reviewRequired()).isTrue();
+        assertThat(result.semanticDecision().reviewReason())
+                .isEqualTo("resource-selection-role-mismatch-with-governed-candidate");
+    }
+
+    @Test
+    void openNarrativePageSelectionWithUnanchoredModerateEvidenceRequiresReviewBeforeApply() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate reputationCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/human-resources/reputacoes",
+                        0.56d,
+                        List.of("reputacao", "contexto", "operacional")),
+                        "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        AgenticAuthoringCandidate rankingCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/human-resources/vw-ranking-reputacao",
+                        0.49d,
+                        List.of("ranking", "reputacao")),
+                        "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(reputationCandidate, rankingCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "page",
+                        "create_artifact",
+                        "/api/human-resources/reputacoes",
+                        null,
+                        "none",
+                        "Vou criar uma tela para acompanhar o time.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "Estou reorganizando uma rotina de gestao e queria uma tela para acompanhar o time da empresa. "
+                        + "Preciso enxergar quem sao as pessoas, alguma visao geral por area e conseguir abrir "
+                        + "detalhes depois, mas ainda nao sei se isso deve virar tabela, painel ou outra coisa.",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/reputacoes");
+        assertThat(result.warnings()).contains("resource-selection-unanchored-low-confidence");
+        assertThat(result.semanticDecision()).isNotNull();
+        assertThat(result.semanticDecision().reviewRequired()).isTrue();
+        assertThat(result.semanticDecision().reviewReason())
+                .isEqualTo("resource-selection-unanchored-low-confidence");
+    }
+
+    @Test
+    void resourceDiscoverySemanticCandidateIsRankedBeforeWeakLexicalCatalogCandidate() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate weakLexicalCandidate = weakLexicalCandidate(
+                "/api/human-resources/historicos-cargos",
+                0.91d,
+                "acompanhar colaboradores cargos",
+                "Historico de cargos encontrado apenas por fallback lexical.");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(weakLexicalCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    List<AgenticAuthoringCandidate> candidateOptions = invocation.getArgument(4);
+                    assertThat(candidateOptions).isNotEmpty();
+                    assertThat(candidateOptions.get(0).resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+                    return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                            true,
+                            "create",
+                            "page",
+                            "create_artifact",
+                            candidateOptions.get(0).resourcePath(),
+                            null,
+                            "none",
+                            "Vou criar uma tela para acompanhar colaboradores.",
+                            List.of(),
+                            List.of(),
+                            List.of("llm-intent-resolution-used")));
+                });
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode resourceDiscovery = contextHints.putObject("resourceDiscovery");
+        resourceDiscovery.put("tool", "searchApiResources");
+        resourceDiscovery.put("retrievalQuery", "tela para acompanhar colaboradores funcionarios");
+        ObjectNode semanticCandidate = resourceDiscovery.putArray("candidates").addObject();
+        semanticCandidate.put("resourcePath", "/api/human-resources/funcionarios");
+        semanticCandidate.put("operation", "post");
+        semanticCandidate.put("submitMethod", "post");
+        semanticCandidate.put("submitUrl", "/api/human-resources/funcionarios/filter/cursor");
+        semanticCandidate.put(
+                "schemaUrl",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response");
+        semanticCandidate.put("score", 0.56d);
+        semanticCandidate.put("reason", "api_metadata semantic retrieval");
+        semanticCandidate.putArray("evidence")
+                .add("api-metadata")
+                .add("semantic-retrieval")
+                .add("schema-available");
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "quero uma tela para acompanhar colaboradores",
+                "deterministic-smoke-disabled",
+                contextHints));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.selectedCandidate().evidence()).contains("semantic-retrieval", "tool-search-api-resources");
     }
 
     @Test
@@ -9889,6 +10664,43 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 resourcePath,
                                 matchedText + " " + summary,
                                 Math.min(score, 0.49d),
+                                List.of(),
+                                "tenant",
+	                                "local",
+	                                "release"))));
+    }
+
+    private AgenticAuthoringCandidate broadArtifactCandidate(
+            String resourcePath,
+            double score,
+            String summary) {
+        String submitUrl = resourcePath + "/filter/cursor";
+        return new AgenticAuthoringCandidate(
+                resourcePath,
+                "post",
+                "/schemas/filtered?path=" + submitUrl + "&operation=post&schemaType=response",
+                submitUrl,
+                "POST",
+                score,
+                summary,
+                List.of("api-metadata", "broad-artifact-discovery", "schema-probe-pending"),
+                AgenticAuthoringEvidenceBundle.of("broad_artifact_discovery", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "retrieved_candidate",
+                                resourcePath,
+                                summary,
+                                0.72d,
+                                List.of(),
+                                "tenant",
+                                "local",
+                                "release"),
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "/schemas/filtered",
+                                "schema_grounding",
+                                resourcePath,
+                                "Schema pending from broad discovery.",
+                                0.78d,
                                 List.of(),
                                 "tenant",
                                 "local",

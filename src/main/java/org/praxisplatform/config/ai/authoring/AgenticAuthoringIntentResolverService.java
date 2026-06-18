@@ -22,6 +22,9 @@ public class AgenticAuthoringIntentResolverService {
 
     private static final String DEFAULT_TARGET_COMPONENT = "praxis-dynamic-page-builder";
     private static final int MAX_ASSISTANT_MESSAGE_CHARS = 700;
+    private static final String SEMANTIC_ROLE_OPERATIONAL_RESOURCE = "semantic-role:operational-resource";
+    private static final String SEMANTIC_ROLE_ANALYTICS_PROJECTION = "semantic-role:analytics-projection";
+    private static final String SEMANTIC_ROLE_PROFILE_PROJECTION = "semantic-role:profile-projection";
     private final AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer;
     private final AgenticAuthoringCandidateEligibilityGate eligibilityGate;
     private final AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog;
@@ -252,7 +255,9 @@ public class AgenticAuthoringIntentResolverService {
         boolean deterministicFallbackApplied = !shouldResolveLlmIntent
                 || (shouldResolveLlmIntent
                 && (llmIntent == null || (!llmIntent.resolved() && !primaryLlmIntentProviderFailure)));
+        boolean providerFailureRecoveredByGroundedCandidates = false;
         boolean semanticPolicyRefinedVisualProjection = false;
+        boolean apiCatalogAuthoringDriftNormalized = false;
         boolean visualProjectionRefinement = isVisualProjectionRefinementPrompt(prompt, turn, currentPageSummary);
         boolean currentPageDrilldownRefinement =
                 isCurrentPageDrilldownRefinementPrompt(prompt, currentPageSummary);
@@ -384,10 +389,19 @@ public class AgenticAuthoringIntentResolverService {
             }
         } else if (llmIntent != null) {
             if (primaryLlmIntentProviderFailure) {
-                operationKind = "unknown";
-                artifactKind = "unknown";
-                changeKind = "provider_error";
-                deterministicFallbackApplied = false;
+                if (shouldRecoverProviderFailureWithGroundedAuthoring(prompt, candidates)) {
+                    operationKind = "create";
+                    artifactKind = "page";
+                    changeKind = "create_artifact";
+                    deterministicFallbackApplied = true;
+                    primaryLlmIntentProviderFailure = false;
+                    providerFailureRecoveredByGroundedCandidates = true;
+                } else {
+                    operationKind = "unknown";
+                    artifactKind = "unknown";
+                    changeKind = "provider_error";
+                    deterministicFallbackApplied = false;
+                }
             } else {
                 operationKind = fallbackResolution.operationKind();
                 artifactKind = fallbackResolution.artifactKind();
@@ -500,10 +514,18 @@ public class AgenticAuthoringIntentResolverService {
             }
             changeKind = "create_artifact";
         }
+        if (shouldNormalizeApiCatalogAuthoringDrift(prompt, operationKind, artifactKind, changeKind, candidates)) {
+            operationKind = "create";
+            artifactKind = "page";
+            changeKind = "create_artifact";
+            apiCatalogAuthoringDriftNormalized = true;
+        }
         candidates = filterConsultativeApiCatalogCandidates(prompt, artifactKind, candidates);
         if ("api_catalog".equals(artifactKind)) {
             candidates = deduplicateCandidates(candidates);
         }
+        candidates = rankCandidatesForDecision(candidates, artifactKind, prompt);
+        List<AgenticAuthoringCandidate> rankedCandidatesForSelectionReview = candidates;
         AgenticAuthoringCandidate selectedCandidate = explicitLocalUiComposition
                 || primaryLlmIntentProviderFailure
                 ? null
@@ -520,6 +542,14 @@ public class AgenticAuthoringIntentResolverService {
         boolean llmResourceSelectionOverriddenByPromptAlignment = !explicitLocalUiComposition
                 && !primaryLlmIntentProviderFailure
                 && llmResourceSelectionOverriddenByPromptAlignment(
+                        llmIntent,
+                        candidates,
+                        selectedCandidate,
+                        artifactKind,
+                        prompt);
+        boolean llmResourceSelectionOverriddenByGovernedRanking = !explicitLocalUiComposition
+                && !primaryLlmIntentProviderFailure
+                && llmResourceSelectionOverriddenByGovernedRanking(
                         llmIntent,
                         candidates,
                         selectedCandidate,
@@ -572,6 +602,13 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = withPriorityCandidate(candidates, selectedCandidate);
             }
         }
+        if (llmSingleChartDecisionRejectedForOpenOperationalPrompt(prompt, llmIntent)
+                && "chart".equals(artifactKind)) {
+            artifactKind = "page";
+            if ("create_chart".equals(changeKind)) {
+                changeKind = "create_artifact";
+            }
+        }
         if (currentChartTypeModification.isPresent()) {
             operationKind = "modify";
             artifactKind = "chart";
@@ -586,8 +623,18 @@ public class AgenticAuthoringIntentResolverService {
                 artifactKind,
                 candidates);
         if (visualMaterializationCandidate != null
+                && (selectedCandidate == null || !promptMentionsSpecificCandidateToken(prompt, selectedCandidate))
                 && !sameCandidate(visualMaterializationCandidate, selectedCandidate)) {
             selectedCandidate = visualMaterializationCandidate;
+            candidates = withPriorityCandidate(candidates, selectedCandidate);
+        }
+        AgenticAuthoringCandidate analyticalRoleCandidate = analyticalRoleCandidateForComparisonPrompt(
+                prompt,
+                artifactKind,
+                selectedCandidate,
+                candidates);
+        if (analyticalRoleCandidate != null && !sameCandidate(analyticalRoleCandidate, selectedCandidate)) {
+            selectedCandidate = analyticalRoleCandidate;
             candidates = withPriorityCandidate(candidates, selectedCandidate);
         }
         if (contextualPreviewAction && !currentPageDrilldownRefinement) {
@@ -721,6 +768,20 @@ public class AgenticAuthoringIntentResolverService {
                 selectedCandidate = candidates.get(0);
             }
             candidates = withPriorityCandidate(candidates, selectedCandidate);
+        }
+        AgenticAuthoringCandidate finalGovernedOperationalCandidate =
+                strongerGovernedOperationalCandidateForFinalSelection(prompt, artifactKind, selectedCandidate, candidates);
+        if (!explicitLocalUiComposition
+                && !primaryLlmIntentProviderFailure
+                && !isExplicitGovernedBusinessRulePrompt(prompt)
+                && finalGovernedOperationalCandidate != null
+                && selectedCandidate != null
+                && !sameCandidate(finalGovernedOperationalCandidate, selectedCandidate)
+                && !promptMatchesCandidatePathIdentity(prompt, selectedCandidate)) {
+            selectedCandidate = finalGovernedOperationalCandidate;
+            candidates = withPriorityCandidate(candidates, selectedCandidate);
+            llmResourceSelectionOverriddenByPromptAlignment = false;
+            llmResourceSelectionOverriddenByGovernedRanking = true;
         }
         if (selectedCandidate != null
                 && !turn.answeredPendingClarification()
@@ -867,7 +928,10 @@ public class AgenticAuthoringIntentResolverService {
                 changeKind,
                 selectedCandidate);
         boolean keywordFallbackAppliedForGovernance =
-                deterministicFallbackApplied && !governedDeterministicResolution && !primaryLlmIntentProviderFailure;
+                deterministicFallbackApplied
+                        && !governedDeterministicResolution
+                        && !primaryLlmIntentProviderFailure
+                        && !providerFailureRecoveredByGroundedCandidates;
         List<String> warnings = warnings(llmIntent);
         if (llmTreatsPendingAsNewInstruction) {
             warnings = withWarning(warnings, "llm-follow-up-kind-new-instruction");
@@ -877,6 +941,23 @@ public class AgenticAuthoringIntentResolverService {
         }
         if (llmResourceSelectionOverriddenByPromptAlignment) {
             warnings = withWarning(warnings, "llm-resource-selection-overridden-by-prompt-alignment");
+        }
+        if (llmResourceSelectionOverriddenByGovernedRanking) {
+            warnings = withWarning(warnings, "llm-resource-selection-overridden-by-governed-ranking");
+        }
+        if (apiCatalogAuthoringDriftNormalized) {
+            warnings = withWarning(warnings, "llm-api-catalog-authoring-drift-normalized");
+        }
+        if (providerFailureRecoveredByGroundedCandidates) {
+            warnings = withoutWarnings(
+                    warnings,
+                    "llm-intent-resolution-provider-failed-clarification-required",
+                    "keyword-fallback-applied",
+                    "keyword-fallback-fail-safe-applied");
+            warnings = withWarning(warnings, "llm-provider-failure-recovered-by-grounded-candidates");
+        }
+        if (llmSingleChartDecisionRejectedForOpenOperationalPrompt(prompt, llmIntent)) {
+            warnings = withWarning(warnings, "llm-single-chart-decision-requires-explicit-analytical-intent");
         }
         if (keywordFallbackAppliedForGovernance) {
             warnings = withWarning(warnings, "keyword-fallback-applied");
@@ -899,6 +980,27 @@ public class AgenticAuthoringIntentResolverService {
             warnings = withWarning(warnings, hasLlmIntentResolver
                     ? "pre-llm-governed-resource-choice-ranked"
                     : "pre-llm-governed-resource-choice-applied");
+        }
+        if (shouldRequireReviewForLowerRankedLlmSelection(
+                prompt,
+                llmIntent,
+                selectedCandidate,
+                rankedCandidatesForSelectionReview)) {
+            warnings = withWarning(warnings, "llm-resource-selection-lower-ranked-than-governed-candidate");
+        }
+        if (shouldRequireReviewForRoleMismatchedSelection(
+                prompt,
+                artifactKind,
+                selectedCandidate,
+                rankedCandidatesForSelectionReview)) {
+            warnings = withWarning(warnings, "resource-selection-role-mismatch-with-governed-candidate");
+        }
+        if (shouldRequireReviewForUnanchoredLowConfidenceSelection(
+                prompt,
+                artifactKind,
+                selectedCandidate,
+                rankedCandidatesForSelectionReview)) {
+            warnings = withWarning(warnings, "resource-selection-unanchored-low-confidence");
         }
         if (apiCatalogWeakLexicalSelectionDeferred) {
             warnings = withWarning(warnings, "api-catalog-weak-lexical-selection-deferred");
@@ -1011,6 +1113,9 @@ public class AgenticAuthoringIntentResolverService {
             return null;
         }
         if (decision != null) {
+            if (!shouldTrustVisualizationDecisionForArtifact(prompt, decision)) {
+                return null;
+            }
             return decision;
         }
         if ("dashboard".equals(valueOrUnknown(artifactKind))
@@ -1462,14 +1567,29 @@ public class AgenticAuthoringIntentResolverService {
         if (!isConcreteDashboardMaterializationPrompt(prompt)) {
             return null;
         }
+        boolean promptNamesCandidate = candidates.stream()
+                .filter(Objects::nonNull)
+                .anyMatch(candidate -> promptMatchesCandidatePathIdentity(prompt, candidate));
+        boolean promptMatchesGovernedCandidate = candidates.stream()
+                .filter(Objects::nonNull)
+                .anyMatch(candidate -> promptMentionsSpecificCandidateToken(prompt, candidate));
+        if (isBroadArtifactDiscoveryOnly(candidates)
+                && !isAnalyticalComparisonPrompt(prompt)
+                && !promptMatchesGovernedCandidate) {
+            return null;
+        }
         return candidates.stream()
                 .filter(Objects::nonNull)
+                .filter(candidate -> !promptNamesCandidate || promptMatchesCandidatePathIdentity(prompt, candidate))
                 .map(candidate -> new CandidatePromptAlignment(
                         candidate,
                         preLlmDashboardCandidateAlignmentScore(prompt, artifactKind, candidate)))
                 .filter(alignment -> alignment.score() > 0)
                 .max(Comparator
                         .comparingInt(CandidatePromptAlignment::score)
+                        .thenComparingDouble(alignment -> semanticRoleFit(
+                                alignment.candidate(),
+                                semanticResourceNeed(prompt, artifactKind)))
                         .thenComparingDouble(alignment -> alignment.candidate().score()))
                 .map(CandidatePromptAlignment::candidate)
                 .orElse(null);
@@ -1490,9 +1610,6 @@ public class AgenticAuthoringIntentResolverService {
             }
         }
         score = Math.max(score, candidatePathDomainTokenScore(prompt, candidate));
-        if (score <= 0) {
-            return 0;
-        }
         if (isVisualMaterializationArtifact(artifactKind) && termListMatchesToken(evidenceTerms, artifactKind)) {
             score += 2;
         }
@@ -1503,6 +1620,20 @@ public class AgenticAuthoringIntentResolverService {
         }
         if ("chart".equals(artifactKind) && isStatsProjectionOperation(candidate)) {
             score += 2;
+        }
+        if (score <= 0) {
+            return 0;
+        }
+        SemanticResourceNeed resourceNeed = semanticResourceNeed(prompt, artifactKind);
+        if (resourceNeed == SemanticResourceNeed.ANALYTICS
+                && hasEvidence(candidate, SEMANTIC_ROLE_ANALYTICS_PROJECTION)) {
+            score += 4;
+        } else if (resourceNeed == SemanticResourceNeed.ANALYTICS
+                && hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE)) {
+            score -= 1;
+        } else if (resourceNeed == SemanticResourceNeed.PROFILE
+                && hasEvidence(candidate, SEMANTIC_ROLE_PROFILE_PROJECTION)) {
+            score += 4;
         }
         return score;
     }
@@ -1646,6 +1777,106 @@ public class AgenticAuthoringIntentResolverService {
                 || hasOverviewDashboard
                 || (hasPageSurface && hasAuthoringIntent)
                 || (hasChart && hasFilter && hasDetails);
+    }
+
+    private boolean shouldNormalizeApiCatalogAuthoringDrift(
+            String prompt,
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            List<AgenticAuthoringCandidate> candidates) {
+        return isApiCatalogQuestion(operationKind, artifactKind, changeKind)
+                && candidates != null
+                && !candidates.isEmpty()
+                && isOpenBusinessSurfaceAuthoringPrompt(prompt);
+    }
+
+    private boolean shouldRecoverProviderFailureWithGroundedAuthoring(
+            String prompt,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty() || !isBusinessDataAuthoringPrompt(prompt)) {
+            return false;
+        }
+        return candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> !hasEvidence(candidate, "broad-artifact-discovery"))
+                .anyMatch(candidate -> hasTrustedSelectionEvidence(candidate)
+                        && !isWeakLexicalCandidate(candidate)
+                        || hasEvidence(candidate, "explicit-resource-path")
+                        || hasEvidence(candidate, "quick-reply-context")
+                        || hasEvidence(candidate, "current-page-target-resource")
+                        || promptMatchesCandidatePathIdentity(prompt, candidate));
+    }
+
+    private boolean isOpenBusinessSurfaceAuthoringPrompt(String prompt) {
+        String normalized = normalize(prompt);
+        boolean hasSurface = containsAny(normalized,
+                "tela",
+                "pagina",
+                "page",
+                "visao",
+                "visualizacao",
+                "view",
+                "painel",
+                "dashboard",
+                "tabela",
+                "lista",
+                "formulario");
+        boolean hasAuthoringIntent = containsAny(normalized,
+                "quero",
+                "queria",
+                "preciso",
+                "gostaria",
+                "crie",
+                "criar",
+                "monte",
+                "montar",
+                "gere",
+                "gerar");
+        return hasSurface && hasAuthoringIntent;
+    }
+
+    private boolean isBusinessDataAuthoringPrompt(String prompt) {
+        String normalized = normalize(prompt);
+        boolean hasIntent = containsAny(normalized,
+                "quero",
+                "queria",
+                "preciso",
+                "gostaria",
+                "crie",
+                "criar",
+                "monte",
+                "montar",
+                "gere",
+                "gerar",
+                "ver",
+                "visualizar",
+                "acompanhar",
+                "mostrar",
+                "mostre");
+        boolean asksForDataSurface = containsAny(normalized,
+                "tela",
+                "pagina",
+                "page",
+                "visao",
+                "visualizacao",
+                "view",
+                "painel",
+                "dashboard",
+                "tabela",
+                "lista",
+                "formulario",
+                "dados",
+                "informacoes",
+                "status",
+                "detalhes",
+                "registros",
+                "como esta",
+                "visualizar",
+                "acompanhar",
+                "mostrar",
+                "mostre");
+        return hasIntent && asksForDataSurface;
     }
 
     private boolean isExplicitDashboardMaterializationCommand(String prompt) {
@@ -2377,14 +2608,80 @@ public class AgenticAuthoringIntentResolverService {
                 .filter(candidate -> selectedResourcePath.equals(candidate.resourcePath()))
                 .findFirst()
                 .orElse(fallback);
-        AgenticAuthoringCandidate promptAlignedCandidate = promptAlignedBusinessCandidate(prompt, candidates);
+        AgenticAuthoringCandidate strongerGovernedCandidate =
+                strongerGovernedOperationalCandidateForLlmSelection(prompt, artifactKind, llmCandidate, candidates);
+        if (strongerGovernedCandidate != null) {
+            return strongerGovernedCandidate;
+        }
+        AgenticAuthoringCandidate governedOperationalCandidate =
+                governedOperationalCandidateForGenericNeed(prompt, artifactKind, candidates);
+        if (governedOperationalCandidate != null
+                && llmCandidate != null
+                && !sameCandidate(governedOperationalCandidate, llmCandidate)
+                && hasRoleProjectionMismatchForGenericOperation(llmCandidate)
+                && governedOperationalCandidate.score() >= llmCandidate.score() + 0.08d
+                && !promptMentionsSpecificCandidateToken(prompt, llmCandidate)
+                && !promptMatchesCandidatePathIdentity(prompt, llmCandidate)) {
+            return governedOperationalCandidate;
+        }
+        AgenticAuthoringCandidate promptAlignedCandidate = firstNonNullCandidate(
+                promptAlignedBusinessCandidate(prompt, candidates),
+                promptAlignedDirectSemanticCandidate(prompt, candidates));
+        boolean llmCandidateIsWeakOrBroad = isWeakLexicalCandidate(llmCandidate)
+                || hasEvidence(llmCandidate, "broad-artifact-discovery")
+                || !hasTrustedSelectionEvidence(llmCandidate);
+        boolean promptAlignedCandidateHasMateriallyBetterEvidence =
+                hasMateriallyBetterPromptAlignment(prompt, promptAlignedCandidate, llmCandidate);
         if (promptAlignedCandidate != null
                 && llmCandidate != null
                 && !sameCandidate(promptAlignedCandidate, llmCandidate)
+                && (llmCandidateIsWeakOrBroad
+                || promptAlignedCandidate.score() >= llmCandidate.score() + 0.08d
+                || promptAlignedCandidateHasMateriallyBetterEvidence)
                 && !promptMentionsSpecificCandidateToken(prompt, llmCandidate)) {
             return promptAlignedCandidate;
         }
         return llmCandidate;
+    }
+
+    private AgenticAuthoringCandidate firstNonNullCandidate(AgenticAuthoringCandidate first, AgenticAuthoringCandidate second) {
+        return first != null ? first : second;
+    }
+
+    private AgenticAuthoringCandidate governedOperationalCandidateForGenericNeed(
+            String prompt,
+            String artifactKind,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (semanticResourceNeed(prompt, artifactKind) != SemanticResourceNeed.GENERIC_OPERATIONAL
+                || candidates == null
+                || candidates.isEmpty()) {
+            return null;
+        }
+        return candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(this::hasTrustedSelectionEvidence)
+                .filter(candidate -> hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE))
+                .filter(candidate -> !isDerivedProjectionCandidate(candidate))
+                .filter(candidate -> hasEvidence(candidate, "tool-search-api-resources"))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean hasMateriallyBetterPromptAlignment(
+            String prompt,
+            AgenticAuthoringCandidate promptAlignedCandidate,
+            AgenticAuthoringCandidate llmCandidate) {
+        if (promptAlignedCandidate == null
+                || llmCandidate == null
+                || sameCandidate(promptAlignedCandidate, llmCandidate)
+                || !hasTrustedSelectionEvidence(promptAlignedCandidate)
+                || isWeakLexicalCandidate(promptAlignedCandidate)
+                || promptAlignedCandidate.score() < 0.75d) {
+            return false;
+        }
+        int alignedScore = promptCandidateAlignmentScore(prompt, promptAlignedCandidate);
+        int llmScore = promptCandidateAlignmentScore(prompt, llmCandidate);
+        return alignedScore >= 4 && alignedScore >= llmScore + 4;
     }
 
     private boolean llmResourceSelectionOverriddenByPromptAlignment(
@@ -2406,9 +2703,236 @@ public class AgenticAuthoringIntentResolverService {
                 || sameCandidate(llmCandidate, selectedCandidate)) {
             return false;
         }
+        AgenticAuthoringCandidate strongerGovernedCandidate =
+                strongerGovernedOperationalCandidateForLlmSelection(prompt, artifactKind, llmCandidate, candidates);
+        if (strongerGovernedCandidate != null && sameCandidate(strongerGovernedCandidate, selectedCandidate)) {
+            return false;
+        }
+        AgenticAuthoringCandidate finalGovernedCandidate =
+                strongerGovernedOperationalCandidateForFinalSelection(prompt, artifactKind, selectedCandidate, candidates);
+        if (finalGovernedCandidate != null && sameCandidate(finalGovernedCandidate, selectedCandidate)) {
+            return false;
+        }
         return promptAlignedBusinessCandidate(prompt, candidates) != null
                 && !promptMentionsSpecificCandidateToken(prompt, llmCandidate)
                 && ("dashboard".equals(artifactKind) || "page".equals(artifactKind) || "table".equals(artifactKind));
+    }
+
+    private boolean llmResourceSelectionOverriddenByGovernedRanking(
+            AgenticAuthoringLlmIntentResolution llmIntent,
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringCandidate selectedCandidate,
+            String artifactKind,
+            String prompt) {
+        String selectedResourcePath = llmIntent == null ? "" : valueOrDefault(llmIntent.selectedResourcePath(), "");
+        if (selectedResourcePath.isBlank() || candidates == null || candidates.isEmpty()) {
+            return false;
+        }
+        AgenticAuthoringCandidate llmCandidate = candidates.stream()
+                .filter(candidate -> selectedResourcePath.equals(candidate.resourcePath()))
+                .findFirst()
+                .orElse(null);
+        if (llmCandidate == null
+                || selectedCandidate == null
+                || sameCandidate(llmCandidate, selectedCandidate)) {
+            return false;
+        }
+        AgenticAuthoringCandidate strongerGovernedCandidate =
+                strongerGovernedOperationalCandidateForLlmSelection(prompt, artifactKind, llmCandidate, candidates);
+        if (strongerGovernedCandidate != null && sameCandidate(strongerGovernedCandidate, selectedCandidate)) {
+            return true;
+        }
+        AgenticAuthoringCandidate finalGovernedCandidate =
+                strongerGovernedOperationalCandidateForFinalSelection(prompt, artifactKind, selectedCandidate, candidates);
+        return finalGovernedCandidate != null && sameCandidate(finalGovernedCandidate, selectedCandidate);
+    }
+
+    private AgenticAuthoringCandidate strongerGovernedOperationalCandidateForLlmSelection(
+            String prompt,
+            String artifactKind,
+            AgenticAuthoringCandidate llmCandidate,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (semanticResourceNeed(prompt, artifactKind) != SemanticResourceNeed.GENERIC_OPERATIONAL
+                || llmCandidate == null
+                || candidates == null
+                || candidates.isEmpty()
+                || hasEvidence(llmCandidate, "explicit-resource-path")
+                || hasEvidence(llmCandidate, "quick-reply-context")
+                || hasEvidence(llmCandidate, "current-page-target-resource")
+                || promptMentionsSpecificCandidateToken(prompt, llmCandidate)
+                || promptMatchesCandidatePathIdentity(prompt, llmCandidate)) {
+            return null;
+        }
+        AgenticAuthoringCandidate governedCandidate = candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> !sameCandidate(candidate, llmCandidate))
+                .filter(this::hasTrustedSelectionEvidence)
+                .filter(candidate -> !isWeakLexicalCandidate(candidate))
+                .filter(candidate -> hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE))
+                .filter(candidate -> !isDerivedProjectionCandidate(candidate))
+                .findFirst()
+                .orElse(null);
+        if (governedCandidate == null) {
+            return null;
+        }
+        boolean selectedIsWeakOrBroad = isWeakLexicalCandidate(llmCandidate)
+                || hasEvidence(llmCandidate, "broad-artifact-discovery")
+                || !hasTrustedSelectionEvidence(llmCandidate);
+        boolean selectedHasRoleMismatch = hasRoleProjectionMismatchForGenericOperation(llmCandidate);
+        boolean meaningfulScoreGap = governedCandidate.score() >= llmCandidate.score() + 0.08d;
+        return selectedIsWeakOrBroad || meaningfulScoreGap || selectedHasRoleMismatch && meaningfulScoreGap
+                ? governedCandidate
+                : null;
+    }
+
+    private AgenticAuthoringCandidate strongerGovernedOperationalCandidateForFinalSelection(
+            String prompt,
+            String artifactKind,
+            AgenticAuthoringCandidate selectedCandidate,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (semanticResourceNeed(prompt, artifactKind) != SemanticResourceNeed.GENERIC_OPERATIONAL
+                || selectedCandidate == null
+                || candidates == null
+                || candidates.isEmpty()
+                || hasEvidence(selectedCandidate, "explicit-resource-path")
+                || hasEvidence(selectedCandidate, "quick-reply-context")
+                || hasEvidence(selectedCandidate, "current-page-target-resource")
+                || promptMatchesCandidatePathIdentity(prompt, selectedCandidate)) {
+            return null;
+        }
+        AgenticAuthoringCandidate governedCandidate = candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> !sameCandidate(candidate, selectedCandidate))
+                .filter(this::hasTrustedSelectionEvidence)
+                .filter(candidate -> !isWeakLexicalCandidate(candidate))
+                .filter(candidate -> hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE))
+                .filter(candidate -> !isDerivedProjectionCandidate(candidate))
+                .filter(candidate -> hasEvidence(candidate, "semantic-retrieval")
+                        || hasEvidence(candidate, "tool-search-api-resources"))
+                .findFirst()
+                .orElse(null);
+        if (governedCandidate == null) {
+            return null;
+        }
+        boolean selectedIsWeakOrBroad = isWeakLexicalCandidate(selectedCandidate)
+                || hasEvidence(selectedCandidate, "broad-artifact-discovery")
+                || !hasTrustedSelectionEvidence(selectedCandidate);
+        boolean selectedHasRoleMismatch = hasRoleProjectionMismatchForGenericOperation(selectedCandidate);
+        boolean meaningfulScoreGap = governedCandidate.score() >= selectedCandidate.score() + 0.08d;
+        boolean governedIsRankedAhead = candidates.indexOf(governedCandidate) >= 0
+                && candidates.indexOf(selectedCandidate) >= 0
+                && candidates.indexOf(governedCandidate) < candidates.indexOf(selectedCandidate);
+        return selectedIsWeakOrBroad
+                || selectedHasRoleMismatch && meaningfulScoreGap
+                || meaningfulScoreGap && governedIsRankedAhead
+                ? governedCandidate
+                : null;
+    }
+
+    private boolean shouldRequireReviewForLowerRankedLlmSelection(
+            String prompt,
+            AgenticAuthoringLlmIntentResolution llmIntent,
+            AgenticAuthoringCandidate selectedCandidate,
+            List<AgenticAuthoringCandidate> rankedCandidates) {
+        String llmSelectedResourcePath = llmIntent == null ? "" : valueOrDefault(llmIntent.selectedResourcePath(), "");
+        if (llmSelectedResourcePath.isBlank()
+                || selectedCandidate == null
+                || rankedCandidates == null
+                || rankedCandidates.size() <= 1
+                || !normalizePath(llmSelectedResourcePath).equals(normalizePath(selectedCandidate.resourcePath()))
+                || hasEvidence(selectedCandidate, "explicit-resource-path")
+                || hasEvidence(selectedCandidate, "quick-reply-context")
+                || hasEvidence(selectedCandidate, "current-page-target-resource")
+                || promptMentionsSpecificCandidateToken(prompt, selectedCandidate)
+                || promptMatchesCandidatePathIdentity(prompt, selectedCandidate)) {
+            return false;
+        }
+        AgenticAuthoringCandidate topCandidate = rankedCandidates.stream()
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
+        if (topCandidate == null || sameCandidate(topCandidate, selectedCandidate)) {
+            return false;
+        }
+        return hasTrustedSelectionEvidence(topCandidate)
+                && !isWeakLexicalCandidate(topCandidate)
+                && topCandidate.score() >= selectedCandidate.score();
+    }
+
+    private boolean shouldRequireReviewForRoleMismatchedSelection(
+            String prompt,
+            String artifactKind,
+            AgenticAuthoringCandidate selectedCandidate,
+            List<AgenticAuthoringCandidate> rankedCandidates) {
+        if (selectedCandidate == null
+                || rankedCandidates == null
+                || rankedCandidates.size() <= 1
+                || hasEvidence(selectedCandidate, "explicit-resource-path")
+                || hasEvidence(selectedCandidate, "quick-reply-context")
+                || hasEvidence(selectedCandidate, "current-page-target-resource")
+                || promptMentionsSpecificCandidateToken(prompt, selectedCandidate)
+                || promptMatchesCandidatePathIdentity(prompt, selectedCandidate)) {
+            return false;
+        }
+        SemanticResourceNeed resourceNeed = semanticResourceNeed(prompt, artifactKind);
+        if (resourceNeed != SemanticResourceNeed.GENERIC_OPERATIONAL
+                || !hasRoleProjectionMismatchForGenericOperation(selectedCandidate)) {
+            return false;
+        }
+        return rankedCandidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> !sameCandidate(candidate, selectedCandidate))
+                .filter(this::hasTrustedSelectionEvidence)
+                .filter(candidate -> !isWeakLexicalCandidate(candidate))
+                .filter(candidate -> hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE))
+                .filter(candidate -> !isDerivedProjectionCandidate(candidate))
+                .findAny()
+                .isPresent();
+    }
+
+    private boolean shouldRequireReviewForUnanchoredLowConfidenceSelection(
+            String prompt,
+            String artifactKind,
+            AgenticAuthoringCandidate selectedCandidate,
+            List<AgenticAuthoringCandidate> rankedCandidates) {
+        if (selectedCandidate == null
+                || rankedCandidates == null
+                || rankedCandidates.size() <= 1
+                || !"page".equals(valueOrDefault(artifactKind, ""))
+                || semanticResourceNeed(prompt, artifactKind) != SemanticResourceNeed.GENERIC_OPERATIONAL
+                || hasEvidence(selectedCandidate, "explicit-resource-path")
+                || hasEvidence(selectedCandidate, "quick-reply-context")
+                || hasEvidence(selectedCandidate, "current-page-target-resource")
+                || promptMentionsSpecificCandidateToken(prompt, selectedCandidate)
+                || promptMatchesCandidatePathIdentity(prompt, selectedCandidate)
+                || selectedCandidate.score() >= 0.62d) {
+            return false;
+        }
+        if (!hasTrustedSelectionEvidence(selectedCandidate) || isWeakLexicalCandidate(selectedCandidate)) {
+            return false;
+        }
+        String normalizedPrompt = normalize(prompt);
+        boolean openNarrative = normalizedPrompt.length() >= 90
+                || containsAny(normalizedPrompt, "ainda nao sei", "ainda não sei", "nao sei se", "não sei se", "outra coisa");
+        if (!openNarrative) {
+            return false;
+        }
+        boolean selectedHasVeryLowModerateConfidence = selectedCandidate.score() < 0.57d;
+        return rankedCandidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> !sameCandidate(candidate, selectedCandidate))
+                .filter(this::hasTrustedSelectionEvidence)
+                .filter(candidate -> !isWeakLexicalCandidate(candidate))
+                .filter(candidate -> selectedHasVeryLowModerateConfidence || candidate.score() >= selectedCandidate.score())
+                .findAny()
+                .isPresent();
+    }
+
+    private boolean hasRoleProjectionMismatchForGenericOperation(AgenticAuthoringCandidate selectedCandidate) {
+        return hasEvidence(selectedCandidate, SEMANTIC_ROLE_ANALYTICS_PROJECTION)
+                || hasEvidence(selectedCandidate, SEMANTIC_ROLE_PROFILE_PROJECTION)
+                || isDerivedProjectionCandidate(selectedCandidate)
+                && !hasEvidence(selectedCandidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE);
     }
 
     private AgenticAuthoringCandidate promptAlignedBusinessCandidate(
@@ -2422,6 +2946,27 @@ public class AgenticAuthoringIntentResolverService {
                         candidate,
                         promptCandidateAlignmentScore(prompt, candidate)))
                 .filter(alignment -> alignment.score() > 0)
+                .filter(alignment -> canUsePromptAlignedCandidate(alignment.candidate(), candidates))
+                .max(Comparator
+                        .comparingInt(CandidatePromptAlignment::score)
+                        .thenComparingDouble(alignment -> alignment.candidate().score()))
+                .map(CandidatePromptAlignment::candidate)
+                .orElse(null);
+    }
+
+    private AgenticAuthoringCandidate promptAlignedDirectSemanticCandidate(
+            String prompt,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+        return candidates.stream()
+                .filter(Objects::nonNull)
+                .map(candidate -> new CandidatePromptAlignment(
+                        candidate,
+                        directPromptCandidateAlignmentScore(prompt, candidate)))
+                .filter(alignment -> alignment.score() >= 4)
+                .filter(alignment -> canUsePromptAlignedCandidate(alignment.candidate(), candidates))
                 .max(Comparator
                         .comparingInt(CandidatePromptAlignment::score)
                         .thenComparingDouble(alignment -> alignment.candidate().score()))
@@ -2988,6 +3533,16 @@ public class AgenticAuthoringIntentResolverService {
         return List.copyOf(next);
     }
 
+    private List<String> withoutWarnings(List<String> warnings, String... removedWarnings) {
+        if (warnings == null || warnings.isEmpty() || removedWarnings == null || removedWarnings.length == 0) {
+            return warnings == null ? List.of() : warnings;
+        }
+        Set<String> removed = Set.of(removedWarnings);
+        return warnings.stream()
+                .filter(warning -> !removed.contains(warning))
+                .toList();
+    }
+
     private List<String> withCandidateProvenanceWarnings(
             List<String> warnings,
             AgenticAuthoringCandidate selectedCandidate,
@@ -3175,6 +3730,9 @@ public class AgenticAuthoringIntentResolverService {
         }
         return hasStrongGroundingEvidence(candidate)
                 || hasEvidence(candidate, AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)
+                || hasEvidence(candidate, "semantic-retrieval")
+                || hasEvidence(candidate, "tool-search-api-resources")
+                || hasEvidence(candidate, "explicit-source-match")
                 || hasEvidence(candidate, "explicit-resource-path")
                 || hasEvidence(candidate, "quick-reply-context")
                 || hasEvidence(candidate, "current-page");
@@ -3517,16 +4075,126 @@ public class AgenticAuthoringIntentResolverService {
 
     private List<AgenticAuthoringCandidate> deduplicateCandidates(List<AgenticAuthoringCandidate> candidates) {
         return candidates.stream()
-                .sorted(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed())
+                .sorted(Comparator
+                        .comparingInt(this::evidenceStrength)
+                        .reversed()
+                        .thenComparing(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed()))
                 .collect(
                         java.util.stream.Collectors.toMap(
                                 AgenticAuthoringCandidate::resourcePath,
                                 candidate -> candidate,
-                                (left, right) -> left.score() >= right.score() ? left : right,
+                                this::preferredCandidateForSameResource,
                                 java.util.LinkedHashMap::new))
                 .values()
                 .stream()
                 .toList();
+    }
+
+    private AgenticAuthoringCandidate preferredCandidateForSameResource(
+            AgenticAuthoringCandidate left,
+            AgenticAuthoringCandidate right) {
+        int leftStrength = evidenceStrength(left);
+        int rightStrength = evidenceStrength(right);
+        if (leftStrength != rightStrength) {
+            return leftStrength > rightStrength ? left : right;
+        }
+        return left.score() >= right.score() ? left : right;
+    }
+
+    private List<AgenticAuthoringCandidate> rankCandidatesForDecision(
+            List<AgenticAuthoringCandidate> candidates,
+            String artifactKind,
+            String prompt) {
+        if (candidates == null || candidates.isEmpty() || "api_catalog".equals(artifactKind)) {
+            return candidates == null ? List.of() : candidates;
+        }
+        SemanticResourceNeed resourceNeed = semanticResourceNeed(prompt, artifactKind);
+        return candidates.stream()
+                .sorted(Comparator
+                        .comparingInt(this::evidenceStrength)
+                        .reversed()
+                        .thenComparing(Comparator.comparingInt(
+                                (AgenticAuthoringCandidate candidate) -> hasEvidence(candidate, "tool-search-api-resources") ? 1 : 0)
+                                .reversed())
+                        .thenComparing(Comparator.comparingInt(
+                                (AgenticAuthoringCandidate candidate) -> promptCandidateIdentityFit(prompt, candidate)).reversed())
+                        .thenComparing(Comparator.comparingDouble(
+                                (AgenticAuthoringCandidate candidate) -> semanticRoleFit(candidate, resourceNeed)).reversed())
+                        .thenComparing(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed()))
+                .toList();
+    }
+
+    private int promptCandidateIdentityFit(String prompt, AgenticAuthoringCandidate candidate) {
+        return promptMatchesCandidatePathIdentity(prompt, candidate) ? 1 : 0;
+    }
+
+    private double semanticRoleFit(AgenticAuthoringCandidate candidate, SemanticResourceNeed resourceNeed) {
+        if (candidate == null || candidate.evidence() == null || resourceNeed == null) {
+            return 0d;
+        }
+        boolean derivedProjection = isDerivedProjectionCandidate(candidate);
+        return switch (resourceNeed) {
+            case ANALYTICS -> hasEvidence(candidate, SEMANTIC_ROLE_ANALYTICS_PROJECTION) ? 0.20d
+                    : hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE) ? 0.04d : 0d;
+            case PROFILE -> hasEvidence(candidate, SEMANTIC_ROLE_PROFILE_PROJECTION) ? 0.20d
+                    : hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE) ? 0.08d : 0d;
+            case GENERIC_OPERATIONAL -> hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE)
+                    ? (derivedProjection ? 0.04d : 0.18d)
+                    : hasEvidence(candidate, SEMANTIC_ROLE_PROFILE_PROJECTION) ? 0.06d : 0d;
+        };
+    }
+
+    private boolean isDerivedProjectionCandidate(AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return false;
+        }
+        return isDerivedProjectionPath(candidate.resourcePath()) || isDerivedProjectionPath(candidate.submitUrl());
+    }
+
+    private boolean isDerivedProjectionPath(String value) {
+        String normalized = normalizePath(value).toLowerCase(Locale.ROOT);
+        return normalized.contains("/vw-")
+                || normalized.contains("/view-")
+                || normalized.contains("/views/")
+                || normalized.contains("/projection-")
+                || normalized.contains("/projections/");
+    }
+
+    private SemanticResourceNeed semanticResourceNeed(String prompt, String artifactKind) {
+        String normalized = normalize(valueOrDefault(prompt, ""));
+        if ("chart".equals(artifactKind)) {
+            return SemanticResourceNeed.ANALYTICS;
+        }
+        if (containsAny(normalized,
+                "grafico", "graficos", "chart", "charts", "indicador", "indicadores",
+                "kpi", "kpis", "metrica", "metricas", "analitico", "analitica", "analytics",
+                "tendencia", "distribuicao", "serie temporal", "comparar", "comparacao", "ranking")) {
+            return SemanticResourceNeed.ANALYTICS;
+        }
+        if (containsAny(normalized,
+                "perfil", "profile", "ficha", "resumo individual", "individual", "360",
+                "visao resumida", "visao consolidada")) {
+            return SemanticResourceNeed.PROFILE;
+        }
+        return SemanticResourceNeed.GENERIC_OPERATIONAL;
+    }
+
+    private int evidenceStrength(AgenticAuthoringCandidate candidate) {
+        if (candidate == null || candidate.evidence() == null) {
+            return 0;
+        }
+        if (hasEvidence(candidate, "semantic-retrieval")
+                || hasEvidence(candidate, "explicit-source-match")
+                || hasEvidence(candidate, AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)) {
+            return 3;
+        }
+        if (hasEvidence(candidate, "broad-artifact-discovery")) {
+            return 1;
+        }
+        if (hasEvidence(candidate, "lexical-fallback") || hasEvidence(candidate, "weak-evidence")) {
+            return 0;
+        }
+        return 2;
     }
 
     private AgenticAuthoringCandidate selectCandidate(
@@ -3633,11 +4301,16 @@ public class AgenticAuthoringIntentResolverService {
         if ((!isVisualMaterializationArtifact(artifactKind)
                 && !isConcreteDashboardMaterializationPrompt(prompt))
                 || candidates == null
-                || candidates.size() <= 1) {
+                || candidates.size() <= 1
+                || isBroadArtifactDiscoveryOnly(candidates)) {
             return null;
         }
+        boolean promptNamesCandidate = candidates.stream()
+                .filter(Objects::nonNull)
+                .anyMatch(candidate -> promptMatchesCandidatePathIdentity(prompt, candidate));
         List<CandidatePromptAlignment> alignments = candidates.stream()
                 .filter(Objects::nonNull)
+                .filter(candidate -> !promptNamesCandidate || promptMatchesCandidatePathIdentity(prompt, candidate))
                 .map(candidate -> new CandidatePromptAlignment(
                         candidate,
                         preLlmDashboardCandidateAlignmentScore(prompt, artifactKind, candidate)))
@@ -3652,6 +4325,28 @@ public class AgenticAuthoringIntentResolverService {
             return null;
         }
         return bestAlignment.candidate();
+    }
+
+    private AgenticAuthoringCandidate analyticalRoleCandidateForComparisonPrompt(
+            String prompt,
+            String artifactKind,
+            AgenticAuthoringCandidate selectedCandidate,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (!"dashboard".equals(artifactKind)
+                || !isAnalyticalComparisonPrompt(prompt)
+                || candidates == null
+                || candidates.isEmpty()
+                || (selectedCandidate != null && promptMatchesCandidatePathIdentity(prompt, selectedCandidate))) {
+            return null;
+        }
+        return candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> hasEvidence(candidate, SEMANTIC_ROLE_ANALYTICS_PROJECTION))
+                .filter(candidate -> !isWeakLexicalCandidate(candidate) || hasTrustedSelectionEvidence(candidate))
+                .max(Comparator
+                        .comparingInt(this::evidenceStrength)
+                        .thenComparingDouble(AgenticAuthoringCandidate::score))
+                .orElse(null);
     }
 
     private boolean isVisualMaterializationArtifact(String artifactKind) {
@@ -3718,11 +4413,24 @@ public class AgenticAuthoringIntentResolverService {
                 .filter(Objects::nonNull)
                 .map(candidate -> new CandidatePromptAlignment(candidate, directPromptCandidateAlignmentScore(prompt, candidate)))
                 .filter(alignment -> alignment.score() > 0)
+                .filter(alignment -> canUsePromptAlignedCandidate(alignment.candidate(), candidates))
                 .max(Comparator
                         .comparingInt(CandidatePromptAlignment::score)
                         .thenComparingDouble(alignment -> alignment.candidate().score()))
                 .map(CandidatePromptAlignment::candidate)
                 .orElse(null);
+    }
+
+    private boolean canUsePromptAlignedCandidate(
+            AgenticAuthoringCandidate candidate,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (!isWeakLexicalCandidate(candidate) || hasTrustedSelectionEvidence(candidate)) {
+            return true;
+        }
+        return (candidates == null ? List.<AgenticAuthoringCandidate>of() : candidates).stream()
+                .filter(Objects::nonNull)
+                .filter(other -> !sameCandidate(candidate, other))
+                .noneMatch(this::hasTrustedSelectionEvidence);
     }
 
     private int directPromptCandidateAlignmentScore(String prompt, AgenticAuthoringCandidate candidate) {
@@ -5217,6 +5925,9 @@ public class AgenticAuthoringIntentResolverService {
         if (!"create".equals(operationKind) || !"dashboard".equals(artifactKind)) {
             return false;
         }
+        if (llmSingleChartDecisionRejectedForOpenOperationalPrompt(prompt, llmIntent)) {
+            return false;
+        }
         if ("create_chart".equals(changeKind)) {
             return true;
         }
@@ -5229,12 +5940,49 @@ public class AgenticAuthoringIntentResolverService {
         AgenticAuthoringVisualizationDecision visualizationDecision =
                 llmIntent == null ? null : llmIntent.visualizationDecision();
         if (visualizationDecision != null
+                && shouldTrustVisualizationDecisionForArtifact(normalized, visualizationDecision)
                 && "single_chart".equals(valueOrDefault(visualizationDecision.layoutKind(), ""))
                 && "praxis-chart".equals(valueOrDefault(visualizationDecision.primaryComponent(), ""))) {
             return true;
         }
         return containsAny(normalized, "apenas", "somente", "so ", "só ")
                 && containsAny(normalized, "grafico", "graficos", "chart", "charts");
+    }
+
+    private boolean llmSingleChartDecisionRejectedForOpenOperationalPrompt(
+            String prompt,
+            AgenticAuthoringLlmIntentResolution llmIntent) {
+        AgenticAuthoringVisualizationDecision decision =
+                llmIntent == null ? null : llmIntent.visualizationDecision();
+        return decision != null
+                && isSingleChartDecision(decision)
+                && !shouldTrustVisualizationDecisionForArtifact(prompt, decision);
+    }
+
+    private boolean shouldTrustVisualizationDecisionForArtifact(
+            String prompt,
+            AgenticAuthoringVisualizationDecision decision) {
+        if (decision == null || !isSingleChartDecision(decision)) {
+            return true;
+        }
+        return hasExplicitAnalyticalVisualizationIntent(prompt);
+    }
+
+    private boolean isSingleChartDecision(AgenticAuthoringVisualizationDecision decision) {
+        return decision != null
+                && "single_chart".equals(valueOrDefault(decision.layoutKind(), ""))
+                && "praxis-chart".equals(valueOrDefault(decision.primaryComponent(), ""));
+    }
+
+    private boolean hasExplicitAnalyticalVisualizationIntent(String prompt) {
+        String normalized = normalize(prompt);
+        return containsAny(normalized,
+                "grafico", "graficos", "gráfico", "gráficos", "chart", "charts",
+                "indicador", "indicadores", "kpi", "kpis", "metrica", "metricas",
+                "métrica", "métricas", "comparar", "comparacao", "comparação",
+                "ranking", "rank", "tendencia", "tendência", "distribuicao", "distribuição",
+                "serie temporal", "série temporal", "maiores", "menores", "media", "média",
+                "total", "totais", "soma", "agregado", "agregada", "agrupado", "agrupada");
     }
 
     private boolean hasPageWidgets(JsonNode currentPage) {
@@ -6675,5 +7423,11 @@ public class AgenticAuthoringIntentResolverService {
     }
 
     private record CandidatePromptAlignment(AgenticAuthoringCandidate candidate, int score) {
+    }
+
+    private enum SemanticResourceNeed {
+        GENERIC_OPERATIONAL,
+        ANALYTICS,
+        PROFILE
     }
 }

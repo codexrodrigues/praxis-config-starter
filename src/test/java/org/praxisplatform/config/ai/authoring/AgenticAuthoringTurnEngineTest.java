@@ -7253,7 +7253,7 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void allowsLexicalCandidateAfterPreviewRegroundsResourceWithFilteredSchema() throws Exception {
+    void keepsLexicalCandidateUnderReviewEvenWhenPreviewSchemaIsVerified() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         com.fasterxml.jackson.databind.node.ObjectNode llmDiagnostics = objectMapper.createObjectNode();
@@ -7299,25 +7299,25 @@ class AgenticAuthoringTurnEngineTest {
 
         com.fasterxml.jackson.databind.JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
         org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean())
-                .isTrue();
+                .isFalse();
         com.fasterxml.jackson.databind.JsonNode diagnostics = result.path("decisionDiagnostics");
         org.assertj.core.api.Assertions.assertThat(diagnostics.path("previewResourceSchemaVerified").asBoolean())
                 .isTrue();
         org.assertj.core.api.Assertions.assertThat(diagnostics.path("selectedCandidateUsesLexicalFallback").asBoolean())
-                .isFalse();
-        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticDecisionReviewGroundedByPreview").asBoolean())
                 .isTrue();
-        org.assertj.core.api.Assertions.assertThat(diagnostics.path("requiresReview").asBoolean())
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticDecisionReviewGroundedByPreview").asBoolean())
                 .isFalse();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("requiresReview").asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(diagnostics.path("reviewReason").asText())
+                .isEqualTo("weak-lexical-evidence");
         com.fasterxml.jackson.databind.JsonNode terminalDecision = result.path("intentResolution").path("semanticDecision");
         org.assertj.core.api.Assertions.assertThat(terminalDecision.path("reviewRequired").asBoolean())
-                .isFalse();
+                .isTrue();
         org.assertj.core.api.Assertions.assertThat(terminalDecision.path("reviewReason").asText())
-                .isBlank();
+                .isEqualTo("weak-lexical-evidence");
         org.assertj.core.api.Assertions.assertThat(terminalDecision.path("rationale").asText())
-                .contains("/schemas/filtered preview grounding");
-        org.assertj.core.api.Assertions.assertThat(terminalDecision.path("confidence").asDouble())
-                .isGreaterThanOrEqualTo(0.70);
+                .doesNotContain("/schemas/filtered preview grounding");
     }
 
     @Test
@@ -8784,6 +8784,511 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void diagnosticPromptWithDomainDiscoveryDoesNotPreDiscoverBeforeIntentResolution() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        JsonNode contextHints = domainDiscoveryContext();
+        AgenticAuthoringTurnStreamRequest request = requestWithContextHintsOnEmptyPage(
+                "quero criar algo que mostre informacoes dos empregados",
+                contextHints);
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(unresolvedConsultativeIntent());
+
+        AgenticAuthoringTurnOutcome outcome = engine(repository).execute(request, principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        verify(intentResolverService, org.mockito.Mockito.times(1))
+                .resolve(any(), eq("tenant"), eq("user"), eq("local"));
+        verify(previewService, never()).preview(any(), eq("tenant"), eq("user"), eq("local"));
+        verify(repository).findAll();
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .noneSatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("routeClass").asText())
+                            .isEqualTo("pre_intent_resource_discovery");
+                });
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .contains("tool.start", "tool.result")
+                .doesNotContain("resource.discovery");
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText()).isEqualTo("tool.start");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("tool").asText())
+                            .isEqualTo("searchApiResources");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("routeClass").asText())
+                            .isEqualTo("advisory_authoring");
+                })
+                .anySatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText()).isEqualTo("tool.result");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("candidateCount").asInt())
+                            .isZero();
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("artifactKind").asText())
+                            .isEqualTo("api_catalog");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("retrievalQuery").asText())
+                            .isEqualTo("quero criar algo que mostre informacoes dos empregados");
+                });
+
+        ArgumentCaptor<AgenticAuthoringIntentResolutionRequest> intentRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringIntentResolutionRequest.class);
+        verify(intentResolverService).resolve(intentRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        JsonNode forwardedHints = intentRequest.getValue().contextHints();
+        org.assertj.core.api.Assertions.assertThat(forwardedHints.path("domainDiscovery").isArray()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(forwardedHints.path("domainDiscovery").toString())
+                .contains("human-resources.funcionarios");
+        org.assertj.core.api.Assertions.assertThat(forwardedHints.path("domainCatalog").isMissingNode()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(forwardedHints.path("resourceDiscovery").isMissingNode()).isTrue();
+    }
+
+    @Test
+    void llmAuthoredPreIntentToolPlanEnrichesContextBeforeIntentResolution() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of(new ApiMetadata(
+                "/api/human-resources/funcionarios",
+                "GET",
+                "funcionarios,colaboradores,recursos humanos,pessoas",
+                "Funcionários",
+                "Cadastro e perfil de funcionarios",
+                "listFuncionarios",
+                null,
+                "{\"type\":\"object\"}",
+                "[]",
+                "{}",
+                null)));
+        AgenticAuthoringPreIntentToolPlanningService planningService = (request, principal) ->
+                AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
+                        "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                        "O pedido menciona pessoas da organizacao e precisa de fonte governada antes da materializacao.",
+                        List.of(new AgenticAuthoringToolCall(
+                                AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                                "pre_intent_resource_discovery",
+                                new AgenticAuthoringResourceCandidatesRequest(
+                                        "funcionarios colaboradores recursos humanos pessoas da empresa",
+                                        request.userPrompt(),
+                                        "page",
+                                        6)))));
+        AgenticAuthoringTurnStreamRequest request = requestWithContextHintsOnEmptyPage(
+                "quero criar algo que mostre informacoes dos empregados",
+                domainDiscoveryContext());
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithFuncionarioCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine(repository, null, null, planningService)
+                .execute(request, principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .containsSubsequence("tool.plan", "tool.start", "tool.result", "intent.resolve.llm");
+        assertPhaseBeforeEventType(sink, "tool.plan", "intent.resolved");
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText()).isEqualTo("tool.plan");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("toolCallCount").asInt())
+                            .isEqualTo(1);
+                })
+                .anySatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText()).isEqualTo("tool.result");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("candidateCount").asInt())
+                            .isEqualTo(1);
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("retrievalQuery").asText())
+                            .isEqualTo("funcionarios colaboradores recursos humanos pessoas da empresa");
+                });
+
+        ArgumentCaptor<AgenticAuthoringIntentResolutionRequest> intentRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringIntentResolutionRequest.class);
+        verify(intentResolverService).resolve(intentRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        JsonNode forwardedHints = intentRequest.getValue().contextHints();
+        org.assertj.core.api.Assertions.assertThat(forwardedHints.path("resourceDiscovery").path("candidates").path(0)
+                        .path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
+        org.assertj.core.api.Assertions.assertThat(forwardedHints.path("resourceDiscovery").path("retrievalQuery").asText())
+                .isEqualTo("funcionarios colaboradores recursos humanos pessoas da empresa");
+        verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
+    }
+
+    @Test
+    void groundsProviderFailureClarificationInPreIntentResourceDiscoveryCandidates() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of(new ApiMetadata(
+                "/api/human-resources/funcionarios",
+                "GET",
+                "funcionarios,colaboradores,recursos humanos,pessoas",
+                "Funcionários",
+                "Cadastro e perfil de funcionarios",
+                "listFuncionarios",
+                null,
+                "{\"type\":\"object\"}",
+                "[]",
+                "{}",
+                null)));
+        AgenticAuthoringPreIntentToolPlanningService planningService = (request, principal) ->
+                AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
+                        "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                        "O pedido precisa consultar o catálogo governado antes de decidir a fonte.",
+                        List.of(new AgenticAuthoringToolCall(
+                                AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                                "pre_intent_resource_discovery",
+                                new AgenticAuthoringResourceCandidatesRequest(
+                                        "funcionarios colaboradores recursos humanos pessoas da empresa",
+                                        request.userPrompt(),
+                                        "page",
+                                        6)))));
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                objectMapper));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                null,
+                new AgenticAuthoringOrchestrator(new AgenticAuthoringToolLoopExecutor(
+                        registry,
+                        new AgenticAuthoringDefaultToolLoopPlanner())),
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                consultativeAnswerService,
+                planningService);
+        AgenticAuthoringTurnStreamRequest request = requestWithContextHintsOnEmptyPage(
+                "quero criar algo que mostre informacoes dos empregados",
+                domainDiscoveryContext());
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(providerFailureClarificationIntent());
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(request, principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .containsSubsequence(
+                        "tool.plan",
+                        "tool.start",
+                        "tool.result",
+                        "intent.resolve.llm",
+                        "consultative.grounded-clarification");
+        verify(previewService, never()).preview(any(), eq("tenant"), eq("user"), eq("local"));
+        verify(consultativeAnswerService, never()).answer(
+                any(AgenticAuthoringTurnStreamRequest.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
+                .contains("busca governada retornou candidatos preliminares")
+                .contains("evidência forte suficiente")
+                .contains("não vou materializar a tela automaticamente");
+        org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics")
+                        .path("resourceDiscoveryGroundedClarification")
+                        .asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
+                .isEmpty();
+    }
+
+    @Test
+    void groundsProviderFailureClarificationWithOnlyPresentableResourceDiscoveryCandidates() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringIntentResolverService intentResolverService =
+                Mockito.mock(AgenticAuthoringIntentResolverService.class);
+        AgenticAuthoringPreviewService previewService = Mockito.mock(AgenticAuthoringPreviewService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate strongCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter",
+                "post",
+                0.91d,
+                "semantic retrieval evidence",
+                List.of("api-metadata", "semantic-retrieval"),
+                AgenticAuthoringEvidenceBundle.of("semantic_retrieval", List.of()));
+        AgenticAuthoringCandidate weakComplement = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/stats/group-by&operation=post&schemaType=response",
+                "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by",
+                "post",
+                0.47d,
+                "weak lexical companion evidence",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence"),
+                AgenticAuthoringEvidenceBundle.of("lexical_fallback", List.of()));
+        when(candidateCatalog.discover(
+                "funcionarios colaboradores recursos humanos pessoas da empresa",
+                "page",
+                "tenant",
+                "local",
+                null))
+                .thenReturn(List.of(strongCandidate, weakComplement));
+        AgenticAuthoringPreIntentToolPlanningService planningService = (request, principal) ->
+                AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
+                        "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                        "O pedido precisa consultar o catalogo governado antes de decidir a fonte.",
+                        List.of(new AgenticAuthoringToolCall(
+                                AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                                "pre_intent_resource_discovery",
+                                new AgenticAuthoringResourceCandidatesRequest(
+                                        "funcionarios colaboradores recursos humanos pessoas da empresa",
+                                        request.userPrompt(),
+                                        "page",
+                                        6)))));
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(candidateCatalog, objectMapper));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                null,
+                new AgenticAuthoringOrchestrator(new AgenticAuthoringToolLoopExecutor(
+                        registry,
+                        new AgenticAuthoringDefaultToolLoopPlanner())),
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                consultativeAnswerService,
+                planningService);
+        AgenticAuthoringTurnStreamRequest request = requestWithContextHintsOnEmptyPage(
+                "quero uma tela para acompanhar colaboradores",
+                domainDiscoveryContext());
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(providerFailureClarificationIntent());
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(request, principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
+                .contains("funcionários")
+                .doesNotContain("analytics folha pagamento");
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
+                .hasSize(1);
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies").path(0).path("contextHints").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies").path(0).path("contextHints").path("resourcePath").asText())
+                .doesNotContain("vw-analytics-folha-pagamento");
+    }
+
+    @Test
+    void groundsNeedsClarificationInResourceDiscoveryCandidatesWithoutProviderFailure() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringIntentResolverService intentResolverService =
+                Mockito.mock(AgenticAuthoringIntentResolverService.class);
+        AgenticAuthoringPreviewService previewService = Mockito.mock(AgenticAuthoringPreviewService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate contractsCandidate = new AgenticAuthoringCandidate(
+                "/api/procurement/contracts",
+                "post",
+                "/schemas/filtered?path=/api/procurement/contracts/filter/cursor&operation=post&schemaType=response",
+                "/api/procurement/contracts/filter/cursor",
+                "post",
+                0.91d,
+                "semantic retrieval evidence",
+                List.of("api-metadata", "semantic-retrieval"),
+                AgenticAuthoringEvidenceBundle.of("semantic_retrieval", List.of()));
+        AgenticAuthoringCandidate suppliersCandidate = new AgenticAuthoringCandidate(
+                "/api/procurement/suppliers",
+                "post",
+                "/schemas/filtered?path=/api/procurement/suppliers/filter/cursor&operation=post&schemaType=response",
+                "/api/procurement/suppliers/filter/cursor",
+                "post",
+                0.88d,
+                "semantic retrieval evidence",
+                List.of("api-metadata", "semantic-retrieval"),
+                AgenticAuthoringEvidenceBundle.of("semantic_retrieval", List.of()));
+        when(candidateCatalog.discover(
+                anyString(),
+                anyString(),
+                any(),
+                any(),
+                any()))
+                .thenReturn(List.of(contractsCandidate, suppliersCandidate));
+        AgenticAuthoringPreIntentToolPlanningService planningService = (request, principal) ->
+                AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
+                        "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                        "O pedido precisa consultar o catalogo governado antes de decidir a fonte.",
+                        List.of(new AgenticAuthoringToolCall(
+                                AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                                "pre_intent_resource_discovery",
+                                new AgenticAuthoringResourceCandidatesRequest(
+                                        "compras contratos parceiros fornecedores acompanhamento",
+                                        request.userPrompt(),
+                                        "page",
+                                        6)))));
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(candidateCatalog, objectMapper));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                null,
+                new AgenticAuthoringOrchestrator(new AgenticAuthoringToolLoopExecutor(
+                        registry,
+                        new AgenticAuthoringDefaultToolLoopPlanner())),
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                consultativeAnswerService,
+                planningService);
+        AgenticAuthoringTurnStreamRequest request = requestWithContextHintsOnEmptyPage(
+                "Na operacao de compras eu preciso acompanhar contratos e fornecedores sem escolher a API agora.",
+                domainDiscoveryContext());
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(resourceDiscoveryNeedsClarificationIntent());
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(request, principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .contains("consultative.grounded-clarification")
+                .doesNotContain("consultative.answer");
+        verify(previewService, never()).preview(any(), eq("tenant"), eq("user"), eq("local"));
+        verify(consultativeAnswerService, never()).answer(
+                any(AgenticAuthoringTurnStreamRequest.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
+                .contains("contracts")
+                .contains("suppliers")
+                .contains("não vou materializar a tela automaticamente");
+        org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics")
+                        .path("resourceDiscoveryGroundedClarification")
+                        .asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
+                .hasSize(2);
+    }
+
+    @Test
+    void groundsProviderFailureClarificationInDomainDiscoveryWhenPlannerFailsBeforeSearch() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringPreIntentToolPlanningService planningService = (request, principal) ->
+                AgenticAuthoringPreIntentToolPlanningResult.failed(
+                        "provider-error",
+                        "AiProviderCallException");
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                null,
+                new AgenticAuthoringOrchestrator(new AgenticAuthoringToolLoopExecutor(
+                        registry,
+                        new AgenticAuthoringDefaultToolLoopPlanner())),
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                consultativeAnswerService,
+                planningService);
+        AgenticAuthoringTurnStreamRequest request = requestWithContextHintsOnEmptyPage(
+                "quero uma tela para acompanhar colaboradores",
+                domainDiscoveryContext());
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(providerFailureClarificationIntent());
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(request, principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .containsSubsequence(
+                        "tool.plan.skipped",
+                        "intent.resolve.llm",
+                        "consultative.grounded-domain-clarification");
+        verify(previewService, never()).preview(any(), eq("tenant"), eq("user"), eq("local"));
+        verify(consultativeAnswerService, never()).answer(
+                any(AgenticAuthoringTurnStreamRequest.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
+                .contains("contexto governado disponível")
+                .contains("Missões")
+                .contains("Funcionários")
+                .contains("Não vou materializar a tela automaticamente")
+                .doesNotContain("Recomendações de telas")
+                .doesNotContain("Painel resumo");
+        org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics")
+                        .path("domainDiscoveryGroundedClarification")
+                        .asBoolean())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies").toString())
+                .contains("human-resources.funcionarios")
+                .contains("Funcionários");
+    }
+
+    @Test
+    void emitsPreIntentToolPlanSkippedWhenPlannerBeanIsUnavailable() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringTurnStreamRequest request = requestWithContextHintsOnEmptyPage(
+                "quero criar algo que mostre informacoes dos empregados",
+                domainDiscoveryContext());
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(unresolvedConsultativeIntent());
+
+        AgenticAuthoringTurnOutcome outcome = engine(null).execute(request, principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        assertPhaseBeforeEventType(sink, "tool.plan.skipped", "intent.resolved");
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("tool.plan.skipped");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("skipReason").asText())
+                            .isEqualTo("planner-bean-unavailable");
+                });
+    }
+
+    @Test
     void materializesLocalTabbedCrudRefinementThroughRealResolverAndPreviewProvider() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
@@ -8964,6 +9469,14 @@ class AgenticAuthoringTurnEngineTest {
             ApiMetadataRepository repository,
             AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
             SchemaRetrievalService schemaRetrievalService) {
+        return engine(repository, projectKnowledgeService, schemaRetrievalService, null);
+    }
+
+    private AgenticAuthoringTurnEngine engine(
+            ApiMetadataRepository repository,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            SchemaRetrievalService schemaRetrievalService,
+            AgenticAuthoringPreIntentToolPlanningService preIntentToolPlanningService) {
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(
                 repository != null ? new AgenticAuthoringApiMetadataCandidateCatalog(repository) : null,
                 objectMapper));
@@ -8978,7 +9491,9 @@ class AgenticAuthoringTurnEngineTest {
                         registry,
                         new AgenticAuthoringDefaultToolLoopPlanner())),
                 schemaRetrievalService,
-                new AgenticAuthoringComponentCapabilitiesService());
+                new AgenticAuthoringComponentCapabilitiesService(),
+                null,
+                preIntentToolPlanningService);
     }
 
     private AgenticAuthoringTurnStreamRequest request() {
@@ -9073,6 +9588,48 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 contextHints,
                 null);
+    }
+
+    private AgenticAuthoringTurnStreamRequest requestWithContextHintsOnEmptyPage(
+            String userPrompt,
+            JsonNode contextHints) {
+        return new AgenticAuthoringTurnStreamRequest(
+                userPrompt,
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/decision-playground",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-test",
+                null,
+                "session-1",
+                "turn-client-1",
+                List.of(),
+                null,
+                List.of(),
+                contextHints,
+                null);
+    }
+
+    private JsonNode domainDiscoveryContext() throws Exception {
+        return objectMapper.readTree("""
+                {
+                  "domainDiscovery": [
+                    {
+                      "resourceKey": "operations.missoes",
+                      "title": "Missões",
+                      "fields": ["Nome", "Status"]
+                    },
+                    {
+                      "resourceKey": "human-resources.funcionarios",
+                      "title": "Funcionários",
+                      "fields": ["Nome", "E-mail", "Cargo", "Departamento"],
+                      "surfaces": ["Cadastrar funcionário", "Obter funcionário", "Perfil 360"]
+                    }
+                  ]
+                }
+                """);
     }
 
     private AgenticAuthoringTurnStreamRequest requestWithContextHintsAndDiagnostics(
@@ -10265,6 +10822,80 @@ class AgenticAuthoringTurnEngineTest {
                 objectMapper.createObjectNode());
     }
 
+    private AgenticAuthoringIntentResolutionResult providerFailureClarificationIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                false,
+                "unknown",
+                "unknown",
+                "provider_error",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "clarification_required", List.of(
+                        "intent-artifact-unknown",
+                        "intent-operation-unknown")),
+                "quero criar algo que mostre informacoes dos empregados",
+                "Ainda nao consegui confirmar a intencao com seguranca.",
+                List.of(),
+                List.of(),
+                List.of(
+                        "llm-intent-resolution-used",
+                        "llm-intent-resolution-provider-failed-clarification-required",
+                        "llm-intent-resolution-failed",
+                        "llm-provider-error",
+                        "llm-provider-unknown-error"),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult resourceDiscoveryNeedsClarificationIntent() {
+        AgenticAuthoringCandidate contractsCandidate = new AgenticAuthoringCandidate(
+                "/api/procurement/contracts",
+                "post",
+                "/schemas/filtered?path=/api/procurement/contracts/filter/cursor&operation=post&schemaType=response",
+                "/api/procurement/contracts/filter/cursor",
+                "post",
+                0.91d,
+                "semantic retrieval evidence",
+                List.of("api-metadata", "semantic-retrieval"));
+        AgenticAuthoringCandidate suppliersCandidate = new AgenticAuthoringCandidate(
+                "/api/procurement/suppliers",
+                "post",
+                "/schemas/filtered?path=/api/procurement/suppliers/filter/cursor&operation=post&schemaType=response",
+                "/api/procurement/suppliers/filter/cursor",
+                "post",
+                0.88d,
+                "semantic retrieval evidence",
+                List.of("api-metadata", "semantic-retrieval"));
+        return new AgenticAuthoringIntentResolutionResult(
+                false,
+                "explore",
+                "page",
+                "unknown",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(contractsCandidate, suppliersCandidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "clarification_required", List.of(
+                        "intent-needs-resource-confirmation")),
+                "Na operacao de compras eu preciso acompanhar contratos e fornecedores sem escolher a API agora.",
+                "Encontrei mais de uma fonte de dados possivel para esta pagina.",
+                List.of(),
+                List.of(),
+                List.of(
+                        "llm-intent-resolution-used",
+                        "llm-intent-resolution-unresolved-fallback-deterministic",
+                        "keyword-fallback-applied",
+                        "keyword-fallback-fail-safe-applied"),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
     private AgenticAuthoringIntentResolutionResult validIntentWithToolCandidate() {
         AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
                 "/api/human-resources/vw-analytics-folha-pagamento",
@@ -10296,11 +10927,67 @@ class AgenticAuthoringTurnEngineTest {
                 objectMapper.createObjectNode());
     }
 
+    private AgenticAuthoringIntentResolutionResult validIntentWithFuncionarioCandidate() {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "get",
+                "/schemas/filtered?path=/api/human-resources/funcionarios&operation=get&schemaType=response",
+                "/api/human-resources/funcionarios",
+                "GET",
+                0.95,
+                "resource discovered by LLM-authored pre-intent tool plan",
+                List.of("api-metadata", "tool-search-api-resources"));
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "create_table",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
+                null,
+                "Preview ready.",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
     private List<String> phases(CapturingSink sink) {
         return sink.payloads.stream()
                 .map(payload -> objectMapper.valueToTree(payload).path("phase").asText(""))
                 .filter(phase -> !phase.isBlank())
                 .toList();
+    }
+
+    private void assertPhaseBeforeEventType(CapturingSink sink, String phase, String eventType) {
+        int phaseIndex = phaseIndex(sink, phase);
+        int eventTypeIndex = eventTypeIndex(sink, eventType);
+        org.assertj.core.api.Assertions.assertThat(phaseIndex)
+                .describedAs("phase %s must be present", phase)
+                .isGreaterThanOrEqualTo(0);
+        org.assertj.core.api.Assertions.assertThat(eventTypeIndex)
+                .describedAs("event type %s must be present", eventType)
+                .isGreaterThanOrEqualTo(0);
+        org.assertj.core.api.Assertions.assertThat(phaseIndex).isLessThan(eventTypeIndex);
+    }
+
+    private int phaseIndex(CapturingSink sink, String phase) {
+        for (int i = 0; i < sink.payloads.size(); i++) {
+            if (phase.equals(objectMapper.valueToTree(sink.payloads.get(i)).path("phase").asText(""))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private int eventTypeIndex(CapturingSink sink, String type) {
+        return sink.types.indexOf(type);
     }
 
     private JsonNode firstPayloadOfType(CapturingSink sink, String type) {

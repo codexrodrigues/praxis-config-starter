@@ -145,10 +145,12 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
             AgenticAuthoringSemanticDecision semanticDecision,
             JsonNode materialization) {
         if (semanticDecision == null
-                || !"weak-lexical-evidence".equals(safe(semanticDecision.reviewReason()))
                 || materialization == null
                 || materialization.isMissingNode()
-                || materialization.isNull()) {
+                || materialization.isNull()
+                || !"keyword-fallback-fail-safe".equals(safe(semanticDecision.reviewReason()))
+                || semanticDecision.refinement() == null
+                || !semanticDecision.refinement().preservesResource()) {
             return false;
         }
         JsonNode grounding = materialization.path("diagnostics").path("resourceSchemaGrounding");

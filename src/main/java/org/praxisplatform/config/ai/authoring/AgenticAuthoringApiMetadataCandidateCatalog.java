@@ -17,6 +17,11 @@ import org.praxisplatform.config.service.ContextRetrievalService;
 public class AgenticAuthoringApiMetadataCandidateCatalog {
 
     private static final int CANDIDATE_LIMIT = 16;
+    private static final double MIN_STRONG_SEMANTIC_SCORE = 0.52d;
+    private static final int MIN_GENERIC_OPERATIONAL_SEMANTIC_CANDIDATES = 6;
+    private static final String SEMANTIC_ROLE_OPERATIONAL_RESOURCE = "semantic-role:operational-resource";
+    private static final String SEMANTIC_ROLE_ANALYTICS_PROJECTION = "semantic-role:analytics-projection";
+    private static final String SEMANTIC_ROLE_PROFILE_PROJECTION = "semantic-role:profile-projection";
 
     private static final Set<String> STOP_WORDS = Set.of(
             "a", "as", "o", "os", "um", "uma", "de", "da", "das", "do", "dos", "para", "por",
@@ -64,13 +69,29 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             return repository == null ? List.of() : new BroadArtifactCandidateRetriever().retrieve(context);
         }
         List<AgenticAuthoringCandidate> semanticCandidates = new SemanticCandidateRetriever().retrieve(context);
+        if (semanticCandidates.isEmpty() && hasScope(tenantId, environment)) {
+            semanticCandidates = new SemanticCandidateRetriever().retrieve(context.withGlobalScope());
+        }
         if (repository == null) {
             return semanticCandidates;
         }
         boolean explicitSourceReference = hasExplicitSourceReference(normalizedPrompt);
+        boolean supplementSemanticRetrieval = shouldSupplementSemanticRetrieval(
+                normalizedPrompt,
+                artifactKind,
+                semanticCandidates);
+        if (!semanticCandidates.isEmpty()
+                && !explicitSourceReference
+                && !supplementSemanticRetrieval) {
+            return mergeCandidates(semanticCandidates, List.of(), artifactKind, normalizedPrompt);
+        }
         List<String> originalTokens = meaningfulTokens(normalizedPrompt);
         if (originalTokens.isEmpty()) {
-            return mergeCandidates(semanticCandidates, new BroadArtifactCandidateRetriever().retrieve(context));
+            return mergeCandidates(
+                    semanticCandidates,
+                    new BroadArtifactCandidateRetriever().retrieve(context),
+                    artifactKind,
+                    normalizedPrompt);
         }
         List<String> tokens = meaningfulTokens(normalizedPrompt);
         List<AgenticAuthoringCandidate> lexicalCandidates =
@@ -79,12 +100,63 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 .filter(candidate -> hasEvidence(candidate, "explicit-source-match"))
                 .toList();
         if (!"api_catalog".equals(artifactKind) && !explicitSourceCandidates.isEmpty()) {
-            return mergeCandidates(explicitSourceCandidates, List.of());
+            return mergeCandidates(explicitSourceCandidates, semanticCandidates, artifactKind, normalizedPrompt);
+        }
+        List<AgenticAuthoringCandidate> supplementaryCandidates = new ArrayList<>(lexicalCandidates);
+        if (shouldSupplementWithBroadOperationalDiscovery(
+                normalizedPrompt,
+                artifactKind,
+                semanticCandidates,
+                supplementSemanticRetrieval)) {
+            supplementaryCandidates.addAll(new BroadArtifactCandidateRetriever().retrieve(context));
         }
         List<AgenticAuthoringCandidate> mergedCandidates =
-                mergeCandidates(lexicalCandidates, semanticCandidates);
+                mergeCandidates(supplementaryCandidates, semanticCandidates, artifactKind, normalizedPrompt);
         return mergedCandidates;
     }
+
+    private boolean hasScope(String tenantId, String environment) {
+        return (tenantId != null && !tenantId.isBlank())
+                || (environment != null && !environment.isBlank());
+    }
+
+    private boolean shouldSupplementSemanticRetrieval(
+            String normalizedPrompt,
+            String artifactKind,
+            List<AgenticAuthoringCandidate> semanticCandidates) {
+        if (semanticCandidates == null || semanticCandidates.isEmpty()) {
+            return true;
+        }
+        if (!strongSemanticRetrieval(semanticCandidates)) {
+            return true;
+        }
+        if ("api_catalog".equals(artifactKind)) {
+            return true;
+        }
+        if (isGenericOperationalBroadSurface(normalizedPrompt, artifactKind)
+                && semanticCandidates.size() < MIN_GENERIC_OPERATIONAL_SEMANTIC_CANDIDATES) {
+            return true;
+        }
+        return ("dashboard".equals(artifactKind) || "chart".equals(artifactKind))
+                && containsAny(normalize(normalizedPrompt), "grafico", "graficos", "chart", "charts", "barras", "linha", "pizza");
+    }
+
+    private boolean shouldSupplementWithBroadOperationalDiscovery(
+            String normalizedPrompt,
+            String artifactKind,
+            List<AgenticAuthoringCandidate> semanticCandidates,
+            boolean supplementSemanticRetrieval) {
+        return supplementSemanticRetrieval
+                && semanticCandidates != null
+                && !semanticCandidates.isEmpty()
+                && isGenericOperationalBroadSurface(normalizedPrompt, artifactKind);
+    }
+
+    private boolean isGenericOperationalBroadSurface(String normalizedPrompt, String artifactKind) {
+        return semanticResourceNeed(normalizedPrompt, artifactKind) == SemanticResourceNeed.GENERIC_OPERATIONAL
+                && ("page".equals(artifactKind) || "table".equals(artifactKind) || "unknown".equals(artifactKind));
+    }
+
 
     private boolean hasExplicitSourceReference(String normalizedPrompt) {
         return !explicitPhraseTerms(normalizedPrompt, "fonte", "source", "recurso").isEmpty();
@@ -102,12 +174,14 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 .filter(candidate -> candidate != null && candidate.evidence().contains("semantic-retrieval"))
                 .mapToDouble(AgenticAuthoringCandidate::score)
                 .max()
-                .orElse(0d) >= 0.70d;
+                .orElse(0d) >= MIN_STRONG_SEMANTIC_SCORE;
     }
 
     private List<AgenticAuthoringCandidate> mergeCandidates(
             List<AgenticAuthoringCandidate> primary,
-            List<AgenticAuthoringCandidate> secondary) {
+            List<AgenticAuthoringCandidate> secondary,
+            String artifactKind,
+            String normalizedPrompt) {
         Map<String, AgenticAuthoringCandidate> candidatesByResource = new LinkedHashMap<>();
         for (AgenticAuthoringCandidate candidate : concat(primary, secondary)) {
             if (candidate == null || candidate.resourcePath() == null || candidate.resourcePath().isBlank()) {
@@ -118,8 +192,12 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                     candidate,
                     this::preferredCandidateForSameResource);
         }
+        SemanticResourceNeed resourceNeed = semanticResourceNeed(normalizedPrompt, artifactKind);
+        Comparator<AgenticAuthoringCandidate> ranking = "api_catalog".equals(artifactKind)
+                ? Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed()
+                : CandidateRankingPolicy.byEvidenceStrengthRoleFitThenScore(resourceNeed);
         return candidatesByResource.values().stream()
-                .sorted(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed())
+                .sorted(ranking)
                 .limit(CANDIDATE_LIMIT)
                 .toList();
     }
@@ -127,12 +205,35 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     private AgenticAuthoringCandidate preferredCandidateForSameResource(
             AgenticAuthoringCandidate existing,
             AgenticAuthoringCandidate replacement) {
+        int existingEvidenceStrength = evidenceStrength(existing);
+        int replacementEvidenceStrength = evidenceStrength(replacement);
+        if (replacementEvidenceStrength != existingEvidenceStrength) {
+            return replacementEvidenceStrength > existingEvidenceStrength ? replacement : existing;
+        }
         boolean existingCreate = isCreateEndpointCandidate(existing);
         boolean replacementCreate = isCreateEndpointCandidate(replacement);
         if (replacementCreate != existingCreate) {
             return replacementCreate ? replacement : existing;
         }
         return replacement.score() > existing.score() ? replacement : existing;
+    }
+
+    private int evidenceStrength(AgenticAuthoringCandidate candidate) {
+        if (candidate == null || candidate.evidence() == null) {
+            return 0;
+        }
+        if (hasEvidence(candidate, "semantic-retrieval")
+                || hasEvidence(candidate, "explicit-source-match")
+                || hasEvidence(candidate, AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)) {
+            return 3;
+        }
+        if (hasEvidence(candidate, "broad-artifact-discovery")) {
+            return 1;
+        }
+        if (hasEvidence(candidate, "lexical-fallback") || hasEvidence(candidate, "weak-evidence")) {
+            return 0;
+        }
+        return 2;
     }
 
     private boolean isCreateEndpointCandidate(AgenticAuthoringCandidate candidate) {
@@ -163,7 +264,10 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         return merged;
     }
 
-    private List<AgenticAuthoringCandidate> discoverBroadCandidates(String artifactKind, String expectedMethod) {
+    private List<AgenticAuthoringCandidate> discoverBroadCandidates(
+            String artifactKind,
+            String expectedMethod,
+            String normalizedPrompt) {
         if (!isBroadDiscoveryArtifact(artifactKind)) {
             return List.of();
         }
@@ -171,7 +275,14 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
                 .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
                 .filter(metadata -> expectedMethod == null || expectedMethod.equalsIgnoreCase(metadata.getMethod()))
-                .map(metadata -> toBroadScoredCandidate(metadata, expectedMethod, artifactKind, null, null, null))
+                .map(metadata -> toBroadScoredCandidate(
+                        metadata,
+                        expectedMethod,
+                        artifactKind,
+                        normalizedPrompt,
+                        null,
+                        null,
+                        null))
                 .filter(scored -> scored.score() >= 0.36d)
                 .sorted(CandidateRankingPolicy.byScoreDescending())
                 .limit(CANDIDATE_LIMIT)
@@ -180,7 +291,8 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     }
 
     private boolean isBroadDiscoveryArtifact(String artifactKind) {
-        return "dashboard".equals(artifactKind)
+        return "page".equals(artifactKind)
+                || "dashboard".equals(artifactKind)
                 || "table".equals(artifactKind)
                 || "form".equals(artifactKind)
                 || "unknown".equals(artifactKind);
@@ -273,7 +385,10 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
 
         @Override
         public List<AgenticAuthoringCandidate> retrieve(RetrievalContext context) {
-            return discoverBroadCandidates(context.artifactKind(), context.expectedMethod());
+            return discoverBroadCandidates(
+                    context.artifactKind(),
+                    context.expectedMethod(),
+                    context.normalizedPrompt());
         }
     }
 
@@ -285,6 +400,65 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         static Comparator<ScoredCandidate> byScoreDescending() {
             return Comparator.comparingDouble(ScoredCandidate::score).reversed();
         }
+
+        static Comparator<AgenticAuthoringCandidate> byEvidenceStrengthRoleFitThenScore(SemanticResourceNeed resourceNeed) {
+            return Comparator.<AgenticAuthoringCandidate>comparingInt(AgenticAuthoringApiMetadataCandidateCatalog::staticEvidenceStrength)
+                    .reversed()
+                    .thenComparing(Comparator.comparingInt(
+                            (AgenticAuthoringCandidate candidate) -> hasStaticEvidence(candidate, "tool-search-api-resources") ? 1 : 0)
+                            .reversed())
+                    .thenComparing(Comparator.comparingDouble(
+                            (AgenticAuthoringCandidate candidate) -> semanticRoleFit(candidate, resourceNeed)).reversed())
+                    .thenComparing(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed());
+        }
+    }
+
+    private static boolean hasStaticEvidence(AgenticAuthoringCandidate candidate, String evidence) {
+        return candidate != null
+                && candidate.evidence() != null
+                && candidate.evidence().contains(evidence);
+    }
+
+    private static double semanticRoleFit(AgenticAuthoringCandidate candidate, SemanticResourceNeed resourceNeed) {
+        if (candidate == null || candidate.evidence() == null || resourceNeed == null) {
+            return 0d;
+        }
+        boolean derivedProjection = isDerivedProjectionCandidate(candidate);
+        return switch (resourceNeed) {
+            case ANALYTICS -> candidate.evidence().contains(SEMANTIC_ROLE_ANALYTICS_PROJECTION) ? 0.20d
+                    : candidate.evidence().contains(SEMANTIC_ROLE_OPERATIONAL_RESOURCE) ? 0.04d : 0d;
+            case PROFILE -> candidate.evidence().contains(SEMANTIC_ROLE_PROFILE_PROJECTION) ? 0.20d
+                    : candidate.evidence().contains(SEMANTIC_ROLE_OPERATIONAL_RESOURCE) ? 0.08d : 0d;
+            case GENERIC_OPERATIONAL -> candidate.evidence().contains(SEMANTIC_ROLE_OPERATIONAL_RESOURCE)
+                    ? (derivedProjection ? 0.04d : 0.18d)
+                    : candidate.evidence().contains(SEMANTIC_ROLE_PROFILE_PROJECTION) ? 0.06d : 0d;
+        };
+    }
+
+    private static boolean isDerivedProjectionCandidate(AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return false;
+        }
+        return isDerivedProjectionPath(candidate.resourcePath()) || isDerivedProjectionPath(candidate.submitUrl());
+    }
+
+    private static int staticEvidenceStrength(AgenticAuthoringCandidate candidate) {
+        if (candidate == null || candidate.evidence() == null) {
+            return 0;
+        }
+        List<String> evidence = candidate.evidence();
+        if (evidence.contains("semantic-retrieval")
+                || evidence.contains("explicit-source-match")
+                || evidence.contains(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)) {
+            return 3;
+        }
+        if (evidence.contains("broad-artifact-discovery")) {
+            return 1;
+        }
+        if (evidence.contains("lexical-fallback") || evidence.contains("weak-evidence")) {
+            return 0;
+        }
+        return 2;
     }
 
     private AgenticAuthoringCandidate toCandidate(
@@ -306,6 +480,14 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 valueOrEmpty(result.getRequestSchema()),
                 valueOrEmpty(result.getResponseSchema()),
                 valueOrEmpty(result.getParameters()));
+        String normalizedEvidenceText = normalize(evidenceText);
+        ResourceSemanticRole semanticRole = semanticRole(resourcePath, submitUrl, normalizedEvidenceText, "");
+        score += semanticRoleScoreAdjustment(semanticRole, semanticResourceNeed(normalizedPrompt, artifactKind));
+        score += derivedProjectionScoreAdjustment(resourcePath, submitUrl, normalizedPrompt, artifactKind);
+        score = Math.max(0.45d, Math.min(0.99d, score));
+        List<String> evidence = new ArrayList<>(List.of(
+                "api-metadata", "semantic-retrieval", "schema-available", "actions-probe-pending"));
+        evidence.add(semanticRole.evidence);
         return new AgenticAuthoringCandidate(
                 resourcePath,
                 submitMethod,
@@ -314,7 +496,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 submitMethod,
                 score,
                 "api_metadata semantic retrieval",
-                List.of("api-metadata", "semantic-retrieval", "schema-available", "actions-probe-pending"),
+                List.copyOf(evidence),
                 evidenceBundle(
                         "semantic_retrieval",
                         resourcePath,
@@ -322,7 +504,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                         submitMethod,
                         valueOrEmpty(result.getSummary()),
                         score,
-                        meaningfulTokens(normalize(evidenceText)),
+                        meaningfulTokens(normalizedEvidenceText),
                         tenantId,
                         environment,
                         releaseId,
@@ -372,11 +554,22 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind);
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(metadata.getPath());
+        ResourceSemanticRole semanticRole = semanticRole(
+                resourcePath,
+                submitUrl,
+                endpointText,
+                valueOrEmpty(metadata.getRawJson()));
         boolean explicitMetadataMatch = explicitSourceMatch;
+        if (explicitMetadataMatch) {
+            score += semanticRoleScoreAdjustment(semanticRole, semanticResourceNeed(normalizedPrompt, artifactKind));
+            score += derivedProjectionScoreAdjustment(resourcePath, submitUrl, normalizedPrompt, artifactKind);
+            score = Math.max(0d, Math.min(0.99d, score));
+        }
         List<String> evidence = explicitMetadataMatch
-                ? explicitMetadataEvidence(explicitFieldMatch)
-                : List.of("api-metadata", "lexical-fallback", "weak-evidence",
-                        "schema-probe-pending", "actions-probe-pending", "capabilities-probe-pending");
+                ? new ArrayList<>(explicitMetadataEvidence(explicitFieldMatch))
+                : new ArrayList<>(List.of("api-metadata", "lexical-fallback", "weak-evidence",
+                        "schema-probe-pending", "actions-probe-pending", "capabilities-probe-pending"));
+        evidence.add(semanticRole.evidence);
         List<String> evidenceTerms = explicitMetadataMatch
                 ? mergeTerms(explicitSourceTerms, explicitFieldTerms, tokens)
                 : tokens;
@@ -390,7 +583,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 explicitMetadataMatch
                         ? "api_metadata explicit source evidence"
                         : "api_metadata weak lexical fallback evidence",
-                evidence,
+                List.copyOf(evidence),
                 evidenceBundle(
                         explicitMetadataMatch ? "explicit_source_match" : "lexical_fallback",
                         resourcePath,
@@ -410,6 +603,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             ApiMetadata metadata,
             String expectedMethod,
             String artifactKind,
+            String normalizedPrompt,
             String tenantId,
             String environment,
             String releaseId) {
@@ -428,6 +622,14 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind);
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(metadata.getPath());
+        ResourceSemanticRole semanticRole = semanticRole(
+                resourcePath,
+                submitUrl,
+                endpointText,
+                valueOrEmpty(metadata.getRawJson()));
+        score += semanticRoleScoreAdjustment(semanticRole, semanticResourceNeed(normalizedPrompt, artifactKind));
+        score += derivedProjectionScoreAdjustment(resourcePath, submitUrl, normalizedPrompt, artifactKind);
+        score = Math.max(0d, Math.min(0.90d, score));
         return new ScoredCandidate(new AgenticAuthoringCandidate(
                 resourcePath,
                 submitMethod,
@@ -436,7 +638,8 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 submitMethod,
                 score,
                 broadDiscoveryReason(metadata),
-                List.of("api-metadata", "broad-artifact-discovery", "schema-probe-pending", "actions-probe-pending"),
+                List.of("api-metadata", "broad-artifact-discovery", "schema-probe-pending",
+                        "actions-probe-pending", semanticRole.evidence),
                 evidenceBundle(
                         "broad_artifact_discovery",
                         resourcePath,
@@ -643,6 +846,108 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 valueOrEmpty(metadata.getSummary()),
                 valueOrEmpty(metadata.getDescription()),
                 valueOrEmpty(metadata.getOperationId())));
+    }
+
+    private ResourceSemanticRole semanticRole(
+            String resourcePath,
+            String submitUrl,
+            String endpointText,
+            String rawJson) {
+        String normalizedResource = normalizePath(resourcePath).toLowerCase(Locale.ROOT);
+        String normalizedSubmit = normalizePath(submitUrl).toLowerCase(Locale.ROOT);
+        String normalizedEndpointText = normalize(valueOrEmpty(endpointText));
+        String normalizedRawJson = normalize(valueOrEmpty(rawJson));
+        if (hasAnalyticsSignal(normalizedResource, normalizedSubmit, normalizedEndpointText, normalizedRawJson)) {
+            return ResourceSemanticRole.ANALYTICS_PROJECTION;
+        }
+        if (hasProfileSignal(normalizedResource, normalizedSubmit, normalizedEndpointText, normalizedRawJson)) {
+            return ResourceSemanticRole.PROFILE_PROJECTION;
+        }
+        return ResourceSemanticRole.OPERATIONAL_RESOURCE;
+    }
+
+    private boolean hasAnalyticsSignal(
+            String resourcePath,
+            String submitUrl,
+            String endpointText,
+            String rawJson) {
+        boolean structuralProjection = isDerivedProjectionPath(resourcePath) || isDerivedProjectionPath(submitUrl);
+        return submitUrl.contains("/stats/")
+                || containsAny(resourcePath, "/analytics-", "-analytics-", "analytics/")
+                || structuralProjection
+                && (rawJson.contains("\"x-ui\"") && rawJson.contains("\"analytics\"")
+                || endpointText.contains("x-ui") && endpointText.contains("analytics")
+                || containsAny(endpointText, "analytical", "analytics", "analitica", "analitico"));
+    }
+
+    private boolean hasProfileSignal(
+            String resourcePath,
+            String submitUrl,
+            String endpointText,
+            String rawJson) {
+        boolean structuralProjection = isDerivedProjectionPath(resourcePath) || isDerivedProjectionPath(submitUrl);
+        return containsAny(resourcePath, "/profile-", "-profile-", "/perfil-", "-perfil-")
+                || containsAny(submitUrl, "/profile", "/perfil")
+                || structuralProjection
+                && (rawJson.contains("read_projection")
+                || rawJson.contains("read-projection")
+                || containsAny(endpointText,
+                "read projection", "read-projection", "profile projection", "perfil 360",
+                "profile 360", "visao consolidada", "summary profile"));
+    }
+
+    private SemanticResourceNeed semanticResourceNeed(String normalizedPrompt, String artifactKind) {
+        String normalized = normalize(valueOrEmpty(normalizedPrompt));
+        if ("chart".equals(artifactKind)) {
+            return SemanticResourceNeed.ANALYTICS;
+        }
+        if (containsAny(normalized,
+                "grafico", "graficos", "chart", "charts", "indicador", "indicadores",
+                "kpi", "kpis", "metrica", "metricas", "analitico", "analitica", "analytics",
+                "tendencia", "distribuicao", "serie temporal")) {
+            return SemanticResourceNeed.ANALYTICS;
+        }
+        if (containsAny(normalized,
+                "perfil", "profile", "ficha", "resumo individual", "individual", "360",
+                "visao resumida", "visao consolidada")) {
+            return SemanticResourceNeed.PROFILE;
+        }
+        return SemanticResourceNeed.GENERIC_OPERATIONAL;
+    }
+
+    private double semanticRoleScoreAdjustment(ResourceSemanticRole role, SemanticResourceNeed need) {
+        if (role == null || need == null) {
+            return 0d;
+        }
+        return switch (need) {
+            case ANALYTICS -> role == ResourceSemanticRole.ANALYTICS_PROJECTION ? 0.07d
+                    : role == ResourceSemanticRole.OPERATIONAL_RESOURCE ? -0.12d : -0.02d;
+            case PROFILE -> role == ResourceSemanticRole.PROFILE_PROJECTION ? 0.07d
+                    : role == ResourceSemanticRole.OPERATIONAL_RESOURCE ? 0.02d : -0.03d;
+            case GENERIC_OPERATIONAL -> role == ResourceSemanticRole.OPERATIONAL_RESOURCE ? 0.06d
+                    : role == ResourceSemanticRole.PROFILE_PROJECTION ? -0.02d : -0.05d;
+        };
+    }
+
+    private double derivedProjectionScoreAdjustment(
+            String resourcePath,
+            String submitUrl,
+            String normalizedPrompt,
+            String artifactKind) {
+        if (!isDerivedProjectionPath(resourcePath) && !isDerivedProjectionPath(submitUrl)) {
+            return 0d;
+        }
+        SemanticResourceNeed need = semanticResourceNeed(normalizedPrompt, artifactKind);
+        return need == SemanticResourceNeed.GENERIC_OPERATIONAL ? -0.08d : 0d;
+    }
+
+    private static boolean isDerivedProjectionPath(String value) {
+        String normalized = normalizePath(value).toLowerCase(Locale.ROOT);
+        return normalized.contains("/vw-")
+                || normalized.contains("/view-")
+                || normalized.contains("/views/")
+                || normalized.contains("/projection-")
+                || normalized.contains("/projections/");
     }
 
     private double artifactScoreAdjustment(String artifactKind, String endpointText, String path) {
@@ -894,7 +1199,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 || normalized.endsWith("/filter/cursor"));
     }
 
-    private String normalizePath(String path) {
+    private static String normalizePath(String path) {
         String normalized = path == null ? "" : path.trim();
         if (normalized.length() > 1 && normalized.endsWith("/")) {
             normalized = normalized.substring(0, normalized.length() - 1);
@@ -945,5 +1250,34 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                     releaseId,
                     tokens == null ? List.of() : List.copyOf(tokens));
         }
+
+        private RetrievalContext withGlobalScope() {
+            return new RetrievalContext(
+                    normalizedPrompt,
+                    artifactKind,
+                    expectedMethod,
+                    null,
+                    null,
+                    releaseId,
+                    tokens);
+        }
+    }
+
+    private enum ResourceSemanticRole {
+        OPERATIONAL_RESOURCE(SEMANTIC_ROLE_OPERATIONAL_RESOURCE),
+        ANALYTICS_PROJECTION(SEMANTIC_ROLE_ANALYTICS_PROJECTION),
+        PROFILE_PROJECTION(SEMANTIC_ROLE_PROFILE_PROJECTION);
+
+        private final String evidence;
+
+        ResourceSemanticRole(String evidence) {
+            this.evidence = evidence;
+        }
+    }
+
+    private enum SemanticResourceNeed {
+        GENERIC_OPERATIONAL,
+        ANALYTICS,
+        PROFILE
     }
 }

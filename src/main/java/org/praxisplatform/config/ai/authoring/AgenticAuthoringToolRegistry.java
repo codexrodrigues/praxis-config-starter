@@ -151,7 +151,13 @@ public class AgenticAuthoringToolRegistry {
 
         private static final AgenticAuthoringToolDefinition DEFINITION = new AgenticAuthoringToolDefinition(
                 SEARCH_API_RESOURCES,
-                Set.of("component_authoring", "shared_rule_authoring", "mixed", "needs_clarification", "advisory_authoring"),
+                Set.of(
+                        "component_authoring",
+                        "shared_rule_authoring",
+                        "mixed",
+                        "needs_clarification",
+                        "advisory_authoring",
+                        "pre_intent_resource_discovery"),
                 "praxis-config-starter:/api/praxis/config/ai/authoring/resource-candidates",
                 "read_only",
                 "safe_grounding",

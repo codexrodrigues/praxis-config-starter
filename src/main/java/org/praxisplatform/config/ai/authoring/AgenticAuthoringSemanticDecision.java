@@ -143,6 +143,11 @@ public record AgenticAuthoringSemanticDecision(
         boolean visualProjectionRefinement = contains(warnings, "semantic-policy-refined-visual-projection");
         boolean decisionMemoryRefinement = contains(warnings, "semantic-decision-memory-refinement-applied");
         boolean semanticRefinementApplied = contains(warnings, "semantic-refinement-applied");
+        boolean promptAlignmentSelection = contains(warnings, "llm-resource-selection-overridden-by-prompt-alignment");
+        boolean lowerRankedLlmSelection = contains(warnings, "llm-resource-selection-lower-ranked-than-governed-candidate");
+        boolean roleMismatchSelection = contains(warnings, "resource-selection-role-mismatch-with-governed-candidate");
+        boolean unanchoredLowConfidenceSelection =
+                contains(warnings, "resource-selection-unanchored-low-confidence");
         String followUpKind = llmIntent == null ? "" : safe(llmIntent.followUpKind());
         String previousDecisionId = activeDecision == null ? "" : safe(activeDecision.decisionId());
         boolean refinement = visualProjectionRefinement
@@ -156,7 +161,11 @@ public record AgenticAuthoringSemanticDecision(
         boolean reviewRequired = keywordFallback
                 || domainAnchorSelection
                 || activeDecisionReviewRequired
-                || weakLexicalEvidence;
+                || weakLexicalEvidence
+                || promptAlignmentSelection
+                || lowerRankedLlmSelection
+                || roleMismatchSelection
+                || unanchoredLowConfidenceSelection;
         String refinementOf = refinement
                 ? (previousDecisionId.isBlank() ? "previous-conversation-decision" : previousDecisionId)
                 : "";
@@ -181,7 +190,16 @@ public record AgenticAuthoringSemanticDecision(
                 RetrievalEvidence.from(selectedCandidate, candidates),
                 retrievedEvidence,
                 reviewRequired,
-                reviewReason(keywordFallback, domainAnchorSelection, activeDecisionReviewRequired, weakLexicalEvidence, activeDecision),
+                reviewReason(
+                        keywordFallback,
+                        domainAnchorSelection,
+                        activeDecisionReviewRequired,
+                        weakLexicalEvidence,
+                        promptAlignmentSelection,
+                        lowerRankedLlmSelection,
+                        roleMismatchSelection,
+                        unanchoredLowConfidenceSelection,
+                        activeDecision),
                 visualProjectionRefinement ? "current-page-bound-resource" : refinementOf,
                 refinementOf,
                 safe(conversationId),
@@ -345,6 +363,10 @@ public record AgenticAuthoringSemanticDecision(
             boolean domainAnchorSelection,
             boolean activeDecisionReviewRequired,
             boolean weakLexicalEvidence,
+            boolean promptAlignmentSelection,
+            boolean lowerRankedLlmSelection,
+            boolean roleMismatchSelection,
+            boolean unanchoredLowConfidenceSelection,
             AgenticAuthoringSemanticDecision activeDecision) {
         if (keywordFallback) {
             return "keyword-fallback-fail-safe";
@@ -358,6 +380,18 @@ public record AgenticAuthoringSemanticDecision(
         }
         if (weakLexicalEvidence) {
             return "weak-lexical-evidence";
+        }
+        if (promptAlignmentSelection) {
+            return "prompt-alignment-selection";
+        }
+        if (lowerRankedLlmSelection) {
+            return "llm-selection-lower-ranked-than-governed-candidate";
+        }
+        if (roleMismatchSelection) {
+            return "resource-selection-role-mismatch-with-governed-candidate";
+        }
+        if (unanchoredLowConfidenceSelection) {
+            return "resource-selection-unanchored-low-confidence";
         }
         return "";
     }

@@ -41,7 +41,8 @@ class AgenticAuthoringToolRegistryTest {
                                     "shared_rule_authoring",
                                     "mixed",
                                     "needs_clarification",
-                                    "advisory_authoring");
+                                    "advisory_authoring",
+                                    "pre_intent_resource_discovery");
                     assertThat(definition.ownerSurface())
                             .isEqualTo("praxis-config-starter:/api/praxis/config/ai/authoring/resource-candidates");
                     assertThat(definition.allowedPhases())
@@ -518,6 +519,45 @@ class AgenticAuthoringToolRegistryTest {
         assertThat(result.valid()).isFalse();
         assertThat(result.errorCode()).isEqualTo("tool-route-not-allowed");
         assertThat(result.errorMessage()).contains("unsupported_route");
+    }
+
+    @Test
+    void allowsPreIntentResourceDiscoveryRouteUsedByTurnEngine() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAll()).thenReturn(List.of(new ApiMetadata(
+                "/api/human-resources/funcionarios",
+                "GET",
+                "funcionarios,rh,pessoas",
+                "Funcionários",
+                "Cadastro e perfil de funcionarios",
+                "listFuncionarios",
+                null,
+                "{\"type\":\"object\"}",
+                "[]",
+                "{}",
+                null)));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                        objectMapper));
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        "searchApiResources",
+                        "pre_intent_resource_discovery",
+                        new AgenticAuthoringResourceCandidatesRequest(
+                                "quero criar algo que mostre informacoes dos empregados",
+                                "quero criar algo que mostre informacoes dos empregados",
+                                "page",
+                                6)),
+                null,
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.tool()).isEqualTo("searchApiResources");
+        assertThat(result.safeDiagnostics())
+                .containsEntry("artifactKind", "page")
+                .containsEntry("retrievalQuery", "quero criar algo que mostre informacoes dos empregados");
     }
 
     @Test

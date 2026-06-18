@@ -260,6 +260,9 @@ public class AgenticAuthoringResourceDiscoveryService {
         if (candidate == null) {
             return false;
         }
+        if (isWeakLexicalCandidate(candidate)) {
+            return false;
+        }
         if (!"api_catalog".equals(valueOrDefault(artifactKind, ""))) {
             return true;
         }

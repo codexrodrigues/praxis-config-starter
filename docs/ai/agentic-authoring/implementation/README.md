@@ -191,6 +191,31 @@ zero:
   formam a trilha canonica de eventos, replay e redaction segura.
 - `AgenticAuthoringResourceDiscoveryService.search` ja e o comportamento
   backend executado pelo primeiro tool interno `searchApiResources`.
+- `AgenticAuthoringPreIntentToolPlanningService` e a fronteira interna para a
+  LLM decidir, antes da resolucao final de intencao, se precisa executar tools
+  read-only de grounding. A implementacao padrao
+  `AgenticAuthoringLlmPreIntentToolPlanningService` so pode solicitar
+  `searchApiResources`, devolvendo uma `retrievalQuery` semantica; o backend
+  continua validando rota, fase, budget e allowlist no
+  `AgenticAuthoringToolRegistry`. O stream deve emitir `tool.plan` quando o
+  plano for executavel e `tool.plan.skipped` com `skipReason` quando o planner
+  nao existir, o provider falhar, ja houver `resourceDiscovery` ou a LLM decidir
+  que nao precisa de busca governada.
+- Quando o planejamento pre-intent encontra candidatos governados e a resolucao
+  semantica final exige esclarecimento, o engine deve falhar fechado sem
+  materializar preview sempre que houver candidatos apresentaveis em
+  `resourceDiscovery`; a resposta terminal deve emitir
+  `consultative.grounded-clarification`, `canApply=false` e uma mensagem curta
+  para confirmar fonte/campos. Em erro de provider, o mesmo caminho tambem pode
+  usar candidatos preliminares fracos como evidencia interna, mas sem expor CTA
+  fraco ao usuario. Esse comportamento reaproveita evidencia ja descoberta; nao
+  introduz roteamento por keyword nem sinonimos hardcoded.
+- `tools/local-e2e/run-agentic-turn-pre-intent-matrix-local.sh` mede recall e
+  ranking do fluxo local real contra prompts abertos. O resumo consolidado
+  registra recurso esperado, rank, top candidatos, selecao final, `reviewReason`
+  e `unexpectedApplyCount`; use essa matriz antes de ajustar busca/ranking para
+  saber se o problema e reformulacao LLM, recuperacao do catalogo, merge de
+  evidencias ou materializacao permissiva.
 - `AgenticAuthoringCurrentPageAnalyzer` ja oferece inspecao estrutural de
   `currentPage`, reduzindo dependencia de `currentPageSummary`.
 - `DomainRuleService` e `DomainRuleController` ja sao a fronteira canonica para

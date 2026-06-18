@@ -3,6 +3,7 @@ package org.praxisplatform.config.ai.authoring;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -86,54 +87,12 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                     assertThat(evidence.matchedTerms()).contains("folha", "pagamento");
                 });
         assertThat(result.assistantMessage()).contains("Encontrei APIs");
-        assertThat(result.quickReplies()).hasSize(1);
-        assertThat(result.quickReplies().get(0).id())
-                .isEqualTo("resource-api-human-resources-vw-analytics-folha-pagamento");
-        assertThat(result.quickReplies().get(0).label()).isEqualTo("analytics folha pagamento");
-        assertThat(result.quickReplies().get(0).prompt())
-                .isEqualTo("Usar analytics folha pagamento como fonte de dados do painel.");
-        assertThat(result.quickReplies().get(0).description())
-                .contains("Indicada para montar um painel")
-                .contains("schema confirmar os recortes");
-        assertThat(result.quickReplies().get(0).contextHints().path("presentation").path("bestFor").asText())
-                .contains("schema confirmar os recortes");
-        assertThat(result.quickReplies().get(0).contextHints().path("presentation").path("returns").asText())
-                .contains("gráficos materializados por schema");
-        assertThat(result.quickReplies().get(0).contextHints().path("presentation").path("nextStep").asText())
-                .contains("Clique");
+        assertThat(result.quickReplies()).isEmpty();
         assertThat(result.candidates().get(0).submitUrl())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
         assertThat(result.candidates().get(0).submitMethod()).isEqualTo("post");
         assertThat(result.candidates().get(0).schemaUrl())
                 .isEqualTo("/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/stats/group-by&operation=post&schemaType=response");
-        assertThat(result.quickReplies().get(0).contextHints().path("resourcePath").asText())
-                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
-        assertThat(result.quickReplies().get(0).contextHints().path("technicalDetails").path("submitUrl").asText())
-                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
-        assertThat(result.quickReplies().get(0).contextHints().path("artifactKind").asText())
-                .isEqualTo("dashboard");
-        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("schemaVersion").asText())
-                .isEqualTo("praxis.ai.context-hints.domain-catalog/v0.2");
-        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("serviceKey").asText())
-                .isEqualTo("praxis-service");
-        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("contextKey").asText())
-                .isEqualTo("human-resources");
-        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("resourceKey").asText())
-                .isEqualTo("human-resources.vw-analytics-folha-pagamento");
-        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("query").asText())
-                .contains("folha de pagamento")
-                .contains("analytics folha pagamento");
-        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("type").asText())
-                .isEqualTo("node");
-        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("relationships").path("enabled").asBoolean())
-                .isTrue();
-        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("relationships").path("federated").asBoolean())
-                .isTrue();
-        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("policyProfile").asText())
-                .isEqualTo("authoring");
-        assertThat(result.quickReplies().get(0).contextHints().path("domainCatalog").path("relationships").path("query").asText())
-                .contains("folha de pagamento")
-                .contains("analytics folha pagamento");
         assertThat(result.warnings()).isEmpty();
     }
 
@@ -1587,7 +1546,146 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                     assertThat(evidence.kind()).isEqualTo("retrieved_candidate");
                     assertThat(evidence.confidence()).isGreaterThan(0.9d);
         });
-        verify(repository).findAll();
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void openOperationalPageSemanticRetrievalIsSupplementedWithBroadBaseResources() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        String retrievalQuery = "Recursos para criar uma tela de acompanhamento de time da empresa, "
+                + "incluindo informações de pessoas, visão geral por área, detalhes individuais, "
+                + "dados de funcionários, departamentos e cargos";
+        when(retrievalService.searchApiMetadata(
+                retrievalQuery,
+                null,
+                null,
+                16,
+                null,
+                null,
+                null,
+                null))
+                .thenReturn(List.of(
+                        ApiSearchResult.builder()
+                                .path("/api/human-resources/reputacoes")
+                                .method("POST")
+                                .summary("Reputacoes e contexto operacional.")
+                                .similarityScore(0.56d)
+                                .build(),
+                        ApiSearchResult.builder()
+                                .path("/api/human-resources/vw-ranking-reputacao")
+                                .method("POST")
+                                .summary("Ranking de reputacao.")
+                                .similarityScore(0.49d)
+                                .build(),
+                        ApiSearchResult.builder()
+                                .path("/api/human-resources/vw-perfil-heroi")
+                                .method("POST")
+                                .summary("Perfil individual detalhado.")
+                                .similarityScore(0.45d)
+                                .build(),
+                        ApiSearchResult.builder()
+                                .path("/api/human-resources/vw-analytics-folha-pagamento")
+                                .method("POST")
+                                .summary("Analiticos de folha.")
+                                .similarityScore(0.45d)
+                                .build()));
+        when(repository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        "human-resources,funcionarios",
+                        "Listar funcionários",
+                        "Endpoint expõe o cadastro completo de funcionários com nome, email, cargo e departamento.",
+                        "listarFuncionarios",
+                        "{}",
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/human-resources/cargos",
+                        "POST",
+                        "human-resources,cargos",
+                        "Listar cargos",
+                        "Cadastro de cargos funcionais.",
+                        "listarCargos",
+                        "{}",
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringResourceDiscoveryService service =
+                new AgenticAuthoringResourceDiscoveryService(
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService),
+                        objectMapper);
+
+        AgenticAuthoringResourceCandidatesResult result = service.search(
+                new AgenticAuthoringResourceCandidatesRequest(
+                        retrievalQuery,
+                        null,
+                        "page",
+                        6));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .contains("/api/human-resources/funcionarios");
+        assertThat(result.candidates())
+                .anySatisfy(candidate -> {
+                    assertThat(candidate.resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+                    assertThat(candidate.evidence())
+                            .contains("broad-artifact-discovery", "semantic-role:operational-resource");
+                });
+    }
+
+    @Test
+    void quickRepliesExposeOnlyStrongCandidatesWhenWeakComplementsAreRetainedAsEvidence() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate semanticCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter",
+                "post",
+                0.91d,
+                "semantic retrieval evidence",
+                List.of("api-metadata", "semantic-retrieval"),
+                AgenticAuthoringEvidenceBundle.of("semantic_retrieval", List.of()));
+        AgenticAuthoringCandidate weakComplement = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/stats/group-by&operation=post&schemaType=response",
+                "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by",
+                "post",
+                0.47d,
+                "weak lexical companion evidence",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence"),
+                AgenticAuthoringEvidenceBundle.of("lexical_fallback", List.of()));
+        when(candidateCatalog.discover(
+                "acompanhar colaboradores",
+                "dashboard",
+                null,
+                null,
+                null))
+                .thenReturn(List.of(semanticCandidate, weakComplement));
+        AgenticAuthoringResourceDiscoveryService service =
+                new AgenticAuthoringResourceDiscoveryService(candidateCatalog, objectMapper);
+
+        AgenticAuthoringResourceCandidatesResult result = service.search(
+                new AgenticAuthoringResourceCandidatesRequest(
+                        "acompanhar colaboradores",
+                        null,
+                        "dashboard",
+                        5));
+
+        assertThat(result.candidates()).containsExactly(semanticCandidate, weakComplement);
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::label)
+                .containsExactly("funcionarios");
+        assertThat(result.quickReplies().get(0).contextHints().path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
     }
 
     @Test

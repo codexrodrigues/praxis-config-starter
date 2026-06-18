@@ -73,7 +73,8 @@ PROVIDER=openai EMBEDDING_PROVIDER=openai ./tools/local-e2e/start-quickstart-loc
 
 The backend starts on `http://localhost:8088` with:
 
-- remote database configuration from quickstart;
+- datasource configuration from `QUICKSTART_ENV_FILE`, defaulting to
+  `../praxis-api-quickstart/.env.dev`;
 - real LLM provider credentials from `.env.openai.local.sh`;
 - real embedding provider matching the selected live lane, for example `EMBEDDING_PROVIDER=openai`;
 - `PRAXIS_AI_STREAM_AUTH_MODE=signed-url-token`;

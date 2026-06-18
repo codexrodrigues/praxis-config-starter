@@ -15,6 +15,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringApiMetadataCandida
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainCatalogCandidateEnhancer;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringLlmIntentResolverService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringLlmPreIntentToolPlanningService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringGenericUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractValidator;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestService;
@@ -26,6 +27,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringPresentationAfford
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceBackedPresentationAffordanceProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewMessageSynthesizerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreIntentToolPlanningService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringProjectKnowledgeService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReplayAuditService;
@@ -368,6 +370,15 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    @ConditionalOnBean(AiProviderManagementService.class)
+    public AgenticAuthoringPreIntentToolPlanningService agenticAuthoringPreIntentToolPlanningService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper) {
+        return new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     @ConditionalOnBean({AgenticAuthoringPlanService.class, AgenticAuthoringPatchCompilerService.class})
     public AgenticAuthoringPreviewService agenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
@@ -429,6 +440,7 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectProvider<AgenticAuthoringProjectKnowledgeService> projectKnowledgeService,
             ObjectProvider<SchemaRetrievalService> schemaRetrievalService,
             ObjectProvider<AgenticAuthoringConsultativeAnswerService> consultativeAnswerService,
+            ObjectProvider<AgenticAuthoringPreIntentToolPlanningService> preIntentToolPlanningService,
             AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
             ObjectMapper objectMapper) {
         return new AgenticAuthoringTurnEngine(
@@ -441,7 +453,8 @@ public class AgenticAuthoringAutoConfiguration {
                 orchestrator.getIfAvailable(),
                 schemaRetrievalService.getIfAvailable(),
                 componentCapabilitiesService,
-                consultativeAnswerService.getIfAvailable());
+                consultativeAnswerService.getIfAvailable(),
+                preIntentToolPlanningService.getIfAvailable());
     }
 
     @Bean
