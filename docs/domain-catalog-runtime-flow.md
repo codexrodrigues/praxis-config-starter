@@ -12,6 +12,8 @@ This document describes the first runtime flow between:
   a compact semantic context pack.
 - LLM/runtime consumers, reading `/api/praxis/config/domain-catalog/relationships/latest`
   when they need explicit cross-service relationships.
+- Operators, reading `/api/praxis/config/domain-catalog/rag/status` when they need to verify
+  the derived vector-store materialization for the latest catalog release.
 
 The goal is to validate the semantic domain catalog without requiring an LLM to inspect source code.
 
@@ -106,7 +108,36 @@ Save the returned `releaseKey`.
 export DOMAIN_RELEASE_KEY="praxis-service:human-resources.folhas-pagamento:0123456789abcdef"
 ```
 
-## 4. Query Persisted Items
+## 4. Verify RAG Publication
+
+RAG publication is a derived materialization. The transactional catalog remains canonical, but
+operators can verify whether the vector-store documents for the latest release are available and
+reconciled with the persisted catalog items.
+
+```bash
+curl -sS \
+  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/rag/status?serviceKey=praxis-service&resourceKey=human-resources.folhas-pagamento" \
+  -H "X-Tenant-ID: $TENANT_ID" \
+  -H "X-Env: $ENVIRONMENT"
+```
+
+The response includes:
+
+- `schemaVersion`: status contract version;
+- `release`: the latest release selected for `serviceKey`, optional `resourceKey`, tenant and environment;
+- `resourceType`: always `domain_catalog` for this endpoint;
+- `ragPublicationEnabled`: whether Domain Catalog RAG publication is enabled in the starter;
+- `vectorStoreAvailable` and `statusAvailable`: runtime availability checks for publication and status reads;
+- `expectedDocumentCount`: persisted catalog items eligible for RAG publication after `aiUsage.visibility`
+  and content checks;
+- `actualDocumentCount`, `sourceCount`, `chunkKindCounts`, `visibilityCounts`, `sources` and
+  `latestPublishedAt`: observed vector-store materialization for the release;
+- `reconciled` and `warnings`: operational readiness signals.
+
+`reconciled=false` or warnings such as `corpus-chunk-count-mismatch` mean the LLM should continue
+to prefer deterministic `/context` retrieval until the derived vector corpus catches up.
+
+## 5. Query Persisted Items
 
 List all items for a release:
 
@@ -143,7 +174,7 @@ curl -sS \
   "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/items?releaseKey=$DOMAIN_RELEASE_KEY&contextKey=human-resources"
 ```
 
-## 5. Query Latest Runtime Context
+## 6. Query Latest Runtime Context
 
 LLM/runtime clients should prefer `context` when they do not already know the active release key.
 
@@ -174,7 +205,7 @@ consumers:
 The raw `/items` endpoints remain deterministic persistence reads and may return the original
 payload for authorized system clients.
 
-## 6. Query Latest Explicit Relationships
+## 7. Query Latest Explicit Relationships
 
 Use `relationships/latest` when the client needs deterministic relationship lookup instead of
 free-text inference.
@@ -201,7 +232,7 @@ Supported filters:
 This endpoint only returns explicit `edge` items. It does not infer relationships from similar
 names, labels or aliases.
 
-## 7. Expected Payroll Semantics
+## 8. Expected Payroll Semantics
 
 For `human-resources.folhas-pagamento`, the catalog should include:
 
@@ -214,7 +245,7 @@ For `human-resources.folhas-pagamento`, the catalog should include:
 - `workflow_action`, `ui_surface` and `dto_field` bindings;
 - `annotation` and `dto_schema` evidence.
 
-## 8. Expected Procurement Semantics
+## 9. Expected Procurement Semantics
 
 For procurement option sources, the catalog should include `policy_hint` nodes.
 

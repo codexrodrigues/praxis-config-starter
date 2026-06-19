@@ -145,6 +145,20 @@ public class RagVectorStoreService {
             String environment,
             String releaseId,
             long expectedChunkCount) {
+        return corpusReleaseStatus(
+                tenantId,
+                environment,
+                releaseId,
+                RagResourceTypes.COMPONENT_DEFINITION,
+                expectedChunkCount);
+    }
+
+    public RagCorpusReleaseStatus corpusReleaseStatus(
+            String tenantId,
+            String environment,
+            String releaseId,
+            String resourceType,
+            long expectedChunkCount) {
         NamedParameterJdbcTemplate jdbcTemplate = jdbcTemplateProvider.getIfAvailable();
         if (jdbcTemplate == null) {
             return RagCorpusReleaseStatus.unavailable(
@@ -157,6 +171,7 @@ public class RagVectorStoreService {
         String resolvedTenant = normalizedScope(tenantId, "global");
         String resolvedEnvironment = normalizedScope(environment, "global");
         String resolvedRelease = normalizedScope(releaseId, "v1");
+        String resolvedResourceType = normalizedScope(resourceType, RagResourceTypes.COMPONENT_DEFINITION);
         String sql = """
             SELECT
               COALESCE(metadata ->> 'sourceId', metadata ->> 'componentId', metadata ->> 'resourceId', id) AS source_id,
@@ -178,7 +193,7 @@ public class RagVectorStoreService {
                 "tenantId", resolvedTenant,
                 "environment", resolvedEnvironment,
                 "releaseId", resolvedRelease,
-                "resourceType", RagResourceTypes.COMPONENT_DEFINITION);
+                "resourceType", resolvedResourceType);
         try {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, params);
             return RagCorpusReleaseStatus.fromRows(

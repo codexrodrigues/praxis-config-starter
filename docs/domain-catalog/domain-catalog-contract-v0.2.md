@@ -57,6 +57,21 @@ disable this materialization with
 `praxis.domain-catalog.rag-publication.enabled=false`; `/items` and `/context`
 continue to read the canonical transactional store.
 
+The operational status surface for this derived materialization is:
+
+```text
+GET /api/praxis/config/domain-catalog/rag/status?serviceKey={serviceKey}&resourceKey={resourceKey}
+```
+
+It resolves the latest release for the requested tenant, environment, service
+and optional resource, then reports `domain_catalog` vector-store document
+counts, source breakdowns, visibility breakdowns, latest publication timestamp
+and reconciliation warnings. The expected count is computed from persisted
+catalog items that are eligible for RAG publication: items must have searchable
+content and must not declare `aiUsage.visibility=deny`. This endpoint is an
+operational readiness check for the derived vector corpus; it does not replace
+the canonical `/items`, `/context` or release identity contracts.
+
 ## Additions From v0.1
 
 Context items may now include:

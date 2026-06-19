@@ -39,6 +39,7 @@ intent -> semantic grounding -> governed rule definition -> simulation -> approv
 | `GET /api/praxis/config/domain-catalog/items/latest` | Exposes latest catalog items. |
 | `GET /api/praxis/config/domain-catalog/context` | Returns compact context and retrieval guidance for authoring/LLM flows. |
 | `GET /api/praxis/config/domain-catalog/relationships/latest` | Exposes explicit relationship edges. |
+| `GET /api/praxis/config/domain-catalog/rag/status` | Reports operational readiness and reconciliation for derived `domain_catalog` vector-store materialization. |
 | `GET /api/praxis/config/domain-federation/context` | Retrieves governed/federated context with retrieval policy report. |
 | `POST /api/praxis/config/domain-federation/dry-run` | Validates federation payloads before ingestion. |
 | `POST /api/praxis/config/domain-federation/ingest` | Persists federated semantic releases. |

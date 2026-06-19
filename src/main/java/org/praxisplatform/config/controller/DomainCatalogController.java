@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogIngestionResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
+import org.praxisplatform.config.dto.DomainCatalogRagStatusResponse;
 import org.praxisplatform.config.dto.DomainCatalogReleaseResponse;
 import org.praxisplatform.config.repository.DomainCatalogItemRepository;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
@@ -118,6 +119,19 @@ public class DomainCatalogController {
                 edgeType,
                 q,
                 limit));
+    }
+
+    @GetMapping("/rag/status")
+    public ResponseEntity<DomainCatalogRagStatusResponse> ragStatus(
+            @RequestParam(required = false) String serviceKey,
+            @RequestParam(required = false) String resourceKey,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity.ok(domainCatalogIngestionService.ragStatus(
+                serviceKey,
+                resourceKey,
+                tenantId,
+                environment));
     }
 
     @GetMapping("/releases")

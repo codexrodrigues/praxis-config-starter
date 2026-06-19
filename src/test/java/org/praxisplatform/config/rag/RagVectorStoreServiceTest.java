@@ -205,6 +205,24 @@ class RagVectorStoreServiceTest {
     }
 
     @Test
+    void shouldAllowReleaseStatusForExplicitResourceType() {
+        when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
+        when(jdbcTemplate.queryForList(anyString(), any(Map.class)))
+                .thenReturn(List.of(row("human-resources.employee", "node", "summary", "allow", "v0.2", "", 1)));
+
+        service.corpusReleaseStatus(
+                "tenant-a",
+                "prod",
+                "release-1",
+                RagResourceTypes.DOMAIN_CATALOG,
+                1);
+
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jdbcTemplate).queryForList(anyString(), paramsCaptor.capture());
+        assertThat(paramsCaptor.getValue()).containsEntry("resourceType", RagResourceTypes.DOMAIN_CATALOG);
+    }
+
+    @Test
     void shouldReturnUnavailableReleaseStatusWhenJdbcIsMissing() {
         when(jdbcTemplateProvider.getIfAvailable()).thenReturn(null);
 

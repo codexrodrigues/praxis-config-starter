@@ -13,6 +13,7 @@ import org.praxisplatform.config.domain.DomainCatalogItem;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
 import org.praxisplatform.config.dto.DomainCatalogIngestionResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
+import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.DomainCatalogItemRepository;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
@@ -210,6 +211,111 @@ class DomainCatalogIngestionServiceTest {
         assertThat(documentsCaptor.getAllValues())
                 .extracting(List::size)
                 .containsExactly(4, 4, 4, 1);
+    }
+
+    @Test
+    void reportsDomainCatalogRagStatusForLatestRelease() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                true,
+                false,
+                100
+        );
+
+        DomainCatalogRelease latestRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-service:human-resources.funcionarios:sourcehash")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-service")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-21T12:00:00Z"))
+                .createdAt(Instant.parse("2026-04-21T12:00:01Z"))
+                .build();
+        DomainCatalogItem indexed = DomainCatalogItem.builder()
+                .release(latestRelease)
+                .itemType("node")
+                .itemKey("human-resources.funcionarios.field.cpf")
+                .payload("{\"nodeKey\":\"human-resources.funcionarios.field.cpf\"}")
+                .searchableText("node | cpf")
+                .build();
+        DomainCatalogItem denied = DomainCatalogItem.builder()
+                .release(latestRelease)
+                .itemType("governance")
+                .itemKey("governance:human-resources.funcionarios.field.cpf:privacy")
+                .payload("""
+                    {
+                      "governanceKey": "governance:human-resources.funcionarios.field.cpf:privacy",
+                      "aiUsage": {"visibility": "deny"}
+                    }
+                    """)
+                .searchableText("governance | cpf")
+                .build();
+        DomainCatalogItem blank = DomainCatalogItem.builder()
+                .release(latestRelease)
+                .itemType("alias")
+                .itemKey("alias:cpf")
+                .payload("{\"aliasKey\":\"alias:cpf\"}")
+                .searchableText("")
+                .build();
+        RagVectorStoreService.RagCorpusReleaseStatus corpusStatus = new RagVectorStoreService.RagCorpusReleaseStatus(
+                true,
+                true,
+                "tenant-a",
+                "dev",
+                latestRelease.getReleaseKey(),
+                1,
+                1,
+                1,
+                java.util.Map.of("summary", 1L),
+                java.util.Map.of("allow", 1L),
+                List.of(new RagVectorStoreService.SourceStatus(
+                        "human-resources.funcionarios.field.cpf",
+                        "node",
+                        1,
+                        List.of("summary"),
+                        List.of("praxis.domain-catalog/v0.2"),
+                        "2026-04-21T12:00:02Z")),
+                "2026-04-21T12:00:02Z",
+                List.of());
+
+        when(releaseRepository.findLatest(eq("praxis-service"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+                .thenReturn(List.of(latestRelease));
+        when(itemRepository.findByRelease(latestRelease)).thenReturn(List.of(indexed, denied, blank));
+        when(ragVectorStoreService.corpusReleaseStatus(
+                eq("tenant-a"),
+                eq("dev"),
+                eq(latestRelease.getReleaseKey()),
+                eq(RagResourceTypes.DOMAIN_CATALOG),
+                eq(1L)))
+                .thenReturn(corpusStatus);
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+
+        var response = service.ragStatus(
+                "praxis-service",
+                "human-resources.funcionarios",
+                "tenant-a",
+                "dev");
+
+        assertThat(response.schemaVersion()).isEqualTo("praxis.domain-catalog-rag-status/v0.1");
+        assertThat(response.release().releaseKey()).isEqualTo(latestRelease.getReleaseKey());
+        assertThat(response.resourceType()).isEqualTo(RagResourceTypes.DOMAIN_CATALOG);
+        assertThat(response.ragPublicationEnabled()).isTrue();
+        assertThat(response.vectorStoreAvailable()).isTrue();
+        assertThat(response.reconciled()).isTrue();
+        assertThat(response.expectedDocumentCount()).isEqualTo(1);
+        assertThat(response.actualDocumentCount()).isEqualTo(1);
+        assertThat(response.sources()).singleElement()
+                .satisfies(source -> {
+                    assertThat(source.sourceId()).isEqualTo("human-resources.funcionarios.field.cpf");
+                    assertThat(source.sourceKind()).isEqualTo("node");
+                });
     }
 
     @Test

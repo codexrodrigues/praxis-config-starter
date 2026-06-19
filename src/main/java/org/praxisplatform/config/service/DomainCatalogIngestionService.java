@@ -25,6 +25,7 @@ import org.praxisplatform.config.domain.DomainCatalogRelease;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogIngestionResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
+import org.praxisplatform.config.dto.DomainCatalogRagStatusResponse;
 import org.praxisplatform.config.dto.DomainCatalogReleaseResponse;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.rag.RagDocumentIdentity;
@@ -294,6 +295,30 @@ public class DomainCatalogIngestionService {
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public DomainCatalogRagStatusResponse ragStatus(
+            String serviceKey,
+            String resourceKey,
+            String tenantId,
+            String environment) {
+        DomainCatalogRelease release = latestRelease(serviceKey, tenantId, environment, resourceKey);
+        long expectedDocumentCount = itemRepository.findByRelease(release).stream()
+                .filter(this::isRagIndexable)
+                .count();
+        RagVectorStoreService.RagCorpusReleaseStatus status = ragVectorStoreService.corpusReleaseStatus(
+                release.getTenantId(),
+                release.getEnvironment(),
+                release.getReleaseKey(),
+                RagResourceTypes.DOMAIN_CATALOG,
+                expectedDocumentCount);
+        return DomainCatalogRagStatusResponse.from(
+                toReleaseResponse(release),
+                RagResourceTypes.DOMAIN_CATALOG,
+                domainCatalogRagPublicationEnabled,
+                ragVectorStoreService.isAvailable(),
+                status);
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<DomainCatalogItemResponse> searchLatest(
             String serviceKey,
             String tenantId,
@@ -486,13 +511,10 @@ public class DomainCatalogIngestionService {
         List<Document> documents = new ArrayList<>();
         int index = 0;
         for (DomainCatalogItem item : items) {
-            if (deniesAiVisibility(read(item.getPayload()))) {
+            if (!isRagIndexable(item)) {
                 continue;
             }
             String content = item.getSearchableText();
-            if (!StringUtils.hasText(content)) {
-                continue;
-            }
             content = ragContent(item, content);
             String contentHash = RagDocumentIdentity.sha256(item.getItemType() + "|" + item.getItemKey() + "|" + item.getPayload());
             Map<String, Object> metadata = new LinkedHashMap<>();
@@ -665,6 +687,12 @@ public class DomainCatalogIngestionService {
             add(joiner, aiUsage.toString());
         }
         return joiner.toString();
+    }
+
+    private boolean isRagIndexable(DomainCatalogItem item) {
+        return item != null
+                && StringUtils.hasText(item.getSearchableText())
+                && !deniesAiVisibility(read(item.getPayload()));
     }
 
     private boolean deniesAiVisibility(JsonNode payload) {
