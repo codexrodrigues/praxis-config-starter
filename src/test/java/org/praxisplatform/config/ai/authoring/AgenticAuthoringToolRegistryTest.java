@@ -11,6 +11,7 @@ import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -501,6 +502,17 @@ class AgenticAuthoringToolRegistryTest {
                 .containsEntry("artifactKind", "dashboard")
                 .containsEntry("retrievalQuery", "graficos de folha de pagamento")
                 .containsEntry("retrievalSource", "lexical_fallback");
+        assertThat(result.safeDiagnostics().get("resourceDiscoveryDiagnostics"))
+                .isInstanceOfSatisfying(Map.class, diagnostics -> assertThat(diagnostics)
+                        .containsKeys(
+                                "catalogDiscoveryElapsedMs",
+                                "groundingElapsedMs",
+                                "consultativeProjectionElapsedMs",
+                                "quickReplyElapsedMs",
+                                "totalElapsedMs")
+                        .containsEntry("catalogCandidateCount", 1)
+                        .containsEntry("groundedCandidateCount", 1)
+                        .containsEntry("limitedCandidateCount", 1));
     }
 
     @Test

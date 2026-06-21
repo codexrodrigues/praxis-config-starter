@@ -8,6 +8,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.praxisplatform.config.dto.ApiSearchResult;
 import org.praxisplatform.config.domain.ApiMetadata;
@@ -67,6 +68,10 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 releaseId);
         if (normalizedPrompt == null || normalizedPrompt.isBlank()) {
             return repository == null ? List.of() : new BroadArtifactCandidateRetriever().retrieve(context);
+        }
+        List<AgenticAuthoringCandidate> llmFocusedCandidates = discoverLlmAuthoredResourceFocusCandidates(context);
+        if (!llmFocusedCandidates.isEmpty()) {
+            return mergeCandidates(llmFocusedCandidates, List.of(), artifactKind, normalizedPrompt);
         }
         List<AgenticAuthoringCandidate> semanticCandidates = new SemanticCandidateRetriever().retrieve(context);
         if (semanticCandidates.isEmpty() && hasScope(tenantId, environment)) {
@@ -135,7 +140,8 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         }
         if (isGenericOperationalBroadSurface(normalizedPrompt, artifactKind)
                 && semanticCandidates.size() < MIN_GENERIC_OPERATIONAL_SEMANTIC_CANDIDATES) {
-            return true;
+            return !hasOperationalSemanticResourceCandidate(semanticCandidates)
+                    || hasUnmatchedEnumeratedBusinessScope(normalizedPrompt, semanticCandidates);
         }
         return ("dashboard".equals(artifactKind) || "chart".equals(artifactKind))
                 && containsAny(normalize(normalizedPrompt), "grafico", "graficos", "chart", "charts", "barras", "linha", "pizza");
@@ -152,9 +158,172 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 && isGenericOperationalBroadSurface(normalizedPrompt, artifactKind);
     }
 
+    private boolean hasOperationalSemanticResourceCandidate(List<AgenticAuthoringCandidate> semanticCandidates) {
+        return semanticCandidates != null
+                && semanticCandidates.stream()
+                .anyMatch(candidate -> hasEvidence(candidate, "semantic-retrieval")
+                        && hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE));
+    }
+
+    private boolean hasUnmatchedEnumeratedBusinessScope(
+            String normalizedPrompt,
+            List<AgenticAuthoringCandidate> semanticCandidates) {
+        List<String> scopeTokens = enumeratedBusinessScopeTokens(normalizedPrompt);
+        if (scopeTokens.isEmpty()) {
+            return false;
+        }
+        return scopeTokens.stream()
+                .noneMatch(token -> semanticCandidates.stream()
+                        .anyMatch(candidate -> candidateMatchesBusinessToken(candidate, token)));
+    }
+
+    private List<String> enumeratedBusinessScopeTokens(String normalizedPrompt) {
+        String normalized = normalize(valueOrEmpty(normalizedPrompt));
+        int scopeStart = firstPositiveIndex(
+                normalized.indexOf(" incluindo "),
+                normalized.indexOf(" inclui "),
+                normalized.indexOf(" dados de "),
+                normalized.indexOf(" relacionado a "),
+                normalized.indexOf(" relacionados a "));
+        if (scopeStart < 0) {
+            return List.of();
+        }
+        return meaningfulTokens(normalized.substring(scopeStart)).stream()
+                .filter(token -> !isPresentationOrGenericScopeToken(token))
+                .limit(8)
+                .toList();
+    }
+
+    private int firstPositiveIndex(int... indexes) {
+        int selected = -1;
+        for (int index : indexes) {
+            if (index >= 0 && (selected < 0 || index < selected)) {
+                selected = index;
+            }
+        }
+        return selected;
+    }
+
+    private boolean isPresentationOrGenericScopeToken(String token) {
+        return containsWord(new String[] {
+                "incluindo", "inclui", "dados", "informacao", "informacoes", "visao", "geral",
+                "detalhe", "detalhes", "individual", "individuais", "area", "areas", "contexto",
+                "operacional", "operacionais", "atual", "atuais"
+        }, token);
+    }
+
+    private boolean candidateMatchesBusinessToken(AgenticAuthoringCandidate candidate, String token) {
+        if (candidate == null || token == null || token.isBlank()) {
+            return false;
+        }
+        String candidateIdentity = normalize(String.join(" ",
+                valueOrEmpty(candidate.resourcePath()),
+                valueOrEmpty(candidate.submitUrl()),
+                valueOrEmpty(candidate.reason())));
+        if (matchesToken(candidateIdentity, token)) {
+            return true;
+        }
+        AgenticAuthoringEvidenceBundle bundle = candidate.evidenceBundle();
+        if (bundle == null || bundle.evidence() == null) {
+            return false;
+        }
+        return bundle.evidence().stream()
+                .flatMap(evidence -> evidence.matchedTerms().stream())
+                .anyMatch(term -> matchesToken(normalize(term), token));
+    }
+
     private boolean isGenericOperationalBroadSurface(String normalizedPrompt, String artifactKind) {
         return semanticResourceNeed(normalizedPrompt, artifactKind) == SemanticResourceNeed.GENERIC_OPERATIONAL
                 && ("page".equals(artifactKind) || "table".equals(artifactKind) || "unknown".equals(artifactKind));
+    }
+
+    private List<AgenticAuthoringCandidate> discoverLlmAuthoredResourceFocusCandidates(RetrievalContext context) {
+        if (repository == null
+                || "api_catalog".equals(context.artifactKind())
+                || semanticResourceNeed(context.normalizedPrompt(), context.artifactKind())
+                != SemanticResourceNeed.GENERIC_OPERATIONAL) {
+            return List.of();
+        }
+        String resourceFocus = canonicalLlmResourceFocus(context.normalizedPrompt());
+        if (resourceFocus.isBlank()) {
+            return List.of();
+        }
+        List<ApiMetadata> focusedMetadata = findLlmFocusedMetadata(resourceFocus, context.expectedMethod());
+        return focusedMetadata.stream()
+                .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
+                .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
+                .filter(metadata -> context.expectedMethod() == null
+                        || context.expectedMethod().equalsIgnoreCase(metadata.getMethod()))
+                .filter(metadata -> resourceFocus.equals(resourceKey(baseResourcePath(metadata.getPath()))))
+                .map(metadata -> toLlmFocusedCandidate(metadata, context, resourceFocus))
+                .sorted(CandidateRankingPolicy.byScoreDescending())
+                .limit(CANDIDATE_LIMIT)
+                .map(ScoredCandidate::candidate)
+                .toList();
+    }
+
+    private List<ApiMetadata> findLlmFocusedMetadata(String resourceFocus, String expectedMethod) {
+        String basePath = resourceFocusToApiBasePath(resourceFocus);
+        if (basePath.isBlank()) {
+            return List.of();
+        }
+        List<ApiMetadata> exactMatches = exactLlmFocusedMetadataMatches(basePath, expectedMethod);
+        if (!exactMatches.isEmpty()) {
+            return exactMatches;
+        }
+        return repository.findAll().stream()
+                .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
+                .filter(metadata -> resourceFocus.equals(resourceKey(baseResourcePath(metadata.getPath()))))
+                .toList();
+    }
+
+    private List<ApiMetadata> exactLlmFocusedMetadataMatches(String basePath, String expectedMethod) {
+        List<String> methods = expectedMethod == null || expectedMethod.isBlank()
+                ? List.of("POST", "GET")
+                : List.of(expectedMethod.toUpperCase(Locale.ROOT));
+        LinkedHashSet<String> paths = new LinkedHashSet<>();
+        paths.add(basePath + "/filter/cursor");
+        paths.add(basePath + "/filter");
+        paths.add(basePath);
+        List<ApiMetadata> matches = new ArrayList<>();
+        for (String method : methods) {
+            for (String path : paths) {
+                Optional<ApiMetadata> metadata = repository.findByPathAndMethod(path, method);
+                metadata.ifPresent(matches::add);
+            }
+        }
+        return matches;
+    }
+
+    private String resourceFocusToApiBasePath(String resourceFocus) {
+        String normalized = canonicalResourceFocus(resourceFocus);
+        if (normalized.isBlank()) {
+            return "";
+        }
+        return "/api/" + normalized.replace('.', '/');
+    }
+
+    private String canonicalLlmResourceFocus(String normalizedPrompt) {
+        String primaryBusinessEntity = semanticQuerySection(
+                normalize(valueOrEmpty(normalizedPrompt)),
+                "primary business entity:",
+                "supporting concepts:");
+        return canonicalResourceFocus(primaryBusinessEntity);
+    }
+
+    private String canonicalResourceFocus(String value) {
+        String normalized = normalizePath(normalize(valueOrEmpty(value)))
+                .replaceAll("[\\s()\\[\\]{}]+", "")
+                .replace('/', '.')
+                .replaceAll("^\\.+|\\.+$", "");
+        if (normalized.startsWith("api.")) {
+            normalized = normalized.substring(4);
+        }
+        normalized = normalized.replaceAll("\\.+", ".");
+        if (!normalized.contains(".") || normalized.length() < 3) {
+            return "";
+        }
+        return normalized;
     }
 
 
@@ -655,6 +824,60 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 score);
     }
 
+    private ScoredCandidate toLlmFocusedCandidate(
+            ApiMetadata metadata,
+            RetrievalContext context,
+            String resourceFocus) {
+        String endpointText = searchableText(metadata);
+        String operation = metadata.getMethod().toLowerCase(Locale.ROOT);
+        String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, context.artifactKind());
+        String submitMethod = canonicalSubmitMethod(submitUrl, operation);
+        String resourcePath = baseResourcePath(metadata.getPath());
+        ResourceSemanticRole semanticRole = semanticRole(
+                resourcePath,
+                submitUrl,
+                endpointText,
+                valueOrEmpty(metadata.getRawJson()));
+        double score = 0.86d + semanticRoleScoreAdjustment(
+                semanticRole,
+                semanticResourceNeed(context.normalizedPrompt(), context.artifactKind()));
+        score += derivedProjectionScoreAdjustment(
+                resourcePath,
+                submitUrl,
+                context.normalizedPrompt(),
+                context.artifactKind());
+        score = Math.max(0.45d, Math.min(0.99d, score));
+        List<String> evidence = new ArrayList<>(List.of(
+                "api-metadata",
+                "semantic-retrieval",
+                "llm-resource-focus",
+                "schema-available",
+                "actions-probe-pending"));
+        evidence.add(semanticRole.evidence);
+        return new ScoredCandidate(new AgenticAuthoringCandidate(
+                resourcePath,
+                submitMethod,
+                schemaUrl(submitUrl, submitMethod),
+                submitUrl,
+                submitMethod,
+                score,
+                "api_metadata llm-authored resource focus",
+                List.copyOf(evidence),
+                evidenceBundle(
+                        "semantic_retrieval",
+                        resourcePath,
+                        submitUrl,
+                        submitMethod,
+                        "LLM-authored governed resource focus: " + resourceFocus,
+                        score,
+                        domainTerms(resourcePath),
+                        context.tenantId(),
+                        context.environment(),
+                        context.releaseId(),
+                        false)),
+                score);
+    }
+
     private String broadDiscoveryReason(ApiMetadata metadata) {
         String businessContext = compactReasonText(String.join(" ",
                 valueOrEmpty(metadata.getTags()),
@@ -750,6 +973,10 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             normalized = normalized.substring(1);
         }
         return normalized.replace('/', '.');
+    }
+
+    private String resourceKey(String resourcePath) {
+        return canonicalResourceFocus(domainCatalogRef(resourcePath));
     }
 
     private List<String> domainTerms(String resourcePath) {
@@ -898,21 +1125,98 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
 
     private SemanticResourceNeed semanticResourceNeed(String normalizedPrompt, String artifactKind) {
         String normalized = normalize(valueOrEmpty(normalizedPrompt));
+        if (hasLlmAuthoredResourceFocus(normalized)) {
+            String supportingConcepts = semanticQuerySection(normalized, "supporting concepts:", "desired surface:");
+            String desiredSurface = semanticQuerySection(normalized, "desired surface:", "semantic query:");
+            String semanticQuery = semanticQuerySection(normalized, "semantic query:", "");
+            String focusedIntent = String.join(" ", supportingConcepts, desiredSurface, semanticQuery).trim();
+            if ("chart".equals(artifactKind)) {
+                return SemanticResourceNeed.ANALYTICS;
+            }
+            if (hasProfileIntentSignal(focusedIntent, normalized)) {
+                return SemanticResourceNeed.PROFILE;
+            }
+            if (hasFocusedOperationalCollectionSignal(focusedIntent)
+                    && !hasFocusedExplicitAnalyticalProjectionSignal(focusedIntent)) {
+                return SemanticResourceNeed.GENERIC_OPERATIONAL;
+            }
+            if (hasFocusedExplicitAnalyticalProjectionSignal(focusedIntent)) {
+                return SemanticResourceNeed.ANALYTICS;
+            }
+            return SemanticResourceNeed.GENERIC_OPERATIONAL;
+        }
+        String intentBearingText = intentBearingSemanticText(normalized);
         if ("chart".equals(artifactKind)) {
             return SemanticResourceNeed.ANALYTICS;
         }
-        if (containsAny(normalized,
+        if (containsAny(intentBearingText,
                 "grafico", "graficos", "chart", "charts", "indicador", "indicadores",
                 "kpi", "kpis", "metrica", "metricas", "analitico", "analitica", "analytics",
                 "tendencia", "distribuicao", "serie temporal")) {
             return SemanticResourceNeed.ANALYTICS;
         }
-        if (containsAny(normalized,
-                "perfil", "profile", "ficha", "resumo individual", "individual", "360",
-                "visao resumida", "visao consolidada")) {
+        if (hasProfileIntentSignal(intentBearingText, normalized)) {
             return SemanticResourceNeed.PROFILE;
         }
         return SemanticResourceNeed.GENERIC_OPERATIONAL;
+    }
+
+    private boolean hasLlmAuthoredResourceFocus(String normalizedPrompt) {
+        return normalizedPrompt.contains("primary business entity:")
+                && normalizedPrompt.contains("supporting concepts:")
+                && normalizedPrompt.contains("semantic query:");
+    }
+
+    private boolean hasFocusedOperationalCollectionSignal(String focusedIntent) {
+        return containsAny(valueOrEmpty(focusedIntent),
+                "lista", "listagem", "listavel", "filtravel", "filtro", "filtros",
+                "tabela", "registros", "cadastro", "colecao", "collection",
+                "overview", "visao geral", "acompanhamento", "acompanhar", "mostrar",
+                "exibir", "informacoes", "dados");
+    }
+
+    private boolean hasFocusedExplicitAnalyticalProjectionSignal(String focusedIntent) {
+        String value = valueOrEmpty(focusedIntent);
+        return containsAny(value,
+                "analitico", "analitica", "analytics", "metricas agregadas", "agregado", "agregada",
+                "distribuicao", "serie temporal", "tendencia", "histograma", "folha", "pagamento",
+                "remuneracao", "salario", "payroll", "financeira");
+    }
+
+    private boolean hasProfileIntentSignal(String intentBearingText, String fullText) {
+        if (containsAny(intentBearingText,
+                "perfil individual", "individual profile", "profile page", "profile screen",
+                "ficha", "resumo individual", "visao resumida", "visao consolidada")) {
+            return true;
+        }
+        String normalized = valueOrEmpty(fullText);
+        return containsAny(normalized,
+                "perfil individual", "individual profile", "ficha", "resumo individual");
+    }
+
+    private String intentBearingSemanticText(String normalizedPrompt) {
+        String normalized = valueOrEmpty(normalizedPrompt);
+        if (!normalized.contains("primary business entity:")
+                || !normalized.contains("supporting concepts:")
+                || !normalized.contains("semantic query:")) {
+            return normalized;
+        }
+        return String.join(" ",
+                semanticQuerySection(normalized, "desired surface:", "semantic query:"),
+                semanticQuerySection(normalized, "semantic query:", ""));
+    }
+
+    private String semanticQuerySection(String value, String startMarker, String endMarker) {
+        int start = value.indexOf(startMarker);
+        if (start < 0) {
+            return "";
+        }
+        start += startMarker.length();
+        int end = endMarker == null || endMarker.isBlank() ? -1 : value.indexOf(endMarker, start);
+        if (end < 0) {
+            end = value.length();
+        }
+        return value.substring(start, end).trim();
     }
 
     private double semanticRoleScoreAdjustment(ResourceSemanticRole role, SemanticResourceNeed need) {

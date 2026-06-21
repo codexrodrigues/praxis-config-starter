@@ -358,7 +358,7 @@ public class SpringAiOpenAiService implements AiProvider {
                 responseFuture.cancel(true);
                 throw new CancellationException("OpenAI stream cancelled before response.");
             }
-            HttpResponse<InputStream> response = responseFuture.get(Math.max(1, timeoutSeconds), TimeUnit.SECONDS);
+            HttpResponse<InputStream> response = responseFuture.get(Math.max(1, resolvedTimeoutSeconds), TimeUnit.SECONDS);
             streamRef.set(response.body());
             if (response.statusCode() >= 400) {
                 String errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);

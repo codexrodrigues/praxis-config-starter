@@ -3,6 +3,7 @@ package org.praxisplatform.config.ai.authoring;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -417,6 +418,359 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 .isEqualTo("/api/human-resources/funcionarios");
         assertThat(candidates.get(0).evidence())
                 .contains("semantic-role:operational-resource");
+        Mockito.verifyNoInteractions(repository);
+    }
+
+    @Test
+    void llmSupportingProfileConceptDoesNotTurnOperationalOverviewIntoProfileNeed() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        Mockito.when(retrievalService.searchApiMetadata(
+                        Mockito.anyString(),
+                        Mockito.nullable(String.class),
+                        Mockito.isNull(),
+                        Mockito.anyInt(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull()))
+                .thenReturn(List.of(
+                        searchResult(
+                                "/api/human-resources/vw-perfil-heroi",
+                                "GET",
+                                "Perfil 360 com visao consolidada de pessoas.",
+                                0.90d),
+                        searchResult(
+                                "/api/human-resources/funcionarios/filter/cursor",
+                                "POST",
+                                "Funcionarios com nome, email, cargo e departamento.",
+                                0.88d)));
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: Funcionarios. "
+                        + "supporting concepts: Nome, Email, Cargo, Departamento, Perfil 360. "
+                        + "desired surface: overview page. "
+                        + "semantic query: staff overview page showing employee details such as name, email, position, and department",
+                "page");
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates.get(0).resourcePath())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(candidates.get(0).evidence())
+                .contains("semantic-role:operational-resource");
+        Mockito.verifyNoInteractions(repository);
+    }
+
+    @Test
+    void llmAuthoredBroadSurfaceDoesNotPromoteAuxiliaryProfileOrIndicatorsOverPrimaryEntity() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        Mockito.when(retrievalService.searchApiMetadata(
+                        Mockito.anyString(),
+                        Mockito.nullable(String.class),
+                        Mockito.isNull(),
+                        Mockito.anyInt(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull()))
+                .thenReturn(List.of(
+                        searchResult(
+                                "/api/human-resources/vw-perfil-heroi",
+                                "GET",
+                                "Perfil 360 com visao consolidada de pessoas.",
+                                0.92d),
+                        searchResult(
+                                "/api/human-resources/vw-analytics-folha-pagamento/filter/cursor",
+                                "POST",
+                                "Visao analitica de folha e indicadores por colaborador.",
+                                0.91d),
+                        searchResult(
+                                "/api/human-resources/funcionarios/filter/cursor",
+                                "POST",
+                                "Funcionarios com nome, email, cargo, departamento e status.",
+                                0.88d)));
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: Funcionarios (colaboradores). "
+                        + "supporting concepts: Nome, E-mail, Cargo, Departamento, Status, Perfil 360, Indicadores. "
+                        + "desired surface: Tela/Dashboard de acompanhamento de colaboradores com lista, filtros, "
+                        + "cartao/perfil 360 e indicadores. "
+                        + "semantic query: Tela para acompanhamento de colaboradores mostrando lista de pessoas, "
+                        + "dados de perfil, status atual e indicadores de apoio.",
+                "page");
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates.get(0).resourcePath())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(candidates.get(0).evidence())
+                .contains("semantic-role:operational-resource");
+        Mockito.verifyNoInteractions(repository);
+    }
+
+    @Test
+    void llmAuthoredCanonicalResourceFocusUsesGovernedMetadataWithoutEmbeddingRetrieval() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ApiMetadata funcionarios = apiMetadata(
+                "/api/human-resources/funcionarios/filter/cursor",
+                "POST",
+                "human resources funcionarios empregados colaboradores",
+                "Funcionarios",
+                "Funcionarios com nome, email, cargo e departamento.");
+        Mockito.when(repository.findByPathAndMethod(
+                        "/api/human-resources/funcionarios/filter/cursor",
+                        "POST"))
+                .thenReturn(Optional.of(funcionarios));
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: human-resources.funcionarios. "
+                        + "supporting concepts: empregados, informacoes, nome, cargo, departamento. "
+                        + "desired surface: page. "
+                        + "semantic query: informacoes dos empregados",
+                "page");
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates.get(0).resourcePath())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(candidates.get(0).evidence())
+                .contains("semantic-retrieval", "llm-resource-focus", "semantic-role:operational-resource");
+        assertThat(candidates.get(0).evidenceBundle().retrievalSource())
+                .isEqualTo("semantic_retrieval");
+        Mockito.verify(repository).findByPathAndMethod(
+                "/api/human-resources/funcionarios/filter/cursor",
+                "POST");
+        Mockito.verify(repository, Mockito.never()).findAll();
+        Mockito.verifyNoInteractions(retrievalService);
+    }
+
+    @Test
+    void llmAuthoredCanonicalResourceFocusFallsBackToCatalogScanWhenExactMetadataIsMissing() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAll()).thenReturn(List.of(
+                apiMetadata(
+                        "/api/human-resources/funcionarios/filter/cursor",
+                        "POST",
+                        "human resources funcionarios empregados colaboradores",
+                        "Funcionarios",
+                        "Funcionarios com nome, email, cargo e departamento."),
+                apiMetadata(
+                        "/api/human-resources/vw-perfil-heroi",
+                        "GET",
+                        "human resources profile",
+                        "Perfil 360",
+                        "Perfil individual consolidado de funcionario.")));
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: human-resources.funcionarios. "
+                        + "supporting concepts: empregados, informacoes, nome, cargo, departamento. "
+                        + "desired surface: page. "
+                        + "semantic query: informacoes dos empregados",
+                "page");
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates.get(0).resourcePath())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(candidates.get(0).evidence())
+                .contains("semantic-retrieval", "llm-resource-focus", "semantic-role:operational-resource");
+        Mockito.verify(repository).findAll();
+        Mockito.verifyNoInteractions(retrievalService);
+    }
+
+    @Test
+    void llmAuthoredCanonicalResourceFocusDoesNotBypassSemanticRetrievalForProfileNeed() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        Mockito.when(retrievalService.searchApiMetadata(
+                        Mockito.anyString(),
+                        Mockito.nullable(String.class),
+                        Mockito.isNull(),
+                        Mockito.anyInt(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull()))
+                .thenReturn(List.of(
+                        searchResult(
+                                "/api/human-resources/funcionarios/filter/cursor",
+                                "POST",
+                                "Funcionarios com nome, email, cargo e departamento.",
+                                0.90d),
+                        searchResult(
+                                "/api/human-resources/vw-perfil-heroi",
+                                "GET",
+                                "Perfil 360 com visao consolidada de pessoas.",
+                                0.88d)));
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: human-resources.funcionarios. "
+                        + "supporting concepts: Nome, Email, Cargo, Departamento. "
+                        + "desired surface: tela de perfil individual do funcionario. "
+                        + "semantic query: ficha de resumo individual com visao consolidada do funcionario",
+                "page");
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates.get(0).resourcePath())
+                .isEqualTo("/api/human-resources/vw-perfil-heroi");
+        assertThat(candidates.get(0).evidence())
+                .contains("semantic-retrieval", "semantic-role:profile-projection")
+                .doesNotContain("llm-resource-focus");
+        Mockito.verifyNoInteractions(repository);
+        Mockito.verify(retrievalService).searchApiMetadata(
+                Mockito.anyString(),
+                Mockito.nullable(String.class),
+                Mockito.isNull(),
+                Mockito.anyInt(),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.isNull());
+    }
+
+    @Test
+    void llmAuthoredSummaryProfileConceptDoesNotUseOperationalResourceFocusShortcut() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        Mockito.when(retrievalService.searchApiMetadata(
+                        Mockito.anyString(),
+                        Mockito.nullable(String.class),
+                        Mockito.isNull(),
+                        Mockito.anyInt(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull()))
+                .thenReturn(List.of(
+                        searchResult(
+                                "/api/human-resources/funcionarios/filter/cursor",
+                                "POST",
+                                "Funcionarios com nome, email, cargo e departamento.",
+                                0.91d),
+                        searchResult(
+                                "/api/human-resources/vw-perfil-heroi",
+                                "GET",
+                                "Perfil 360 com visao resumida e consolidada de pessoas.",
+                                0.88d)));
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: human-resources.funcionarios. "
+                        + "supporting concepts: resumo, visao, funcionario, dados, informacoes, visao resumida. "
+                        + "desired surface: page. "
+                        + "semantic query: resumo funcionario",
+                "page");
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates.get(0).resourcePath())
+                .isEqualTo("/api/human-resources/vw-perfil-heroi");
+        assertThat(candidates.get(0).evidence())
+                .contains("semantic-retrieval", "semantic-role:profile-projection")
+                .doesNotContain("llm-resource-focus");
+        Mockito.verifyNoInteractions(repository);
+        Mockito.verify(retrievalService).searchApiMetadata(
+                Mockito.anyString(),
+                Mockito.nullable(String.class),
+                Mockito.isNull(),
+                Mockito.anyInt(),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.isNull());
+    }
+
+    @Test
+    void llmAuthoredExplicitAnalyticalSurfaceKeepsAnalyticalProjectionAheadOfPrimaryEntity() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        Mockito.when(retrievalService.searchApiMetadata(
+                        Mockito.anyString(),
+                        Mockito.nullable(String.class),
+                        Mockito.isNull(),
+                        Mockito.anyInt(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull()))
+                .thenReturn(List.of(
+                        searchResult(
+                                "/api/human-resources/funcionarios/filter/cursor",
+                                "POST",
+                                "Funcionarios com nome, email, cargo e departamento.",
+                                0.93d),
+                        searchResult(
+                                "/api/human-resources/vw-analytics-folha-pagamento/filter/cursor",
+                                "POST",
+                                "Visao analitica de folha de pagamento com metricas agregadas.",
+                                0.89d)));
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: Funcionarios. "
+                        + "supporting concepts: Folha de pagamento, salario, departamento. "
+                        + "desired surface: dashboard analitico de folha de pagamento com metricas agregadas. "
+                        + "semantic query: indicadores agregados de remuneracao e pagamento por departamento",
+                "dashboard");
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates.get(0).resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(candidates.get(0).evidence())
+                .contains("semantic-role:analytics-projection");
+        Mockito.verifyNoInteractions(repository);
+    }
+
+    @Test
+    void llmDesiredProfileSurfacePromotesProfileProjection() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        Mockito.when(retrievalService.searchApiMetadata(
+                        Mockito.anyString(),
+                        Mockito.nullable(String.class),
+                        Mockito.isNull(),
+                        Mockito.anyInt(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull()))
+                .thenReturn(List.of(
+                        searchResult(
+                                "/api/human-resources/funcionarios/filter/cursor",
+                                "POST",
+                                "Funcionarios com nome, email, cargo e departamento.",
+                                0.90d),
+                        searchResult(
+                                "/api/human-resources/vw-perfil-heroi",
+                                "GET",
+                                "Perfil 360 com visao consolidada de pessoas.",
+                                0.88d)));
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: Funcionarios. "
+                        + "supporting concepts: Nome, Email, Cargo, Departamento. "
+                        + "desired surface: tela de perfil individual do funcionario. "
+                        + "semantic query: ficha de resumo individual com visao consolidada do funcionario",
+                "page");
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates.get(0).resourcePath())
+                .isEqualTo("/api/human-resources/vw-perfil-heroi");
+        assertThat(candidates.get(0).evidence())
+                .contains("semantic-role:profile-projection");
         Mockito.verifyNoInteractions(repository);
     }
 

@@ -5,8 +5,16 @@ import java.util.Map;
 record AgenticAuthoringToolProgressProjection(
         String phase,
         String label,
+        String message,
         Map<String, Object> diagnostics
 ) {
+
+    AgenticAuthoringToolProgressProjection(
+            String phase,
+            String label,
+            Map<String, Object> diagnostics) {
+        this(phase, label, label, diagnostics);
+    }
 
     AgenticAuthoringToolProgressProjection {
         diagnostics = diagnostics == null ? Map.of() : Map.copyOf(diagnostics);

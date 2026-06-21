@@ -363,8 +363,8 @@ Os eventos devem usar os tipos existentes sempre que possivel:
 
 | Tipo | Payload recomendado |
 |------|---------------------|
-| `status` | `state`, `phase`, `message` |
-| `thought.step` | `phase`, `tool`, `summary`, `diagnostics` seguro, `streamEventDiagnostics` quando houver dedupe auditavel |
+| `status` | `state`, `phase`, `message`, `summary`, `diagnostics` seguro quando for progresso persistido |
+| `thought.step` | `phase`, `tool`, `message` user-facing quando houver texto curado, `summary` seguro/auditavel, `diagnostics` seguro, `streamEventDiagnostics` quando houver dedupe auditavel |
 | `heartbeat` | metadados de keep-alive |
 | `intent.resolved` | `schemaVersion`, `semanticDecisionRef`, `routeClass`, `resolved`, `userFacingUnderstanding`, `requiresClarification`, `canMaterialize`, `fallbackKind`, `requiredTools`, `evidenceRefs`, `confidence`, `warnings` |
 | `result` | `intentResolution`, `preview`, `assistantMessage`, `quickReplies`, `canApply`, `decisionDiagnostics`, `streamEventDiagnostics` quando houver dedupe auditavel |
@@ -376,6 +376,16 @@ alimentar a UI com a interpretacao segura da intencao do usuario, por exemplo
 `userFacingUnderstanding`, sem expor chain-of-thought nem autorizar aplicacao.
 Clientes devem continuar aguardando `result`, `error` ou `cancelled` para
 encerrar o estado de processamento.
+
+Em eventos de progresso, `message` e o texto curado para apresentacao ao usuario.
+Ele pode ser produzido diretamente pela LLM quando a fase ja tiver resolvido uma
+intencao semanticamente apresentavel, ou por uma projecao backend-authored
+baseada na decisao/ferramenta governada. `summary` permanece uma trilha segura
+para auditoria, replay e fallback de clientes antigos; ele nao deve ser tratado
+como fonte primaria de UX quando `message` ou `userFacingUnderstanding`
+estiverem presentes. O texto bruto do usuario permanece no historico do turno;
+a UI deve preferir a intencao curada em `intent.resolved.userFacingUnderstanding`
+e mensagens de progresso curadas nos eventos seguintes.
 
 Quando o turno seguir para resposta consultiva ou preview, o backend pode
 preservar a mesma decisao em `contextHints.resolvedIntent`
@@ -396,6 +406,8 @@ estado generico. As fases canonicas atuais de `thought.step` incluem:
   confiavel, com contagens, claims aceitas/rejeitadas, superficies e refs
   seguros.
 - `intent.resolve`: preparacao da resolucao semantica.
+- `component.capabilities`: carregamento das capacidades governadas dos
+  componentes antes da confirmacao semantica e materializacao.
 - `intent.resolve.llm`: chamada ou revisao da LLM sobre a intencao do usuario.
 - `intent.resolve.grounding`: checagem da decisao contra evidencias governadas.
 - `resource.discovery`: recuperacao de recursos, schemas, capabilities ou
@@ -409,6 +421,15 @@ menos `state=alive`, `phase`, `summary` e `lastEventType`. O `phase` deve
 refletir o ultimo evento nao terminal conhecido, permitindo que clientes mostrem
 mensagens como "a LLM ainda esta resolvendo a intencao" sem inventar logica
 local ou depender de timers opacos no frontend.
+
+Além do `heartbeat`, o backend emite progresso persistido (`status`) durante
+turnos ainda em processamento. O intervalo padrao de
+`praxis.ai.authoring.stream.processing-progress-seconds` e `8s`. Esses eventos
+devem ter `message` curado para UX e `diagnostics.source` igual a
+`backend-processing-progress-watchdog`; diagnosticos permanecem auditaveis, mas
+nao devem ser exibidos como texto conversacional. A mensagem deve explicar a
+fase atual em linguagem de produto, por exemplo planejamento de busca governada,
+revisao da LLM, validacao de dados confirmados ou compilacao da preview.
 
 O processamento assincrono do turno deve respeitar
 `praxis.ai.stream.processing-timeout-seconds` para evitar que o cliente fique
@@ -613,8 +634,8 @@ O Page Builder deve:
 - manter o fluxo sincrono atual como fallback;
 - usar streaming apenas quando o backend anunciar suporte ou quando o host habilitar
   explicitamente essa capacidade;
-- apresentar eventos de progresso como estado tecnico/operacional, sem misturar
-  payload de diagnostico com mensagens conversacionais;
+- apresentar `message`/`userFacingUnderstanding` como texto conversacional curado
+  e manter payloads de diagnostico apenas como apoio auditavel;
 - preservar `quickReplies[].contextHints` em todos os caminhos;
 - preservar `quickReplies[].semanticDecision` e, quando presente, reenviar a
   decisao selecionada como `activeSemanticDecision` no turno seguinte;

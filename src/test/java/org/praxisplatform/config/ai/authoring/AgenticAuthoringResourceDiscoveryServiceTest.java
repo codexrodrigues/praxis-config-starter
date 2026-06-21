@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -88,6 +89,17 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 });
         assertThat(result.assistantMessage()).contains("Encontrei APIs");
         assertThat(result.quickReplies()).isEmpty();
+        assertThat(result.diagnostics())
+                .containsKeys(
+                        "catalogDiscoveryElapsedMs",
+                        "groundingElapsedMs",
+                        "consultativeProjectionElapsedMs",
+                        "quickReplyElapsedMs",
+                        "totalElapsedMs")
+                .containsEntry("catalogCandidateCount", 1)
+                .containsEntry("groundedCandidateCount", 1)
+                .containsEntry("limitedCandidateCount", 1)
+                .containsEntry("quickReplyCount", 0);
         assertThat(result.candidates().get(0).submitUrl())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
         assertThat(result.candidates().get(0).submitMethod()).isEqualTo("post");
@@ -1935,6 +1947,73 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
         assertThat(result.candidates().get(0).evidence())
                 .contains(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)
                 .doesNotContain("lexical-fallback", "weak-evidence");
+    }
+
+    @Test
+    void domainCatalogGroundingUsesBoundedWorkingSetBeforeResultLimit() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
+                Mockito.mock(AgenticAuthoringDomainCatalogCandidateEnhancer.class);
+        List<AgenticAuthoringCandidate> candidates = IntStream.range(0, 12)
+                .mapToObj(index -> new AgenticAuthoringCandidate(
+                        "/api/test/resource-" + index,
+                        "post",
+                        "/schemas/filtered?path=/api/test/resource-" + index + "/filter",
+                        "/api/test/resource-" + index + "/filter",
+                        "post",
+                        0.90d - index * 0.01d,
+                        "semantic candidate " + index,
+                        List.of("api-metadata", "semantic-retrieval")))
+                .toList();
+        when(candidateCatalog.discover(
+                "acompanhar recursos",
+                "dashboard",
+                "tenant-a",
+                "dev",
+                null))
+                .thenReturn(candidates);
+        when(enhancer.enhance(
+                Mockito.eq("acompanhar recursos"),
+                Mockito.anyList(),
+                Mockito.eq("tenant-a"),
+                Mockito.eq("dev")))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        AgenticAuthoringResourceDiscoveryService service =
+                new AgenticAuthoringResourceDiscoveryService(
+                        candidateCatalog,
+                        objectMapper,
+                        "praxis-service",
+                        enhancer);
+
+        AgenticAuthoringResourceCandidatesResult result = service.search(
+                new AgenticAuthoringResourceCandidatesRequest(
+                        "acompanhar recursos",
+                        null,
+                        "dashboard",
+                        5),
+                new AiPrincipalContext("tenant-a", "user-a", "dev", false));
+
+        Mockito.verify(enhancer).enhance(
+                Mockito.eq("acompanhar recursos"),
+                Mockito.argThat(argument -> argument.size() == 9
+                        && argument.get(0).resourcePath().equals("/api/test/resource-0")
+                        && argument.get(8).resourcePath().equals("/api/test/resource-8")),
+                Mockito.eq("tenant-a"),
+                Mockito.eq("dev"));
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .containsExactly(
+                        "/api/test/resource-0",
+                        "/api/test/resource-1",
+                        "/api/test/resource-2",
+                        "/api/test/resource-3",
+                        "/api/test/resource-4");
+        assertThat(result.diagnostics())
+                .containsEntry("preGroundingCandidateCount", 12)
+                .containsEntry("groundingInputCandidateCount", 9)
+                .containsEntry("groundingSkippedCandidateCount", 3)
+                .containsEntry("limitedCandidateCount", 5);
     }
 
     @Test

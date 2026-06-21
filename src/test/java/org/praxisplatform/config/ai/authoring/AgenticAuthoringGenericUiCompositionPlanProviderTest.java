@@ -345,6 +345,76 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void materializesListPageWhenSemanticDecisionRequestsPraxisList() {
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "Visao resumida de funcionarios com dados basicos para consulta rapida",
+                "list-page",
+                "praxis-list",
+                List.of(),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "quero uma visao resumida de funcionario",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "page", "author_component", "/api/human-resources/vw-perfil-heroi",
+                        visualizationDecision))).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(result.warnings()).containsExactly("ui-composition-plan-provider:generic-resource-page");
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-list-page");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-list");
+        JsonNode listInputs = findWidgetInputs(plan, "praxis-list");
+        assertThat(listInputs.path("config").path("dataSource").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-perfil-heroi");
+        assertThat(listInputs.path("config").path("layout").path("variant").asText()).isEqualTo("cards");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .doesNotContain("praxis-table", "praxis-dynamic-form");
+    }
+
+    @Test
+    void materializesProfilePageWhenSemanticDecisionRequestsPageBuilderAndExcludesCollections() {
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "employee_profile_page",
+                "single_column",
+                "praxis-page-builder",
+                List.of(),
+                true,
+                false,
+                List.of("praxis-table", "praxis-list", "praxis-chart"),
+                false,
+                false,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "quero uma tela de perfil individual do funcionario",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "page", "create_page_profile_screen", "/api/human-resources/vw-perfil-heroi",
+                        visualizationDecision))).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(result.warnings()).containsExactly("ui-composition-plan-provider:generic-resource-page");
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-profile-page");
+        assertThat(plan.path("layoutPresetOptions").path("presetFamily").asText()).isEqualTo("profile-detail");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-rich-content", "praxis-dynamic-form");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .doesNotContain("praxis-table", "praxis-list", "praxis-chart");
+        assertThat(plan.path("widgets").get(1).path("inputs").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-perfil-heroi");
+        assertThat(plan.path("canvas").path("items").has("vw-perfil-heroi-profile-summary")).isTrue();
+        assertThat(plan.path("canvas").path("items").has("vw-perfil-heroi-profile-detail")).isTrue();
+    }
+
+    @Test
     void infersEmployeeDashboardChartsWhenLlmReturnsTableBiasedDashboardDecision() {
         AgenticAuthoringVisualizationDecision tableBiasedDecision = new AgenticAuthoringVisualizationDecision(
                 "praxis-agentic-authoring-visualization-decision.v1",

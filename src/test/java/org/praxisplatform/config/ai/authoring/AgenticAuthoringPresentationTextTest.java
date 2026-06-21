@@ -16,6 +16,9 @@ class AgenticAuthoringPresentationTextTest {
         assertThat(AgenticAuthoringPresentationText.display(
                 "Campos confirmados: Codigo, Responsavel Nome. Filtrar com paginacao por cursor."))
                 .isEqualTo("Campos confirmados: Código, Responsável Nome. Filtrar com paginação por cursor.");
+        assertThat(AgenticAuthoringPresentationText.display(
+                "Pre-visualizacao pronta. Materializacao, Validacao e Proximo passo da decisao semantica."))
+                .isEqualTo("Pré-visualização pronta. Materialização, Validação e Próximo passo da decisão semântica.");
         assertThat(AgenticAuthoringPresentationText.display("Suppliers"))
                 .isEqualTo("Suppliers");
     }

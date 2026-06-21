@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -112,6 +113,39 @@ class AiProviderManagementServiceTest {
 
         verify(openai).generateJson(any(), any(), configCaptor.capture());
         assertEquals(15, configCaptor.getValue().getTimeoutSeconds());
+    }
+
+    @Test
+    void generateJsonDoesNotBlockOnStoredConfigLookupBeyondCallBudget() {
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        when(openai.generateJson(any(), any(), any()))
+                .thenReturn(new ObjectMapper().createObjectNode());
+        org.mockito.Mockito.doAnswer(invocation -> {
+                    Thread.sleep(5_000L);
+                    return Optional.empty();
+                })
+                .when(userConfigService)
+                .getResolved(any(), any(), any(), any(), any());
+
+        long startedAt = System.nanoTime();
+        service.generateJson(
+                "prompt",
+                AiJsonSchema.ofSchema("{}"),
+                AiCallConfig.builder()
+                        .provider("openai")
+                        .model("gpt-4o-mini")
+                        .timeoutSeconds(1)
+                        .build(),
+                "tenant",
+                "user",
+                "local");
+        long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+
+        assertTrue(elapsedMs < 2_500L);
+        verify(openai).generateJson(any(), any(), configCaptor.capture());
+        assertEquals("openai", configCaptor.getValue().getProvider());
+        assertEquals("gpt-4o-mini", configCaptor.getValue().getModel());
+        assertEquals(1, configCaptor.getValue().getTimeoutSeconds());
     }
 
     @Test

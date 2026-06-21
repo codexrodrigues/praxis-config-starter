@@ -164,7 +164,7 @@ public class AgenticAuthoringAutoConfiguration {
     public AgenticAuthoringComponentCapabilitiesService agenticAuthoringComponentCapabilitiesService(
             ObjectProvider<AiRegistryRepository> aiRegistryRepository,
             ObjectMapper objectMapper,
-            @Value("${praxis.ai.authoring.component-capabilities.cache-ttl-ms:60000}") long cacheTtlMs) {
+            @Value("${praxis.ai.authoring.component-capabilities.cache-ttl-ms:600000}") long cacheTtlMs) {
         return new AgenticAuthoringComponentCapabilitiesService(
                 aiRegistryRepository.getIfAvailable(),
                 objectMapper,

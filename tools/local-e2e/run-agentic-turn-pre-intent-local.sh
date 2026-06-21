@@ -113,10 +113,59 @@ probe_code="$(curl -sS --max-time 30 -o /dev/null -w '%{http_code}' \
 test "$probe_code" = "204"
 
 echo "[4/5] read raw SSE"
-curl -sS --max-time "$STREAM_TIMEOUT_SECONDS" \
-  "$BASE_URL/api/praxis/config/ai/authoring/turn/stream/$stream_id$query" \
-  "${headers[@]}" \
-  -o "$ARTIFACTS_DIR/turn.raw.sse" || true
+STREAM_URL="$BASE_URL/api/praxis/config/ai/authoring/turn/stream/$stream_id$query" \
+RAW_SSE_PATH="$ARTIFACTS_DIR/turn.raw.sse" \
+ORIGIN="$ORIGIN" \
+TENANT_ID="$TENANT_ID" \
+USER_ID="$USER_ID" \
+ENVIRONMENT="$ENVIRONMENT" \
+STREAM_TIMEOUT_SECONDS="$STREAM_TIMEOUT_SECONDS" \
+python3 <<'PY'
+import json
+import os
+import socket
+import sys
+import urllib.request
+
+stream_url = os.environ["STREAM_URL"]
+raw_sse_path = os.environ["RAW_SSE_PATH"]
+timeout = float(os.environ.get("STREAM_TIMEOUT_SECONDS") or "180")
+request = urllib.request.Request(
+    stream_url,
+    headers={
+        "Origin": os.environ["ORIGIN"],
+        "X-Tenant-ID": os.environ["TENANT_ID"],
+        "X-User-ID": os.environ["USER_ID"],
+        "X-Env": os.environ["ENVIRONMENT"],
+        "Accept": "text/event-stream",
+    },
+)
+terminal_types = {"result", "error", "cancelled"}
+try:
+    with urllib.request.urlopen(request, timeout=timeout) as response, open(raw_sse_path, "wb") as output:
+        while True:
+            line = response.readline()
+            if not line:
+                break
+            output.write(line)
+            output.flush()
+            decoded = line.decode("utf-8", errors="replace").strip()
+            if not decoded.startswith("data:"):
+                continue
+            data = decoded[5:].strip()
+            if not data:
+                continue
+            try:
+                event = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            if (event.get("type") or "").lower() in terminal_types:
+                break
+except (TimeoutError, socket.timeout):
+    print(f"SSE read timed out after {timeout:g}s; continuing with captured events.", file=sys.stderr)
+except Exception as exc:
+    print(f"SSE read failed: {exc}", file=sys.stderr)
+PY
 awk '/^data:/ {sub(/^data:[[:space:]]*/, ""); print}' "$ARTIFACTS_DIR/turn.raw.sse" > "$ARTIFACTS_DIR/turn.events.jsonl"
 event_count="$(wc -l < "$ARTIFACTS_DIR/turn.events.jsonl" | tr -d ' ')"
 if [[ "$event_count" -le 0 ]]; then
@@ -127,7 +176,9 @@ fi
 echo "[5/5] assert pre-intent planning observability"
 python3 - "$ARTIFACTS_DIR/turn.events.jsonl" "$ARTIFACTS_DIR/summary.json" <<'PY'
 import json
+import re
 import sys
+from datetime import datetime, timezone
 
 events_path = sys.argv[1]
 summary_path = sys.argv[2]
@@ -156,6 +207,43 @@ def first_index(predicate):
             return index
     return -1
 
+def event_timestamp(event):
+    value = event.get("timestamp")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        return None
+
+def elapsed_between_event_indices(start_index, end_index):
+    if not isinstance(start_index, int) or not isinstance(end_index, int):
+        return None
+    if start_index < 0 or end_index < 0 or start_index >= len(events) or end_index >= len(events):
+        return None
+    start = event_timestamp(events[start_index])
+    end = event_timestamp(events[end_index])
+    if start is None or end is None:
+        return None
+    return round((end - start).total_seconds(), 3)
+
+def first_phase_index(phase_name, event_type_name=None):
+    return first_index(
+        lambda event: phase(event) == phase_name
+        and (event_type_name is None or event_type(event) == event_type_name)
+    )
+
+def diagnostics_for_phase(phase_name, event_type_name=None):
+    index = first_phase_index(phase_name, event_type_name)
+    if index < 0:
+        return {}
+    diagnostics = payload(events[index]).get("diagnostics")
+    return diagnostics if isinstance(diagnostics, dict) else {}
+
 plan_index = first_index(lambda event: phase(event) in {"tool.plan", "tool.plan.skipped"})
 resolved_index = first_index(lambda event: event_type(event) == "intent.resolved")
 terminal_index = first_index(lambda event: event_type(event) in {"result", "error", "cancelled"})
@@ -164,6 +252,18 @@ grounded_clarification_index = first_index(lambda event: phase(event) == "consul
 grounded_domain_clarification_index = first_index(
     lambda event: phase(event) == "consultative.grounded-domain-clarification"
 )
+context_bundle_start = first_phase_index("context.bundle")
+intent_resolve_start = first_phase_index("intent.resolve")
+tool_start = first_phase_index("tool.start")
+component_capabilities_start = first_phase_index("component.capabilities", "status")
+component_capabilities_done = first_phase_index("component.capabilities", "thought.step")
+intent_resolve_evidence_start = first_phase_index("intent.resolve.evidence")
+intent_resolve_llm_start = first_phase_index("intent.resolve.llm")
+intent_resolution_start = intent_resolve_evidence_start if intent_resolve_evidence_start >= 0 else intent_resolve_llm_start
+preview_plan_start = first_phase_index("preview.plan")
+preview_compile_start = first_phase_index("preview.compile")
+tool_loop_start = first_phase_index("tool.loop")
+component_capabilities_diagnostics = diagnostics_for_phase("component.capabilities", "thought.step")
 
 sequence = [
     {
@@ -176,6 +276,40 @@ sequence = [
     for index, event in enumerate(events)
 ]
 
+technical_message_pattern = re.compile(
+    r"\b("
+    r"Governed|Runtime|Retrieved|Granular|"
+    r"preview planning|tool loop|backend API resource search|"
+    r"Post-intent|Resource candidates|Compiled preview"
+    r")\b"
+)
+missing_thought_step_messages = []
+redacted_thought_step_messages = []
+technical_thought_step_messages = []
+for index, event in enumerate(events):
+    event_payload = payload(event)
+    if event_type(event) != "thought.step":
+        continue
+    message = event_payload.get("message")
+    if not isinstance(message, str) or not message.strip():
+        missing_thought_step_messages.append({
+            "index": index,
+            "phase": phase(event),
+        })
+        continue
+    if "[REDACTED]" in message:
+        redacted_thought_step_messages.append({
+            "index": index,
+            "phase": phase(event),
+            "message": message,
+        })
+    if technical_message_pattern.search(message):
+        technical_thought_step_messages.append({
+            "index": index,
+            "phase": phase(event),
+            "message": message,
+        })
+
 summary = {
     "eventCount": len(events),
     "planOrSkippedIndex": plan_index,
@@ -187,6 +321,31 @@ summary = {
     "planOrSkippedPhase": phase(events[plan_index]) if plan_index >= 0 else None,
     "skipReason": payload(events[plan_index]).get("diagnostics", {}).get("skipReason") if plan_index >= 0 else None,
     "errorCode": payload(events[plan_index]).get("diagnostics", {}).get("errorCode") if plan_index >= 0 else None,
+    "presentationAudit": {
+        "thoughtStepMissingMessageCount": len(missing_thought_step_messages),
+        "thoughtStepRedactedMessageCount": len(redacted_thought_step_messages),
+        "thoughtStepTechnicalMessageCount": len(technical_thought_step_messages),
+        "thoughtStepMissingMessages": missing_thought_step_messages,
+        "thoughtStepRedactedMessages": redacted_thought_step_messages,
+        "thoughtStepTechnicalMessages": technical_thought_step_messages,
+    },
+    "phaseTimingSeconds": {
+        "contextBundleToIntentResolve": elapsed_between_event_indices(context_bundle_start, intent_resolve_start),
+        "preIntentPlanning": elapsed_between_event_indices(intent_resolve_start, plan_index),
+        "toolExecution": elapsed_between_event_indices(tool_start, tool_result_index),
+        "componentCapabilitiesTransport": elapsed_between_event_indices(
+            component_capabilities_start,
+            component_capabilities_done,
+        ),
+        "intentResolveEvidence": elapsed_between_event_indices(intent_resolve_evidence_start, resolved_index),
+        "intentResolveLlm": elapsed_between_event_indices(intent_resolve_llm_start, resolved_index),
+        "intentResolution": elapsed_between_event_indices(intent_resolution_start, resolved_index),
+        "intentResolvedToPreview": elapsed_between_event_indices(resolved_index, preview_plan_start),
+        "previewToResult": elapsed_between_event_indices(preview_plan_start, terminal_index),
+        "previewCompileToToolLoop": elapsed_between_event_indices(preview_compile_start, tool_loop_start),
+        "toolLoopToResult": elapsed_between_event_indices(tool_loop_start, terminal_index),
+    },
+    "componentCapabilitiesDiagnostics": component_capabilities_diagnostics,
     "sequence": sequence,
 }
 
@@ -206,6 +365,18 @@ if terminal_index < 0:
     print("Expected terminal result/error/cancelled event, but it was not emitted.", file=sys.stderr)
     print(json.dumps(sequence, ensure_ascii=False, indent=2), file=sys.stderr)
     sys.exit(1)
+if missing_thought_step_messages:
+    print("Expected every thought.step to expose a user-facing payload.message.", file=sys.stderr)
+    print(json.dumps(missing_thought_step_messages, ensure_ascii=False, indent=2), file=sys.stderr)
+    sys.exit(1)
+if redacted_thought_step_messages:
+    print("Expected thought.step payload.message not to contain redacted fallback text.", file=sys.stderr)
+    print(json.dumps(redacted_thought_step_messages, ensure_ascii=False, indent=2), file=sys.stderr)
+    sys.exit(1)
+if technical_thought_step_messages:
+    print("Expected thought.step payload.message not to expose technical/audit phrasing.", file=sys.stderr)
+    print(json.dumps(technical_thought_step_messages, ensure_ascii=False, indent=2), file=sys.stderr)
+    sys.exit(1)
 
 resolved_payload = payload(events[resolved_index])
 terminal_event = events[terminal_index]
@@ -221,6 +392,11 @@ provider_failed_after_candidate_discovery = (
 )
 summary["providerFailedAfterCandidateDiscovery"] = provider_failed_after_candidate_discovery
 summary["toolResultCandidateCount"] = tool_result_diagnostics.get("candidateCount") if tool_result_index >= 0 else None
+summary["resourceDiscoveryDiagnostics"] = (
+    tool_result_diagnostics.get("resourceDiscoveryDiagnostics")
+    if isinstance(tool_result_diagnostics.get("resourceDiscoveryDiagnostics"), dict)
+    else {}
+)
 summary["resultCanApply"] = terminal_payload.get("canApply") if event_type(terminal_event) == "result" else None
 summary["resourceDiscoveryGroundedClarification"] = (
     terminal_payload.get("decisionDiagnostics", {}).get("resourceDiscoveryGroundedClarification")

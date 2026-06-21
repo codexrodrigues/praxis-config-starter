@@ -34,7 +34,8 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         }
         String primaryComponent = requestedPrimaryComponent(semanticDecision);
         if (!primaryComponent.isBlank()
-                && !containsComponent(materialization, primaryComponent)) {
+                && !containsComponent(materialization, primaryComponent)
+                && !primaryComponentSatisfiedByCompositeMaterialization(primaryComponent, materialization)) {
             failureCodes.add(PRIMARY_COMPONENT_REQUIRED_FAILURE);
             warnings.add(MATERIALIZATION_MISMATCH_WARNING);
         }
@@ -147,15 +148,44 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         if (semanticDecision == null
                 || materialization == null
                 || materialization.isMissingNode()
-                || materialization.isNull()
-                || !"keyword-fallback-fail-safe".equals(safe(semanticDecision.reviewReason()))
-                || semanticDecision.refinement() == null
-                || !semanticDecision.refinement().preservesResource()) {
+                || materialization.isNull()) {
             return false;
         }
         JsonNode grounding = materialization.path("diagnostics").path("resourceSchemaGrounding");
-        return grounding.path("verified").asBoolean(false)
+        boolean schemaGrounded = grounding.path("verified").asBoolean(false)
                 && "schemas.filtered".equals(safe(grounding.path("source").asText("")));
+        if (!schemaGrounded) {
+            return false;
+        }
+        String reason = safe(semanticDecision.reviewReason());
+        if ("weak-lexical-evidence".equals(reason)) {
+            return semanticDecision.selectedResource() != null
+                    && !safe(semanticDecision.selectedResource().resourcePath()).isBlank()
+                    && !hasResourceBindingMismatch(semanticDecision, materialization);
+        }
+        if ("prompt-alignment-selection".equals(reason)) {
+            return hasGovernedResourceEvidence(semanticDecision)
+                    && semanticDecision.selectedResource() != null
+                    && !safe(semanticDecision.selectedResource().resourcePath()).isBlank()
+                    && !hasResourceBindingMismatch(semanticDecision, materialization);
+        }
+        return "keyword-fallback-fail-safe".equals(reason)
+                && (semanticDecision.refinement() != null
+                && semanticDecision.refinement().preservesResource()
+                || hasGovernedResourceEvidence(semanticDecision)
+                && semanticDecision.selectedResource() != null
+                && !safe(semanticDecision.selectedResource().resourcePath()).isBlank()
+                && !hasResourceBindingMismatch(semanticDecision, materialization));
+    }
+
+    private static boolean hasGovernedResourceEvidence(AgenticAuthoringSemanticDecision semanticDecision) {
+        AgenticAuthoringSemanticDecision.RetrievalEvidence retrievalEvidence =
+                semanticDecision == null ? null : semanticDecision.retrievalEvidence();
+        if (retrievalEvidence == null || retrievalEvidence.evidence() == null) {
+            return false;
+        }
+        return retrievalEvidence.evidence().contains("tool-search-api-resources")
+                || "semantic_retrieval".equals(safe(retrievalEvidence.retrievalSource()));
     }
 
     private static String reviewRequiredFailure(AgenticAuthoringSemanticDecision semanticDecision) {
@@ -191,6 +221,31 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
             }
         }
         return false;
+    }
+
+    private static boolean primaryComponentSatisfiedByCompositeMaterialization(
+            String primaryComponent,
+            JsonNode materialization) {
+        if (isPageBuilderComponent(primaryComponent)) {
+            return isUiCompositionPlan(materialization);
+        }
+        if (!"praxis-crud".equals(safe(primaryComponent))) {
+            return false;
+        }
+        return containsComponent(materialization, "praxis-table")
+                && containsComponent(materialization, "praxis-dynamic-form");
+    }
+
+    private static boolean isPageBuilderComponent(String primaryComponent) {
+        String value = safe(primaryComponent);
+        return "praxis-page-builder".equals(value) || "praxis-dynamic-page-builder".equals(value);
+    }
+
+    private static boolean isUiCompositionPlan(JsonNode materialization) {
+        return materialization != null
+                && !materialization.isMissingNode()
+                && !materialization.isNull()
+                && "praxis.ui-composition-plan".equals(safe(materialization.path("kind").asText("")));
     }
 
     private static String safe(String value) {

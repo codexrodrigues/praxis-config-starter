@@ -143,7 +143,12 @@ public record AgenticAuthoringSemanticDecision(
         boolean visualProjectionRefinement = contains(warnings, "semantic-policy-refined-visual-projection");
         boolean decisionMemoryRefinement = contains(warnings, "semantic-decision-memory-refinement-applied");
         boolean semanticRefinementApplied = contains(warnings, "semantic-refinement-applied");
-        boolean promptAlignmentSelection = contains(warnings, "llm-resource-selection-overridden-by-prompt-alignment");
+        boolean preIntentGovernedEvidenceSatisfied =
+                contains(warnings, "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence")
+                        && contains(warnings, "llm-pre-intent-resource-discovery-used")
+                        && strongGroundingEvidence;
+        boolean promptAlignmentSelection = contains(warnings, "llm-resource-selection-overridden-by-prompt-alignment")
+                && !preIntentGovernedEvidenceSatisfied;
         boolean lowerRankedLlmSelection = contains(warnings, "llm-resource-selection-lower-ranked-than-governed-candidate");
         boolean roleMismatchSelection = contains(warnings, "resource-selection-role-mismatch-with-governed-candidate");
         boolean unanchoredLowConfidenceSelection =

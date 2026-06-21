@@ -81,6 +81,66 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     @Test
+    void startEventUsesCuratedContextBundleMessage() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringTurnStreamRequest request = request();
+
+        when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), eq("Crie um painel")))
+                .thenReturn(AiThread.builder().threadId(threadId).build());
+        when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class))).thenReturn(Optional.empty());
+        org.mockito.Mockito.lenient()
+                .when(turnEventService.isTerminalType(anyString()))
+                .thenAnswer(invocation -> isTerminal(invocation.getArgument(0, String.class)));
+        org.mockito.Mockito.lenient()
+                .when(turnEventService.findLastEvent(any(UUID.class))).thenReturn(Optional.empty());
+        org.mockito.Mockito.lenient()
+                .when(turnEventService.appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), any()))
+                .thenAnswer(invocation -> AiTurnEventEnvelope.builder()
+                        .eventId(UUID.randomUUID())
+                        .streamId(invocation.getArgument(1, UUID.class))
+                        .threadId(invocation.getArgument(2, UUID.class))
+                        .turnId(invocation.getArgument(3, UUID.class))
+                        .type(invocation.getArgument(4, String.class))
+                        .timestamp(Instant.now())
+                        .payload(objectMapper.valueToTree(invocation.getArgument(5)))
+                        .build());
+        when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
+        org.mockito.Mockito.lenient()
+                .when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntent());
+        org.mockito.Mockito.lenient()
+                .when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local"), eq("http://localhost")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnStreamService service = service();
+        service.start(request, "http://localhost", principalContext);
+
+        ArgumentCaptor<Object> startPayload = ArgumentCaptor.forClass(Object.class);
+        verify(turnEventService).appendStartEventIfAbsent(
+                any(),
+                any(UUID.class),
+                eq(threadId),
+                any(UUID.class),
+                startPayload.capture());
+        JsonNode node = objectMapper.valueToTree(startPayload.getValue());
+        org.assertj.core.api.Assertions.assertThat(node.path("phase").asText()).isEqualTo("context.bundle");
+        org.assertj.core.api.Assertions.assertThat(node.path("message").asText())
+                .isEqualTo("Recebi seu pedido e estou preparando o contexto governado.")
+                .doesNotContain("Agentic authoring stream started");
+
+        service.shutdown();
+    }
+
+    @Test
     void startEmitsTerminalTimeoutWhenProcessingDoesNotFinish() throws Exception {
         UUID threadId = UUID.randomUUID();
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
@@ -215,14 +275,24 @@ class AgenticAuthoringTurnStreamServiceTest {
         releaseIntent.countDown();
         service.shutdown();
 
-        org.assertj.core.api.Assertions.assertThat(statusPayloads)
-                .anySatisfy(payload -> {
-                    JsonNode node = objectMapper.valueToTree(payload);
-                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("source").asText())
-                            .isEqualTo("backend-processing-progress-watchdog");
+        List<JsonNode> watchdogPayloads = statusPayloads.stream()
+                .map(payload -> (JsonNode) objectMapper.valueToTree(payload))
+                .filter(node -> "backend-processing-progress-watchdog"
+                        .equals(node.path("diagnostics").path("source").asText()))
+                .toList();
+        org.assertj.core.api.Assertions.assertThat(watchdogPayloads)
+                .isNotEmpty()
+                .allSatisfy(node -> {
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("elapsedSeconds").asLong())
                             .isGreaterThanOrEqualTo(1L);
                     org.assertj.core.api.Assertions.assertThat(node.path("state").asText()).isEqualTo("in_progress");
+                    org.assertj.core.api.Assertions.assertThat(node.path("message").asText())
+                            .containsAnyOf(
+                                    "Recebi seu pedido",
+                                    "Estou organizando sua intencao",
+                                    "A LLM esta revisando")
+                            .doesNotContain("Preparing semantic intent resolution")
+                            .doesNotContain("backend-processing-progress-watchdog");
                 });
     }
 
@@ -754,6 +824,23 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     @Test
+    void heartbeatSummaryUsesUserFacingToolLabelWhenAvailable() {
+        AiTurnEventEnvelope tail = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(UUID.randomUUID())
+                .type("thought.step")
+                .payload(objectMapper.createObjectNode()
+                        .put("phase", "tool.result")
+                        .put("label", "Busca governada concluida; vou usar os candidatos como evidencia."))
+                .build();
+
+        String summary = ReflectionTestUtils.invokeMethod(service(), "heartbeatSummary", tail);
+
+        org.assertj.core.api.Assertions.assertThat(summary)
+                .isEqualTo("Busca governada concluida; vou usar os candidatos como evidencia.");
+    }
+
+    @Test
     void heartbeatSummaryUsesSpecificIntentResolutionFallbacks() {
         AiTurnEventEnvelope intentResolve = AiTurnEventEnvelope.builder()
                 .eventId(UUID.randomUUID())
@@ -778,7 +865,152 @@ class AgenticAuthoringTurnStreamServiceTest {
         org.assertj.core.api.Assertions.assertThat(intentSummary)
                 .isEqualTo("Estou organizando o pedido, a pagina atual e as restricoes governadas.");
         org.assertj.core.api.Assertions.assertThat(llmSummary)
-                .isEqualTo("Estou resolvendo a intencao com o contexto governado antes de escolher recursos ou componentes.");
+                .isEqualTo("A LLM esta revisando a intencao com a evidencia governada recuperada.");
+    }
+
+    @Test
+    void intentResolvedWithoutPhaseUsesGroundingProgressFallback() {
+        AiTurnEventEnvelope intentResolved = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(UUID.randomUUID())
+                .type("intent.resolved")
+                .payload(objectMapper.createObjectNode())
+                .build();
+
+        String phase = ReflectionTestUtils.invokeMethod(service(), "heartbeatPhase", intentResolved);
+        String progress = ReflectionTestUtils.invokeMethod(service(), "processingProgressMessage", intentResolved, 24L);
+
+        org.assertj.core.api.Assertions.assertThat(phase).isEqualTo("intent.resolve.grounding");
+        org.assertj.core.api.Assertions.assertThat(progress)
+                .contains("validando a decisao semantica")
+                .contains("24 segundos")
+                .doesNotContain("Ainda estou processando");
+    }
+
+    @Test
+    void processingProgressMessageExplainsLongLlmWaitWithCuratedText() {
+        AiTurnEventEnvelope tail = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(UUID.randomUUID())
+                .type("thought.step")
+                .payload(objectMapper.createObjectNode()
+                        .put("phase", "intent.resolve.llm")
+                        .put("summary", "Resolving the user request against governed context."))
+                .build();
+
+        String message = ReflectionTestUtils.invokeMethod(service(), "processingProgressMessage", tail, 32L);
+
+        org.assertj.core.api.Assertions.assertThat(message)
+                .contains("A LLM esta revisando a intencao com as evidencias governadas")
+                .contains("32 segundos")
+                .doesNotContain("Resolving the user request")
+                .doesNotContain("backend-processing-progress-watchdog");
+    }
+
+    @Test
+    void processingProgressMessageExplainsSkippedAuthoringEvidenceWithCuratedText() {
+        AiTurnEventEnvelope tail = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(UUID.randomUUID())
+                .type("thought.step")
+                .payload(objectMapper.createObjectNode()
+                        .put("phase", "authoringEvidence.skipped")
+                        .put("summary", "No component selected."))
+                .build();
+
+        String message = ReflectionTestUtils.invokeMethod(service(), "processingProgressMessage", tail, 33L);
+
+        org.assertj.core.api.Assertions.assertThat(message)
+                .contains("Nao ha componente selecionado")
+                .contains("recurso governado")
+                .contains("33 segundos")
+                .doesNotContain("Ainda estou processando")
+                .doesNotContain("No component selected");
+    }
+
+    @Test
+    void processingProgressMessageExplainsComponentCapabilityLoadingWithCuratedText() {
+        AiTurnEventEnvelope tail = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(UUID.randomUUID())
+                .type("thought.step")
+                .payload(objectMapper.createObjectNode()
+                        .put("phase", "component.capabilities")
+                        .put("summary", "Loaded governed component capabilities."))
+                .build();
+
+        String heartbeat = ReflectionTestUtils.invokeMethod(service(), "heartbeatSummary", tail);
+        String progress = ReflectionTestUtils.invokeMethod(service(), "processingProgressMessage", tail, 41L);
+
+        org.assertj.core.api.Assertions.assertThat(heartbeat)
+                .contains("capacidades governadas dos componentes")
+                .doesNotContain("Loaded governed component capabilities");
+        org.assertj.core.api.Assertions.assertThat(progress)
+                .contains("capacidades governadas dos componentes")
+                .contains("41 segundos")
+                .doesNotContain("Loaded governed component capabilities");
+    }
+
+    @Test
+    void processingProgressSkipsTailThatWasSupersededByIntentResolved() {
+        UUID streamId = UUID.randomUUID();
+        AiTurnEventEnvelope staleLlmTail = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(streamId)
+                .seq(10L)
+                .timestamp(Instant.now())
+                .type("thought.step")
+                .payload(objectMapper.createObjectNode()
+                        .put("phase", "intent.resolve.llm")
+                        .put("summary", "Resolving the user request against governed context."))
+                .build();
+        AiTurnEventEnvelope intentResolved = AiTurnEventEnvelope.builder()
+                .eventId(UUID.randomUUID())
+                .streamId(streamId)
+                .seq(11L)
+                .timestamp(Instant.now())
+                .type("intent.resolved")
+                .payload(objectMapper.createObjectNode())
+                .build();
+        when(turnEventService.findLastEvent(streamId)).thenReturn(Optional.of(intentResolved));
+
+        Boolean stillLatest = ReflectionTestUtils.invokeMethod(
+                service(),
+                "isStillLatestEvent",
+                streamId,
+                staleLlmTail);
+
+        org.assertj.core.api.Assertions.assertThat(stillLatest).isFalse();
+    }
+
+    @Test
+    void processingProgressAppendRejectsObservedEventThatIsNoLongerLatest() {
+        UUID observedEventId = UUID.randomUUID();
+        UUID latestEventId = UUID.randomUUID();
+        ObjectNode payload = objectMapper.createObjectNode()
+                .put("phase", "preview.plan")
+                .put("message", "Estou planejando como materializar a decisao em uma pre-visualizacao revisavel.");
+        payload.putObject("diagnostics")
+                .put("source", "backend-processing-progress-watchdog")
+                .put("observedEventId", observedEventId.toString())
+                .put("observedSeq", 23L);
+        AiTurnEventEnvelope latestEvent = AiTurnEventEnvelope.builder()
+                .eventId(latestEventId)
+                .streamId(UUID.randomUUID())
+                .seq(24L)
+                .timestamp(Instant.now())
+                .type("status")
+                .payload(objectMapper.createObjectNode()
+                        .put("phase", "preview.compile"))
+                .build();
+
+        Boolean stale = ReflectionTestUtils.invokeMethod(
+                service(),
+                "isStaleProcessingProgress",
+                payload,
+                latestEvent);
+
+        org.assertj.core.api.Assertions.assertThat(stale).isTrue();
     }
 
     @Test

@@ -69,6 +69,16 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         if (!deterministicMessage.isBlank()) {
             return deterministicMessage;
         }
+        String governedMaterializationMessage = deterministicGovernedMaterializationMessage(
+                request,
+                intentResolution,
+                uiCompositionPlan,
+                valid,
+                failureCodes,
+                warnings);
+        if (!governedMaterializationMessage.isBlank()) {
+            return governedMaterializationMessage;
+        }
         if (request == null || request.userPrompt() == null || request.userPrompt().isBlank()) {
             return fallback;
         }
@@ -201,7 +211,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         }
         message.append("\n- Preservei a dimensao, a metrica e o recorte atual do grafico.");
         message.append("\n- Proximo passo: revise a visualizacao ou escolha outra acao sugerida.");
-        return sanitizeTechnicalLanguage(message.toString(), intentResolution);
+        return AgenticAuthoringPresentationText.assistantReply(sanitizeTechnicalLanguage(message.toString(), intentResolution));
     }
 
     private boolean isChartSurfaceOpenModification(
@@ -254,6 +264,9 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
             return result;
         }
         for (JsonNode axis : axes) {
+            if (axis.path("materialized").isBoolean() && !axis.path("materialized").asBoolean()) {
+                continue;
+            }
             ObjectNode item = objectMapper.createObjectNode();
             item.put("concept", text(axis, "concept"));
             item.put("requestedField", text(axis, "requestedField"));
@@ -371,7 +384,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         message.append(", sem tabela, filtros ou KPIs.");
         message.append("\n- Validacao: usei apenas campos confirmados para a pre-visualizacao.");
         message.append("\n- Proximo passo: revise o grafico ou peça outro ajuste.");
-        return sanitizeTechnicalLanguage(message.toString(), intentResolution);
+        return AgenticAuthoringPresentationText.assistantReply(sanitizeTechnicalLanguage(message.toString(), intentResolution));
     }
 
     private boolean isSingleChartPlan(JsonNode uiCompositionPlan) {
@@ -416,6 +429,154 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         return field.isBlank() ? "" : titleFromResourcePath("/" + field);
     }
 
+    private String deterministicGovernedMaterializationMessage(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            JsonNode uiCompositionPlan,
+            boolean valid,
+            List<String> failureCodes,
+            List<String> warnings) {
+        if (!valid
+                || intentResolution == null
+                || intentResolution.selectedCandidate() == null
+                || uiCompositionPlan == null
+                || uiCompositionPlan.isMissingNode()
+                || uiCompositionPlan.isNull()
+                || isLocalEditorialComposition(request, intentResolution, warnings)
+                || (failureCodes != null && !failureCodes.isEmpty())
+                || !hasGovernedResolvedCandidate(intentResolution)) {
+            return "";
+        }
+        String sourceLabel = selectedResourceLabel(intentResolution);
+        String componentSummary = materializedComponentSummary(uiCompositionPlan);
+        if (sourceLabel.isBlank() || componentSummary.isBlank()) {
+            return "";
+        }
+        String goal = authoringGoal(request, intentResolution);
+        StringBuilder message = new StringBuilder("Montei uma pre-visualizacao governada");
+        if (!goal.isBlank()) {
+            message.append(" para ").append(stripTrailingSentencePunctuation(lowercaseFirst(goal)));
+        }
+        message.append(".");
+        message.append("\n\n- Fonte governada: ").append(sourceLabel).append(".");
+        message.append("\n- Materializacao: ").append(componentSummary).append(".");
+        message.append("\n- Validacao: usei a decisao semantica e os campos confirmados disponiveis.");
+        message.append("\n- Proximo passo: revise a pre-visualizacao, peça ajustes ou salve quando estiver ok.");
+        return AgenticAuthoringPresentationText.assistantReply(sanitizeTechnicalLanguage(message.toString(), intentResolution));
+    }
+
+    private boolean hasGovernedResolvedCandidate(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null || intentResolution.selectedCandidate() == null) {
+            return false;
+        }
+        List<String> warnings = intentResolution.warnings();
+        if (containsWarning(warnings, "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence")
+                && containsWarning(warnings, "llm-pre-intent-resource-discovery-used")) {
+            return true;
+        }
+        return containsWarning(warnings, "llm-fast-intent-resolution-used")
+                && containsCandidateEvidence(intentResolution.selectedCandidate(), "tool-search-api-resources")
+                && containsCandidateEvidence(intentResolution.selectedCandidate(), "schema-available");
+    }
+
+    private boolean containsCandidateEvidence(AgenticAuthoringCandidate candidate, String evidence) {
+        return candidate != null
+                && candidate.evidence() != null
+                && candidate.evidence().contains(evidence);
+    }
+
+    private String materializedComponentSummary(JsonNode uiCompositionPlan) {
+        JsonNode widgets = uiCompositionPlan == null ? MissingNode.getInstance() : uiCompositionPlan.path("widgets");
+        if (!widgets.isArray() || widgets.isEmpty()) {
+            return "";
+        }
+        List<String> componentKinds = new java.util.ArrayList<>();
+        for (JsonNode widget : widgets) {
+            String kind = userFacingComponentKind(text(widget, "componentId"));
+            if (!kind.isBlank() && !componentKinds.contains(kind)) {
+                componentKinds.add(kind);
+            }
+        }
+        return humanJoin(componentKinds);
+    }
+
+    private String authoringGoal(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        AgenticAuthoringSemanticDecision semanticDecision =
+                intentResolution == null ? null : intentResolution.semanticDecision();
+        String goal = semanticDecision == null ? "" : value(semanticDecision.userGoal());
+        String originalPrompt = request == null ? "" : value(request.userPrompt());
+        goal = collapseRepeatedAdjacentText(goal);
+        if (!goal.isBlank() && goal.equalsIgnoreCase(originalPrompt)) {
+            goal = "";
+        }
+        if (goal.isBlank()) {
+            String effectivePrompt = intentResolution == null ? "" : value(intentResolution.effectivePrompt());
+            if (!effectivePrompt.equalsIgnoreCase(originalPrompt)) {
+                goal = collapseRepeatedAdjacentText(effectivePrompt);
+            }
+        }
+        goal = goal.replaceAll("\\s+", " ").trim();
+        goal = collapseRepeatedAdjacentText(goal);
+        if (!goal.isBlank() && goal.equalsIgnoreCase(originalPrompt)) {
+            goal = "";
+        }
+        return goal.length() > 120 ? "" : goal;
+    }
+
+    private String collapseRepeatedAdjacentText(String text) {
+        String normalized = value(text).replaceAll("\\s+", " ").trim();
+        if (normalized.isBlank()) {
+            return "";
+        }
+        String[] words = normalized.split(" ");
+        if (words.length > 1 && words.length % 2 == 0) {
+            int half = words.length / 2;
+            boolean repeated = true;
+            for (int i = 0; i < half; i++) {
+                if (!words[i].equalsIgnoreCase(words[i + half])) {
+                    repeated = false;
+                    break;
+                }
+            }
+            if (repeated) {
+                return String.join(" ", java.util.Arrays.copyOfRange(words, 0, half));
+            }
+        }
+        int mid = normalized.length() / 2;
+        if (normalized.length() % 2 == 0) {
+            String first = normalized.substring(0, mid).trim();
+            String second = normalized.substring(mid).trim();
+            if (!first.isBlank() && first.equalsIgnoreCase(second)) {
+                return first;
+            }
+        }
+        return normalized;
+    }
+
+    private String humanJoin(List<String> values) {
+        List<String> safeValues = values == null
+                ? List.of()
+                : values.stream()
+                        .map(this::value)
+                        .filter(item -> !item.isBlank())
+                        .distinct()
+                        .toList();
+        if (safeValues.isEmpty()) {
+            return "";
+        }
+        if (safeValues.size() == 1) {
+            return safeValues.get(0);
+        }
+        if (safeValues.size() == 2) {
+            return safeValues.get(0) + " e " + safeValues.get(1);
+        }
+        return String.join(", ", safeValues.subList(0, safeValues.size() - 1))
+                + " e "
+                + safeValues.get(safeValues.size() - 1);
+    }
+
     private String safeMessage(String generated, String fallback) {
         String message = value(generated)
                 .replace("```", "")
@@ -458,8 +619,9 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
                 .replaceAll("(?i)salvar o dashboard", "salvar a pré-visualização")
                 .replaceAll("(?i)\\bschema\\b", "campos confirmados")
                 .replaceAll("(?i)\\bwarnings?\\b", "pontos de revisao")
-                .replaceAll("\\s{2,}", " ")
-                .replaceAll("\\s+([,.;:])", "$1")
+                .replaceAll("[\\t ]{2,}", " ")
+                .replaceAll("[\\t ]+([,.;:])", "$1")
+                .replaceAll("\\n{3,}", "\n\n")
                 .trim();
         return sanitized.length() > MAX_MESSAGE_LENGTH ? value.substring(0, MAX_MESSAGE_LENGTH).trim() : sanitized;
     }
@@ -570,6 +732,18 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
     private String text(JsonNode node, String field) {
         JsonNode value = node == null ? null : node.path(field);
         return value != null && value.isTextual() ? value.asText() : "";
+    }
+
+    private String lowercaseFirst(String value) {
+        String text = value(value);
+        if (text.isBlank()) {
+            return "";
+        }
+        return text.substring(0, 1).toLowerCase(Locale.ROOT) + text.substring(1);
+    }
+
+    private String stripTrailingSentencePunctuation(String value) {
+        return value(value).replaceAll("[.!?]+$", "").trim();
     }
 
     private String value(String value) {

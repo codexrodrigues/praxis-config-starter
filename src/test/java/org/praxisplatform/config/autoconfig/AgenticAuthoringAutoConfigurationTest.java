@@ -32,6 +32,7 @@ import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @Tag("unit")
 class AgenticAuthoringAutoConfigurationTest {
@@ -63,6 +64,30 @@ class AgenticAuthoringAutoConfigurationTest {
             assertThat(context).doesNotHaveBean(AgenticAuthoringReplayAuditService.class);
             assertThat(context).doesNotHaveBean(ApplicationRunner.class);
         });
+    }
+
+    @Test
+    void shouldUseLongerDefaultComponentCapabilitiesCacheTtlForAuthoringSessions() {
+        contextRunner.run(context -> {
+            AgenticAuthoringComponentCapabilitiesService service =
+                    context.getBean(AgenticAuthoringComponentCapabilitiesService.class);
+
+            assertThat(ReflectionTestUtils.getField(service, "cacheTtlMs"))
+                    .isEqualTo(600_000L);
+        });
+    }
+
+    @Test
+    void shouldAllowComponentCapabilitiesCacheTtlOverride() {
+        contextRunner
+                .withPropertyValues("praxis.ai.authoring.component-capabilities.cache-ttl-ms=1234")
+                .run(context -> {
+                    AgenticAuthoringComponentCapabilitiesService service =
+                            context.getBean(AgenticAuthoringComponentCapabilitiesService.class);
+
+                    assertThat(ReflectionTestUtils.getField(service, "cacheTtlMs"))
+                            .isEqualTo(1_234L);
+                });
     }
 
     @Test

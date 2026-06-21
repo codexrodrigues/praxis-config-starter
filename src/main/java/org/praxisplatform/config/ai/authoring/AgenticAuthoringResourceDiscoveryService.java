@@ -14,6 +14,8 @@ import org.praxisplatform.config.service.AiPrincipalContext;
 public class AgenticAuthoringResourceDiscoveryService {
 
     private static final String TOOL_NAME = "searchApiResources";
+    private static final int MIN_GROUNDING_WORK_LIMIT = 8;
+    private static final int GROUNDING_OVERSAMPLE = 4;
 
     private final AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog;
     private final ObjectMapper objectMapper;
@@ -68,8 +70,10 @@ public class AgenticAuthoringResourceDiscoveryService {
     public AgenticAuthoringResourceCandidatesResult search(
             AgenticAuthoringResourceCandidatesRequest request,
             AiPrincipalContext principalContext) {
+        long startedAtNanos = System.nanoTime();
         String retrievalQuery = retrievalQuery(request);
         String artifactKind = artifactKind(request);
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
         List<String> warnings = new ArrayList<>();
         if (retrievalQuery.isBlank()) {
             warnings.add("resource-discovery-query-required");
@@ -83,6 +87,8 @@ public class AgenticAuthoringResourceDiscoveryService {
                     List.of(),
                     List.copyOf(warnings));
         }
+        int limit = limit(request);
+        long catalogStartedAtNanos = System.nanoTime();
         List<AgenticAuthoringCandidate> candidates = candidateCatalog == null
                 ? List.of()
                 : candidateCatalog.discover(
@@ -91,22 +97,33 @@ public class AgenticAuthoringResourceDiscoveryService {
                         principalContext == null ? null : principalContext.tenantId(),
                         principalContext == null ? null : principalContext.environment(),
                         null);
+        diagnostics.put("catalogDiscoveryElapsedMs", elapsedMs(catalogStartedAtNanos));
+        diagnostics.put("catalogCandidateCount", candidates.size());
+        diagnostics.put("preGroundingCandidateCount", candidates.size());
+        long groundingStartedAtNanos = System.nanoTime();
         candidates = groundCandidates(
                 retrievalQuery,
                 candidates,
                 principalContext == null ? null : principalContext.tenantId(),
-                principalContext == null ? null : principalContext.environment());
+                principalContext == null ? null : principalContext.environment(),
+                groundingWorkLimit(candidates, limit),
+                diagnostics);
+        diagnostics.put("groundingElapsedMs", elapsedMs(groundingStartedAtNanos));
+        diagnostics.put("groundedCandidateCount", candidates.size());
+        diagnostics.put("domainCatalogGroundedCandidateCount", domainCatalogGroundedCandidateCount(candidates));
+        long consultativeProjectionStartedAtNanos = System.nanoTime();
         AgenticAuthoringConsultativeApiCatalogProjection consultativeProjection = consultativeProjection(
                 retrievalQuery,
                 artifactKind,
                 candidates,
                 principalContext == null ? null : principalContext.tenantId(),
                 principalContext == null ? null : principalContext.environment());
+        diagnostics.put("consultativeProjectionElapsedMs", elapsedMs(consultativeProjectionStartedAtNanos));
+        diagnostics.put("consultativeProjectionUsed", consultativeProjection != null && consultativeProjection.hasResources());
         if (consultativeProjection != null && consultativeProjection.hasResources()) {
             warnings.add("domain-api-consultative-projection-used");
             warnings.addAll(consultativeProjection.warnings());
         }
-        int limit = limit(request);
         if (candidates.size() > limit) {
             candidates = candidates.subList(0, limit);
             warnings.add("resource-candidates-limited");
@@ -114,7 +131,12 @@ public class AgenticAuthoringResourceDiscoveryService {
         if (candidates.isEmpty()) {
             warnings.add("resource-candidates-empty");
         }
+        long quickRepliesStartedAtNanos = System.nanoTime();
         List<AgenticAuthoringQuickReply> quickReplies = candidateResourceQuickReplies(candidates, artifactKind, retrievalQuery);
+        diagnostics.put("quickReplyElapsedMs", elapsedMs(quickRepliesStartedAtNanos));
+        diagnostics.put("limitedCandidateCount", candidates.size());
+        diagnostics.put("quickReplyCount", quickReplies.size());
+        diagnostics.put("totalElapsedMs", elapsedMs(startedAtNanos));
         return new AgenticAuthoringResourceCandidatesResult(
                 true,
                 TOOL_NAME,
@@ -125,7 +147,24 @@ public class AgenticAuthoringResourceDiscoveryService {
                 List.copyOf(candidates),
                 quickReplies,
                 List.copyOf(warnings),
-                consultativeProjection);
+                request.resourceSearchFocus(),
+                consultativeProjection,
+                diagnostics);
+    }
+
+    private long elapsedMs(long startedAtNanos) {
+        return Math.max(0L, (System.nanoTime() - startedAtNanos) / 1_000_000L);
+    }
+
+    private int domainCatalogGroundedCandidateCount(List<AgenticAuthoringCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return 0;
+        }
+        return (int) candidates.stream()
+                .filter(candidate -> hasEvidence(
+                        candidate,
+                        AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING))
+                .count();
     }
 
     private AgenticAuthoringConsultativeApiCatalogProjection consultativeProjection(
@@ -149,12 +188,46 @@ public class AgenticAuthoringResourceDiscoveryService {
             String retrievalQuery,
             List<AgenticAuthoringCandidate> candidates,
             String tenantId,
-            String environment) {
+            String environment,
+            int groundingWorkLimit,
+            Map<String, Object> diagnostics) {
         if (domainCatalogCandidateEnhancer == null || candidates == null || candidates.isEmpty()) {
+            putGroundingWorkDiagnostics(diagnostics, candidates, candidates == null ? 0 : candidates.size());
             return candidates == null ? List.of() : candidates;
         }
-        return pruneWeakLexicalCandidatesWhenGrounded(
-                domainCatalogCandidateEnhancer.enhance(retrievalQuery, candidates, tenantId, environment));
+        int effectiveLimit = Math.max(1, Math.min(candidates.size(), groundingWorkLimit));
+        putGroundingWorkDiagnostics(diagnostics, candidates, effectiveLimit);
+        List<AgenticAuthoringCandidate> groundingInput = candidates.subList(0, effectiveLimit);
+        List<AgenticAuthoringCandidate> grounded = pruneWeakLexicalCandidatesWhenGrounded(
+                domainCatalogCandidateEnhancer.enhance(retrievalQuery, groundingInput, tenantId, environment));
+        if (effectiveLimit >= candidates.size()) {
+            return grounded;
+        }
+        List<AgenticAuthoringCandidate> merged = new ArrayList<>(grounded.size() + candidates.size() - effectiveLimit);
+        merged.addAll(grounded);
+        merged.addAll(candidates.subList(effectiveLimit, candidates.size()));
+        return merged;
+    }
+
+    private int groundingWorkLimit(List<AgenticAuthoringCandidate> candidates, int resultLimit) {
+        if (candidates == null || candidates.isEmpty()) {
+            return 0;
+        }
+        int requestedLimit = Math.max(1, resultLimit);
+        int workLimit = Math.max(MIN_GROUNDING_WORK_LIMIT, requestedLimit + GROUNDING_OVERSAMPLE);
+        return Math.min(candidates.size(), workLimit);
+    }
+
+    private void putGroundingWorkDiagnostics(
+            Map<String, Object> diagnostics,
+            List<AgenticAuthoringCandidate> candidates,
+            int groundingInputCandidateCount) {
+        if (diagnostics == null) {
+            return;
+        }
+        int candidateCount = candidates == null ? 0 : candidates.size();
+        diagnostics.put("groundingInputCandidateCount", Math.max(0, groundingInputCandidateCount));
+        diagnostics.put("groundingSkippedCandidateCount", Math.max(0, candidateCount - groundingInputCandidateCount));
     }
 
     private List<AgenticAuthoringCandidate> pruneWeakLexicalCandidatesWhenGrounded(

@@ -192,14 +192,18 @@ public class AgenticAuthoringToolRegistry {
                         "searchApiResources requires AgenticAuthoringResourceCandidatesRequest payload.");
             }
             AgenticAuthoringResourceCandidatesResult result = resourceDiscoveryService.search(request, principalContext);
+            Map<String, Object> diagnostics = new LinkedHashMap<>();
+            diagnostics.put("candidateCount", result.candidates() != null ? result.candidates().size() : 0);
+            diagnostics.put("artifactKind", result.artifactKind() != null ? result.artifactKind() : "");
+            diagnostics.put("retrievalQuery", result.retrievalQuery() != null ? result.retrievalQuery() : "");
+            diagnostics.put("retrievalSource", AgenticAuthoringCandidateProvenancePolicy.retrievalSource(result.candidates()));
+            if (result.diagnostics() != null && !result.diagnostics().isEmpty()) {
+                diagnostics.put("resourceDiscoveryDiagnostics", result.diagnostics());
+            }
             return AgenticAuthoringToolResult.success(
                     call.name(),
                     result,
-                    Map.of(
-                            "candidateCount", result.candidates() != null ? result.candidates().size() : 0,
-                            "artifactKind", result.artifactKind() != null ? result.artifactKind() : "",
-                            "retrievalQuery", result.retrievalQuery() != null ? result.retrievalQuery() : "",
-                            "retrievalSource", AgenticAuthoringCandidateProvenancePolicy.retrievalSource(result.candidates())));
+                    diagnostics);
         }
     }
 

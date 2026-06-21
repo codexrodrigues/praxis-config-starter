@@ -8,6 +8,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.AiProviderCatalogItem;
@@ -36,6 +39,7 @@ public class AiProviderManagementService {
     private static final String TEST_PROMPT = "ping";
     private static final String GLOBAL_CONFIG_COMPONENT_TYPE = "praxis-global-config-editor";
     private static final String GLOBAL_CONFIG_KEY = "praxis:global-config";
+    private static final int DEFAULT_STORED_CONFIG_LOOKUP_TIMEOUT_SECONDS = 3;
 
     @Value("${praxis.ai.provider:gemini}")
     private String defaultProvider;
@@ -82,7 +86,7 @@ public class AiProviderManagementService {
             String tenantId,
             String userId,
             String environment) {
-        StoredAiConfig stored = resolveStoredConfig(tenantId, userId, environment);
+        StoredAiConfig stored = resolveStoredConfigSafely(tenantId, userId, environment, null);
         String provider = resolveProviderName(
                 request != null ? request.getProvider() : null,
                 stored != null ? stored.provider() : null);
@@ -119,7 +123,7 @@ public class AiProviderManagementService {
             String tenantId,
             String userId,
             String environment) {
-        StoredAiConfig stored = resolveStoredConfig(tenantId, userId, environment);
+        StoredAiConfig stored = resolveStoredConfigSafely(tenantId, userId, environment, null);
         String provider = resolveProviderName(
                 request != null ? request.getProvider() : null,
                 stored != null ? stored.provider() : null);
@@ -161,7 +165,11 @@ public class AiProviderManagementService {
             String tenantId,
             String userId,
             String environment) {
-        StoredAiConfig stored = resolveStoredConfig(tenantId, userId, environment);
+        StoredAiConfig stored = resolveStoredConfigSafely(
+                tenantId,
+                userId,
+                environment,
+                requestConfig != null ? requestConfig.getTimeoutSeconds() : null);
         String provider = resolveProviderName(
                 requestConfig != null ? requestConfig.getProvider() : null,
                 stored != null ? stored.provider() : null);
@@ -189,7 +197,11 @@ public class AiProviderManagementService {
             String tenantId,
             String userId,
             String environment) {
-        StoredAiConfig stored = resolveStoredConfig(tenantId, userId, environment);
+        StoredAiConfig stored = resolveStoredConfigSafely(
+                tenantId,
+                userId,
+                environment,
+                requestConfig != null ? requestConfig.getTimeoutSeconds() : null);
         String provider = resolveProviderName(
                 requestConfig != null ? requestConfig.getProvider() : null,
                 stored != null ? stored.provider() : null);
@@ -533,6 +545,42 @@ public class AiProviderManagementService {
             }
         }
         return null;
+    }
+
+    private StoredAiConfig resolveStoredConfigSafely(
+            String tenantId,
+            String userId,
+            String environment,
+            Integer callTimeoutSeconds) {
+        String resolvedTenant = trimToNull(tenantId);
+        if (resolvedTenant == null || userConfigService == null) {
+            return null;
+        }
+        int timeoutSeconds = storedConfigLookupTimeoutSeconds(callTimeoutSeconds);
+        CompletableFuture<StoredAiConfig> lookup = CompletableFuture.supplyAsync(
+                () -> resolveStoredConfig(tenantId, userId, environment));
+        try {
+            return lookup.get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (TimeoutException timeoutException) {
+            lookup.cancel(true);
+            log.warn(
+                    "[AiProviderManagement] Stored AI config lookup timed out after {}s; continuing with request/default provider config.",
+                    timeoutSeconds);
+            return null;
+        } catch (Exception ex) {
+            lookup.cancel(true);
+            log.warn(
+                    "[AiProviderManagement] Stored AI config lookup failed; continuing with request/default provider config. reason={}",
+                    safeErrorMessage(ex));
+            return null;
+        }
+    }
+
+    private int storedConfigLookupTimeoutSeconds(Integer callTimeoutSeconds) {
+        if (callTimeoutSeconds == null || callTimeoutSeconds <= 0) {
+            return DEFAULT_STORED_CONFIG_LOOKUP_TIMEOUT_SECONDS;
+        }
+        return Math.max(1, Math.min(DEFAULT_STORED_CONFIG_LOOKUP_TIMEOUT_SECONDS, callTimeoutSeconds));
     }
 
     private List<String> buildGlobalConfigIds(String tenantId) {

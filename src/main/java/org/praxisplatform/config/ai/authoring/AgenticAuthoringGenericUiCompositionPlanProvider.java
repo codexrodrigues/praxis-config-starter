@@ -89,7 +89,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             case "table" -> dashboardMaterialization
                     ? dashboardPlan(request, candidate, visualizationDecision)
                     : tablePlan(candidate);
-            case "page" -> pagePlan(candidate);
+            case "page" -> pagePlan(candidate, visualizationDecision);
             default -> dashboardMaterialization
                     ? dashboardPlan(request, candidate, visualizationDecision)
                     : tablePlan(candidate);
@@ -421,11 +421,55 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         return plan;
     }
 
-    private ObjectNode pagePlan(AgenticAuthoringCandidate candidate) {
+    private ObjectNode pagePlan(
+            AgenticAuthoringCandidate candidate,
+            AgenticAuthoringVisualizationDecision visualizationDecision) {
+        if (shouldMaterializeProfilePage(visualizationDecision)) {
+            return profilePagePlan(candidate);
+        }
+        if (isPrimaryComponent(visualizationDecision, "praxis-list")) {
+            return listPagePlan(candidate);
+        }
         ObjectNode plan = basePlan("resource-master-detail");
         ArrayNode widgets = plan.putArray("widgets");
         addTable(widgets, candidate, widgetKey(candidate, "master"), "master");
         addDetail(widgets, candidate, widgetKey(candidate, "detail"));
+        return plan;
+    }
+
+    private ObjectNode profilePagePlan(AgenticAuthoringCandidate candidate) {
+        ObjectNode plan = basePlan("resource-profile-page");
+        ArrayNode widgets = plan.putArray("widgets");
+        String summaryKey = widgetKey(candidate, "profile-summary");
+        String detailKey = widgetKey(candidate, "profile-detail");
+        addProfileSummary(widgets, candidate, summaryKey);
+        addDetail(widgets, candidate, detailKey);
+        ObjectNode canvas = plan.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.put("rowUnit", "72px");
+        canvas.put("gap", "16px");
+        ObjectNode items = canvas.putObject("items");
+        putCanvasItem(items, summaryKey, 1, 1, 12, 2);
+        putCanvasItem(items, detailKey, 1, 3, 12, 6);
+        ObjectNode options = plan.putObject("layoutPresetOptions");
+        options.put("presetFamily", "profile-detail");
+        options.put("sourceResource", businessResourcePath(candidate.resourcePath()));
+        options.put("density", "comfortable");
+        return plan;
+    }
+
+    private ObjectNode listPagePlan(AgenticAuthoringCandidate candidate) {
+        ObjectNode plan = basePlan("resource-list-page");
+        ArrayNode widgets = plan.putArray("widgets");
+        String listKey = widgetKey(candidate, "list");
+        addList(widgets, candidate, listKey, "primary", List.of());
+        ObjectNode canvas = plan.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.put("rowUnit", "72px");
+        canvas.put("gap", "16px");
+        putCanvasItem(canvas.putObject("items"), listKey, 1, 1, 12, 8);
         return plan;
     }
 
@@ -1642,6 +1686,31 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 + ". Use os filtros para refinar indicadores, graficos, lista e tabela. Selecione pontos do grafico para abrir uma exploracao contextual em modal e sincronizar os detalhes.");
     }
 
+    private void addProfileSummary(ArrayNode widgets, AgenticAuthoringCandidate candidate, String key) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", key);
+        widget.put("componentId", "praxis-rich-content");
+        widget.put("role", "summary");
+        ObjectNode document = richContentDocument(widget.putObject("inputs"));
+        ObjectNode card = document.putArray("nodes").addObject();
+        card.put("type", "card");
+        card.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
+        card.put("subtitle", "Ficha de perfil");
+        card.put("variant", "filled");
+        card.put("tone", "info");
+        card.put("size", "sm");
+        card.put("density", "comfortable");
+        card.put("orientation", "horizontal");
+        card.putObject("media")
+                .put("kind", "icon")
+                .put("icon", "badge")
+                .put("placement", "leading");
+        ArrayNode content = card.putArray("content");
+        content.addObject()
+                .put("type", "text")
+                .put("text", "Resumo individual conectado a fonte governada selecionada. Use a ficha abaixo para consultar os campos confirmados do perfil.");
+    }
+
     private ObjectNode richContentDocument(ObjectNode inputs) {
         ObjectNode document = inputs.putObject("document");
         document.put("kind", "praxis.rich-content");
@@ -2698,6 +2767,18 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         return visualizationDecision.excludedComponentIds().stream()
                 .map(this::normalize)
                 .anyMatch(expected::equals);
+    }
+
+    private boolean shouldMaterializeProfilePage(AgenticAuthoringVisualizationDecision visualizationDecision) {
+        if (visualizationDecision == null) {
+            return false;
+        }
+        return isPrimaryComponent(visualizationDecision, "praxis-page-builder")
+                && (hasVisualIntent(visualizationDecision, "profile", "perfil", "ficha", "detail")
+                || hasLayoutKind(visualizationDecision, "single-column", "single_column"))
+                && excludesComponent(visualizationDecision, "praxis-table")
+                && excludesComponent(visualizationDecision, "praxis-list")
+                && excludesComponent(visualizationDecision, "praxis-chart");
     }
 
     private boolean hasLayoutKind(

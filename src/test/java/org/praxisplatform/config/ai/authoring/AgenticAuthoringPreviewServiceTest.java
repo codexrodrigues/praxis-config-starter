@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.praxisplatform.config.dto.AiSchemaContext;
@@ -468,6 +469,274 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewAcceptsCrudPrimaryComponentWhenMaterializedAsMasterDetailComposition() throws Exception {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0");
+        plan.put("kind", "praxis.ui-composition-plan");
+        ArrayNode planWidgets = plan.putArray("widgets");
+        planWidgets.addObject().put("key", "employees-master").put("componentId", "praxis-table");
+        planWidgets.addObject().put("key", "employees-detail").put("componentId", "praxis-dynamic-form");
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        ObjectNode page = compiledFormPatch.putObject("patch").putObject("page");
+        ArrayNode widgets = page.putArray("widgets");
+        ObjectNode table = widgets.addObject();
+        table.put("id", "employees-master");
+        table.putObject("definition").put("id", "praxis-table");
+        ObjectNode form = widgets.addObject();
+        form.put("id", "employees-detail");
+        form.putObject("definition").put("id", "praxis-dynamic-form");
+        AgenticAuthoringUiCompositionPlanProvider provider = ignored -> java.util.Optional.of(
+                new AgenticAuthoringUiCompositionPlanResult(
+                        true,
+                        List.of(),
+                        List.of("ui-composition-plan-provider:test-master-detail"),
+                        plan,
+                        compiledFormPatch));
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter/cursor",
+                "POST",
+                0.93d,
+                "matched employees",
+                List.of("semantic-retrieval", "tool-search-api-resources"));
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "employee_tracking_with_profile_access",
+                "single_column",
+                "praxis-crud",
+                List.of(),
+                true,
+                false,
+                "llm-authored-semantic-decision");
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "create_page",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie uma tela para acompanhar colaboradores e abrir perfil",
+                "Vou montar uma tela de colaboradores.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of("llm-fast-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                visualizationDecision);
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(provider))
+                .preview(new AgenticAuthoringPlanRequest(
+                        "Crie uma tela para acompanhar colaboradores e abrir perfil",
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        null,
+                        intent), "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes())
+                .doesNotContain(AgenticAuthoringSemanticMaterializationPolicy.PRIMARY_COMPONENT_REQUIRED_FAILURE);
+        assertThat(result.warnings()).doesNotContain("semantic-preview-materialization-mismatch");
+        assertThat(result.uiCompositionPlan().path("widgets").toString()).contains("praxis-table", "praxis-dynamic-form");
+    }
+
+    @Test
+    void previewAcceptsPraxisListPrimaryComponentWhenGenericProviderMaterializesListPage() throws Exception {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-perfil-heroi",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-perfil-heroi/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/vw-perfil-heroi/filter/cursor",
+                "POST",
+                0.93d,
+                "matched employee profile",
+                List.of("semantic-retrieval", "tool-search-api-resources", "semantic-role:profile-projection"));
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "Visao resumida de funcionario",
+                "list-page",
+                "praxis-list",
+                List.of(),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+        AgenticAuthoringSemanticDecision semanticDecision = new AgenticAuthoringSemanticDecision(
+                AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                "profile-list-decision",
+                "create",
+                "page",
+                "author_component",
+                new AgenticAuthoringSemanticDecision.SelectedResource(
+                        candidate.resourcePath(),
+                        candidate.operation(),
+                        candidate.schemaUrl(),
+                        candidate.submitUrl(),
+                        candidate.submitMethod()),
+                visualizationDecision,
+                new AgenticAuthoringSemanticDecision.RetrievalEvidence(
+                        "semantic_retrieval",
+                        List.of("tool-search-api-resources"),
+                        1),
+                false,
+                "",
+                "",
+                "");
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "author_component",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "visao resumida de funcionario",
+                "Vou montar uma lista resumida de funcionario.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of("llm-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                visualizationDecision,
+                semanticDecision);
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)))
+                .preview(new AgenticAuthoringPlanRequest(
+                        "visao resumida de funcionario",
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        null,
+                        intent), "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.warnings()).doesNotContain("semantic-preview-materialization-mismatch");
+        assertThat(result.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("resource-list-page");
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-list");
+        assertThat(result.uiCompositionPlan().path("widgets").get(0).path("inputs")
+                .path("config").path("dataSource").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/vw-perfil-heroi");
+    }
+
+    @Test
+    void previewAcceptsPageBuilderPrimaryComponentWhenGenericProviderMaterializesProfilePage() throws Exception {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-perfil-heroi",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-perfil-heroi/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/vw-perfil-heroi/filter/cursor",
+                "POST",
+                0.93d,
+                "matched employee profile",
+                List.of("semantic-retrieval", "tool-search-api-resources", "semantic-role:profile-projection"));
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "employee_profile_page",
+                "single_column",
+                "praxis-page-builder",
+                List.of(),
+                true,
+                false,
+                List.of("praxis-table", "praxis-list", "praxis-chart"),
+                false,
+                false,
+                "llm-authored-semantic-decision");
+        AgenticAuthoringSemanticDecision semanticDecision = new AgenticAuthoringSemanticDecision(
+                AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                "profile-page-decision",
+                "create",
+                "page",
+                "create_page_profile_screen",
+                new AgenticAuthoringSemanticDecision.SelectedResource(
+                        candidate.resourcePath(),
+                        candidate.operation(),
+                        candidate.schemaUrl(),
+                        candidate.submitUrl(),
+                        candidate.submitMethod()),
+                visualizationDecision,
+                new AgenticAuthoringSemanticDecision.RetrievalEvidence(
+                        "semantic_retrieval",
+                        List.of("tool-search-api-resources"),
+                        1),
+                false,
+                "",
+                "",
+                "");
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "create_page_profile_screen",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "quero uma tela de perfil individual do funcionario",
+                "Vou montar uma tela de perfil individual do funcionario.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of("llm-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                visualizationDecision,
+                semanticDecision);
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)))
+                .preview(new AgenticAuthoringPlanRequest(
+                        "quero uma tela de perfil individual do funcionario",
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        null,
+                        intent), "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.warnings()).doesNotContain("semantic-preview-materialization-mismatch");
+        assertThat(result.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("resource-profile-page");
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-rich-content", "praxis-dynamic-form");
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .doesNotContain("praxis-table", "praxis-list", "praxis-chart");
+    }
+
+    @Test
     void previewDescribesGovernanceReviewWithoutBlamingTableContract() throws Exception {
         ObjectNode plan = objectMapper.createObjectNode();
         plan.put("version", "1.0");
@@ -867,6 +1136,64 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewReusesSchemaFetchesDuringSingleUiCompositionPreview() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Quero um painel com indicadores e graficos sobre funcionarios.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                operationalMonitoringDashboardIntentWithoutVisualizationDecision());
+        ObjectNode responseSchema = objectMapper.createObjectNode();
+        ObjectNode responseProperties = responseSchema.putObject("properties");
+        responseProperties.putObject("id").put("type", "integer");
+        responseProperties.putObject("departamentoNome")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Departamento");
+        responseProperties.putObject("cargoNome")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Cargo");
+        responseProperties.putObject("salario").put("type", "number");
+        ObjectNode requestSchema = objectMapper.createObjectNode();
+        ObjectNode requestProperties = requestSchema.putObject("properties");
+        requestProperties.putObject("departamentoNome")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Departamento");
+        List<AiSchemaContext> capturedContexts = new ArrayList<>();
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    capturedContexts.add(context);
+                    JsonNode schema = "request".equals(context.getSchemaType()) ? requestSchema : responseSchema;
+                    return SchemaFetchResult.success(schema, "http://localhost/schemas/filtered");
+                });
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.uiCompositionPlan().path("diagnostics").path("resourceSchemaGrounding").path("verified").asBoolean())
+                .isTrue();
+        assertThat(capturedContexts.stream()
+                .filter(context -> "response".equals(context.getSchemaType()))
+                .count())
+                .isEqualTo(1);
+        assertThat(capturedContexts.stream()
+                .filter(context -> "request".equals(context.getSchemaType()))
+                .count())
+                .isLessThanOrEqualTo(1);
+    }
+
+    @Test
     void previewMaterializesDashboardQualityRepairActionsThroughGenericPlanner() throws Exception {
         ObjectNode contextHints = objectMapper.createObjectNode();
         contextHints.put("source", "dashboard-quality-gate");
@@ -1203,6 +1530,72 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewReleasesPromptAlignmentReviewWhenToolBackedResourceIsSchemaGrounded() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Quero uma tela longa para acompanhar o time e abrir detalhes depois",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                promptAlignedPayrollTableIntent("Quero uma tela longa para acompanhar o time e abrir detalhes depois"));
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("nomeCompleto").put("type", "string");
+        properties.putObject("cargoNome").put("type", "string");
+        properties.putObject("departamentoNome").put("type", "string");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(request.intentResolution().semanticDecision().reviewRequired()).isTrue();
+        assertThat(request.intentResolution().semanticDecision().reviewReason()).isEqualTo("prompt-alignment-selection");
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("semantic-decision-review-required:prompt-alignment-selection");
+        assertThat(result.warnings()).doesNotContain("semantic-decision-review-required");
+    }
+
+    @Test
+    void previewReleasesKeywordFallbackReviewWhenToolBackedResourceIsSchemaGrounded() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Quero uma tela longa para acompanhar o time e abrir detalhes depois",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                governedKeywordFallbackPayrollTableIntent("Quero uma tela longa para acompanhar o time e abrir detalhes depois"));
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("nomeCompleto").put("type", "string");
+        properties.putObject("cargoNome").put("type", "string");
+        properties.putObject("departamentoNome").put("type", "string");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(request.intentResolution().semanticDecision().reviewRequired()).isTrue();
+        assertThat(request.intentResolution().semanticDecision().reviewReason()).isEqualTo("keyword-fallback-fail-safe");
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("semantic-decision-review-required:keyword-fallback-fail-safe");
+        assertThat(result.warnings()).doesNotContain("semantic-decision-review-required");
+    }
+
+    @Test
     void previewGroundsBareGetResourceThroughCanonicalCursorSchema() throws Exception {
         AtomicReference<AiSchemaContext> capturedContext = new AtomicReference<>();
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
@@ -1265,7 +1658,7 @@ class AgenticAuthoringPreviewServiceTest {
                 .preview(request, "tenant", "user", "local", "http://localhost");
 
         assertThat(result.valid()).isTrue();
-        assertThat(result.warnings()).contains("semantic-axis-schema-verification-unsupported-axis");
+        assertThat(result.warnings()).doesNotContain("semantic-axis-schema-verification-unsupported-axis");
         assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
                 .containsExactly(
                         "praxis-rich-content",
@@ -1327,13 +1720,11 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.warnings()).contains("ui-composition-plan-orphan-slot-assignment-removed");
         assertThat(result.uiCompositionPlan().path("diagnostics").path("semanticAxes").toString())
                 .contains("\"field\":\"severidade\"")
-                .contains("\"schemaProbeStatus\":\"unsupported\"");
-        assertThat(result.failureCodes()).contains("semantic-preview-axis-schema-verification-required");
+                .contains("\"schemaProbeStatus\":\"verified\"");
+        assertThat(result.failureCodes()).doesNotContain("semantic-preview-axis-schema-verification-required");
         assertThat(result.assistantMessage())
-                .contains("campos seguros para alguns graficos")
-                .contains("manter a proposta em revisao")
-                .doesNotContain("propriedades incompativeis")
-                .doesNotContain("cards ricos");
+                .contains("Montei uma primeira versao")
+                .doesNotContain("propriedades incompativeis");
     }
 
     @Test
@@ -1488,6 +1879,108 @@ class AgenticAuthoringPreviewServiceTest {
                 .contains("\"field\":\"missao\"")
                 .contains("\"materialized\":false")
                 .contains("\"materializationReason\":\"schema-safe-axis-repair\"");
+    }
+
+    @Test
+    void previewDoesNotKeepDroppedUnresolvedAxisPendingAfterChartRemoval() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "quero visualizar contratos de fornecedores",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                contractsDashboardIntentWithUnresolvedAxis());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("codigoInterno")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Codigo Interno");
+        properties.putObject("descricao")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Descricao");
+        properties.putObject("valorTotal")
+                .put("type", "number")
+                .putObject("x-ui")
+                .put("label", "Valor Total");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(ignored -> java.util.Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                        true,
+                        List.of(),
+                        List.of("ui-composition-plan-provider:test-unresolved-axis"),
+                        unresolvedAxisDashboardPlan(),
+                        objectMapper.createObjectNode()))),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("semantic-preview-axis-schema-verification-required");
+        assertThat(result.warnings())
+                .doesNotContain("semantic-axis-schema-verification-pending")
+                .doesNotContain("semantic-preview-materialization-mismatch");
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(plan)
+                .doesNotContain("\"componentId\":\"praxis-chart\"")
+                .contains("\"componentId\":\"praxis-list\"")
+                .contains("\"componentId\":\"praxis-table\"");
+        assertThat(result.uiCompositionPlan().path("diagnostics").path("semanticAxes").toString())
+                .contains("\"field\":\"unresolved\"")
+                .contains("\"schemaProbeStatus\":\"unsupported\"")
+                .contains("\"materialized\":false")
+                .contains("\"materializationReason\":\"unsupported-semantic-axis\"");
+    }
+
+    @Test
+    void previewDropsOrphanDiagnosticsAxisWhenInferredChartIsRemoved() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "quero acompanhar contratos dos fornecedores",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                contractsDashboardIntentWithUnresolvedAxis());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("codigoInterno").put("type", "string");
+        properties.putObject("descricao").put("type", "string");
+        properties.putObject("valorTotal").put("type", "number");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(ignored -> java.util.Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                        true,
+                        List.of(),
+                        List.of("ui-composition-plan-provider:test-orphan-axis"),
+                        unresolvedAxisDashboardPlanWithOrphanDiagnosticsAxis(),
+                        objectMapper.createObjectNode()))),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).doesNotContain("semantic-preview-axis-schema-verification-required");
+        assertThat(result.warnings())
+                .doesNotContain("semantic-axis-schema-verification-pending")
+                .doesNotContain("semantic-preview-materialization-mismatch");
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .contains("praxis-list", "praxis-table")
+                .doesNotContain("praxis-chart");
+        assertThat(result.uiCompositionPlan().path("diagnostics").path("semanticAxes").toString())
+                .contains("\"field\":\"contratoStatus\"")
+                .contains("\"materialized\":false")
+                .contains("\"materializationReason\":\"chart-axis-not-materialized\"");
     }
 
     @Test
@@ -2131,10 +2624,10 @@ class AgenticAuthoringPreviewServiceTest {
                 .put("label", "Departamento");
         properties.putObject("cargoNome").put("type", "string");
         properties.putObject("salario").put("type", "number");
-        AtomicReference<AiSchemaContext> capturedContext = new AtomicReference<>();
+        List<AiSchemaContext> capturedContexts = new ArrayList<>();
         when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
                 .thenAnswer(invocation -> {
-                    capturedContext.set(invocation.getArgument(0));
+                    capturedContexts.add(invocation.getArgument(0));
                     return SchemaFetchResult.success(schema, "http://localhost/schemas/filtered");
                 });
 
@@ -2148,10 +2641,12 @@ class AgenticAuthoringPreviewServiceTest {
                 .preview(request, "tenant", "user", "local", "http://localhost");
 
         assertThat(result.valid()).isTrue();
-        assertThat(capturedContext.get()).isNotNull();
-        assertThat(capturedContext.get().getPath()).isEqualTo("/api/human-resources/funcionarios/filter/cursor");
-        assertThat(capturedContext.get().getOperation()).isEqualTo("post");
-        assertThat(capturedContext.get().getSchemaType()).isEqualTo("response");
+        assertThat(capturedContexts)
+                .anySatisfy(context -> {
+                    assertThat(context.getPath()).isEqualTo("/api/human-resources/funcionarios/filter/cursor");
+                    assertThat(context.getOperation()).isEqualTo("post");
+                    assertThat(context.getSchemaType()).isEqualTo("response");
+                });
         String plan = result.uiCompositionPlan().toString();
         assertThat(plan)
                 .contains("\"requestedField\":\"departamento\"")
@@ -2370,6 +2865,61 @@ class AgenticAuthoringPreviewServiceTest {
 
     private AgenticAuthoringPreviewService service() {
         return new AgenticAuthoringPreviewService(planService, patchCompilerService);
+    }
+
+    private ObjectNode unresolvedAxisDashboardPlan() {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("kind", "praxis.ui-composition-plan");
+        plan.put("version", "1.0");
+        ArrayNode widgets = plan.putArray("widgets");
+        ObjectNode chart = widgets.addObject();
+        chart.put("key", "contracts-chart");
+        chart.put("componentId", "praxis-chart");
+        ObjectNode chartConfig = chart.putObject("inputs").putObject("config");
+        chartConfig.put("id", "contracts-chart");
+        chartConfig.put("type", "bar");
+        chartConfig.putObject("semanticAxis")
+                .put("concept", "unresolved")
+                .put("field", "unresolved")
+                .put("label", "Unresolved")
+                .put("provenance", "schema-grounding-required")
+                .put("schemaVerified", false)
+                .put("schemaProbeStatus", "pending");
+        chartConfig.putObject("dataSource")
+                .put("kind", "remote")
+                .put("resourcePath", "/api/procurement/contracts")
+                .put("submitUrl", "/api/procurement/contracts/filter/cursor")
+                .put("submitMethod", "post");
+        ObjectNode list = widgets.addObject();
+        list.put("key", "contracts-list");
+        list.put("componentId", "praxis-list");
+        list.putObject("inputs").putObject("config")
+                .putObject("dataSource")
+                .put("resourcePath", "/api/procurement/contracts");
+        ObjectNode table = widgets.addObject();
+        table.put("key", "contracts-table");
+        table.put("componentId", "praxis-table");
+        table.putObject("inputs")
+                .put("resourcePath", "/api/procurement/contracts");
+        ObjectNode diagnostics = plan.putObject("diagnostics");
+        diagnostics.putArray("semanticAxes").addObject()
+                .put("concept", "unresolved")
+                .put("field", "unresolved")
+                .put("label", "Unresolved")
+                .put("provenance", "schema-grounding-required")
+                .put("schemaVerified", false)
+                .put("schemaProbeStatus", "pending");
+        return plan;
+    }
+
+    private ObjectNode unresolvedAxisDashboardPlanWithOrphanDiagnosticsAxis() {
+        ObjectNode plan = unresolvedAxisDashboardPlan();
+        ObjectNode diagnosticsAxis = (ObjectNode) plan.path("diagnostics").path("semanticAxes").path(0);
+        diagnosticsAxis.put("concept", "status do contrato");
+        diagnosticsAxis.put("field", "contratoStatus");
+        diagnosticsAxis.put("label", "Status do contrato");
+        diagnosticsAxis.put("provenance", "llm-authored-semantic-axis");
+        return plan;
     }
 
     private AgenticAuthoringIntentResolutionResult hostUiCompositionIntent() {
@@ -2734,6 +3284,58 @@ class AgenticAuthoringPreviewServiceTest {
                                 "llm-authored-semantic-axis")),
                         false,
                         false,
+                        "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult contractsDashboardIntentWithUnresolvedAxis() {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/procurement/contracts",
+                "post",
+                "/schemas/filtered?path=/api/procurement/contracts/filter/cursor&operation=post&schemaType=response",
+                "/api/procurement/contracts/filter/cursor",
+                "POST",
+                0.95d,
+                "matched procurement contracts",
+                List.of("semantic-retrieval", "tool-search-api-resources"));
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Visualizar contratos de fornecedores em tabela",
+                "Vou criar uma visualizacao de contratos.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "contracts-supplier-overview",
+                        "resource-dashboard",
+                        "praxis-table",
+                        List.of(new AgenticAuthoringVisualizationAxisDecision(
+                                "unresolved",
+                                "unresolved",
+                                "Unresolved",
+                                "bar",
+                                "vertical",
+                                "count",
+                                null,
+                                "Total",
+                                "schema-grounding-required")),
+                        true,
+                        true,
                         "llm-authored-semantic-decision"));
     }
 
@@ -3189,6 +3791,76 @@ class AgenticAuthoringPreviewServiceTest {
                 evidence,
                 "/schemas/filtered?path=/api/human-resources/folhas-pagamento/all&operation=get&schemaType=response",
                 "/api/human-resources/folhas-pagamento/all");
+    }
+
+    private AgenticAuthoringIntentResolutionResult promptAlignedPayrollTableIntent(String effectivePrompt) {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "table",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/folhas-pagamento",
+                        "get",
+                        "/schemas/filtered?path=/api/human-resources/folhas-pagamento/all&operation=get&schemaType=response",
+                        "/api/human-resources/folhas-pagamento/all",
+                        "GET",
+                        0.94d,
+                        "matched payroll table",
+                        List.of("semantic-retrieval", "tool-search-api-resources")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                effectivePrompt,
+                "Vou criar uma tabela operacional.",
+                List.of(),
+                List.of(),
+                List.of("llm-resource-selection-overridden-by-prompt-alignment"),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult governedKeywordFallbackPayrollTableIntent(String effectivePrompt) {
+        ObjectNode llmDiagnostics = objectMapper.createObjectNode();
+        ObjectNode telemetry = llmDiagnostics.putObject("resolutionTelemetry");
+        telemetry.put("schemaVersion", "praxis-agentic-authoring-resolution-telemetry.v1");
+        telemetry.put("llmResolutionAttempted", true);
+        telemetry.put("llmResolved", false);
+        telemetry.put("fallbackPolicy", "fail-safe");
+        telemetry.put("keywordFallbackApplied", true);
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "table",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/folhas-pagamento",
+                        "get",
+                        "/schemas/filtered?path=/api/human-resources/folhas-pagamento/all&operation=get&schemaType=response",
+                        "/api/human-resources/folhas-pagamento/all",
+                        "GET",
+                        0.94d,
+                        "matched payroll table",
+                        List.of("semantic-retrieval", "tool-search-api-resources")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                effectivePrompt,
+                "Vou criar uma tabela operacional.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of("keyword-fallback-applied", "keyword-fallback-fail-safe-applied"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                llmDiagnostics);
     }
 
     private AgenticAuthoringIntentResolutionResult barePayrollGetTableIntent(String effectivePrompt) {

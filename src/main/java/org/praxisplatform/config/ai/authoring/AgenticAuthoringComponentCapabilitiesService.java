@@ -25,7 +25,7 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private static final String SYSTEM_SCOPE_KEY = "GLOBAL";
     private static final int MAX_TRIGGER_TERMS = 18;
     private static final int MAX_OPERATION_CAPABILITIES = 16;
-    private static final long DEFAULT_CACHE_TTL_MS = 60_000L;
+    private static final long DEFAULT_CACHE_TTL_MS = 300_000L;
 
     private final AgenticAuthoringFormCapabilityCatalog formCatalog = AgenticAuthoringFormCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringTableCapabilityCatalog tableCatalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;

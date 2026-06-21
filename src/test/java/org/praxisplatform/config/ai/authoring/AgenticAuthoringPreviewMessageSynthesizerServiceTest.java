@@ -72,6 +72,93 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
     }
 
     @Test
+    void synthesizeReusesGovernedPreIntentDecisionWithoutExtraProviderCall() {
+        String result = service().synthesize(
+                governedPreIntentRequest(),
+                governedPreIntentIntent(),
+                uiCompositionPlan(),
+                true,
+                List.of(),
+                List.of("compiled-form-patch-materialized-by-page-builder"),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result)
+                .contains("pré-visualização governada")
+                .contains("\n\n- Fonte governada")
+                .contains("Fonte governada: Resumo missoes")
+                .contains("Materialização: tabela")
+                .contains("Validação: usei a decisão semântica")
+                .contains("Próximo passo: revise a pré-visualização")
+                .contains("campos confirmados")
+                .doesNotContain("/api/")
+                .doesNotContain("/schemas/")
+                .doesNotContain("schema");
+        org.mockito.Mockito.verify(providerManagementService, org.mockito.Mockito.never()).generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                any(String.class),
+                any(String.class),
+                any(String.class));
+    }
+
+    @Test
+    void synthesizeCollapsesRepeatedSemanticGoalInGovernedMessage() {
+        String result = service().synthesize(
+                governedPreIntentRequest(),
+                governedPreIntentIntentWithRepeatedGoal(),
+                uiCompositionPlan(),
+                true,
+                List.of(),
+                List.of("compiled-form-patch-materialized-by-page-builder"),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result)
+                .contains("pré-visualização governada")
+                .doesNotContain("para quero criar algo que mostre informacoes dos empregados")
+                .doesNotContain("empregados quero criar");
+        org.mockito.Mockito.verify(providerManagementService, org.mockito.Mockito.never()).generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                any(String.class),
+                any(String.class),
+                any(String.class));
+    }
+
+    @Test
+    void synthesizeReusesFastGovernedIntentResolutionWithoutExtraProviderCall() {
+        String result = service().synthesize(
+                governedFastIntentRequest(),
+                governedFastIntent(),
+                uiCompositionPlan(),
+                true,
+                List.of(),
+                List.of("compiled-form-patch-materialized-by-page-builder"),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result)
+                .contains("pré-visualização governada")
+                .contains("Fonte governada: Resumo missoes")
+                .contains("Materialização: tabela")
+                .doesNotContain("/api/")
+                .doesNotContain("/schemas/");
+        org.mockito.Mockito.verify(providerManagementService, org.mockito.Mockito.never()).generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                any(String.class),
+                any(String.class),
+                any(String.class));
+    }
+
+    @Test
     void synthesizeSanitizesTechnicalAddressesFromLlmMessage() {
         when(providerManagementService.generateText(
                 any(String.class),
@@ -174,6 +261,42 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                 .contains("\"schemaLabel\" : \"Severidade\"")
                 .contains("\"schemaProbeStatus\" : \"unsupported\"")
                 .contains("\"field\" : \"andamento\"");
+    }
+
+    @Test
+    void synthesizeDoesNotExposeDroppedSemanticAxisAsUserVisiblePendingWork() {
+        when(providerManagementService.generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("Criei uma visualizacao com tabela e lista usando a fonte governada.");
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        String result = service().synthesize(
+                request(),
+                intent(),
+                uiCompositionPlanWithDroppedSemanticAxis(),
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:generic-resource-dashboard"),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result).contains("visualizacao");
+        org.mockito.Mockito.verify(providerManagementService).generateText(
+                promptCaptor.capture(),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        assertThat(promptCaptor.getValue())
+                .contains("\"semanticAxes\" : [ ]")
+                .doesNotContain("Unresolved")
+                .doesNotContain("\"schemaProbeStatus\" : \"unsupported\"");
     }
 
     @Test
@@ -447,6 +570,26 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                 intent());
     }
 
+    private AgenticAuthoringPlanRequest governedPreIntentRequest() {
+        return new AgenticAuthoringPlanRequest(
+                "quero criar algo que mostre informacoes dos empregados",
+                "openai",
+                "gpt-4.1-mini",
+                "test-key",
+                null,
+                governedPreIntentIntent());
+    }
+
+    private AgenticAuthoringPlanRequest governedFastIntentRequest() {
+        return new AgenticAuthoringPlanRequest(
+                "quero visualizar contratos de fornecedores",
+                "openai",
+                "gpt-4.1-mini",
+                "test-key",
+                null,
+                governedFastIntent());
+    }
+
     private AgenticAuthoringPlanRequest localEditorialRequest() {
         return new AgenticAuthoringPlanRequest(
                 "Crie uma página com tabs usando conteúdo local/editorial de demonstração.",
@@ -482,6 +625,134 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                 List.of(),
                 List.of(),
                 objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult governedPreIntentIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/operations/vw-resumo-missoes",
+                        "post",
+                        "/schemas/filtered?path=/api/operations/vw-resumo-missoes/filter&operation=post&schemaType=response",
+                        "/api/operations/vw-resumo-missoes/filter",
+                        "POST",
+                        0.94d,
+                        "LLM selected the governed candidate from pre-intent retrieval",
+                        List.of("tool-search-api-resources")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "criar uma tela para acompanhar informações de empregados",
+                "Vou montar uma prévia governada.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(
+                        "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                        "llm-pre-intent-resource-discovery-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
+    }
+
+    private AgenticAuthoringIntentResolutionResult governedPreIntentIntentWithRepeatedGoal() {
+        List<String> warnings = List.of(
+                "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                "llm-pre-intent-resource-discovery-used");
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/operations/vw-resumo-missoes",
+                "post",
+                "/schemas/filtered?path=/api/operations/vw-resumo-missoes/filter&operation=post&schemaType=response",
+                "/api/operations/vw-resumo-missoes/filter",
+                "POST",
+                0.94d,
+                "LLM selected the governed candidate from pre-intent retrieval",
+                List.of("tool-search-api-resources", "schema-available"));
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "quero criar algo que mostre informacoes dos empregados",
+                "Vou montar uma prévia governada.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                warnings,
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null,
+                AgenticAuthoringSemanticDecision.from(
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        candidate,
+                        List.of(candidate),
+                        null,
+                        warnings,
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "conversation-1",
+                        "turn-1",
+                        "quero criar algo que mostre informacoes dos empregados quero criar algo que mostre informacoes dos empregados",
+                        "",
+                        "semantic-goal-authored-by-llm",
+                        null));
+    }
+
+    private AgenticAuthoringIntentResolutionResult governedFastIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "table",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/operations/vw-resumo-missoes",
+                        "post",
+                        "/schemas/filtered?path=/api/operations/vw-resumo-missoes/filter&operation=post&schemaType=response",
+                        "/api/operations/vw-resumo-missoes/filter",
+                        "POST",
+                        0.94d,
+                        "Fast semantic intent resolution selected a governed resource candidate",
+                        List.of("tool-search-api-resources", "schema-available")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "visualizar contratos de fornecedores",
+                "Vou montar uma prévia governada.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(
+                        "metadata-probe-not-run",
+                        "llm-intent-resolution-used",
+                        "llm-fast-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
     }
 
     private AgenticAuthoringIntentResolutionResult localEditorialIntent() {
@@ -660,6 +931,20 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
         status.put("label", "Andamento");
         status.put("schemaVerified", false);
         status.put("schemaProbeStatus", "unsupported");
+        return plan;
+    }
+
+    private ObjectNode uiCompositionPlanWithDroppedSemanticAxis() {
+        ObjectNode plan = uiCompositionPlan();
+        ObjectNode diagnostics = plan.putObject("diagnostics");
+        ObjectNode axis = diagnostics.putArray("semanticAxes").addObject();
+        axis.put("concept", "unresolved");
+        axis.put("field", "unresolved");
+        axis.put("label", "Unresolved");
+        axis.put("schemaVerified", false);
+        axis.put("schemaProbeStatus", "unsupported");
+        axis.put("materialized", false);
+        axis.put("materializationReason", "chart-axis-not-materialized");
         return plan;
     }
 

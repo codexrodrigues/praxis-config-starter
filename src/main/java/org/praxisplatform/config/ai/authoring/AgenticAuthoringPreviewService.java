@@ -272,7 +272,8 @@ public class AgenticAuthoringPreviewService {
         if (request == null) {
             return Optional.empty();
         }
-        request = withSchemaFieldContext(request, schemaBaseUrl);
+        PreviewSchemaFetchCache schemaFetchCache = new PreviewSchemaFetchCache(schemaRetrievalService);
+        request = withSchemaFieldContext(request, schemaBaseUrl, schemaFetchCache);
         for (AgenticAuthoringUiCompositionPlanProvider provider : uiCompositionPlanProviders) {
             Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(request);
             if (result.isEmpty()) {
@@ -289,14 +290,20 @@ public class AgenticAuthoringPreviewService {
                     request,
                     planResult.uiCompositionPlan(),
                     warnings,
-                    schemaBaseUrl);
+                    schemaBaseUrl,
+                    schemaFetchCache);
             uiCompositionPlan = verifyResourceSchemaGrounding(
                     request,
                     uiCompositionPlan,
                     warnings,
-                    schemaBaseUrl);
+                    schemaBaseUrl,
+                    schemaFetchCache);
             if (uiCompositionPlan instanceof ObjectNode uiCompositionPlanObject) {
                 normalizeFilterQueryContextBindings(uiCompositionPlanObject, warnings);
+                if (!AgenticAuthoringSemanticMaterializationPolicy.requiresChartMaterialization(
+                        semanticDecision(request.intentResolution()))) {
+                    markOrphanUnverifiedSemanticAxesAsDropped(uiCompositionPlanObject, warnings);
+                }
             }
             JsonNode semanticMaterialization = semanticMaterialization(planResult, uiCompositionPlan);
             if (containsUnverifiedSemanticAxes(semanticMaterialization)) {
@@ -352,7 +359,8 @@ public class AgenticAuthoringPreviewService {
 
     private AgenticAuthoringPlanRequest withSchemaFieldContext(
             AgenticAuthoringPlanRequest request,
-            String schemaBaseUrl) {
+            String schemaBaseUrl,
+            PreviewSchemaFetchCache schemaFetchCache) {
         if (request == null
                 || schemaRetrievalService == null
                 || !shouldEnrichSchemaFieldsForGenericDashboard(request)
@@ -366,7 +374,7 @@ public class AgenticAuthoringPreviewService {
         if (schemaContext == null) {
             return request;
         }
-        SchemaFetchResult schemaResult = schemaRetrievalService.fetchSchemaResult(schemaContext, schemaBaseUrl);
+        SchemaFetchResult schemaResult = schemaFetchCache.fetch(schemaContext, schemaBaseUrl);
         if (schemaResult == null || !schemaResult.isSuccess()) {
             return request;
         }
@@ -466,7 +474,8 @@ public class AgenticAuthoringPreviewService {
             AgenticAuthoringPlanRequest request,
             JsonNode uiCompositionPlan,
             List<String> warnings,
-            String schemaBaseUrl) {
+            String schemaBaseUrl,
+            PreviewSchemaFetchCache schemaFetchCache) {
         if (schemaRetrievalService == null || uiCompositionPlan == null || uiCompositionPlan.isMissingNode()) {
             return uiCompositionPlan;
         }
@@ -477,7 +486,7 @@ public class AgenticAuthoringPreviewService {
         if (schemaContext == null) {
             return uiCompositionPlan;
         }
-        SchemaFetchResult schemaResult = schemaRetrievalService.fetchSchemaResult(schemaContext, schemaBaseUrl);
+        SchemaFetchResult schemaResult = schemaFetchCache.fetch(schemaContext, schemaBaseUrl);
         if (schemaResult == null || !schemaResult.isSuccess()) {
             return uiCompositionPlan;
         }
@@ -511,7 +520,8 @@ public class AgenticAuthoringPreviewService {
             AgenticAuthoringPlanRequest request,
             JsonNode uiCompositionPlan,
             List<String> warnings,
-            String schemaBaseUrl) {
+            String schemaBaseUrl,
+            PreviewSchemaFetchCache schemaFetchCache) {
         if (schemaRetrievalService == null || !containsUnverifiedSemanticAxes(uiCompositionPlan)) {
             return uiCompositionPlan;
         }
@@ -523,7 +533,7 @@ public class AgenticAuthoringPreviewService {
             addWarningOnce(warnings, "semantic-axis-schema-verification-invalid-context");
             return uiCompositionPlan;
         }
-        SchemaFetchResult schemaResult = schemaRetrievalService.fetchSchemaResult(schemaContext, schemaBaseUrl);
+        SchemaFetchResult schemaResult = schemaFetchCache.fetch(schemaContext, schemaBaseUrl);
         if (schemaResult == null || !schemaResult.isSuccess()) {
             String status = schemaResult == null || schemaResult.getStatus() == null
                     ? "unavailable"
@@ -537,7 +547,7 @@ public class AgenticAuthoringPreviewService {
             return uiCompositionPlan;
         }
         Map<String, SchemaFieldDescriptor> filterSchemaFields =
-                filterSchemaFields(request, schemaBaseUrl).orElse(schemaFields);
+                filterSchemaFields(request, schemaBaseUrl, schemaFetchCache).orElse(schemaFields);
         JsonNode copy = uiCompositionPlan == null ? MissingNode.getInstance() : uiCompositionPlan.deepCopy();
         if (copy instanceof ObjectNode objectNode) {
             reconcileSemanticAxesWithSchema(
@@ -596,7 +606,8 @@ public class AgenticAuthoringPreviewService {
 
     private Optional<Map<String, SchemaFieldDescriptor>> filterSchemaFields(
             AgenticAuthoringPlanRequest request,
-            String schemaBaseUrl) {
+            String schemaBaseUrl,
+            PreviewSchemaFetchCache schemaFetchCache) {
         if (schemaRetrievalService == null) {
             return Optional.empty();
         }
@@ -614,7 +625,7 @@ public class AgenticAuthoringPreviewService {
                 .operation("post")
                 .schemaType("request")
                 .build();
-        SchemaFetchResult filterSchemaResult = schemaRetrievalService.fetchSchemaResult(filterContext, schemaBaseUrl);
+        SchemaFetchResult filterSchemaResult = schemaFetchCache.fetch(filterContext, schemaBaseUrl);
         if (filterSchemaResult == null || !filterSchemaResult.isSuccess()) {
             return Optional.empty();
         }
@@ -819,6 +830,9 @@ public class AgenticAuthoringPreviewService {
                         markSemanticAxisDropped(axisObject, "schema-safe-axis-repair");
                         markDiagnosticsAxisDropped(uiCompositionPlan, axisObject.path("field").asText(""), "schema-safe-axis-repair");
                         addWarningOnce(warnings, "semantic-chart-axis-dropped-without-safe-schema-field");
+                    } else {
+                        markSemanticAxisDropped(axisObject, "unsupported-semantic-axis");
+                        markDiagnosticsAxisDropped(uiCompositionPlan, axisObject.path("field").asText(""), "unsupported-semantic-axis");
                     }
                     widgetArray.remove(i);
                 }
@@ -2252,6 +2266,9 @@ public class AgenticAuthoringPreviewService {
             return false;
         }
         for (JsonNode axis : axes) {
+            if (axis.path("materialized").isBoolean() && !axis.path("materialized").asBoolean()) {
+                continue;
+            }
             if (!axis.path("schemaVerified").asBoolean(false)) {
                 return true;
             }
@@ -2267,11 +2284,67 @@ public class AgenticAuthoringPreviewService {
             return false;
         }
         for (JsonNode axis : axes) {
+            if (axis.path("materialized").isBoolean() && !axis.path("materialized").asBoolean()) {
+                continue;
+            }
             if ("unsupported".equals(axis.path("schemaProbeStatus").asText(""))) {
                 return true;
             }
         }
         return false;
+    }
+
+    private void markOrphanUnverifiedSemanticAxesAsDropped(
+            ObjectNode uiCompositionPlan,
+            List<String> warnings) {
+        JsonNode axes = uiCompositionPlan == null
+                ? MissingNode.getInstance()
+                : uiCompositionPlan.path("diagnostics").path("semanticAxes");
+        if (!axes.isArray()) {
+            return;
+        }
+        Set<String> materializedChartFields = materializedChartSemanticAxisFields(uiCompositionPlan);
+        for (JsonNode axis : axes) {
+            if (!(axis instanceof ObjectNode axisObject)
+                    || axisObject.path("schemaVerified").asBoolean(false)
+                    || axisObject.path("materialized").isBoolean() && !axisObject.path("materialized").asBoolean()) {
+                continue;
+            }
+            String field = normalize(axisObject.path("field").asText(""));
+            if (field.isBlank() || !materializedChartFields.contains(field)) {
+                markSemanticAxisDropped(axisObject, "chart-axis-not-materialized");
+            }
+        }
+        if (!containsUnsupportedSemanticAxes(uiCompositionPlan)) {
+            warnings.remove("semantic-axis-schema-verification-unsupported-axis");
+        }
+        if (!containsUnverifiedSemanticAxes(uiCompositionPlan)) {
+            warnings.remove("semantic-axis-schema-verification-pending");
+        }
+    }
+
+    private Set<String> materializedChartSemanticAxisFields(JsonNode uiCompositionPlan) {
+        Set<String> fields = new LinkedHashSet<>();
+        JsonNode widgets = uiCompositionPlan == null
+                ? MissingNode.getInstance()
+                : uiCompositionPlan.path("widgets");
+        if (!widgets.isArray()) {
+            return fields;
+        }
+        for (JsonNode widget : widgets) {
+            if (!"praxis-chart".equals(widget.path("componentId").asText(""))) {
+                continue;
+            }
+            JsonNode axis = widget.path("inputs").path("config").path("semanticAxis");
+            if (axis.path("materialized").isBoolean() && !axis.path("materialized").asBoolean()) {
+                continue;
+            }
+            String field = normalize(axis.path("field").asText(""));
+            if (!field.isBlank()) {
+                fields.add(field);
+            }
+        }
+        return fields;
     }
 
     private boolean requiresUiCompositionPlan(AgenticAuthoringIntentResolutionResult intentResolution) {
@@ -2988,6 +3061,39 @@ public class AgenticAuthoringPreviewService {
             return List.of("intent-resolution-shared-rule-route-required");
         }
         return List.of();
+    }
+
+    private final class PreviewSchemaFetchCache {
+
+        private final SchemaRetrievalService schemaRetrievalService;
+        private final Map<String, SchemaFetchResult> fetches = new LinkedHashMap<>();
+
+        private PreviewSchemaFetchCache(SchemaRetrievalService schemaRetrievalService) {
+            this.schemaRetrievalService = schemaRetrievalService;
+        }
+
+        private SchemaFetchResult fetch(AiSchemaContext context, String schemaBaseUrl) {
+            if (schemaRetrievalService == null || context == null) {
+                return null;
+            }
+            String key = cacheKey(context, schemaBaseUrl);
+            if (fetches.containsKey(key)) {
+                return fetches.get(key);
+            }
+            SchemaFetchResult result = schemaRetrievalService.fetchSchemaResult(context, schemaBaseUrl);
+            fetches.put(key, result);
+            return result;
+        }
+
+        private String cacheKey(AiSchemaContext context, String schemaBaseUrl) {
+            return value(schemaBaseUrl)
+                    + "|"
+                    + value(context.getPath())
+                    + "|"
+                    + value(context.getOperation())
+                    + "|"
+                    + value(context.getSchemaType());
+        }
     }
 
     private record SchemaFieldDescriptor(

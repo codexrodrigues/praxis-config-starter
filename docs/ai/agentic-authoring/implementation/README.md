@@ -101,9 +101,10 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 26. [22-runtime-related-surface-compare-contract.md](./22-runtime-related-surface-compare-contract.md)
 27. [23-runtime-related-surface-preview-release-hardening.md](./23-runtime-related-surface-preview-release-hardening.md)
 28. [24-runtime-related-surface-demo-operator-playbook.md](./24-runtime-related-surface-demo-operator-playbook.md)
-29. [01-current-state-and-target.md](./01-current-state-and-target.md)
-30. [02-implementation-backlog.md](./02-implementation-backlog.md)
-31. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+29. [25-pre-intent-resource-discovery-demo-readiness.md](./25-pre-intent-resource-discovery-demo-readiness.md)
+30. [01-current-state-and-target.md](./01-current-state-and-target.md)
+31. [02-implementation-backlog.md](./02-implementation-backlog.md)
+32. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -176,6 +177,258 @@ governado passam pelo gate real oficial sem abrir nova capacidade funcional.
 `24-runtime-related-surface-demo-operator-playbook.md` transforma esse estado em
 um roteiro operacional de apresentacao, com setup, prompts copiaveis, criterios
 visuais de sucesso e contingencia para oscilacao do provider.
+`25-pre-intent-resource-discovery-demo-readiness.md` fecha a apresentacao
+inicial da refatoracao de pre-intent resource discovery: registra o antes/depois
+do prompt `empregados`, os smokes locais OpenAI, a guarda de perfil individual,
+os criterios de sucesso da demo e os gargalos que continuam fora do corte de
+apresentacao.
+
+## Checkpoint 2026-06-18 - pre-intent resource discovery e UX de revisao
+
+Este checkpoint nasceu de uma falha simples no Decision Playground: o usuario
+pedia "quero criar algo que mostre informacoes dos empregados", mas o fluxo
+respondia como se nao conseguisse confirmar uma fonte governada, mesmo com
+`human-resources.funcionarios` disponivel no contexto de dominio. A investigacao
+mostrou que o problema nao era falta de sugestao textual no frontend nem falta
+de sinonimo hardcoded. O gap estava no caminho agentic: a decisao de buscar
+evidencia governada precisava ser planejada semanticamente pela LLM antes da
+resolucao final de intencao, com observabilidade suficiente para distinguir
+"a LLM decidiu nao buscar" de "o planner nao rodou".
+
+O fluxo local-first atual ja prova os seguintes pontos:
+
+- `AgenticAuthoringLlmPreIntentToolPlanningService` pode solicitar
+  `searchApiResources` antes da intencao final, usando uma `retrievalQuery`
+  semantica e um `AgenticAuthoringResourceSearchFocus` interno para enriquecer
+  entidade primaria, conceitos de apoio e superficie desejada.
+- O backend emite rastro auditavel `tool.plan` ou `tool.plan.skipped`, evitando
+  silencio entre `context.bundle` e `intent.resolve.llm`.
+- A matriz local
+  `tools/local-e2e/run-agentic-turn-pre-intent-matrix-local.sh` gera
+  `matrix-summary.json` e `matrix-audit.md`, com recall, ranking, MRR,
+  candidatos, warnings, tempos, razoes de review, qualidade do feedback
+  progressivo de `status`/`heartbeat` e breakdown de performance por fase
+  (`tool.plan`, `tool.result`, `component.capabilities`,
+  `intent.resolved`, preview e tool loop). Para acelerar diagnosticos sem
+  gastar provider, `REUSE_EXISTING_ARTIFACTS=true` reprocessa artefatos ja
+  capturados e regenera `matrix-summary.json`/`matrix-audit.md` sem backend ou
+  chamadas LLM.
+- A busca e o ranking foram validados com prompts abertos e variados, incluindo
+  termos como empregados, funcionarios, colaboradores, pessoas, perfil,
+  resumo, contratos e fornecedores, sem introduzir lista de sinonimos no
+  frontend ou backend.
+- A materializacao ficou fail-closed quando a evidencia governada nao sustenta
+  aplicacao, mas permite preview quando a selecao governada, o tipo de artefato
+  e as capacidades do componente sao suficientes.
+- O caminho de preview foi corrigido para nao bloquear materializacao valida
+  por eixos de grafico remanescentes quando a composicao final remove o chart.
+- A UI Angular foi ajustada para o estado de revisao real: `Cancelar pedido`
+  permanece apenas em processamento/clarificacao, nao depois de uma preview
+  aplicavel; mensagens consultivas intermediarias nao viram mensagem final; e
+  warnings de qualidade de dashboard nao aparecem em previews de tabela apenas
+  porque existe `uiCompositionPlan`.
+- O smoke browser local no Decision Playground, com API local e prompt
+  `quero criar algo que mostre informacoes dos empregados`, gerou preview de
+  tabela baseada em funcionarios, exibiu `Salvar`, ocultou `Cancelar pedido`,
+  nao persistiu pergunta consultiva, nao mostrou warning indevido de dashboard
+  e nao exibiu mojibake visivel.
+- O primeiro slice de performance tambem foi iniciado: quando
+  `resourceDiscovery` contem candidatos governados e o `resourceSearchFocus`
+  authorado pela LLM separa semanticamente um recurso operacional mesmo com
+  score proximo de outro candidato, o resolver pode satisfazer a intencao com
+  `llm-intent-resolution-satisfied-by-pre-intent-governed-evidence` sem chamar
+  o provider de intent novamente. Essa antecipacao continua subordinada a
+  evidencia forte, foco semantico e gates de materializacao; nao reintroduz
+  keyword routing nem lista de sinonimos.
+- A investigacao posterior da matriz local mostrou que `staff_en` ainda
+  chamava `intent.resolve.llm` porque o gate dependia do prompt bruto ser
+  reconhecido como authoring de dados; esse caso agora usa o
+  `resourceSearchFocus` authorado pela LLM como sinal semantico suficiente
+  para prompts multilingues curtos.
+- O segundo slice de performance cobre casos cross-language em que o foco
+  authorado pela LLM usa vocabulario do usuario, mas o catalogo governado esta
+  em outro idioma. Quando a tool `searchApiResources` retorna um candidato
+  operacional com `semantic-retrieval`, `schema-available`,
+  `tool-search-api-resources` e lideranca clara de score sobre pares
+  operacionais, o resolver pode satisfazer a intencao sem uma nova chamada de
+  intent LLM. A decisao continua baseada na busca semantica governada, nao em
+  sinonimos hardcoded.
+- O baseline OpenAI local de 2026-06-19, executado por
+  `run-agentic-turn-pre-intent-matrix-local.sh`, fechou 16/16 casos com
+  `tool.plan`, `canApply=true`, `recall@1=1.0`, `MRR=1.0`,
+  `unexpectedApplyCount=0`, `unsafeConfirmationCount=0`,
+  `llmSecondPassUsedCount=0`, duracao media de 28.951s e maxima de 31.744s.
+  A matriz cobriu prompts curtos, typo, transcricao ruim, ingles, fornecedores,
+  perfil individual, analytics de folha e narrativas longas; `fornecedores`
+  passou a usar o caminho compacto
+  `llm-intent-resolution-satisfied-by-pre-intent-governed-evidence`.
+- O baseline OpenAI local de 2026-06-20, apos compactar o contexto do planner
+  e corrigir a preferencia por projecao analitica dedicada quando ela lidera a
+  recuperacao semantica contra um candidato misto operacional/analytics,
+  fechou novamente 16/16 casos com `recall@1=1.0`, `MRR=1.0`,
+  `unexpectedApplyCount=0`, `llmSecondPassUsedCount=0`, duracao media de
+  28.367s e maxima de 29.583s. O prompt `quero um painel analítico de folha de
+  pagamento por departamento` voltou a selecionar
+  `/api/human-resources/vw-analytics-folha-pagamento`, mesmo quando a LLM
+  authorou o foco em ingles (`analytical dashboard`, `payroll`, `metrics`) e
+  `departamentos` apareceu como candidato dimensional.
+- O baseline OpenAI local de 2026-06-20 apos o polimento de texto pt-BR no
+  stream e na resposta final fechou 16/16 casos com `tool.plan`,
+  `canApply=true`, `recall@1=1.0`, `MRR=1.0`, `top1Accuracy=1.0`,
+  `unexpectedApplyCount=0`, `streamFeedbackTechnicalMessageCount=0` e
+  `thoughtStepTechnicalMessageCount=0`. A duracao media foi 29.172s e a maxima
+  foi 45.010s no caso `empregados`. A matriz cobriu prompts curtos, typo,
+  transcricao ruim, ingles, fornecedores, perfil individual, analytics de folha
+  e narrativas longas/confusas. O caso `visao_resumida_funcionario` comprovou
+  que o ranking semantico final pode promover corretamente
+  `/api/human-resources/vw-perfil-heroi` acima de
+  `/api/human-resources/funcionarios` mesmo quando o raw embedding score do
+  cadastro e maior, sem recorrer a matriz hardcoded de sinonimos.
+- O slice seguinte de performance investigou o prompt aberto
+  `quero uma tela para acompanhar colaboradores`, que no smoke focado chegava
+  a 76.887s porque a LLM incluiu "metricas" como conceito secundario no
+  `resourceSearchFocus`; a politica interpretava isso como analytics e deixava
+  o fluxo cair na passagem longa de `intent.resolve.llm`. A correcao nao cria
+  sinonimos nem keywords de dominio: ela classifica foco de acompanhamento/
+  monitoramento de dados, status, atividades ou registros como necessidade
+  operacional quando nao ha sinal forte de agregacao analitica. O smoke local
+  OpenAI pos-correcao selecionou `/api/human-resources/funcionarios`, emitiu
+  `llm-intent-resolution-satisfied-by-pre-intent-governed-evidence` e
+  `llm-pre-intent-resource-discovery-used`, reduziu o caso quente para 32.467s
+  e preservou o controle `quero uma tela de perfil individual do funcionário`
+  selecionando `/api/human-resources/vw-perfil-heroi`.
+- O baseline OpenAI local de 2026-06-21, apos a correcao de foco operacional
+  para acompanhamento/monitoramento, fechou novamente 16/16 casos com
+  `tool.plan`, `canApply=true`, `recall@1=1.0`, `recall@3=1.0`,
+  `MRR=1.0`, `top1Accuracy=1.0`, `unexpectedApplyCount=0`,
+  `streamFeedbackTechnicalMessageCount=0` e
+  `thoughtStepTechnicalMessageCount=0`. A duracao media foi 30.102s e a maxima
+  caiu para 36.115s (`empregados`); `colaboradores` ficou em 31.838s e a
+  narrativa longa confusa de colaboradores em 31.905s. A matriz preservou
+  controles importantes: perfil individual continuou selecionando
+  `/api/human-resources/vw-perfil-heroi`, analytics de folha continuou
+  selecionando `/api/human-resources/vw-analytics-folha-pagamento`, e
+  fornecedores/contratos continuou funcionando fora do dominio de RH. O caso
+  `visao_resumida_funcionario` tambem manteve a promocao semantica de perfil
+  acima do cadastro mesmo com raw score maior para funcionarios, provando que a
+  decisao final segue governada por foco semantico e evidencia, nao por ranking
+  vetorial bruto ou matriz hardcoded de dominio.
+- A tentativa posterior de reduzir o custo do planner apenas compactando a
+  saida LLM (`maxTokens` menor e foco mais curto) foi rejeitada pela matriz:
+  embora smokes focais tenham passado, a bateria completa caiu para
+  `recall@1=0.875`, elevou a media para 37.039s, gerou cauda de 91.739s e
+  deixou o caso original `empregados` sem `canApply` por selecao inferior
+  (`/api/hr/employees` acima de `/api/human-resources/funcionarios`). Esse
+  resultado confirma que a otimizacao de performance deve atacar recuperacao,
+  ranking, cache ou execucao de tools com evidencia governada; nao deve apertar
+  a LLM a ponto de empobrecer o foco semantico. O script da matriz agora deve
+  falhar quando `recall@1` cair abaixo do baseline, quando houver apply
+  inesperado, quando algum recurso esperado nao for recuperado, ou quando
+  mensagens tecnicas vazarem no stream.
+- A correcao seguinte reaproveitou uma capacidade ja existente, mas estreita:
+  candidatos operacionais escopados pelo `domainDiscovery` governado agora
+  podem vencer pares externos semanticamente equivalentes quando a diferenca de
+  score esta dentro da tolerancia de empate semantico. Isso corrigiu o limite
+  revelado pelo caso `/api/hr/employees` vs
+  `/api/human-resources/funcionarios` sem criar sinonimos hardcoded nem regra
+  de dominio. A matriz OpenAI local de 2026-06-21 em
+  `artifacts/local-e2e/openai-full-matrix-after-domain-scoped-tolerance-20260621-100805`
+  fechou 16/16 casos com `recall@1=1.0`, `recall@3=1.0`, `MRR=1.0`,
+  `top1Accuracy=1.0`, `unexpectedApplyCount=0`, `gatePassed=true`,
+  duracao media de 29.480s e maxima de 31.730s. O smoke do prompt original
+  `quero criar algo que mostre informacoes dos empregados` selecionou
+  `/api/human-resources/funcionarios`, `preview.valid=true` e `canApply=true`.
+- O slice seguinte de performance atacou um gargalo potencial sem mudar
+  contrato publico: o carregamento de `component.capabilities` agora e
+  iniciado em paralelo no comeco do turno, reaproveita cache de 5 minutos no
+  `AgenticAuthoringComponentCapabilitiesService` e emite diagnostics internos
+  `preloaded`, `preloadCompletedBeforeAwait`, `awaitElapsedMs`,
+  `preloadAgeMs` e `fallbackSynchronousLoad` no evento
+  `component.capabilities`. O smoke OpenAI local de 2026-06-21 em
+  `artifacts/local-e2e/openai-component-capabilities-preload-diagnostics-empregados`
+  comprovou `preloadCompletedBeforeAwait=true`, `awaitElapsedMs=0`,
+  `fallbackSynchronousLoad=false`, selecao de
+  `/api/human-resources/funcionarios` e `canApply=true`. Isso mostra que
+  capabilities saiu do caminho critico do engine; o tempo total restante ainda
+  deve ser investigado em planner LLM, busca semantica/schema grounding,
+  preview e transporte SSE.
+- A matriz agora separa o tempo percebido no stream
+  `componentCapabilitiesSeconds` do tempo interno de espera do engine
+  `componentCapabilitiesAwaitSeconds`, permitindo distinguir atraso de
+  transporte/replay/heartbeat de custo real de carregamento. O modo
+  `REUSE_EXISTING_ARTIFACTS=true` validado sobre uma copia temporaria do smoke
+  acima mostrou `componentCapabilitiesSeconds=1.638` e
+  `componentCapabilitiesAwaitSeconds=0.0`, confirmando que o proximo gargalo
+  deve ser investigado fora de capabilities.
+- O checkpoint seguinte abriu o breakdown interno da tool
+  `searchApiResources`, ainda sem contrato publico novo: o discovery mede
+  `catalogDiscoveryElapsedMs`, `groundingElapsedMs`,
+  `consultativeProjectionElapsedMs`, `quickReplyElapsedMs`, `totalElapsedMs` e
+  contagens de candidatos antes/depois do grounding. O registry projeta esses
+  valores dentro de `safeDiagnostics.resourceDiscoveryDiagnostics`, e os
+  scripts locais materializam isso em `summary.json`, `matrix-summary.json` e
+  `matrix-audit.md` como tempos de catalog discovery, grounding e total medido
+  da tool. Esse checkpoint nao altera decisao, ranking ou exposicao ao usuario;
+  ele existe para decidir, com evidencia, se o proximo gargalo real esta no
+  catalogo, grounding, projecao consultiva, quick replies, preview ou
+  transporte SSE.
+- A matriz OpenAI local de 2026-06-21 em
+  `artifacts/local-e2e/openai-full-matrix-resource-diagnostics-20260621-115158`
+  fechou 16/16 casos com `gatePassed=true`, `recall@1=1.0`, `MRR=1.0`,
+  `unexpectedApplyCount=0`, `streamFeedbackTechnicalMessageCount=0`,
+  duracao media de 28.471s e maxima de 31.993s. O breakdown confirmou
+  `componentCapabilitiesAwaitSeconds=0.0`, `preIntentPlanningSeconds` medio de
+  6.746s, `toolExecutionSeconds` medio de 3.658s, e custo interno medido de
+  `searchApiResources` de 2.457s em media. Dentro da tool, os custos medios
+  ficaram em 1.252s para catalog discovery e 1.202s para grounding, com pico
+  de 4.531s no total medido da tool no caso `colaboradores`, onde seis
+  candidatos exigiram grounding. A decisao de proxima performance deve
+  preservar ranking/qualidade e focar em reduzir latencia do planner LLM e do
+  grounding por conjunto de candidatos, especialmente quando a recuperacao
+  semantica abre muitos recursos operacionais compativeis.
+- O checkpoint posterior compactou o prompt interno do planner pre-intent,
+  reduziu o teto de resposta JSON para 480 tokens e passou a projetar
+  transcricoes longas preservando inicio/fim. A matriz OpenAI local
+  `artifacts/local-e2e/openai-full-matrix-compact-preintent-planner-20260621-122900`
+  manteve `recall@1=1.0`, `MRR=1.0` e `gatePassed=true`, mas mostrou que o
+  tempo do planner continuou alto (`preIntentPlanningSeconds` medio de 8.175s)
+  e revelou um bloqueio isolado de materializacao no caso curto
+  `colaboradores`: o recurso correto `/api/human-resources/funcionarios` foi
+  escolhido, o preview era valido, mas `canApply=false` por
+  `llm-selection-lower-ranked-than-governed-candidate` causado por uma diferenca
+  decimal de score bruto entre candidatos operacionais. A politica de review foi
+  refinada para tratar como empate tecnico quando ha `resourceSearchFocus`
+  authorado pela LLM, candidatos tool-backed confiaveis e margem menor que
+  0.01 sem alinhamento de foco melhor no competidor. O smoke local
+  `artifacts/local-e2e/openai-review-tie-policy-colaboradores` confirmou
+  `canApply=true`, `selectedResourcePath=/api/human-resources/funcionarios` e
+  `semanticDecisionReviewRequired=false`.
+
+O que continua como gargalo separado, e nao deve ser tratado como regressao
+deste checkpoint:
+
+- performance do authoring em turnos longos: o bypass pre-intent e a correcao
+  de foco operacional reduziram a cauda observada para 36.115s no baseline de
+  2026-06-21, mas a media ainda fica em torno de 30s. A proxima fase deve
+  investigar aquecimento, cache, paralelizacao ou antecipacao de custos de
+  planner LLM, busca semantica/schema grounding, preview e transporte SSE sem
+  voltar para heuristica textual;
+- feedback progressivo para esperas longas: o SSE ja emite fases, status e
+  heartbeats com texto publico sem mensagens tecnicas, mas ainda vale ampliar
+  a prova visual browser para mais de um prompt longo alem do smoke principal;
+- ampliacao continua da matriz para narrativas e intencoes abertas alem do
+  baseline atual, medindo quando complementos devem aparecer ao usuario e
+  quando devem ficar como evidencia interna;
+- robustez do planner/provider em cenarios de oscilacao real de LLM: um
+  `tool.plan.skipped` por erro de provider deve continuar fail-closed, com
+  diagnostico observavel, sem promover candidatos de fallback fracos para
+  aplicacao automatica;
+- estabilizacao de criterios de apresentacao para candidatos secundarios, sem
+  promover recursos analiticos, views ou exemplos de dominio acima do cadastro
+  canonico quando a intencao pede perfil, ficha ou resumo individual;
+- publicacao/deploy remoto continua fora do ciclo de desenvolvimento diario:
+  o gate de fase deve ser local-first, e Render/GitHub Actions devem ficar para
+  fechamento ou smoke publicado explicitamente autorizado.
 
 ## Baseline de reaproveitamento
 
@@ -195,12 +448,27 @@ zero:
   LLM decidir, antes da resolucao final de intencao, se precisa executar tools
   read-only de grounding. A implementacao padrao
   `AgenticAuthoringLlmPreIntentToolPlanningService` so pode solicitar
-  `searchApiResources`, devolvendo uma `retrievalQuery` semantica; o backend
-  continua validando rota, fase, budget e allowlist no
+  `searchApiResources`, devolvendo uma `retrievalQuery` semantica. Para reduzir
+  latencia sem enfraquecer a decisao semantica, o planner recebe uma projecao
+  compacta de `currentPage` e `contextHints`, preservando sinais governados
+  como `domainDiscovery`, `domainCatalog`, `projectKnowledge`, recursos,
+  widgets e endpoints ja presentes, mas sem enviar configuracao local bruta,
+  evidencia extensa ou payloads de pagina que nao ajudam a decidir a busca.
+  O planner tambem pode produzir um `resourceSearchFocus` interno, usado apenas
+  para enriquecer a busca com entidade primaria, conceitos de apoio e superficie
+  desejada; esse foco nao e uma segunda intencao canonica e permanece
+  subordinado a `semanticDecision`, `retrievedEvidence` e aos gates de
+  materializacao. O backend continua validando rota, fase, budget e allowlist no
   `AgenticAuthoringToolRegistry`. O stream deve emitir `tool.plan` quando o
   plano for executavel e `tool.plan.skipped` com `skipReason` quando o planner
   nao existir, o provider falhar, ja houver `resourceDiscovery` ou a LLM decidir
   que nao precisa de busca governada.
+- Para necessidades de superficie analitica ou de perfil, o ranking final deve
+  preferir uma projecao dedicada quando ela tiver evidencia semantica governada
+  claramente superior a um candidato misto operacional/projecao. Esse criterio
+  usa `semantic-retrieval`, papeis semanticos e score de recuperacao; nao
+  depende de nomes de recursos especificos nem de sinonimos de dominio
+  hardcoded.
 - Quando o planejamento pre-intent encontra candidatos governados e a resolucao
   semantica final exige esclarecimento, o engine deve falhar fechado sem
   materializar preview sempre que houver candidatos apresentaveis em
@@ -212,10 +480,13 @@ zero:
   introduz roteamento por keyword nem sinonimos hardcoded.
 - `tools/local-e2e/run-agentic-turn-pre-intent-matrix-local.sh` mede recall e
   ranking do fluxo local real contra prompts abertos. O resumo consolidado
-  registra recurso esperado, rank, top candidatos, selecao final, `reviewReason`
-  e `unexpectedApplyCount`; use essa matriz antes de ajustar busca/ranking para
-  saber se o problema e reformulacao LLM, recuperacao do catalogo, merge de
-  evidencias ou materializacao permissiva.
+  registra recurso esperado, rank, top candidatos, papeis semanticos,
+  evidencias, margem do top candidato, selecao final, `reviewReason`,
+  `llmSecondPassUsed`, duracao por caso, `recall@k`, MRR e
+  `unexpectedApplyCount`; o script tambem gera `matrix-audit.md` para leitura
+  humana. Use essa matriz antes de ajustar busca/ranking para saber se o
+  problema e reformulacao LLM, recuperacao do catalogo, merge de evidencias,
+  latencia da segunda passada ou materializacao permissiva.
 - `AgenticAuthoringCurrentPageAnalyzer` ja oferece inspecao estrutural de
   `currentPage`, reduzindo dependencia de `currentPageSummary`.
 - `DomainRuleService` e `DomainRuleController` ja sao a fronteira canonica para

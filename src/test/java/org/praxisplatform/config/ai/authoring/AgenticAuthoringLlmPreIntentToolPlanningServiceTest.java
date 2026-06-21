@@ -3,8 +3,11 @@ package org.praxisplatform.config.ai.authoring;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
@@ -16,6 +19,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiPrincipalContext;
+import org.praxisplatform.config.service.AiProviderCallException;
 import org.praxisplatform.config.service.AiProviderManagementService;
 
 @ExtendWith(MockitoExtension.class)
@@ -69,15 +73,17 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .isEqualTo("quero criar algo que mostre informacoes dos empregados");
         assertThat(payload.artifactKind()).isEqualTo("page");
         assertThat(promptCaptor.getValue())
-                .contains("Use reasoning, not keyword matching")
+                .contains("without keyword routing")
                 .contains("vague, misspelled, colloquial, multilingual")
-                .contains("treat domainDiscovery as semantic context for the retrievalQuery")
+                .contains("use it as semantic context for retrievalQuery")
                 .contains("domainDiscovery")
                 .contains("human-resources.funcionarios");
+        assertThat(promptCaptor.getValue()).doesNotContain("\n  \"");
         assertThat(schemaCaptor.getValue().jsonSchema())
                 .contains("shouldRetrieveGovernedResources")
                 .contains("retrievalQuery");
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(7);
+        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(320);
     }
 
     @Test
@@ -109,6 +115,178 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
     }
 
     @Test
+    void enrichesRetrievalQueryWithLlmAuthoredResourceSearchFocus() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "shouldRetrieveGovernedResources": true,
+                  "artifactKind": "page",
+                  "retrievalQuery": "acompanhar pessoas da empresa com detalhes por area",
+                  "resourceSearchFocus": {
+                    "primaryBusinessEntity": "pessoas da empresa",
+                    "supportingConcepts": ["area", "departamento", "detalhes"],
+                    "desiredSurface": "pagina operacional de acompanhamento",
+                    "uncertainty": "usuario ainda nao sabe se quer tabela ou painel",
+                    "rationale": "Separar entidade principal de dimensoes auxiliares evita ranquear departamento como fonte principal."
+                  },
+                  "reason": "O pedido precisa descobrir a fonte governada principal antes da tela."
+                }
+                """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper, 7);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("preciso ver como esta meu pessoal por area"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        AgenticAuthoringResourceCandidatesRequest payload =
+                (AgenticAuthoringResourceCandidatesRequest) result.plan().toolCalls().get(0).payload();
+        assertThat(payload.retrievalQuery())
+                .contains("primary business entity: pessoas da empresa")
+                .contains("supporting concepts: area, departamento, detalhes")
+                .contains("desired surface: pagina operacional de acompanhamento")
+                .contains("semantic query: acompanhar pessoas da empresa com detalhes por area");
+    }
+
+    @Test
+    void sendsCompactPlannerContextInsteadOfRawPageAndHints() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "shouldRetrieveGovernedResources": true,
+                  "artifactKind": "page",
+                  "retrievalQuery": "contratos fornecedores compras vigencia status",
+                  "resourceSearchFocus": {
+                    "primaryBusinessEntity": "contratos de fornecedores",
+                    "supportingConcepts": ["compras", "vigencia", "status"],
+                    "desiredSurface": "pagina de acompanhamento",
+                    "uncertainty": "",
+                    "rationale": "O usuario quer uma visao operacional de contratos."
+                  },
+                  "reason": "O pedido precisa de descoberta governada antes da tela."
+                }
+                """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper, 7);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request(
+                        "quero acompanhar os contratos dos fornecedores",
+                        objectMapper.readTree("""
+                        {
+                          "widgets": [
+                            {
+                              "key": "contracts-table",
+                              "componentId": "praxis-table",
+                              "resourcePath": "/api/procurement/contracts",
+                              "largeLocalConfig": "raw-page-config-that-should-not-be-sent-to-planner"
+                            }
+                          ],
+                          "largePageDraft": "raw-page-draft-that-should-not-be-sent-to-planner"
+                        }
+                        """),
+                        objectMapper.readTree("""
+                        {
+                          "domainDiscovery": [
+                            {
+                              "resourceKey": "procurement.contracts",
+                              "title": "Contratos",
+                              "description": "Contratos firmados com fornecedores",
+                              "largeGovernancePayload": "raw-domain-discovery-payload-that-should-not-be-sent-to-planner"
+                            }
+                          ],
+                          "projectKnowledge": {
+                            "schemaVersion": "praxis-agentic-authoring-project-knowledge.v1",
+                            "source": "domain_knowledge_concept",
+                            "entries": [
+                              {
+                                "knowledgeId": "contracts-policy",
+                                "summary": "Priorizar contratos ativos e vencimento",
+                                "rawEvidence": "raw-project-knowledge-evidence-that-should-not-be-sent-to-planner"
+                              }
+                            ]
+                          },
+                          "largeContext": "raw-context-hint-that-should-not-be-sent-to-planner"
+                        }
+                        """)),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(promptCaptor.getValue())
+                .contains("praxis-agentic-authoring-pre-intent-current-page-projection.v1")
+                .contains("praxis-agentic-authoring-pre-intent-context-hints-projection.v1")
+                .contains("procurement.contracts")
+                .contains("/api/procurement/contracts")
+                .contains("Contratos firmados com fornecedores")
+                .contains("Priorizar contratos ativos e vencimento")
+                .doesNotContain("raw-page-config-that-should-not-be-sent-to-planner")
+                .doesNotContain("raw-page-draft-that-should-not-be-sent-to-planner")
+                .doesNotContain("raw-domain-discovery-payload-that-should-not-be-sent-to-planner")
+                .doesNotContain("raw-project-knowledge-evidence-that-should-not-be-sent-to-planner")
+                .doesNotContain("raw-context-hint-that-should-not-be-sent-to-planner");
+    }
+
+    @Test
+    void compactsLongSpokenPromptForPlannerWhilePreservingHeadAndTail() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "shouldRetrieveGovernedResources": true,
+                  "artifactKind": "page",
+                  "retrievalQuery": "funcionarios ficha resumo pessoas empresa",
+                  "resourceSearchFocus": {
+                    "primaryBusinessEntity": "funcionarios",
+                    "supportingConcepts": ["ficha", "resumo"],
+                    "desiredSurface": "perfil individual",
+                    "uncertainty": "transcricao longa com contexto irrelevante",
+                    "rationale": "A intencao aparece no final depois de uma narracao longa."
+                  },
+                  "reason": "O pedido depende de fonte governada de funcionarios."
+                }
+                """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper, 7);
+        String longMiddle = "detalhe irrelevante de transcricao ".repeat(120);
+        String prompt = "olha eu estava pensando no fluxo do RH e preciso melhorar a consulta "
+                + longMiddle
+                + "no fim quero uma tela de perfil individual do funcionario com ficha de resumo";
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request(prompt),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(promptCaptor.getValue())
+                .contains("olha eu estava pensando no fluxo do RH")
+                .contains("perfil individual do funcionario com ficha de resumo")
+                .contains("middle omitted for planner performance")
+                .contains("userPromptOriginalLength")
+                .contains("head_tail_compacted");
+        assertThat(promptCaptor.getValue().length()).isLessThan(prompt.length() + 3000);
+    }
+
+    @Test
     void returnsProviderErrorSkipReasonWhenLlmPlanningFails() throws Exception {
         when(providerManagementService.generateJson(
                 any(),
@@ -129,22 +307,101 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         assertThat(result.errorCode()).isEqualTo("IllegalStateException");
     }
 
+    @Test
+    void retriesTransientProviderFailureBeforeSkippingPreIntentPlanning() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenThrow(AiProviderCallException.timeout("openai", new RuntimeException("request timed out")))
+                .thenReturn(objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "shouldRetrieveGovernedResources": true,
+                  "artifactKind": "page",
+                  "retrievalQuery": "funcionarios colaboradores recursos humanos pessoas da empresa",
+                  "resourceSearchFocus": {
+                    "primaryBusinessEntity": "pessoas da empresa",
+                    "supportingConcepts": ["cargo", "departamento"],
+                    "desiredSurface": "pagina de acompanhamento",
+                    "uncertainty": "",
+                    "rationale": "O usuario quer mostrar informacoes de empregados."
+                  },
+                  "reason": "A primeira chamada falhou transitoriamente, mas o planejamento governado pode ser recuperado."
+                }
+                """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        7,
+                        2,
+                        0L);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("quero criar algo que mostre informacoes dos empregados"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.skipReason()).isBlank();
+        AgenticAuthoringResourceCandidatesRequest payload =
+                (AgenticAuthoringResourceCandidatesRequest) result.plan().toolCalls().get(0).payload();
+        assertThat(payload.retrievalQuery())
+                .contains("primary business entity: pessoas da empresa")
+                .contains("semantic query: funcionarios colaboradores recursos humanos pessoas da empresa");
+        verify(providerManagementService, times(2)).generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
+    void doesNotRetryNonTransientProviderFailures() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenThrow(AiProviderCallException.fromHttpStatus(
+                        "openai",
+                        429,
+                        "insufficient_quota"));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        7,
+                        2,
+                        0L);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("quero criar algo que mostre informacoes dos empregados"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isFalse();
+        assertThat(result.skipReason()).isEqualTo("provider-error");
+        assertThat(result.errorCode()).isEqualTo("AiProviderCallException");
+        verify(providerManagementService, times(1)).generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
     private AgenticAuthoringTurnStreamRequest request(String prompt) throws Exception {
-        return new AgenticAuthoringTurnStreamRequest(
+        return request(
                 prompt,
-                "praxis-ui-angular",
-                "praxis-dynamic-page-builder",
-                "/decision-playground",
                 objectMapper.createObjectNode(),
-                null,
-                "openai",
-                "gpt-test",
-                "test-key",
-                "session-1",
-                "turn-client-1",
-                List.of(),
-                null,
-                List.of(),
                 objectMapper.readTree("""
                         {
                           "domainDiscovery": [
@@ -154,7 +411,29 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                             }
                           ]
                         }
-                        """),
+                        """));
+    }
+
+    private AgenticAuthoringTurnStreamRequest request(
+            String prompt,
+            JsonNode currentPage,
+            JsonNode contextHints) throws Exception {
+        return new AgenticAuthoringTurnStreamRequest(
+                prompt,
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/decision-playground",
+                currentPage,
+                null,
+                "openai",
+                "gpt-test",
+                "test-key",
+                "session-1",
+                "turn-client-1",
+                List.of(),
+                null,
+                List.of(),
+                contextHints,
                 null);
     }
 }

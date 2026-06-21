@@ -12,6 +12,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.service.AiPrincipalContext;
@@ -210,20 +212,23 @@ public class AgenticAuthoringTurnEngine {
         request = withGroundedRuntimeComponentContext(request);
         AgenticAuthoringTurnState state = initialState(request);
         request = withActiveDecisionContext(request, state.activeSemanticDecision());
+        PreloadedComponentCapabilities componentCapabilitiesFuture =
+                preloadServerComponentCapabilities(request);
         try {
-            eventSink.append("thought.step", Map.of(
-                    "phase", "context.bundle",
-                    "summary", "Authoring context received.",
-                    "diagnostics", safeDiagnostics(request)));
+            eventSink.append("thought.step", thoughtStepPayload(
+                    "context.bundle",
+                    "Contexto do pedido recebido; vou organizar pagina, historico e evidencias disponiveis.",
+                    "Authoring context received.",
+                    safeDiagnostics(request)));
             emitRuntimeComponentGroundingStep(request, eventSink);
-            request = withServerComponentCapabilities(request);
             emitStatus(
                     eventSink,
                     "intent.resolve",
                     "Estou organizando o pedido, o contexto da pagina e as restricoes informadas.");
-            eventSink.append("thought.step", Map.of(
-                    "phase", "intent.resolve",
-                    "summary", "Preparing semantic intent resolution."));
+            eventSink.append("thought.step", thoughtStepPayload(
+                    "intent.resolve",
+                    "Estou identificando a intencao principal do pedido antes de escolher recursos ou componentes.",
+                    "Preparing semantic intent resolution."));
             request = withProjectKnowledgeContext(request, principalContext, eventSink, null);
             AgenticAuthoringResourceCandidatesResult plannedResourceDiscovery =
                     maybeRunPreIntentToolPlan(request, principalContext, eventSink);
@@ -239,14 +244,24 @@ public class AgenticAuthoringTurnEngine {
                     && !earlyResourceDiscovery.candidates().isEmpty()) {
                 request = withResourceDiscoveryContext(request, earlyResourceDiscovery);
             }
-            emitStatus(
-                    eventSink,
-                    "intent.resolve.llm",
-                    "Estou resolvendo sua intencao com o contexto governado antes de escolher recursos ou componentes.");
-            eventSink.append("thought.step", Map.of(
-                    "phase", "intent.resolve.llm",
-                    "summary", "Resolving the user request against governed context.",
-                    "diagnostics", Map.of(
+            request = withServerComponentCapabilities(request, eventSink, componentCapabilitiesFuture);
+            boolean resourceDiscoveryContextPresent = hasResourceDiscoveryContext(request);
+            if (!resourceDiscoveryContextPresent) {
+                emitStatus(
+                        eventSink,
+                        "intent.resolve.llm",
+                        "A LLM esta confirmando a intencao com a evidencia governada antes de materializar a tela.");
+            }
+            String intentResolutionPhase = resourceDiscoveryContextPresent
+                    ? "intent.resolve.evidence"
+                    : "intent.resolve.llm";
+            eventSink.append("thought.step", thoughtStepPayload(
+                    intentResolutionPhase,
+                    resourceDiscoveryContextPresent
+                            ? "Estou avaliando os candidatos governados recuperados antes de materializar."
+                            : "A LLM esta confirmando a intencao com o contexto governado.",
+                    "Resolving the user request against governed context.",
+                    Map.of(
                             "provider", safeText(request.provider()),
                             "model", safeText(request.model()),
                             "hasProjectKnowledge", request.contextHints() != null
@@ -272,15 +287,19 @@ public class AgenticAuthoringTurnEngine {
             if (postIntentConsultativeOutcome != null) {
                 return postIntentConsultativeOutcome;
             }
-            emitStatus(
-                    eventSink,
-                    "intent.resolve.grounding",
-                    "Estou conferindo a decisao com as evidencias governadas disponiveis.");
-            eventSink.append("thought.step", Map.of(
-                    "phase", "intent.resolve.grounding",
-                    "summary", "Checking resolved intent against governed resource evidence.",
-                    "diagnostics", intentGroundingDiagnostics(intentResolution, route)));
-            emitIntentResolutionProgress(eventSink, intentResolution);
+            boolean compactGovernedFastPath = resolvedByPreIntentGovernedEvidence(intentResolution);
+            if (!compactGovernedFastPath) {
+                emitStatus(
+                        eventSink,
+                        "intent.resolve.grounding",
+                        "Estou conferindo a decisao com as evidencias governadas disponiveis.");
+                eventSink.append("thought.step", thoughtStepPayload(
+                        "intent.resolve.grounding",
+                        "Estou conferindo a intencao resolvida com as evidencias governadas disponiveis.",
+                        "Checking resolved intent against governed resource evidence.",
+                        intentGroundingDiagnostics(intentResolution, route)));
+                emitIntentResolutionProgress(eventSink, intentResolution);
+            }
             AgenticAuthoringToolResult resourceDiscoveryResult = maybeRunResourceDiscoveryTool(
                     request,
                     principalContext,
@@ -318,10 +337,11 @@ public class AgenticAuthoringTurnEngine {
                         eventSink,
                         "intent.resolve.grounding",
                         "Estou validando a escolha refinada com as evidencias do backend.");
-                eventSink.append("thought.step", Map.of(
-                        "phase", "intent.resolve.grounding",
-                        "summary", "Checking refined intent against backend resource evidence.",
-                        "diagnostics", intentGroundingDiagnostics(intentResolution, route)));
+                eventSink.append("thought.step", thoughtStepPayload(
+                        "intent.resolve.grounding",
+                        "Estou validando a escolha refinada com as evidencias do backend.",
+                        "Checking refined intent against backend resource evidence.",
+                        intentGroundingDiagnostics(intentResolution, route)));
                 emitIntentResolutionProgress(eventSink, intentResolution);
             }
             AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery =
@@ -343,19 +363,24 @@ public class AgenticAuthoringTurnEngine {
             if (route.allowsPreview() && intentResolution.valid()) {
                 AgenticAuthoringTurnStreamRequest contextualPreviewRequest =
                         withImplicitChartDetailModalActionContext(request, intentResolution);
-                AgenticAuthoringTurnStreamRequest previewRequest = withProjectKnowledgeContext(
-                        contextualPreviewRequest,
-                        principalContext,
-                        eventSink,
-                        intentResolution);
-                emitStatus(
-                        eventSink,
+                AgenticAuthoringTurnStreamRequest previewRequest = resolvedByPreIntentGovernedEvidence(intentResolution)
+                        ? contextualPreviewRequest
+                        : withProjectKnowledgeContext(
+                                contextualPreviewRequest,
+                                principalContext,
+                                eventSink,
+                                intentResolution);
+                if (!compactGovernedFastPath) {
+                    emitStatus(
+                            eventSink,
+                            "preview.plan",
+                            "Entendi a intencao e estou planejando a materializacao governada.");
+                }
+                eventSink.append("thought.step", thoughtStepPayload(
                         "preview.plan",
-                        "Entendi a intencao e estou planejando a materializacao governada.");
-                eventSink.append("thought.step", Map.of(
-                        "phase", "preview.plan",
-                        "summary", "Planning governed page materialization.",
-                        "diagnostics", Map.of(
+                        "Entendi a intencao e estou planejando a materializacao governada.",
+                        "Planning governed page materialization.",
+                        Map.of(
                                 "routeClass", safeText(route.routeClass()),
                                 "artifactKind", safeText(intentResolution.artifactKind()),
                                 "operationKind", safeText(intentResolution.operationKind()))));
@@ -372,16 +397,21 @@ public class AgenticAuthoringTurnEngine {
                                 principalContext.tenantId(),
                                 principalContext.userId(),
                                 principalContext.environment());
-                emitStatus(
-                        eventSink,
+                if (!compactGovernedFastPath) {
+                    emitStatus(
+                            eventSink,
+                            "preview.compile",
+                            preview.valid()
+                                    ? "Estou preparando a pre-visualizacao para revisao."
+                                    : "A pre-visualizacao precisa de uma revisao de seguranca antes de continuar.");
+                }
+                eventSink.append("thought.step", thoughtStepPayload(
                         "preview.compile",
                         preview.valid()
                                 ? "Estou preparando a pre-visualizacao para revisao."
-                                : "A pre-visualizacao precisa de uma revisao de seguranca antes de continuar.");
-                eventSink.append("thought.step", Map.of(
-                        "phase", "preview.compile",
-                        "summary", preview.valid() ? "Compiled preview payload." : "Preview requires backend repair classification.",
-                        "diagnostics", safePreviewDiagnostics(intentResolution, preview, false)));
+                                : "A pre-visualizacao precisa de uma revisao de seguranca antes de continuar.",
+                        preview.valid() ? "Compiled preview payload." : "Preview requires backend repair classification.",
+                        safePreviewDiagnostics(intentResolution, preview, false)));
                 preview = maybeRepairPreview(
                         previewRequest,
                         principalContext,
@@ -456,8 +486,30 @@ public class AgenticAuthoringTurnEngine {
         eventSink.append("status", Map.of(
                 "state", "in_progress",
                 "phase", safeText(phase),
-                "message", safeText(message),
-                "summary", safeText(message)));
+                "message", presentationText(message),
+                "summary", presentationText(message)));
+    }
+
+    private Map<String, Object> thoughtStepPayload(
+            String phase,
+            String message,
+            String summary) {
+        return thoughtStepPayload(phase, message, summary, null);
+    }
+
+    private Map<String, Object> thoughtStepPayload(
+            String phase,
+            String message,
+            String summary,
+            Object diagnostics) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("phase", safeText(phase));
+        payload.put("message", presentationText(message));
+        payload.put("summary", presentationText(summary));
+        if (diagnostics != null) {
+            payload.put("diagnostics", diagnostics);
+        }
+        return payload;
     }
 
     private void emitRuntimeComponentGroundingStep(
@@ -472,10 +524,11 @@ public class AgenticAuthoringTurnEngine {
         if (context == null || !context.isObject()) {
             return;
         }
-        eventSink.append("thought.step", Map.of(
-                "phase", "runtime.context.grounding",
-                "summary", "Grounded runtime component observations as untrusted evidence.",
-                "diagnostics", safeRuntimeGroundingDiagnostics(context)));
+        eventSink.append("thought.step", thoughtStepPayload(
+                "runtime.context.grounding",
+                "Estou aterrando o contexto dos componentes atuais como evidencia nao autoritativa.",
+                "Grounded runtime component observations as untrusted evidence.",
+                safeRuntimeGroundingDiagnostics(context)));
     }
 
     private Map<String, Object> safeRuntimeGroundingDiagnostics(JsonNode context) {
@@ -587,10 +640,11 @@ public class AgenticAuthoringTurnEngine {
             return null;
         }
         if (!isPostIntentConsultativeRoute(route)) {
-            eventSink.append("thought.step", Map.of(
-                    "phase", "consultative.post-intent.skipped",
-                    "summary", "Resolved route requires governed materialization or another executor.",
-                    "diagnostics", Map.of(
+            eventSink.append("thought.step", thoughtStepPayload(
+                    "consultative.post-intent.skipped",
+                    "A rota resolvida segue para materializacao governada; nao preciso de resposta consultiva agora.",
+                    "Resolved route requires governed materialization or another executor.",
+                    Map.of(
                             "serviceAvailable", true,
                             "routeClass", safeText(route == null ? "" : route.routeClass()))));
             return null;
@@ -607,10 +661,11 @@ public class AgenticAuthoringTurnEngine {
         }
         if (consultativeAnswerService == null) {
             log.info("[AgenticAuthoring] Post-intent consultative answer unavailable; service bean was not injected.");
-            eventSink.append("thought.step", Map.of(
-                    "phase", "consultative.post-intent.skipped",
-                    "summary", "Post-intent consultative answer service unavailable.",
-                    "diagnostics", Map.of("serviceAvailable", false)));
+            eventSink.append("thought.step", thoughtStepPayload(
+                    "consultative.post-intent.skipped",
+                    "A resposta consultiva nao esta disponivel neste runtime; vou seguir pelo caminho governado restante.",
+                    "Post-intent consultative answer service unavailable.",
+                    Map.of("serviceAvailable", false)));
             return null;
         }
         emitStatus(
@@ -631,10 +686,11 @@ public class AgenticAuthoringTurnEngine {
         log.info("[AgenticAuthoring] Post-intent consultative answer evaluated: routeClass={}, answerPresent={}",
                 route.routeClass(),
                 answer != null);
-        eventSink.append("thought.step", Map.of(
-                "phase", "consultative.post-intent.probe",
-                "summary", "Post-intent consultative executor evaluated.",
-                "diagnostics", Map.of(
+        eventSink.append("thought.step", thoughtStepPayload(
+                "consultative.post-intent.probe",
+                "Estou verificando se uma resposta consultiva governada resolve este turno.",
+                "Post-intent consultative executor evaluated.",
+                Map.of(
                         "serviceAvailable", true,
                         "routeClass", safeText(route.routeClass()),
                         "answerPresent", answer != null)));
@@ -1457,6 +1513,7 @@ public class AgenticAuthoringTurnEngine {
             String dedupeKey) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("phase", phase);
+        payload.put("message", summary);
         payload.put("summary", summary);
         payload.put("diagnostics", diagnostics);
         payload.put("streamEventDiagnostics", streamEventDiagnostics(dedupeKey, false));
@@ -1494,16 +1551,37 @@ public class AgenticAuthoringTurnEngine {
         return contextHints == null || fieldName == null ? "" : safeText(contextHints.path(fieldName).asText(""));
     }
 
-    private AgenticAuthoringTurnStreamRequest withServerComponentCapabilities(AgenticAuthoringTurnStreamRequest request) {
+    private AgenticAuthoringTurnStreamRequest withServerComponentCapabilities(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringTurnEventSink eventSink,
+            PreloadedComponentCapabilities preloadedCapabilities) {
         if (request == null
                 || (request.componentCapabilities() != null
                 && request.componentCapabilities().catalogs() != null
                 && !request.componentCapabilities().catalogs().isEmpty())) {
             return request;
         }
-        AgenticAuthoringComponentCapabilitiesResult componentCapabilities = componentCapabilitiesService == null
-                ? new AgenticAuthoringComponentCapabilitiesService().listCapabilities()
-                : componentCapabilitiesService.listCapabilities();
+        emitStatus(
+                eventSink,
+                "component.capabilities",
+                "Estou carregando capacidades governadas dos componentes para escolher a materializacao correta.");
+        ComponentCapabilitiesLoadResult componentCapabilitiesLoad =
+                awaitServerComponentCapabilities(preloadedCapabilities);
+        AgenticAuthoringComponentCapabilitiesResult componentCapabilities = componentCapabilitiesLoad.result();
+        eventSink.append("thought.step", thoughtStepPayload(
+                "component.capabilities",
+                "Capacidades governadas dos componentes carregadas; vou usar isso na decisao de materializacao.",
+                "Loaded governed component capabilities.",
+                Map.of(
+                        "catalogCount", componentCapabilities != null && componentCapabilities.catalogs() != null
+                                ? componentCapabilities.catalogs().size()
+                                : 0,
+                        "preloaded", componentCapabilitiesLoad.preloaded(),
+                        "preloadCompletedBeforeAwait", componentCapabilitiesLoad.completedBeforeAwait(),
+                        "fallbackSynchronousLoad", componentCapabilitiesLoad.fallbackSynchronousLoad(),
+                        "awaitElapsedMs", componentCapabilitiesLoad.awaitElapsedMs(),
+                        "preloadAgeMs", componentCapabilitiesLoad.preloadAgeMs(),
+                        "source", componentCapabilitiesService == null ? "built-in" : "service")));
         return new AgenticAuthoringTurnStreamRequest(
                 request.userPrompt(),
                 request.targetApp(),
@@ -1525,6 +1603,79 @@ public class AgenticAuthoringTurnEngine {
                 request.diagnostics(),
                 request.runtimeComponentObservations(),
                 request.runtimeComponentObservationTrustBoundary());
+    }
+
+    private PreloadedComponentCapabilities preloadServerComponentCapabilities(
+            AgenticAuthoringTurnStreamRequest request) {
+        if (request == null
+                || request.componentCapabilities() != null
+                && request.componentCapabilities().catalogs() != null
+                && !request.componentCapabilities().catalogs().isEmpty()) {
+            return null;
+        }
+        return new PreloadedComponentCapabilities(
+                CompletableFuture.supplyAsync(this::loadServerComponentCapabilities),
+                System.nanoTime());
+    }
+
+    private ComponentCapabilitiesLoadResult awaitServerComponentCapabilities(
+            PreloadedComponentCapabilities preloadedCapabilities) {
+        long awaitStartedAtNanos = System.nanoTime();
+        if (preloadedCapabilities == null) {
+            AgenticAuthoringComponentCapabilitiesResult result = loadServerComponentCapabilities();
+            return new ComponentCapabilitiesLoadResult(
+                    result,
+                    false,
+                    false,
+                    false,
+                    elapsedMs(awaitStartedAtNanos),
+                    0L);
+        }
+        boolean completedBeforeAwait = preloadedCapabilities.future().isDone();
+        try {
+            AgenticAuthoringComponentCapabilitiesResult result = preloadedCapabilities.future().join();
+            return new ComponentCapabilitiesLoadResult(
+                    result,
+                    true,
+                    completedBeforeAwait,
+                    false,
+                    elapsedMs(awaitStartedAtNanos),
+                    elapsedMs(preloadedCapabilities.startedAtNanos()));
+        } catch (CompletionException ex) {
+            log.debug("Preloaded component capabilities failed; loading synchronously.", ex);
+            AgenticAuthoringComponentCapabilitiesResult result = loadServerComponentCapabilities();
+            return new ComponentCapabilitiesLoadResult(
+                    result,
+                    true,
+                    completedBeforeAwait,
+                    true,
+                    elapsedMs(awaitStartedAtNanos),
+                    elapsedMs(preloadedCapabilities.startedAtNanos()));
+        }
+    }
+
+    private long elapsedMs(long startedAtNanos) {
+        return Math.max(0L, (System.nanoTime() - startedAtNanos) / 1_000_000L);
+    }
+
+    private record PreloadedComponentCapabilities(
+            CompletableFuture<AgenticAuthoringComponentCapabilitiesResult> future,
+            long startedAtNanos) {
+    }
+
+    private record ComponentCapabilitiesLoadResult(
+            AgenticAuthoringComponentCapabilitiesResult result,
+            boolean preloaded,
+            boolean completedBeforeAwait,
+            boolean fallbackSynchronousLoad,
+            long awaitElapsedMs,
+            long preloadAgeMs) {
+    }
+
+    private AgenticAuthoringComponentCapabilitiesResult loadServerComponentCapabilities() {
+        return componentCapabilitiesService == null
+                ? new AgenticAuthoringComponentCapabilitiesService().listCapabilities()
+                : componentCapabilitiesService.listCapabilities();
     }
 
     private AgenticAuthoringTurnStreamRequest withGroundedRuntimeComponentContext(
@@ -1568,7 +1719,7 @@ public class AgenticAuthoringTurnEngine {
                         6));
         eventSink.append("thought.step", safeToolProjection(
                 "tool.start",
-                "Preloading governed resource candidates for semantic intent resolution.",
+                "Estou consultando recursos governados antes de resolver a intencao.",
                 Map.of(
                         "tool", toolCall.name(),
                         "routeClass", "pre_intent_resource_discovery",
@@ -1577,8 +1728,8 @@ public class AgenticAuthoringTurnEngine {
         eventSink.append("thought.step", safeToolProjection(
                 result.valid() ? "tool.result" : "tool.error",
                 result.valid()
-                        ? "Pre-intent backend API resource search completed."
-                        : "Pre-intent backend API resource search failed.",
+                        ? "Encontrei candidatos governados para fundamentar a decisao."
+                        : "Nao consegui concluir a busca governada neste passo.",
                 safeToolDiagnostics(result)));
         return resourceDiscoveryPayload(result);
     }
@@ -1618,7 +1769,7 @@ public class AgenticAuthoringTurnEngine {
         }
         eventSink.append("thought.step", safeToolProjection(
                 "tool.plan",
-                "LLM-authored read-only tool plan prepared before semantic intent resolution.",
+                "A LLM decidiu consultar ferramentas de leitura antes de materializar a tela.",
                 Map.of(
                         "schemaVersion", safeText(plan.schemaVersion()),
                         "toolCallCount", Math.min(plan.toolCalls().size(), MAX_TOOL_CALLS_PER_TURN),
@@ -1631,7 +1782,7 @@ public class AgenticAuthoringTurnEngine {
             }
             eventSink.append("thought.step", safeToolProjection(
                     "tool.start",
-                    "Executing LLM-authored read-only pre-intent tool call.",
+                    "Estou executando a busca governada planejada pela LLM.",
                     Map.of(
                             "tool", safeText(toolCall.name()),
                             "routeClass", safeText(toolCall.routeClass()),
@@ -1640,8 +1791,8 @@ public class AgenticAuthoringTurnEngine {
             eventSink.append("thought.step", safeToolProjection(
                     result.valid() ? "tool.result" : "tool.error",
                     result.valid()
-                            ? "LLM-authored pre-intent tool call completed."
-                            : "LLM-authored pre-intent tool call failed.",
+                            ? "Busca governada concluida; vou usar os candidatos como evidencia."
+                            : "A busca governada planejada pela LLM falhou.",
                     safeToolDiagnostics(result)));
             executed++;
             AgenticAuthoringResourceCandidatesResult payload = resourceDiscoveryPayload(result);
@@ -1666,7 +1817,7 @@ public class AgenticAuthoringTurnEngine {
         }
         eventSink.append("thought.step", safeToolProjection(
                 "tool.plan.skipped",
-                "LLM-authored read-only pre-intent tool planning was skipped.",
+                "O planejamento de ferramenta pre-intent foi ignorado com motivo diagnosticado.",
                 diagnostics));
     }
 
@@ -1732,7 +1883,7 @@ public class AgenticAuthoringTurnEngine {
                         6));
         eventSink.append("thought.step", safeToolProjection(
                 "tool.start",
-                "Searching backend API resources.",
+                "Estou consultando recursos do backend para conferir a decisao.",
                 Map.of(
                         "tool", toolCall.name(),
                         "routeClass", safeText(route.routeClass()),
@@ -1740,7 +1891,9 @@ public class AgenticAuthoringTurnEngine {
         AgenticAuthoringToolResult result = toolRegistry.execute(toolCall, principalContext, "retrieveEvidence");
         eventSink.append("thought.step", safeToolProjection(
                 result.valid() ? "tool.result" : "tool.error",
-                result.valid() ? "Backend API resource search completed." : "Backend API resource search failed.",
+                result.valid()
+                        ? "Consulta de recursos concluida; estou conferindo os candidatos encontrados."
+                        : "Nao consegui concluir a consulta de recursos do backend.",
                 safeToolDiagnostics(result)));
         return result;
     }
@@ -1825,8 +1978,8 @@ public class AgenticAuthoringTurnEngine {
         eventSink.append("thought.step", safeToolProjection(
                 "tool.loop",
                 result.completed()
-                        ? "Governed authoring tool loop completed."
-                        : "Governed authoring tool loop stopped before completion.",
+                        ? "O ciclo de ferramentas governadas foi concluido."
+                        : "O ciclo de ferramentas governadas parou antes da conclusao.",
                 safeToolLoopDiagnostics(result)));
         return result;
     }
@@ -1848,6 +2001,20 @@ public class AgenticAuthoringTurnEngine {
             return request;
         }
         String componentId = authoringEvidenceComponentId(request, intentResolution);
+        if (!StringUtils.hasText(componentId)) {
+            if (resolvedByPreIntentGovernedEvidence(intentResolution)) {
+                return request;
+            }
+            eventSink.append("thought.step", safeToolProjection(
+                    "authoringEvidence.skipped",
+                    "Nao ha componente selecionado para buscar evidencia granular de autoria.",
+                    Map.of(
+                            "skipReason", "component-id-empty",
+                            "routeClass", safeText(route.routeClass()),
+                            "artifactKind", safeText(intentResolution.artifactKind()),
+                            "operationKind", safeText(intentResolution.operationKind()))));
+            return request;
+        }
         String retrievalQuery = authoringEvidenceQuery(request, intentResolution);
         AgenticAuthoringToolCall toolCall = new AgenticAuthoringToolCall(
                 AgenticAuthoringToolRegistry.GET_COMPONENT_AUTHORING_CONTEXT,
@@ -1900,6 +2067,20 @@ public class AgenticAuthoringTurnEngine {
                 && request.contextHints().path("authoringEvidence").isObject()
                 && request.contextHints().path("authoringEvidence").path("evidence").isArray()
                 && !request.contextHints().path("authoringEvidence").path("evidence").isEmpty();
+    }
+
+    private boolean resolvedByPreIntentGovernedEvidence(AgenticAuthoringIntentResolutionResult intentResolution) {
+        return intentResolution != null
+                && containsWarning(
+                        intentResolution.warnings(),
+                        "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence")
+                && containsWarning(
+                        intentResolution.warnings(),
+                        "llm-pre-intent-resource-discovery-used");
+    }
+
+    private boolean containsWarning(List<String> warnings, String expected) {
+        return warnings != null && warnings.stream().anyMatch(expected::equals);
     }
 
     private String authoringEvidenceQuery(
@@ -2447,11 +2628,17 @@ public class AgenticAuthoringTurnEngine {
                 "Estou buscando conhecimento governado do projeto para responder com mais contexto.");
         List<AgenticAuthoringProjectKnowledgeProjection> projections = projectKnowledgeService.retrieve(query);
         if (projections.isEmpty()) {
+            Map<String, Object> diagnostics = new LinkedHashMap<>(projectKnowledgeDiagnostics(projections));
+            diagnostics.put("result", "empty");
+            eventSink.append("thought.step", safeToolProjection(
+                    "projectKnowledge.result",
+                    "Nao encontrei conhecimento governado adicional do projeto para este planejamento.",
+                    diagnostics));
             return request;
         }
         eventSink.append("thought.step", safeToolProjection(
                 "projectKnowledge.retrieve",
-                "Retrieved governed project knowledge for preview planning.",
+                "Conhecimento governado do projeto recuperado para apoiar o planejamento.",
                 projectKnowledgeDiagnostics(projections)));
         ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
                 ? request.contextHints().deepCopy()
@@ -2816,7 +3003,10 @@ public class AgenticAuthoringTurnEngine {
         diagnostics.put("uiCompositionPlanUsesHardcodedAnchor", uiCompositionPlanUsesHardcodedAnchor(preview));
         diagnostics.put("uiCompositionPlanHasUnverifiedSemanticAxes", uiCompositionPlanHasUnverifiedSemanticAxes(preview));
         diagnostics.put("previewTechnicallyValid", preview != null && preview.valid());
-        diagnostics.put("previewResourceSchemaVerified", previewResourceSchemaVerified(preview));
+        boolean previewResourceSchemaVerified = previewResourceSchemaVerified(preview);
+        diagnostics.put("previewResourceSchemaVerified", previewResourceSchemaVerified);
+        diagnostics.put("selectedResourceSchemaGroundingMissing",
+                selectedResourceRequiresSchemaGrounding(selectedCandidate, preview) && !previewResourceSchemaVerified);
         diagnostics.put("decisionValid", !previewHasSemanticMaterializationFailures(
                 preview,
                 Boolean.TRUE.equals(diagnostics.get("semanticDecisionReviewGroundedByPreview"))));
@@ -2904,6 +3094,21 @@ public class AgenticAuthoringTurnEngine {
                 && "schemas.filtered".equals(grounding.path("source").asText(""));
     }
 
+    private boolean selectedResourceRequiresSchemaGrounding(
+            AgenticAuthoringCandidate selectedCandidate,
+            AgenticAuthoringPreviewResult preview) {
+        if (selectedCandidate == null
+                || !StringUtils.hasText(selectedCandidate.resourcePath())
+                || preview == null
+                || preview.uiCompositionPlan() == null) {
+            return false;
+        }
+        return hasEvidence(selectedCandidate, "semantic-retrieval")
+                || hasEvidence(selectedCandidate, "tool-search-api-resources")
+                || hasEvidence(selectedCandidate, "api-metadata")
+                || hasEvidence(selectedCandidate, "schema-available");
+    }
+
     private boolean semanticDecisionReviewGroundedByPreview(
             AgenticAuthoringSemanticDecision semanticDecision,
             AgenticAuthoringPreviewResult preview) {
@@ -2911,12 +3116,27 @@ public class AgenticAuthoringTurnEngine {
             return false;
         }
         String reason = safeText(semanticDecision.reviewReason());
-        return "keyword-fallback-fail-safe".equals(reason)
-                && semanticDecision.refinement() != null
-                && semanticDecision.refinement().preservesResource()
-                && ("current-page-bound-resource".equals(safeText(semanticDecision.previousDecisionRef()))
-                        || !safeText(semanticDecision.refinementOf()).isBlank()
-                        || !safeText(semanticDecision.previousDecisionId()).isBlank());
+        if ("prompt-alignment-selection".equals(reason)) {
+            AgenticAuthoringSemanticDecision.RetrievalEvidence retrievalEvidence = semanticDecision.retrievalEvidence();
+            return retrievalEvidence != null
+                    && retrievalEvidence.evidence() != null
+                    && (retrievalEvidence.evidence().contains("tool-search-api-resources")
+                    || "semantic_retrieval".equals(safeText(retrievalEvidence.retrievalSource())));
+        }
+        if ("keyword-fallback-fail-safe".equals(reason)) {
+            AgenticAuthoringSemanticDecision.RetrievalEvidence retrievalEvidence = semanticDecision.retrievalEvidence();
+            boolean governedEvidence = retrievalEvidence != null
+                    && retrievalEvidence.evidence() != null
+                    && (retrievalEvidence.evidence().contains("tool-search-api-resources")
+                    || "semantic_retrieval".equals(safeText(retrievalEvidence.retrievalSource())));
+            return governedEvidence
+                    || semanticDecision.refinement() != null
+                    && semanticDecision.refinement().preservesResource()
+                    && ("current-page-bound-resource".equals(safeText(semanticDecision.previousDecisionRef()))
+                            || !safeText(semanticDecision.refinementOf()).isBlank()
+                            || !safeText(semanticDecision.previousDecisionId()).isBlank());
+        }
+        return false;
     }
 
     private void putSemanticAxisDiagnostics(Map<String, Object> diagnostics, AgenticAuthoringPreviewResult preview) {
@@ -2934,6 +3154,9 @@ public class AgenticAuthoringTurnEngine {
         int verified = 0;
         List<Map<String, Object>> axisSummaries = new ArrayList<>();
         for (JsonNode axis : axes) {
+            if (axis.path("materialized").isBoolean() && !axis.path("materialized").asBoolean()) {
+                continue;
+            }
             total++;
             boolean schemaVerified = axis.path("schemaVerified").asBoolean(false);
             if (schemaVerified) {
@@ -2964,6 +3187,7 @@ public class AgenticAuthoringTurnEngine {
                 || Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesLexicalFallback"))
                 || Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesBroadArtifactDiscovery"))
                 || Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesDomainAnchor"))
+                || Boolean.TRUE.equals(diagnostics.get("selectedResourceSchemaGroundingMissing"))
                 || Boolean.FALSE.equals(diagnostics.get("decisionValid"))
                 || Boolean.FALSE.equals(diagnostics.get("toolLoopCompleted"))
                 || Boolean.TRUE.equals(diagnostics.get("uiCompositionPlanUsesHardcodedAnchor"))
@@ -2990,15 +3214,18 @@ public class AgenticAuthoringTurnEngine {
         if (Boolean.TRUE.equals(diagnostics.get("selectedCandidateUsesDomainAnchor"))) {
             return "resource-selection-domain-anchor";
         }
+        if (Boolean.TRUE.equals(diagnostics.get("uiCompositionPlanUsesHardcodedAnchor"))) {
+            return "ui-composition-hardcoded-reference-provider";
+        }
+        if (Boolean.TRUE.equals(diagnostics.get("selectedResourceSchemaGroundingMissing"))) {
+            return "resource-schema-grounding-required";
+        }
         if (Boolean.FALSE.equals(diagnostics.get("decisionValid"))) {
             return "semantic-preview-materialization-mismatch";
         }
         if (Boolean.FALSE.equals(diagnostics.get("toolLoopCompleted"))) {
             String reason = safeText((String) diagnostics.get("toolLoopTerminalReason"));
             return reason.isBlank() ? "agentic-tool-loop-incomplete" : "agentic-tool-loop-" + reason;
-        }
-        if (Boolean.TRUE.equals(diagnostics.get("uiCompositionPlanUsesHardcodedAnchor"))) {
-            return "ui-composition-hardcoded-reference-provider";
         }
         if (Boolean.TRUE.equals(diagnostics.get("uiCompositionPlanHasUnverifiedSemanticAxes"))) {
             return "ui-composition-semantic-axis-schema-verification-pending";
@@ -3054,12 +3281,15 @@ public class AgenticAuthoringTurnEngine {
                         principalContext.tenantId(),
                         principalContext.userId(),
                         principalContext.environment());
-        eventSink.append("thought.step", Map.of(
-                "phase", "preview.compile",
-                "summary", repairedPreview.valid()
+        eventSink.append("thought.step", thoughtStepPayload(
+                "preview.compile",
+                repairedPreview.valid()
+                        ? "O reparo do backend gerou uma pre-visualizacao valida para revisao."
+                        : "A tentativa de reparo terminou, mas ainda nao gerou uma pre-visualizacao valida.",
+                repairedPreview.valid()
                         ? "Compiled preview payload after backend repair."
                         : "Preview repair attempt completed without a valid payload.",
-                "diagnostics", safePreviewDiagnostics(intentResolution, repairedPreview, true)));
+                safePreviewDiagnostics(intentResolution, repairedPreview, true)));
         return repairedPreview;
     }
 
@@ -3116,6 +3346,7 @@ public class AgenticAuthoringTurnEngine {
             copySafeDiagnostic(result.safeDiagnostics(), diagnostics, "releaseId");
             copySafeDiagnostic(result.safeDiagnostics(), diagnostics, "retrievalQuery");
             copySafeDiagnostic(result.safeDiagnostics(), diagnostics, "retrievalSource");
+            copySafeDiagnostic(result.safeDiagnostics(), diagnostics, "resourceDiscoveryDiagnostics");
             copySafeDiagnostic(result.safeDiagnostics(), diagnostics, "sourceRefs");
         }
         return diagnostics;
@@ -3140,6 +3371,9 @@ public class AgenticAuthoringTurnEngine {
         resourceDiscovery.put("tool", AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES);
         resourceDiscovery.put("retrievalQuery", safeText(discovery.retrievalQuery()));
         resourceDiscovery.put("artifactKind", safeText(discovery.artifactKind()));
+        if (discovery.resourceSearchFocus() != null && !discovery.resourceSearchFocus().isEmpty()) {
+            resourceDiscovery.set("resourceSearchFocus", resourceSearchFocusNode(discovery.resourceSearchFocus()));
+        }
         ArrayNode candidates = resourceDiscovery.putArray("candidates");
         for (AgenticAuthoringCandidate candidate : discovery.candidates()) {
             candidates.add(candidateContext(candidate));
@@ -3170,6 +3404,21 @@ public class AgenticAuthoringTurnEngine {
                 request.diagnostics(),
                 request.runtimeComponentObservations(),
                 request.runtimeComponentObservationTrustBoundary());
+    }
+
+    private ObjectNode resourceSearchFocusNode(AgenticAuthoringResourceSearchFocus focus) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("primaryBusinessEntity", safeText(focus.primaryBusinessEntity()));
+        ArrayNode supportingConcepts = node.putArray("supportingConcepts");
+        for (String concept : focus.supportingConcepts()) {
+            if (StringUtils.hasText(concept)) {
+                supportingConcepts.add(concept.trim());
+            }
+        }
+        node.put("desiredSurface", safeText(focus.desiredSurface()));
+        node.put("uncertainty", safeText(focus.uncertainty()));
+        node.put("rationale", safeText(focus.rationale()));
+        return node;
     }
 
     private String domainCatalogHint(AgenticAuthoringTurnStreamRequest request, String fieldName) {
@@ -3233,6 +3482,9 @@ public class AgenticAuthoringTurnEngine {
             candidate.evidence().stream()
                     .filter(value -> value != null && !value.isBlank())
                     .forEach(evidence::add);
+        }
+        if (candidate.evidenceBundle() != null) {
+            node.set("evidenceBundle", objectMapper.valueToTree(candidate.evidenceBundle()));
         }
         return node;
     }
@@ -3352,21 +3604,24 @@ public class AgenticAuthoringTurnEngine {
             return;
         }
         if (hasToolDiscoveredCandidates(intentResolution)) {
-            eventSink.append("thought.step", Map.of(
-                    "phase", "resource.discovery",
-                    "summary", "Resource candidates were retrieved from the backend catalog.",
-                    "diagnostics", resourceDiscoveryDiagnostics(intentResolution)));
+            eventSink.append("thought.step", thoughtStepPayload(
+                    "resource.discovery",
+                    "Encontrei candidatos governados no catalogo do backend.",
+                    "Resource candidates were retrieved from the backend catalog.",
+                    resourceDiscoveryDiagnostics(intentResolution)));
         } else if (contains(intentResolution.failureCodes(), "resource-candidate-ambiguous")) {
-            eventSink.append("thought.step", Map.of(
-                    "phase", "resource.discovery",
-                    "summary", "Resource candidates returned for user selection.",
-                    "diagnostics", resourceDiscoveryDiagnostics(intentResolution)));
+            eventSink.append("thought.step", thoughtStepPayload(
+                    "resource.discovery",
+                    "Encontrei mais de uma fonte governada possivel e vou manter a escolha para revisao.",
+                    "Resource candidates returned for user selection.",
+                    resourceDiscoveryDiagnostics(intentResolution)));
         }
         if (contains(intentResolution.warnings(), "llm-intent-resolution-second-pass-used")) {
-            eventSink.append("thought.step", Map.of(
-                    "phase", "intent.resolve.llm",
-                    "summary", "The LLM reviewed refined backend resource candidates.",
-                    "diagnostics", secondPassDiagnostics(intentResolution)));
+            eventSink.append("thought.step", thoughtStepPayload(
+                    "intent.resolve.llm",
+                    "A LLM revisou os candidatos recuperados pelo backend.",
+                    "The LLM reviewed refined backend resource candidates.",
+                    secondPassDiagnostics(intentResolution)));
         }
     }
 
@@ -4106,6 +4361,10 @@ public class AgenticAuthoringTurnEngine {
 
     private String publicAssistantMessage(String value) {
         return AgenticAuthoringPresentationText.assistantReply(safeText(value));
+    }
+
+    private String presentationText(String value) {
+        return AgenticAuthoringPresentationText.display(safeText(value));
     }
 
     private String toSnippet(String value) {
