@@ -13233,6 +13233,8 @@ class AgenticAuthoringIntentResolverServiceTest {
     void unresolvedLongNarrativeUsesGovernedToolEvidenceInsteadOfBroadKeywordFallback() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         AgenticAuthoringCandidate broadAgreementCandidate = withEvidence(
                 broadArtifactCandidate(
                         "/api/operations/acordos-regulatorios",
@@ -13263,7 +13265,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
-                null,
+                llmIntentResolver,
                 null);
 
         AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
@@ -13288,12 +13290,22 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.warnings())
                 .contains(
-                        "llm-resource-discovery-authoring-drift-normalized",
-                        "governed-deterministic-resolution-applied")
+                        "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                        "llm-pre-intent-resource-discovery-used")
                 .doesNotContain("keyword-fallback-applied", "keyword-fallback-fail-safe-applied")
-                .doesNotContain("llm-intent-resolution-satisfied-by-pre-intent-governed-evidence");
+                .doesNotContain("llm-intent-resolution-second-pass-used");
         assertThat(result.semanticDecision()).isNotNull();
         assertThat(result.semanticDecision().reviewRequired()).isFalse();
+        Mockito.verify(llmIntentResolver, Mockito.never()).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
     }
 
     @Test

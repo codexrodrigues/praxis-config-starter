@@ -555,8 +555,18 @@ public record AgenticAuthoringSemanticDecision(
             String operation,
             String schemaUrl,
             String submitUrl,
-            String submitMethod
+            String submitMethod,
+            String label
     ) {
+
+        public SelectedResource(
+                String resourcePath,
+                String operation,
+                String schemaUrl,
+                String submitUrl,
+                String submitMethod) {
+            this(resourcePath, operation, schemaUrl, submitUrl, submitMethod, "");
+        }
 
         static SelectedResource from(AgenticAuthoringCandidate candidate) {
             if (candidate == null) {
@@ -567,7 +577,8 @@ public record AgenticAuthoringSemanticDecision(
                     safe(candidate.operation()),
                     safe(candidate.schemaUrl()),
                     safe(candidate.submitUrl()),
-                    safe(candidate.submitMethod()));
+                    safe(candidate.submitMethod()),
+                    AgenticAuthoringResourcePresentationLabel.fromCandidate(candidate));
         }
     }
 

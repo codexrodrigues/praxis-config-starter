@@ -105,6 +105,34 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
     }
 
     @Test
+    void synthesizeUsesGovernedEvidenceSummaryAsPublicResourceLabel() {
+        String result = service().synthesize(
+                governedPreIntentRequest(),
+                governedProfileIntentWithEvidenceSummary(),
+                uiCompositionPlan(),
+                true,
+                List.of(),
+                List.of("compiled-form-patch-materialized-by-page-builder"),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result)
+                .contains("Fonte governada: Perfis 360")
+                .doesNotContain("Perfil heroi")
+                .doesNotContain("vw-perfil-heroi")
+                .doesNotContain("/api/")
+                .doesNotContain("/schemas/");
+        org.mockito.Mockito.verify(providerManagementService, org.mockito.Mockito.never()).generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                any(String.class),
+                any(String.class),
+                any(String.class));
+    }
+
+    @Test
     void synthesizeCollapsesRepeatedSemanticGoalInGovernedMessage() {
         String result = service().synthesize(
                 governedPreIntentRequest(),
@@ -716,6 +744,54 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                         "",
                         "semantic-goal-authored-by-llm",
                         null));
+    }
+
+    private AgenticAuthoringIntentResolutionResult governedProfileIntentWithEvidenceSummary() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/vw-perfil-heroi",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/vw-perfil-heroi/filter/cursor&operation=post&schemaType=response",
+                        "/api/human-resources/vw-perfil-heroi/filter/cursor",
+                        "POST",
+                        0.82d,
+                        "LLM selected the governed profile projection from pre-intent retrieval",
+                        List.of("tool-search-api-resources", "semantic-retrieval", "schema-available"),
+                        AgenticAuthoringEvidenceBundle.of(
+                                "semantic_retrieval",
+                                List.of(new AgenticAuthoringEvidenceBundle.Evidence(
+                                        "api_metadata",
+                                        "retrieved_candidate",
+                                        "/api/human-resources/vw-perfil-heroi",
+                                        "Percorrer perfis 360 em listas extensas",
+                                        0.82d,
+                                        List.of("perfil", "funcionario", "ficha"),
+                                        "tenant",
+                                        "local",
+                                        "")))),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "criar uma tela de perfil individual do funcionario",
+                "Vou montar uma prévia governada.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(
+                        "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                        "llm-pre-intent-resource-discovery-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
     }
 
     private AgenticAuthoringIntentResolutionResult governedFastIntent() {

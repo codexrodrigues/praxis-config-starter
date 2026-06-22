@@ -2743,6 +2743,71 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.path("widgets")).isEmpty();
     }
 
+    @Test
+    void shouldCompileTopLevelUiCompositionPlanIntoPageBuilderPreviewPage() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "title": "Old",
+                  "canvas": { "columns": 12, "items": {} },
+                  "widgets": []
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("composition.plan.compile", "agenticPreview", "agentic-preview-result", true,
+                        "compile-domain-patch", "page-builder-ui-composition-plan-compile", "compiledFormPatch.patch.page"),
+                plan("{}", """
+                        {
+                          "uiCompositionPlan": {
+                            "kind": "praxis.ui-composition-plan",
+                            "layoutPreset": "resource-master-detail",
+                            "widgets": [
+                              { "key": "funcionarios-master", "componentId": "praxis-table" },
+                              { "key": "funcionarios-detail", "componentId": "praxis-dynamic-form" }
+                            ],
+                            "canvas": {
+                              "mode": "grid",
+                              "columns": 12,
+                              "rowUnit": "80px",
+                              "gap": "16px",
+                              "items": {
+                                "funcionarios-master": { "col": 1, "row": 1, "colSpan": 12, "rowSpan": 4 },
+                                "funcionarios-detail": { "col": 1, "row": 5, "colSpan": 12, "rowSpan": 7 }
+                              }
+                            },
+                            "deviceLayouts": {
+                              "mobile": {
+                                "canvas": {
+                                  "columns": 1,
+                                  "items": {
+                                    "funcionarios-master": { "col": 1, "row": 1, "colSpan": 1, "rowSpan": 4 }
+                                  }
+                                }
+                              }
+                            },
+                            "composition": { "links": [] }
+                          }
+                        }
+                        """),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode page = proposedConfig.path("compiledFormPatch").path("patch").path("page");
+        assertThat(page.path("layoutPreset").asText()).isEqualTo("resource-master-detail");
+        assertThat(page.path("widgets")).hasSize(2);
+        assertThat(page.path("canvas").path("items").path("funcionarios-master").path("colSpan").asInt())
+                .isEqualTo(12);
+        assertThat(page.path("canvas").path("items").path("funcionarios-detail").path("row").asInt())
+                .isEqualTo(5);
+        assertThat(page.path("deviceLayouts").path("mobile").path("canvas")
+                .path("items").path("funcionarios-master").path("colSpan").asInt()).isEqualTo(1);
+        assertThat(patchOperations.get(0).path("page").path("canvas").path("items")
+                .path("funcionarios-master").path("colSpan").asInt()).isEqualTo(12);
+    }
+
     private ObjectNode dynamicFormConfig() throws Exception {
         return (ObjectNode) objectMapper.readTree("""
                 {

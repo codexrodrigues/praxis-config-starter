@@ -164,7 +164,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
             AgenticAuthoringCandidate candidate = intentResolution.selectedCandidate();
             if (candidate != null) {
                 ObjectNode resource = root.putObject("selectedResource");
-                resource.put("label", titleFromResourcePath(candidate.resourcePath()));
+                resource.put("label", AgenticAuthoringResourcePresentationLabel.fromCandidate(candidate));
             }
         }
         root.set("uiCompositionSummary", uiCompositionSummary(uiCompositionPlan));
@@ -642,7 +642,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         if (candidate == null) {
             return "";
         }
-        return titleFromResourcePath(candidate.resourcePath());
+        return AgenticAuthoringResourcePresentationLabel.fromCandidate(candidate);
     }
 
     private boolean isLocalEditorialComposition(
@@ -695,18 +695,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
     }
 
     private String titleFromResourcePath(String resourcePath) {
-        String value = value(resourcePath);
-        if (value.isBlank()) {
-            return "o recurso selecionado";
-        }
-        String lastSegment = value.substring(value.lastIndexOf('/') + 1)
-                .replace("vw-", "")
-                .replace('-', ' ')
-                .trim();
-        if (lastSegment.isBlank()) {
-            return "o recurso selecionado";
-        }
-        return Character.toUpperCase(lastSegment.charAt(0)) + lastSegment.substring(1);
+        return AgenticAuthoringResourcePresentationLabel.fromResourcePath(resourcePath);
     }
 
     private String userFacingComponentKind(String componentId) {

@@ -7060,6 +7060,39 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void emitsCuratedGovernedResourceLabelInIntentResolvedProgress() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(profileIntentWithEvidenceSummary());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(request(), principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        JsonNode intentResolved = firstPayloadOfType(sink, "intent.resolved");
+        org.assertj.core.api.Assertions.assertThat(intentResolved.path("userFacingUnderstanding").asText())
+                .contains("Perfis 360")
+                .doesNotContain("perfil heroi");
+        JsonNode result = firstPayloadOfType(sink, "result");
+        org.assertj.core.api.Assertions.assertThat(result.path("intentResolution")
+                        .path("semanticDecision")
+                        .path("selectedResource")
+                        .path("label")
+                        .asText())
+                .isEqualTo("Perfis 360");
+    }
+
+    @Test
     void exposesContextualQuickRepliesAfterChartPreview() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
@@ -8373,6 +8406,8 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
         verify(projectKnowledgeService, never()).retrieve(any());
         verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .doesNotContain("intent.resolve.grounding", "projectKnowledge.retrieve", "projectKnowledge.result");
         org.assertj.core.api.Assertions.assertThat(sink.payloads)
                 .noneSatisfy(payload -> {
                     JsonNode node = objectMapper.valueToTree(payload);
@@ -10974,6 +11009,50 @@ class AgenticAuthoringTurnEngineTest {
                 "Preview ready.",
                 List.of(),
                 List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult profileIntentWithEvidenceSummary() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "create_artifact",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/vw-perfil-heroi",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/vw-perfil-heroi/filter/cursor&operation=post&schemaType=response",
+                        "/api/human-resources/vw-perfil-heroi/filter/cursor",
+                        "POST",
+                        0.82,
+                        "selected profile projection from governed evidence",
+                        List.of("semantic-retrieval", "tool-search-api-resources", "schema-available"),
+                        AgenticAuthoringEvidenceBundle.of(
+                                "semantic_retrieval",
+                                List.of(new AgenticAuthoringEvidenceBundle.Evidence(
+                                        "api_metadata",
+                                        "retrieved_candidate",
+                                        "/api/human-resources/vw-perfil-heroi",
+                                        "Percorrer perfis 360 em listas extensas",
+                                        0.82d,
+                                        List.of("perfil", "funcionario", "ficha"),
+                                        "tenant",
+                                        "local",
+                                        "")))),
+                List.of(),
+                new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
+                null,
+                "Vou criar uma página usando a fonte governada perfil heroi.",
+                List.of(),
+                List.of(
+                        "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                        "llm-pre-intent-resource-discovery-used"),
                 List.of(),
                 List.of(),
                 objectMapper.createObjectNode());

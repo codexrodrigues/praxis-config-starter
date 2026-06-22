@@ -2671,7 +2671,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             failures.add("page-builder-ui-composition-plan-compile requires uiCompositionPlan");
             return null;
         }
-        JsonNode page = plan.path("page").isObject() ? plan.path("page").deepCopy() : proposedConfig.deepCopy();
+        JsonNode page = pageFromUiCompositionPlan(plan, proposedConfig);
         objectAt(proposedConfig, "compiledFormPatch.patch", true).set("page", page);
         proposedConfig.set("uiCompositionPlan", plan.deepCopy());
         ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
@@ -2679,6 +2679,33 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.put("path", "compiledFormPatch.patch.page");
         compiled.set("page", page);
         return compiled;
+    }
+
+    private ObjectNode pageFromUiCompositionPlan(JsonNode plan, ObjectNode proposedConfig) {
+        if (plan.path("page").isObject()) {
+            return plan.path("page").deepCopy();
+        }
+        ObjectNode page = objectMapper.createObjectNode();
+        copyIfPresentOrFallback(plan, proposedConfig, page, "title");
+        copyIfPresentOrFallback(plan, proposedConfig, page, "layoutPreset");
+        copyIfPresentOrFallback(plan, proposedConfig, page, "context");
+        copyIfPresentOrFallback(plan, proposedConfig, page, "metadata");
+        copyIfPresentOrFallback(plan, proposedConfig, page, "widgets");
+        copyIfPresentOrFallback(plan, proposedConfig, page, "canvas");
+        copyIfPresentOrFallback(plan, proposedConfig, page, "composition");
+        copyIfPresent(plan, page, "deviceLayouts");
+        copyIfPresent(plan, page, "grouping");
+        copyIfPresent(plan, page, "slotAssignments");
+        copyIfPresent(plan, page, "bindings");
+        return page;
+    }
+
+    private void copyIfPresentOrFallback(JsonNode source, JsonNode fallback, ObjectNode target, String field) {
+        if (source.path(field).isMissingNode() || source.path(field).isNull()) {
+            copyIfPresent(fallback, target, field);
+            return;
+        }
+        target.set(field, source.path(field).deepCopy());
     }
 
     private ObjectNode compilePageBuilderStateSet(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {

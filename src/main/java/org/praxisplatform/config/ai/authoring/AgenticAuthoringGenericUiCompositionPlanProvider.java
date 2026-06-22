@@ -232,7 +232,10 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
 
     private ObjectNode tablePlan(AgenticAuthoringCandidate candidate) {
         ObjectNode plan = basePlan("single-table-page");
-        addTable(plan.putArray("widgets"), candidate, widgetKey(candidate, "table"), "main");
+        String tableKey = widgetKey(candidate, "table");
+        addTable(plan.putArray("widgets"), candidate, tableKey, "main");
+        addSingleTableCanvas(plan, candidate, tableKey);
+        addSingleTableDeviceLayouts(plan, tableKey);
         return plan;
     }
 
@@ -424,7 +427,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     private ObjectNode pagePlan(
             AgenticAuthoringCandidate candidate,
             AgenticAuthoringVisualizationDecision visualizationDecision) {
-        if (shouldMaterializeProfilePage(visualizationDecision)) {
+        if (shouldMaterializeProfilePage(visualizationDecision, candidate)) {
             return profilePagePlan(candidate);
         }
         if (isPrimaryComponent(visualizationDecision, "praxis-list")) {
@@ -432,9 +435,97 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         }
         ObjectNode plan = basePlan("resource-master-detail");
         ArrayNode widgets = plan.putArray("widgets");
-        addTable(widgets, candidate, widgetKey(candidate, "master"), "master");
-        addDetail(widgets, candidate, widgetKey(candidate, "detail"));
+        String masterKey = widgetKey(candidate, "master");
+        String detailKey = widgetKey(candidate, "detail");
+        addTable(widgets, candidate, masterKey, "master");
+        addDetail(widgets, candidate, detailKey);
+        addMasterDetailCanvas(plan, candidate, masterKey, detailKey);
+        addMasterDetailDeviceLayouts(plan, masterKey, detailKey);
         return plan;
+    }
+
+    private void addMasterDetailCanvas(
+            ObjectNode plan,
+            AgenticAuthoringCandidate candidate,
+            String masterKey,
+            String detailKey) {
+        ObjectNode canvas = plan.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.put("rowUnit", "80px");
+        canvas.put("gap", "16px");
+        canvas.put("autoRows", "fixed");
+        ObjectNode items = canvas.putObject("items");
+        putCanvasItem(items, masterKey, 1, 1, 12, 7);
+        putCanvasItem(items, detailKey, 1, 8, 12, 8);
+
+        ObjectNode options = plan.putObject("layoutPresetOptions");
+        options.put("presetFamily", "resource-master-detail");
+        options.put("sourceResource", businessResourcePath(candidate.resourcePath()));
+        options.put("density", "comfortable");
+        options.put("responsiveStrategy", "canvas-device-layouts");
+    }
+
+    private void addMasterDetailDeviceLayouts(
+            ObjectNode plan,
+            String masterKey,
+            String detailKey) {
+        ObjectNode deviceLayouts = plan.putObject("deviceLayouts");
+        addStackedMasterDetailDeviceLayout(deviceLayouts.putObject("mobile"), 1, "88px", "12px", masterKey, detailKey);
+        addStackedMasterDetailDeviceLayout(deviceLayouts.putObject("tablet"), 6, "80px", "14px", masterKey, detailKey);
+    }
+
+    private void addStackedMasterDetailDeviceLayout(
+            ObjectNode variant,
+            int columns,
+            String rowUnit,
+            String gap,
+            String masterKey,
+            String detailKey) {
+        ObjectNode canvas = variant.putObject("canvas");
+        canvas.put("columns", columns);
+        canvas.put("rowUnit", rowUnit);
+        canvas.put("gap", gap);
+        canvas.put("autoRows", "fixed");
+        ObjectNode items = canvas.putObject("items");
+        putCanvasItem(items, masterKey, 1, 1, columns, 7);
+        putCanvasItem(items, detailKey, 1, 8, columns, 8);
+    }
+
+    private void addSingleTableCanvas(ObjectNode plan, AgenticAuthoringCandidate candidate, String tableKey) {
+        ObjectNode canvas = plan.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.put("rowUnit", "72px");
+        canvas.put("gap", "16px");
+        canvas.put("autoRows", "fixed");
+        putCanvasItem(canvas.putObject("items"), tableKey, 1, 1, 12, 7);
+
+        ObjectNode options = plan.putObject("layoutPresetOptions");
+        options.put("presetFamily", "single-table");
+        options.put("sourceResource", businessResourcePath(candidate.resourcePath()));
+        options.put("density", "comfortable");
+        options.put("responsiveStrategy", "canvas-device-layouts");
+    }
+
+    private void addSingleTableDeviceLayouts(ObjectNode plan, String tableKey) {
+        ObjectNode deviceLayouts = plan.putObject("deviceLayouts");
+        addSingleTableDeviceLayout(deviceLayouts.putObject("mobile"), 1, "88px", "12px", tableKey);
+        addSingleTableDeviceLayout(deviceLayouts.putObject("tablet"), 6, "80px", "14px", tableKey);
+    }
+
+    private void addSingleTableDeviceLayout(
+            ObjectNode variant,
+            int columns,
+            String rowUnit,
+            String gap,
+            String tableKey) {
+        ObjectNode canvas = variant.putObject("canvas");
+        canvas.put("columns", columns);
+        canvas.put("rowUnit", rowUnit);
+        canvas.put("gap", gap);
+        canvas.put("autoRows", "fixed");
+        putCanvasItem(canvas.putObject("items"), tableKey, 1, 1, columns, 7);
     }
 
     private ObjectNode profilePagePlan(AgenticAuthoringCandidate candidate) {
@@ -449,14 +540,45 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         canvas.put("columns", 12);
         canvas.put("rowUnit", "72px");
         canvas.put("gap", "16px");
+        canvas.put("autoRows", "fixed");
         ObjectNode items = canvas.putObject("items");
-        putCanvasItem(items, summaryKey, 1, 1, 12, 2);
-        putCanvasItem(items, detailKey, 1, 3, 12, 6);
+        putCanvasItem(items, summaryKey, 1, 1, 4, 8);
+        putCanvasItem(items, detailKey, 5, 1, 8, 8);
         ObjectNode options = plan.putObject("layoutPresetOptions");
         options.put("presetFamily", "profile-detail");
         options.put("sourceResource", businessResourcePath(candidate.resourcePath()));
         options.put("density", "comfortable");
+        options.put("responsiveStrategy", "canvas-device-layouts");
+        ObjectNode slotAssignments = plan.putObject("slotAssignments");
+        slotAssignments.put(summaryKey, "profile-summary");
+        slotAssignments.put(detailKey, "profile-detail");
+        ArrayNode grouping = plan.putArray("grouping");
+        ObjectNode profileGroup = grouping.addObject();
+        profileGroup.put("kind", "section");
+        profileGroup.put("id", "profile-workspace");
+        profileGroup.put("layout", "row");
+        profileGroup.putArray("widgetKeys").add(summaryKey).add(detailKey);
+        ObjectNode deviceLayouts = plan.putObject("deviceLayouts");
+        addStackedProfileDeviceLayout(deviceLayouts.putObject("mobile"), 1, "88px", "12px", summaryKey, detailKey);
+        addStackedProfileDeviceLayout(deviceLayouts.putObject("tablet"), 6, "80px", "14px", summaryKey, detailKey);
         return plan;
+    }
+
+    private void addStackedProfileDeviceLayout(
+            ObjectNode variant,
+            int columns,
+            String rowUnit,
+            String gap,
+            String summaryKey,
+            String detailKey) {
+        ObjectNode canvas = variant.putObject("canvas");
+        canvas.put("columns", columns);
+        canvas.put("rowUnit", rowUnit);
+        canvas.put("gap", gap);
+        canvas.put("autoRows", "fixed");
+        ObjectNode items = canvas.putObject("items");
+        putCanvasItem(items, summaryKey, 1, 1, columns, 2);
+        putCanvasItem(items, detailKey, 1, 3, columns, 7);
     }
 
     private ObjectNode listPagePlan(AgenticAuthoringCandidate candidate) {
@@ -520,7 +642,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         inputs.put("resourcePath", businessResourcePath(candidate.resourcePath()));
         inputs.put("tableId", key);
         ObjectNode config = inputs.putObject("config");
-        config.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
+        config.put("title", resourceTitle(candidate));
         config.putArray("columns");
     }
 
@@ -542,16 +664,16 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         inputs.putObject("queryContext").putObject("filters");
         ObjectNode config = inputs.putObject("config");
         String resourcePath = businessResourcePath(candidate.resourcePath());
-        config.put("title", "Destaques de " + titleFromResourcePath(resourcePath));
+        config.put("title", "Destaques de " + resourceTitle(candidate));
         ObjectNode dataSource = config.putObject("dataSource");
         dataSource.put("resourcePath", resourcePath);
         dataSource.putObject("query");
         ObjectNode layout = config.putObject("layout");
         layout.put("variant", "cards");
-        layout.put("density", "comfortable");
+        layout.put("density", "insight-list".equals(role) ? "compact" : "comfortable");
         layout.put("itemSpacing", "default");
-        layout.put("lines", 3);
-        layout.put("pageSize", 6);
+        layout.put("lines", "insight-list".equals(role) ? 2 : 3);
+        layout.put("pageSize", "insight-list".equals(role) ? 4 : 6);
         ObjectNode templating = config.putObject("templating");
         DashboardDimension primary = dimensions == null || dimensions.isEmpty() ? null : dimensions.get(0);
         String primaryField = primary == null ? "id" : canonicalFieldName(primary.field());
@@ -690,7 +812,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode inputs = widget.putObject("inputs");
         inputs.put("resourcePath", businessResourcePath(candidate.resourcePath()));
         inputs.put("tableId", key);
-        inputs.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
+        inputs.put("title", resourceTitle(candidate));
         inputs.putObject("config").putArray("columns");
     }
 
@@ -701,7 +823,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode document = richContentDocument(widget.putObject("inputs"));
         ObjectNode card = document.putArray("nodes").addObject();
         card.put("type", "card");
-        card.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
+        card.put("title", resourceTitle(candidate));
         card.put("subtitle", "Fonte governada");
         card.put("variant", "filled");
         card.put("tone", "info");
@@ -726,7 +848,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         inputs.put("enableCustomization", true);
         inputs.putNull("resourceId");
         inputs.putObject("config")
-                .put("title", "Detalhes de " + titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
+                .put("title", "Detalhes de " + resourceTitle(candidate));
     }
 
     private void addNestedChart(
@@ -1463,8 +1585,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             tableRow = chartRow + Math.max(1, chartRows) * chartRowSpan;
         }
         if (!surfaceOpenModal && includeDetailTable(visualizationDecision)) {
-            putCanvasItem(items, widgetKey(candidate, "list"), 1, tableRow, 5, 5);
-            putCanvasItem(items, widgetKey(candidate, "table"), 6, tableRow, 7, 5);
+            putCanvasItem(items, widgetKey(candidate, "list"), 1, tableRow, 5, 8);
+            putCanvasItem(items, widgetKey(candidate, "table"), 6, tableRow, 7, 8);
         }
     }
 
@@ -1588,9 +1710,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             nextRow += 4;
         }
         if (!surfaceOpenModal && includeDetailTable(visualizationDecision)) {
-            putCanvasItem(items, widgetKey(candidate, "list"), 1, nextRow, 1, 4);
-            nextRow += 4;
-            putCanvasItem(items, widgetKey(candidate, "table"), 1, nextRow, 1, 6);
+            putCanvasItem(items, widgetKey(candidate, "list"), 1, nextRow, 1, 6);
+            nextRow += 6;
+            putCanvasItem(items, widgetKey(candidate, "table"), 1, nextRow, 1, 8);
         }
     }
 
@@ -1639,9 +1761,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             nextRow += ((int) Math.ceil(dimensions.size() / 2.0d)) * chartRowSpan;
         }
         if (!surfaceOpenModal && includeDetailTable(visualizationDecision)) {
-            putCanvasItem(items, widgetKey(candidate, "list"), 1, nextRow, 6, 4);
-            nextRow += 4;
-            putCanvasItem(items, widgetKey(candidate, "table"), 1, nextRow, 6, 5);
+            putCanvasItem(items, widgetKey(candidate, "list"), 1, nextRow, 6, 7);
+            nextRow += 7;
+            putCanvasItem(items, widgetKey(candidate, "table"), 1, nextRow, 6, 7);
         }
     }
 
@@ -1668,7 +1790,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode document = richContentDocument(widget.putObject("inputs"));
         ObjectNode card = document.putArray("nodes").addObject();
         card.put("type", "card");
-        card.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
+        card.put("title", resourceTitle(candidate));
         card.put("subtitle", "Visao executiva");
         card.put("variant", "filled");
         card.put("tone", "info");
@@ -1682,7 +1804,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ArrayNode content = card.putArray("content");
         ObjectNode body = content.addObject();
         body.put("type", "text");
-        body.put("text", "Visao inicial baseada em " + titleFromResourcePath(businessResourcePath(candidate.resourcePath()))
+        body.put("text", "Visao inicial baseada em " + resourceTitle(candidate)
                 + ". Use os filtros para refinar indicadores, graficos, lista e tabela. Selecione pontos do grafico para abrir uma exploracao contextual em modal e sincronizar os detalhes.");
     }
 
@@ -1694,7 +1816,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode document = richContentDocument(widget.putObject("inputs"));
         ObjectNode card = document.putArray("nodes").addObject();
         card.put("type", "card");
-        card.put("title", titleFromResourcePath(businessResourcePath(candidate.resourcePath())));
+        card.put("title", resourceTitle(candidate));
         card.put("subtitle", "Ficha de perfil");
         card.put("variant", "filled");
         card.put("tone", "info");
@@ -1745,6 +1867,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         inputs.put("mode", "view");
         inputs.put("schemaSource", "resource");
         inputs.put("enableCustomization", true);
+        inputs.putObject("config")
+                .put("title", "Detalhes de " + resourceTitle(candidate));
     }
 
     private ObjectNode emptyCompiledFormPatch() {
@@ -2124,26 +2248,13 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         return (slug.isBlank() ? "resource" : slug) + "-" + suffix;
     }
 
+    private String resourceTitle(AgenticAuthoringCandidate candidate) {
+        return AgenticAuthoringResourcePresentationLabel.fromCandidate(candidate);
+    }
+
     private String titleFromResourcePath(String path) {
-        String name = baseResourceName(path);
-        if (name.isBlank()) {
-            return "Resource";
-        }
-        String[] parts = name.replace('-', ' ').replace('_', ' ').split("\\s+");
-        StringBuilder title = new StringBuilder();
-        for (String part : parts) {
-            if (part.isBlank()) {
-                continue;
-            }
-            if (!title.isEmpty()) {
-                title.append(' ');
-            }
-            title.append(part.substring(0, 1).toUpperCase(Locale.ROOT));
-            if (part.length() > 1) {
-                title.append(part.substring(1));
-            }
-        }
-        return title.isEmpty() ? "Resource" : title.toString();
+        String title = AgenticAuthoringResourcePresentationLabel.fromResourcePath(path);
+        return "o recurso selecionado".equals(title) ? "Resource" : title;
     }
 
     private List<DashboardDimension> dashboardDimensions(
@@ -2769,16 +2880,64 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 .anyMatch(expected::equals);
     }
 
-    private boolean shouldMaterializeProfilePage(AgenticAuthoringVisualizationDecision visualizationDecision) {
-        if (visualizationDecision == null) {
-            return false;
-        }
-        return isPrimaryComponent(visualizationDecision, "praxis-page-builder")
-                && (hasVisualIntent(visualizationDecision, "profile", "perfil", "ficha", "detail")
-                || hasLayoutKind(visualizationDecision, "single-column", "single_column"))
+    private boolean shouldMaterializeProfilePage(
+            AgenticAuthoringVisualizationDecision visualizationDecision,
+            AgenticAuthoringCandidate candidate) {
+        boolean pageBuilderSurface = visualizationDecision == null
+                || isPrimaryComponent(visualizationDecision, "praxis-page-builder")
+                || safe(visualizationDecision.primaryComponent()).isBlank();
+        boolean profileIntent = visualizationDecision != null
+                && (hasVisualIntent(visualizationDecision, "profile", "perfil", "ficha", "individual")
+                || hasLayoutKind(visualizationDecision, "single-column", "single_column", "profile", "profile-page"));
+        boolean profileEvidence = hasProfileGovernedEvidence(candidate);
+        boolean explicitlyCollectionFirst = visualizationDecision != null
+                && (isPrimaryComponent(visualizationDecision, "praxis-table")
+                || isPrimaryComponent(visualizationDecision, "praxis-list")
+                || isPrimaryComponent(visualizationDecision, "praxis-chart"));
+        boolean explicitlyExcludedCollections = visualizationDecision != null
                 && excludesComponent(visualizationDecision, "praxis-table")
                 && excludesComponent(visualizationDecision, "praxis-list")
                 && excludesComponent(visualizationDecision, "praxis-chart");
+        return profileIntent
+                && !explicitlyCollectionFirst
+                && (pageBuilderSurface || explicitlyExcludedCollections)
+                || profileEvidence
+                && !explicitlyCollectionFirst
+                && (pageBuilderSurface || explicitlyExcludedCollections);
+    }
+
+    private boolean hasProfileGovernedEvidence(AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return false;
+        }
+        List<String> fragments = new ArrayList<>();
+        fragments.add(AgenticAuthoringResourcePresentationLabel.fromCandidate(candidate));
+        fragments.add(candidate.reason());
+        fragments.addAll(candidate.evidence() == null ? List.of() : candidate.evidence());
+        AgenticAuthoringEvidenceBundle bundle = candidate.evidenceBundle();
+        if (bundle != null && bundle.evidence() != null) {
+            for (AgenticAuthoringEvidenceBundle.Evidence evidence : bundle.evidence()) {
+                if (evidence == null) {
+                    continue;
+                }
+                fragments.add(evidence.kind());
+                fragments.add(evidence.ref());
+                fragments.add(evidence.summary());
+                fragments.addAll(evidence.matchedTerms());
+            }
+        }
+        String evidenceText = normalize(String.join(" ", fragments)).replaceAll("[^a-z0-9]+", " ").trim();
+        return containsWholeTerm(evidenceText, "perfil")
+                || containsWholeTerm(evidenceText, "profile")
+                || containsWholeTerm(evidenceText, "ficha");
+    }
+
+    private boolean containsWholeTerm(String normalizedText, String term) {
+        String normalizedTerm = normalize(term).replaceAll("[^a-z0-9]+", " ").trim();
+        if (normalizedText.isBlank() || normalizedTerm.isBlank()) {
+            return false;
+        }
+        return (" " + normalizedText + " ").contains(" " + normalizedTerm + " ");
     }
 
     private boolean hasLayoutKind(

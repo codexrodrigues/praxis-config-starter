@@ -64,9 +64,11 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("canvas").path("items").path("orders-chart-status").path("rowSpan").asInt()).isEqualTo(4);
         assertThat(plan.path("canvas").path("items").path("orders-list").path("row").asInt()).isEqualTo(10);
         assertThat(plan.path("canvas").path("items").path("orders-list").path("colSpan").asInt()).isEqualTo(5);
+        assertThat(plan.path("canvas").path("items").path("orders-list").path("rowSpan").asInt()).isEqualTo(8);
         assertThat(plan.path("canvas").path("items").path("orders-table").path("row").asInt()).isEqualTo(10);
         assertThat(plan.path("canvas").path("items").path("orders-table").path("col").asInt()).isEqualTo(6);
         assertThat(plan.path("canvas").path("items").path("orders-table").path("colSpan").asInt()).isEqualTo(7);
+        assertThat(plan.path("canvas").path("items").path("orders-table").path("rowSpan").asInt()).isEqualTo(8);
         assertThat(plan.path("grouping").findValuesAsText("id"))
                 .containsExactly(
                         "orders-overview-group",
@@ -88,7 +90,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("deviceLayouts").path("mobile").path("canvas").path("items")
                 .path("orders-table").path("col").asInt()).isEqualTo(1);
         assertThat(plan.path("deviceLayouts").path("mobile").path("canvas").path("items")
-                .path("orders-table").path("rowSpan").asInt()).isEqualTo(6);
+                .path("orders-table").path("rowSpan").asInt()).isEqualTo(8);
         assertThat(plan.path("deviceLayouts").path("tablet").path("canvas").path("columns").asInt()).isEqualTo(6);
         assertThat(plan.path("deviceLayouts").path("tablet").path("canvas").path("items")
                 .path("orders-chart-status").path("colSpan").asInt()).isEqualTo(6);
@@ -135,12 +137,13 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         JsonNode listInputs = findWidgetInputs(plan, "praxis-list");
         assertThat(listInputs.path("config").path("title").asText()).isEqualTo("Destaques de Orders");
         assertThat(listInputs.path("config").path("layout").path("variant").asText()).isEqualTo("cards");
-        assertThat(listInputs.path("config").path("layout").path("lines").asInt()).isEqualTo(3);
+        assertThat(listInputs.path("config").path("layout").path("density").asText()).isEqualTo("compact");
+        assertThat(listInputs.path("config").path("layout").path("lines").asInt()).isEqualTo(2);
         assertThat(listInputs.path("config").path("dataSource").path("resourcePath").asText())
                 .isEqualTo("/api/acme/orders");
         assertThat(listInputs.path("config").path("dataSource").path("query").isObject()).isTrue();
         assertThat(listInputs.path("config").path("dataSource").path("query").has("size")).isFalse();
-        assertThat(listInputs.path("config").path("layout").path("pageSize").asInt()).isEqualTo(6);
+        assertThat(listInputs.path("config").path("layout").path("pageSize").asInt()).isEqualTo(4);
         assertThat(listInputs.path("config").path("templating").path("leading").path("expr").asText())
                 .isEqualTo("subject");
         assertThat(listInputs.path("config").path("templating").path("primary").path("expr").asText())
@@ -378,6 +381,40 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void materializesMasterDetailPageWithFullWidthPresentationCanvas() {
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "quero criar algo que mostre informacoes dos empregados",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "page", "create_artifact", "/api/human-resources/funcionarios")))
+                .orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(result.warnings()).containsExactly("ui-composition-plan-provider:generic-resource-page");
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-master-detail");
+        assertThat(plan.path("layoutPresetOptions").path("responsiveStrategy").asText())
+                .isEqualTo("canvas-device-layouts");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-table", "praxis-dynamic-form");
+        assertThat(plan.path("canvas").path("columns").asInt()).isEqualTo(12);
+        assertThat(plan.path("canvas").path("items").path("funcionarios-master").path("colSpan").asInt())
+                .isEqualTo(12);
+        assertThat(plan.path("canvas").path("items").path("funcionarios-master").path("rowSpan").asInt())
+                .isEqualTo(7);
+        assertThat(plan.path("canvas").path("items").path("funcionarios-detail").path("row").asInt())
+                .isEqualTo(8);
+        assertThat(plan.path("canvas").path("items").path("funcionarios-detail").path("colSpan").asInt())
+                .isEqualTo(12);
+        assertThat(plan.path("canvas").path("items").path("funcionarios-detail").path("rowSpan").asInt())
+                .isEqualTo(8);
+        assertThat(plan.path("deviceLayouts").path("tablet").path("canvas").path("items")
+                .path("funcionarios-detail").path("colSpan").asInt()).isEqualTo(6);
+        assertThat(plan.path("deviceLayouts").path("mobile").path("canvas").path("items")
+                .path("funcionarios-detail").path("colSpan").asInt()).isEqualTo(1);
+    }
+
+    @Test
     void materializesProfilePageWhenSemanticDecisionRequestsPageBuilderAndExcludesCollections() {
         AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
                 "praxis-agentic-authoring-visualization-decision.v1",
@@ -410,8 +447,168 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .doesNotContain("praxis-table", "praxis-list", "praxis-chart");
         assertThat(plan.path("widgets").get(1).path("inputs").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-perfil-heroi");
-        assertThat(plan.path("canvas").path("items").has("vw-perfil-heroi-profile-summary")).isTrue();
-        assertThat(plan.path("canvas").path("items").has("vw-perfil-heroi-profile-detail")).isTrue();
+        assertThat(plan.path("layoutPresetOptions").path("responsiveStrategy").asText())
+                .isEqualTo("canvas-device-layouts");
+        assertThat(plan.path("slotAssignments").path("vw-perfil-heroi-profile-summary").asText())
+                .isEqualTo("profile-summary");
+        assertThat(plan.path("slotAssignments").path("vw-perfil-heroi-profile-detail").asText())
+                .isEqualTo("profile-detail");
+        assertThat(plan.path("grouping").path(0).path("layout").asText()).isEqualTo("row");
+        assertThat(plan.path("canvas").path("items").path("vw-perfil-heroi-profile-summary").path("colSpan").asInt())
+                .isEqualTo(4);
+        assertThat(plan.path("canvas").path("items").path("vw-perfil-heroi-profile-detail").path("col").asInt())
+                .isEqualTo(5);
+        assertThat(plan.path("canvas").path("items").path("vw-perfil-heroi-profile-detail").path("colSpan").asInt())
+                .isEqualTo(8);
+        assertThat(plan.path("deviceLayouts").path("mobile").path("canvas").path("items")
+                .path("vw-perfil-heroi-profile-detail").path("colSpan").asInt()).isEqualTo(1);
+        assertThat(plan.path("deviceLayouts").path("tablet").path("canvas").path("items")
+                .path("vw-perfil-heroi-profile-detail").path("colSpan").asInt()).isEqualTo(6);
+    }
+
+    @Test
+    void materializesProfilePageWhenSemanticProfileIntentDoesNotExplicitlyExcludeCollections() {
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "perfil individual para revisar a ficha da pessoa",
+                "profile-page",
+                "praxis-page-builder",
+                List.of(),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "quero uma tela de perfil individual do funcionario",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "page", "create_page_profile_screen", "/api/human-resources/vw-perfil-heroi",
+                        visualizationDecision))).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-profile-page");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-rich-content", "praxis-dynamic-form");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .doesNotContain("praxis-table", "praxis-list", "praxis-chart");
+        assertThat(plan.path("canvas").path("items").path("vw-perfil-heroi-profile-summary").path("colSpan").asInt())
+                .isEqualTo(4);
+        assertThat(plan.path("canvas").path("items").path("vw-perfil-heroi-profile-detail").path("colSpan").asInt())
+                .isEqualTo(8);
+    }
+
+    @Test
+    void materializesProfilePageWithGovernedEvidenceLabelInsteadOfPathSlug() {
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "employee_profile_page",
+                "single_column",
+                "praxis-page-builder",
+                List.of(),
+                true,
+                false,
+                List.of("praxis-table", "praxis-list", "praxis-chart"),
+                false,
+                false,
+                "llm-authored-semantic-decision");
+        AgenticAuthoringCandidate profileProjection = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-perfil-heroi",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-perfil-heroi/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/vw-perfil-heroi/filter/cursor",
+                "POST",
+                0.82d,
+                "LLM selected profile projection from governed evidence",
+                List.of("api-metadata", "semantic-retrieval", "schema-available"),
+                AgenticAuthoringEvidenceBundle.of(
+                        "semantic_retrieval",
+                        List.of(new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "retrieved_candidate",
+                                "/api/human-resources/vw-perfil-heroi",
+                                "Percorrer perfis 360 em listas extensas",
+                                0.82d,
+                                List.of("perfil", "funcionario", "ficha"),
+                                "tenant",
+                                "local",
+                                ""))));
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "quero uma tela de perfil individual do funcionario",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intentWithCandidates(
+                        "create",
+                        "page",
+                        "create_page_profile_screen",
+                        profileProjection,
+                        List.of(profileProjection),
+                        visualizationDecision))).orElseThrow();
+
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(plan)
+                .contains("\"title\":\"Perfis 360\"")
+                .contains("\"title\":\"Detalhes de Perfis 360\"")
+                .doesNotContain("\"title\":\"Perfil heroi\"")
+                .doesNotContain("\"title\":\"Detalhes de Perfil heroi\"");
+    }
+
+    @Test
+    void materializesProfilePageWhenSelectedGovernedEvidenceIsProfileSurface() {
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "create governed page",
+                "resource-page",
+                "praxis-page-builder",
+                List.of(),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+        AgenticAuthoringCandidate profileProjection = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-perfil-heroi",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/vw-perfil-heroi/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/vw-perfil-heroi/filter/cursor",
+                "POST",
+                0.82d,
+                "LLM selected a governed profile surface from semantic evidence",
+                List.of("api-metadata", "semantic-retrieval"),
+                AgenticAuthoringEvidenceBundle.of(
+                        "semantic_retrieval",
+                        List.of(new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "retrieved_candidate",
+                                "/api/human-resources/vw-perfil-heroi",
+                                "Percorrer perfis 360 em listas extensas",
+                                0.82d,
+                                List.of("perfil", "funcionario", "ficha"),
+                                "tenant",
+                                "local",
+                                ""))));
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "quero uma tela de perfil individual do funcionario",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intentWithCandidates(
+                        "create",
+                        "page",
+                        "create_artifact",
+                        profileProjection,
+                        List.of(profileProjection),
+                        visualizationDecision))).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-profile-page");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-rich-content", "praxis-dynamic-form");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .doesNotContain("praxis-table", "praxis-list", "praxis-chart");
+        assertThat(plan.path("slotAssignments").path("vw-perfil-heroi-profile-summary").asText())
+                .isEqualTo("profile-summary");
     }
 
     @Test
@@ -795,8 +992,19 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         JsonNode plan = result.uiCompositionPlan();
         assertThat(result.warnings()).containsExactly("ui-composition-plan-provider:generic-resource-table");
         assertThat(plan.path("layoutPreset").asText()).isEqualTo("single-table-page");
+        assertThat(plan.path("layoutPresetOptions").path("responsiveStrategy").asText())
+                .isEqualTo("canvas-device-layouts");
         assertThat(plan.path("widgets")).hasSize(1);
         assertThat(plan.path("widgets").path(0).path("componentId").asText()).isEqualTo("praxis-table");
+        assertThat(plan.path("canvas").path("columns").asInt()).isEqualTo(12);
+        assertThat(plan.path("canvas").path("items").path("vw-indicadores-incidentes-table").path("colSpan").asInt())
+                .isEqualTo(12);
+        assertThat(plan.path("canvas").path("items").path("vw-indicadores-incidentes-table").path("rowSpan").asInt())
+                .isEqualTo(7);
+        assertThat(plan.path("deviceLayouts").path("mobile").path("canvas").path("items")
+                .path("vw-indicadores-incidentes-table").path("colSpan").asInt()).isEqualTo(1);
+        assertThat(plan.path("deviceLayouts").path("tablet").path("canvas").path("items")
+                .path("vw-indicadores-incidentes-table").path("colSpan").asInt()).isEqualTo(6);
         assertThat(plan.toString())
                 .doesNotContain("praxis-tabs")
                 .doesNotContain("praxis-chart")

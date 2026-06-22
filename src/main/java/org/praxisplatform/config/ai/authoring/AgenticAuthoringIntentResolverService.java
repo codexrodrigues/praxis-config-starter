@@ -2455,7 +2455,14 @@ public class AgenticAuthoringIntentResolverService {
                 || !hasTrustedSelectionEvidence(focusedCandidate)
                 || isWeakLexicalCandidate(focusedCandidate)
                 || !hasSafeFocusedResourceDiscoveryLead(request, prompt, artifactKind, focusedCandidate, candidates)) {
-            return null;
+            focusedCandidate = strongLlmAuthoredOperationalResourceDiscoveryLead(
+                    request,
+                    prompt,
+                    artifactKind,
+                    candidates);
+            if (focusedCandidate == null) {
+                return null;
+            }
         }
         return new AgenticAuthoringLlmIntentResolution(
                 true,
@@ -2474,6 +2481,54 @@ public class AgenticAuthoringIntentResolverService {
                 null,
                 null,
                 false);
+    }
+
+    private AgenticAuthoringCandidate strongLlmAuthoredOperationalResourceDiscoveryLead(
+            AgenticAuthoringIntentResolutionRequest request,
+            String prompt,
+            String artifactKind,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (request == null
+                || candidates == null
+                || candidates.isEmpty()
+                || !hasLlmAuthoredMaterializableResourceFocus(request)
+                || semanticResourceNeed(prompt, artifactKind) != SemanticResourceNeed.GENERIC_OPERATIONAL
+                || resourceSearchFocusNeed(resourceDiscoverySearchFocus(request), artifactKind)
+                != SemanticResourceNeed.GENERIC_OPERATIONAL) {
+            return null;
+        }
+        List<AgenticAuthoringCandidate> operationalCandidates = candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> hasResourceDiscoveryCandidate(request, candidate)
+                        || hasEvidence(candidate, "tool-search-api-resources"))
+                .filter(candidate -> hasEvidence(candidate, "tool-search-api-resources"))
+                .filter(candidate -> hasEvidence(candidate, "semantic-retrieval"))
+                .filter(candidate -> hasEvidence(candidate, "schema-available"))
+                .filter(candidate -> hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE))
+                .filter(candidate -> !isDerivedProjectionCandidate(candidate))
+                .filter(this::hasTrustedSelectionEvidence)
+                .filter(candidate -> !isWeakLexicalCandidate(candidate))
+                .sorted(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed())
+                .toList();
+        if (operationalCandidates.isEmpty()) {
+            return null;
+        }
+        AgenticAuthoringCandidate lead = operationalCandidates.get(0);
+        if (lead.score() < 0.58d) {
+            return null;
+        }
+        if (operationalCandidates.size() == 1) {
+            return lead.score() >= 0.60d ? lead : null;
+        }
+        AgenticAuthoringCandidate second = operationalCandidates.get(1);
+        AgenticAuthoringResourceSearchFocus focus = resourceDiscoverySearchFocus(request);
+        int leadFocusScore = resourceSearchFocusAlignmentScore(focus, lead);
+        int secondFocusScore = resourceSearchFocusAlignmentScore(focus, second);
+        boolean scoreLead = lead.score() >= second.score() + 0.025d;
+        boolean focusLead = leadFocusScore >= secondFocusScore + 2;
+        boolean sameNamespaceLead = sameGovernedResourceNamespace(lead, second)
+                && lead.score() >= second.score() + 0.015d;
+        return scoreLead || focusLead || sameNamespaceLead ? lead : null;
     }
 
     private boolean hasSafeFocusedResourceDiscoveryLead(

@@ -14,6 +14,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.service.AiPrincipalContext;
@@ -3656,7 +3658,7 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnRoute route) {
         String assistantMessage = safeText(intentResolution.assistantMessage());
         if (!assistantMessage.isBlank()) {
-            return publicAssistantMessage(assistantMessage);
+            return curatedResourceLabel(publicAssistantMessage(assistantMessage), intentResolution.selectedCandidate());
         }
         String routeClass = route == null ? "" : safeText(route.routeClass());
         String operation = safeText(intentResolution.operationKind());
@@ -3674,6 +3676,24 @@ public class AgenticAuthoringTurnEngine {
         return "Entendi a intencao como " + nonBlank(operation, "authoring")
                 + " de " + nonBlank(artifact, "componente")
                 + (change.isBlank() ? "." : " para " + change + ".");
+    }
+
+    private String curatedResourceLabel(String message, AgenticAuthoringCandidate candidate) {
+        String value = safeText(message);
+        if (value.isBlank() || candidate == null) {
+            return value;
+        }
+        String fallbackLabel = AgenticAuthoringResourcePresentationLabel.fromResourcePath(candidate.resourcePath());
+        String governedLabel = AgenticAuthoringResourcePresentationLabel.fromCandidate(candidate);
+        if (fallbackLabel.isBlank()
+                || governedLabel.isBlank()
+                || fallbackLabel.equals(governedLabel)
+                || "o recurso selecionado".equals(fallbackLabel)) {
+            return value;
+        }
+        return Pattern.compile(Pattern.quote(fallbackLabel), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
+                .matcher(value)
+                .replaceAll(Matcher.quoteReplacement(governedLabel));
     }
 
     private String intentResolvedFallbackKind(AgenticAuthoringIntentResolutionResult intentResolution) {

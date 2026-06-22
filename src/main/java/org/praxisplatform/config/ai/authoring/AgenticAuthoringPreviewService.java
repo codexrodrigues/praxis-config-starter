@@ -2422,7 +2422,7 @@ public class AgenticAuthoringPreviewService {
         if (candidate == null || value(candidate.resourcePath()).isBlank()) {
             return "";
         }
-        String resourceLabel = titleFromResourcePath(candidate.resourcePath());
+        String resourceLabel = AgenticAuthoringResourcePresentationLabel.fromCandidate(candidate);
         if ("modify".equals(value(intentResolution.operationKind()))
                 && ("chart".equals(value(intentResolution.artifactKind()))
                 || "set_chart_type".equals(value(intentResolution.changeKind())))
@@ -2548,7 +2548,7 @@ public class AgenticAuthoringPreviewService {
         AgenticAuthoringCandidate candidate = intentResolution == null ? null : intentResolution.selectedCandidate();
         String resourceLabel = candidate == null || value(candidate.resourcePath()).isBlank()
                 ? "a fonte encontrada"
-                : titleFromResourcePath(candidate.resourcePath());
+                : AgenticAuthoringResourcePresentationLabel.fromCandidate(candidate);
         if (containsComponent(uiCompositionPlan, "praxis-chart")) {
             if (isSingleChartPlan(uiCompositionPlan)) {
                 return "Montei uma primeira pre-visualizacao de grafico para " + resourceLabel + ".\n\n"
@@ -2713,18 +2713,7 @@ public class AgenticAuthoringPreviewService {
     }
 
     private String titleFromResourcePath(String resourcePath) {
-        String value = value(resourcePath);
-        if (value.isBlank()) {
-            return "o recurso selecionado";
-        }
-        String lastSegment = value.substring(value.lastIndexOf('/') + 1)
-                .replace("vw-", "")
-                .replace('-', ' ')
-                .trim();
-        if (lastSegment.isBlank()) {
-            return "o recurso selecionado";
-        }
-        return Character.toUpperCase(lastSegment.charAt(0)) + lastSegment.substring(1);
+        return AgenticAuthoringResourcePresentationLabel.fromResourcePath(resourcePath);
     }
 
     private AgenticAuthoringPlanRequest enrichRequest(AgenticAuthoringPlanRequest request) {
