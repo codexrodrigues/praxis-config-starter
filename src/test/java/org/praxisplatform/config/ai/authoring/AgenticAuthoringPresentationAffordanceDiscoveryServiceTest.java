@@ -67,6 +67,13 @@ class AgenticAuthoringPresentationAffordanceDiscoveryServiceTest {
                 .extracting(AgenticAuthoringPresentationAffordanceCatalog.PresentationAffordance::id)
                 .contains("column.align", "column.renderer.badge")
                 .doesNotContain("column.format.numeric", "column.format.date");
+        assertThat(catalog.compatibleAffordances("column", "boolean"))
+                .extracting(AgenticAuthoringPresentationAffordanceCatalog.PresentationAffordance::id)
+                .contains("column.format.boolean", "column.presentation.status", "column.renderer.badge");
+        assertThat(catalog.compatibleAffordances("column", "date"))
+                .filteredOn(affordance -> "column.format.date".equals(affordance.id()))
+                .flatExtracting(AgenticAuthoringPresentationAffordanceCatalog.PresentationAffordance::options)
+                .contains("dd/MM/yyyy", "yyyy-MM-dd", "yyyy-MM-dd HH:mm");
     }
 
     @Test

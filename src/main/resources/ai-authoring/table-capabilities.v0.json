@@ -34,6 +34,45 @@
       ]
     },
     {
+      "id": "praxis-table.column.format.date@0.1.0",
+      "changeKind": "set_column_format",
+      "triggerTerms": ["formato de data", "formatacao de data", "data", "dd/MM/yyyy", "yyyy-MM-dd", "date-time"],
+      "fieldAliases": [],
+      "examples": [
+        {
+          "prompt": "Quais formatos de data posso usar em uma coluna da tabela?",
+          "intent": "Explicar opcoes confirmadas de formatacao de data sem aplicar mudanca.",
+          "configHints": ["columns.<schemaField>.type=date", "columns.<schemaField>.format=dd/MM/yyyy|yyyy-MM-dd|yyyy-MM-dd HH:mm|mediumDate|longDate"]
+        },
+        {
+          "prompt": "Formate Data de Admissao como dd/MM/yyyy.",
+          "intent": "Aplicar formatacao de data a uma coluna de data confirmada.",
+          "configHints": ["columns.<schemaField>.format=dd/MM/yyyy", "preservar resourcePath e dados originais"]
+        }
+      ]
+    },
+    {
+      "id": "praxis-table.column.presentation.status@0.1.0",
+      "changeKind": "set_column_presentation",
+      "triggerTerms": ["status", "ativo", "inativo", "badge", "chip", "icone", "icon", "toggle", "sim nao", "sim/não"],
+      "fieldAliases": [
+        { "field": "ativo", "aliases": ["ativo", "status", "ativo inativo"] },
+        { "field": "status", "aliases": ["status", "situacao", "situação"] }
+      ],
+      "examples": [
+        {
+          "prompt": "O que voce sugere de formatacao para a coluna de status?",
+          "intent": "Explicar opcoes de apresentacao para status booleano ou categorico sem aplicar mudanca.",
+          "configHints": ["columns.<schemaField>.format=active-inactive|custom|Sim|Nao", "columns.<schemaField>.renderer.type=badge|chip|icon|toggle"]
+        },
+        {
+          "prompt": "Mostre Ativo como badge verde e Inativo como badge neutro.",
+          "intent": "Aplicar apresentacao visual governada para uma coluna de status.",
+          "configHints": ["columns.<schemaField>.renderer.type=badge", "columns.<schemaField>.conditionalRenderers usa Json Logic canonico"]
+        }
+      ]
+    },
+    {
       "id": "praxis-table.column.visibility@0.1.0",
       "changeKind": "set_column_visibility",
       "triggerTerms": ["ocultar", "oculte", "esconder", "esconda", "deixe somente", "deixar somente", "somente", "apenas", "mantenha as colunas", "manter colunas"],

@@ -4314,7 +4314,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void consultativeDomainQuestionDoesNotOverrideResolvedLlmRoute() {
+    void consultativeDomainQuestionNormalizesLlmAuthoringDriftToCatalogAnswer() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
@@ -4371,14 +4371,106 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
 
         assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("create");
-        assertThat(result.artifactKind()).isEqualTo("form");
-        assertThat(result.changeKind()).isEqualTo("create_form");
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.apiCatalogAnswer()).isNotNull();
+        assertThat(result.apiCatalogAnswer().path("candidateApis").size()).isGreaterThan(0);
+        assertThat(result.warnings())
+                .contains("llm-consultative-api-catalog-authoring-drift-normalized")
+                .doesNotContain("llm-api-catalog-authoring-drift-normalized");
         assertThat(result.failureCodes())
                 .doesNotContain(
                         "intent-resolution-selected-candidate-required",
                         "intent-resolution-operation-must-be-create-modify-or-remove",
                         "intent-resolution-artifact-must-be-form");
+    }
+
+    @Test
+    void openSubjectQuestionDoesNotMaterializePageWhenLlmReturnsCreatePage() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate departmentCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/departamentos",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/departamentos/filter&operation=post&schemaType=response",
+                "/api/human-resources/departamentos/filter",
+                "post",
+                0.44d,
+                "catalog candidate discovered for department screens",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence"),
+                AgenticAuthoringEvidenceBundle.of("lexical_fallback", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "weak_lexical_match",
+                                "/api/human-resources/departamentos",
+                                "Departamento pode ser uma fonte candidata para telas.",
+                                0.44d,
+                                List.of("departamentos", "tabelas", "formularios"),
+                                "tenant-a",
+                                "dev",
+                                "test"))));
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(departmentCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "page",
+                        "create_artifact",
+                        "/api/human-resources/departamentos",
+                        null,
+                        "none",
+                        "Vou montar uma página com tabela e formulário.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService service = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "sobre quais assuntos posso criar tabelas e formularios aqui?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.apiCatalogAnswer()).isNotNull();
+        assertThat(result.warnings())
+                .contains(
+                        "llm-consultative-api-catalog-authoring-drift-normalized",
+                        "api-catalog-weak-lexical-selection-deferred")
+                .doesNotContain(
+                        "llm-api-catalog-authoring-drift-normalized",
+                        "resource-selection-lexical-fallback-selected");
     }
 
     @Test

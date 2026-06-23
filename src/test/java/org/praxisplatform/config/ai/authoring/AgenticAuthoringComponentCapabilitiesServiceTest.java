@@ -41,6 +41,28 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
     }
 
     @Test
+    void exposesTableDateFormatAndStatusPresentationCapabilities() {
+        AgenticAuthoringComponentCapabilitiesResult result =
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities();
+
+        AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog tableCatalog =
+                result.catalogs().stream()
+                        .filter(catalog -> "praxis-table".equals(catalog.componentId()))
+                        .findFirst()
+                        .orElseThrow();
+
+        assertThat(tableCatalog.capabilities())
+                .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapability::id)
+                .contains(
+                        "praxis-table.column.format.date@0.1.0",
+                        "praxis-table.column.presentation.status@0.1.0");
+        assertThat(tableCatalog.capabilities())
+                .filteredOn(capability -> "praxis-table.column.presentation.status@0.1.0".equals(capability.id()))
+                .flatExtracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapability::triggerTerms)
+                .contains("status", "ativo", "badge", "chip", "toggle");
+    }
+
+    @Test
     void mergesGovernedComponentsFromAiRegistryAuthoringManifests() {
         AiRegistryRepository repository = mock(AiRegistryRepository.class);
         when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(

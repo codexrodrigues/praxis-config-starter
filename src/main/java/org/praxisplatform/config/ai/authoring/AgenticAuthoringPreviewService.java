@@ -497,9 +497,78 @@ public class AgenticAuthoringPreviewService {
         JsonNode copy = uiCompositionPlan.deepCopy();
         if (copy instanceof ObjectNode objectNode) {
             markResourceSchemaGrounded(objectNode, schemaResult, schemaFields.size());
+            materializeTableColumnsFromSchema(objectNode, schemaFields, warnings);
             return objectNode;
         }
         return copy;
+    }
+
+    private void materializeTableColumnsFromSchema(
+            ObjectNode uiCompositionPlan,
+            Map<String, SchemaFieldDescriptor> schemaFields,
+            List<String> warnings) {
+        if (schemaFields == null || schemaFields.isEmpty()) {
+            return;
+        }
+        JsonNode widgets = uiCompositionPlan.path("widgets");
+        if (!(widgets instanceof ArrayNode widgetArray)) {
+            return;
+        }
+        boolean materialized = false;
+        for (JsonNode widget : widgetArray) {
+            if (!"praxis-table".equals(widget.path("componentId").asText(""))) {
+                continue;
+            }
+            if (!(widget.path("inputs") instanceof ObjectNode inputsObject)) {
+                continue;
+            }
+            ObjectNode configObject = inputsObject.path("config") instanceof ObjectNode existingConfig
+                    ? existingConfig
+                    : inputsObject.putObject("config");
+            JsonNode existingColumns = configObject.path("columns");
+            if (existingColumns.isArray() && !existingColumns.isEmpty()) {
+                continue;
+            }
+            ArrayNode columns = configObject.putArray("columns");
+            schemaFields.values().stream()
+                    .limit(16)
+                    .map(this::tableColumnFromSchemaField)
+                    .forEach(columns::add);
+            if (!columns.isEmpty()) {
+                materialized = true;
+            }
+        }
+        if (materialized) {
+            addWarningOnce(warnings, "table-columns-materialized-from-schema");
+        }
+    }
+
+    private ObjectNode tableColumnFromSchemaField(SchemaFieldDescriptor field) {
+        ObjectNode column = objectMapper.createObjectNode();
+        column.put("field", field.name());
+        column.put("header", firstNonBlank(field.label(), field.name()));
+        String type = tableColumnType(field);
+        if (!type.isBlank()) {
+            column.put("type", type);
+        }
+        return column;
+    }
+
+    private String tableColumnType(SchemaFieldDescriptor field) {
+        String format = value(field.format());
+        if ("date".equals(format)) {
+            return "date";
+        }
+        if ("date-time".equals(format) || "datetime".equals(format)) {
+            return "datetime";
+        }
+        String type = value(field.type());
+        return switch (type) {
+            case "integer", "number" -> "number";
+            case "boolean" -> "boolean";
+            case "string" -> "string";
+            default -> "";
+        };
     }
 
     private void markResourceSchemaGrounded(
@@ -548,6 +617,8 @@ public class AgenticAuthoringPreviewService {
         }
         Map<String, SchemaFieldDescriptor> filterSchemaFields =
                 filterSchemaFields(request, schemaBaseUrl, schemaFetchCache).orElse(schemaFields);
+        Map<String, SchemaFieldDescriptor> statsRequestFields =
+                statsRequestSchemaFields(candidate, schemaBaseUrl, schemaFetchCache).orElse(Map.of());
         JsonNode copy = uiCompositionPlan == null ? MissingNode.getInstance() : uiCompositionPlan.deepCopy();
         if (copy instanceof ObjectNode objectNode) {
             reconcileSemanticAxesWithSchema(
@@ -555,6 +626,7 @@ public class AgenticAuthoringPreviewService {
                     objectNode,
                     schemaFields,
                     filterSchemaFields,
+                    statsRequestFields,
                     schemaResult,
                     warnings,
                     allowsSchemaSafeAxisRepair(request));
@@ -630,6 +702,26 @@ public class AgenticAuthoringPreviewService {
             return Optional.empty();
         }
         Map<String, SchemaFieldDescriptor> fields = schemaFields(filterSchemaResult.getSchema());
+        return fields.isEmpty() ? Optional.empty() : Optional.of(fields);
+    }
+
+    private Optional<Map<String, SchemaFieldDescriptor>> statsRequestSchemaFields(
+            AgenticAuthoringCandidate candidate,
+            String schemaBaseUrl,
+            PreviewSchemaFetchCache schemaFetchCache) {
+        if (candidate == null || schemaFetchCache == null || !isStatsPath(candidate.submitUrl())) {
+            return Optional.empty();
+        }
+        AiSchemaContext statsContext = AiSchemaContext.builder()
+                .path(candidate.submitUrl())
+                .operation(valueOrDefault(candidate.submitMethod(), "post"))
+                .schemaType("request")
+                .build();
+        SchemaFetchResult statsSchemaResult = schemaFetchCache.fetch(statsContext, schemaBaseUrl);
+        if (statsSchemaResult == null || !statsSchemaResult.isSuccess()) {
+            return Optional.empty();
+        }
+        Map<String, SchemaFieldDescriptor> fields = schemaFields(statsSchemaResult.getSchema());
         return fields.isEmpty() ? Optional.empty() : Optional.of(fields);
     }
 
@@ -726,6 +818,7 @@ public class AgenticAuthoringPreviewService {
             ObjectNode uiCompositionPlan,
             Map<String, SchemaFieldDescriptor> schemaFields,
             Map<String, SchemaFieldDescriptor> filterSchemaFields,
+            Map<String, SchemaFieldDescriptor> statsRequestFields,
             SchemaFetchResult schemaResult,
             List<String> warnings,
             boolean allowSchemaSafeAxisRepair) {
@@ -758,6 +851,7 @@ public class AgenticAuthoringPreviewService {
                     continue;
                 }
                 Optional<SchemaFieldDescriptor> schemaField = resolveSchemaField(axisObject, schemaFields);
+                schemaField = governedStatsAxisField(widget, schemaField, schemaFields, statsRequestFields, warnings);
                 if (schemaField.isPresent() && isSafeGenericGroupByChartField(schemaField.get(), widget)) {
                     Optional<SchemaFieldDescriptor> promptAlignedSchemaField = promptAlignedSafeGroupingField(
                             schemaFields,
@@ -772,6 +866,9 @@ public class AgenticAuthoringPreviewService {
                     alignChartBinding(widget, selectedField);
                     alignTemporalChartOperation(widget, selectedField, warnings);
                     alignChartMetricBinding(widget, schemaFields, schemaResult, warnings, contextTokens);
+                    if (!normalize(requestedField).equals(normalize(selectedField.name()))) {
+                        alignDiagnosticsAxis(uiCompositionPlan, requestedField, selectedField, schemaResult);
+                    }
                     if (promptAlignedSchemaField.isPresent()) {
                         alignChartDisplayText(widget, previousAxisLabel, selectedField);
                         alignDiagnosticsAxis(uiCompositionPlan, requestedField, selectedField, schemaResult);
@@ -802,6 +899,14 @@ public class AgenticAuthoringPreviewService {
                                 || allowStatsAxisRepair;
                         if (repairedSchemaField.isEmpty() && allowsSchemaScoredFallback) {
                             repairedSchemaField = preferredSafeGroupingField(schemaFields, widget, assignedChartFields, contextTokens);
+                        }
+                        if (repairedSchemaField.isPresent()) {
+                            repairedSchemaField = governedStatsAxisField(
+                                    widget,
+                                    repairedSchemaField,
+                                    schemaFields,
+                                    statsRequestFields,
+                                    warnings);
                         }
                     }
                     if (repairedSchemaField.isPresent()) {
@@ -1217,6 +1322,83 @@ public class AgenticAuthoringPreviewService {
             }
         }
         return best == null || bestScore <= 0 ? Optional.empty() : Optional.of(best);
+    }
+
+    private Optional<SchemaFieldDescriptor> governedStatsAxisField(
+            JsonNode widget,
+            Optional<SchemaFieldDescriptor> currentField,
+            Map<String, SchemaFieldDescriptor> schemaFields,
+            Map<String, SchemaFieldDescriptor> statsRequestFields,
+            List<String> warnings) {
+        if (!"timeseries".equalsIgnoreCase(statsOperation(widget))) {
+            return currentField;
+        }
+        if (currentField.isPresent() && isStrictTemporalStatsField(currentField.get())) {
+            return currentField;
+        }
+        Optional<SchemaFieldDescriptor> governedField = preferredStrictTemporalStatsField(
+                schemaFields,
+                statsRequestFields);
+        if (governedField.isEmpty()) {
+            return currentField;
+        }
+        if (currentField.isEmpty()
+                || !normalize(currentField.get().name()).equals(normalize(governedField.get().name()))) {
+            addWarningOnce(warnings, "semantic-chart-timeseries-axis-repaired-with-governed-temporal-field");
+        }
+        return governedField;
+    }
+
+    private Optional<SchemaFieldDescriptor> preferredStrictTemporalStatsField(
+            Map<String, SchemaFieldDescriptor> schemaFields,
+            Map<String, SchemaFieldDescriptor> statsRequestFields) {
+        if (schemaFields == null || schemaFields.isEmpty()) {
+            return Optional.empty();
+        }
+        Set<String> requestTokens = statsRequestFieldTokens(statsRequestFields);
+        SchemaFieldDescriptor best = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (SchemaFieldDescriptor field : schemaFields.values()) {
+            if (!isStrictTemporalStatsField(field)) {
+                continue;
+            }
+            int score = temporalFieldScore(field);
+            if (!requestTokens.isEmpty()) {
+                score += semanticMatchScore(requestTokens, field) * 40;
+            }
+            if (score > bestScore) {
+                best = field;
+                bestScore = score;
+            }
+        }
+        return best == null || bestScore <= 0 ? Optional.empty() : Optional.of(best);
+    }
+
+    private Set<String> statsRequestFieldTokens(Map<String, SchemaFieldDescriptor> statsRequestFields) {
+        if (statsRequestFields == null || statsRequestFields.isEmpty()) {
+            return Set.of();
+        }
+        SchemaFieldDescriptor fieldRequest = statsRequestFields.get("field");
+        if (fieldRequest == null) {
+            return Set.of();
+        }
+        Set<String> tokens = new LinkedHashSet<>();
+        tokens.addAll(fieldRequest.labelTokens());
+        tokens.addAll(fieldRequest.descriptionTokens());
+        return tokens;
+    }
+
+    private boolean isStrictTemporalStatsField(SchemaFieldDescriptor field) {
+        if (field == null) {
+            return false;
+        }
+        String type = normalize(field.type());
+        String format = normalize(field.format());
+        return "date".equals(type)
+                || "datetime".equals(type)
+                || "date".equals(format)
+                || "date-time".equals(format)
+                || "datetime".equals(format);
     }
 
     private int temporalFieldScore(SchemaFieldDescriptor field) {
@@ -1814,6 +1996,42 @@ public class AgenticAuthoringPreviewService {
         if (statsMetric instanceof ObjectNode metricObject) {
             alignMetricField(metricObject, schemaFields, schemaResult, warnings);
         }
+        alignQueryMetricsWithStatsMetric(config, warnings);
+    }
+
+    private void alignQueryMetricsWithStatsMetric(ObjectNode config, List<String> warnings) {
+        JsonNode statsMetric = config.path("dataSource").path("query").path("statsRequest").path("metric");
+        if (!(statsMetric instanceof ObjectNode statsMetricObject)) {
+            return;
+        }
+        String operation = normalize(statsMetricObject.path("operation").asText(""));
+        String field = statsMetricObject.path("field").asText("");
+        if (!"sum".equals(operation) || field.isBlank()) {
+            return;
+        }
+        JsonNode metrics = config.path("dataSource").path("query").path("metrics");
+        if (metrics.isArray()) {
+            for (JsonNode metric : metrics) {
+                if (metric instanceof ObjectNode metricObject
+                        && normalize(metricObject.path("field").asText("")).equals(normalize(field))
+                        && "count".equals(normalize(metricObject.path("aggregation").asText("")))) {
+                    metricObject.put("aggregation", "sum");
+                    addWarningOnce(warnings, "semantic-chart-query-metric-aligned-with-stats-metric");
+                }
+            }
+        }
+        JsonNode series = config.path("series");
+        if (series.isArray()) {
+            for (JsonNode item : series) {
+                JsonNode metric = item.path("metric");
+                if (metric instanceof ObjectNode metricObject
+                        && normalize(metricObject.path("field").asText("")).equals(normalize(field))
+                        && "count".equals(normalize(metricObject.path("aggregation").asText("")))) {
+                    metricObject.put("aggregation", "sum");
+                    addWarningOnce(warnings, "semantic-chart-query-metric-aligned-with-stats-metric");
+                }
+            }
+        }
     }
 
     private void inferMetricFieldFromContext(
@@ -1941,13 +2159,16 @@ public class AgenticAuthoringPreviewService {
         }
         String aggregation = metric.path("aggregation").asText("");
         String operation = metric.path("operation").asText("");
-        if ("count".equals(normalize(aggregation))) {
-            metric.put("aggregation", "sum");
-            addWarningOnce(warnings, "semantic-chart-metric-aggregation-repaired-with-schema-field");
-        }
         if ("count".equals(normalize(operation))) {
-            metric.put("operation", "SUM");
-            addWarningOnce(warnings, "semantic-chart-metric-aggregation-repaired-with-schema-field");
+            String alias = metric.path("alias").asText("");
+            if (!alias.isBlank() && normalize(alias).equals(normalize(field.name()))) {
+                metric.put("alias", "total");
+            }
+            metric.remove("field");
+            addWarningOnce(warnings, "semantic-chart-count-metric-field-removed-for-stats-contract");
+        }
+        if ("count".equals(normalize(aggregation))) {
+            addWarningOnce(warnings, "semantic-chart-count-metric-preserved-for-record-count");
         }
     }
 

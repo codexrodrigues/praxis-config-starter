@@ -1487,6 +1487,13 @@ class AgenticAuthoringPreviewServiceTest {
                 .isTrue();
         assertThat(result.uiCompositionPlan().path("diagnostics").path("resourceSchemaGrounding").path("fieldCount").asInt())
                 .isEqualTo(3);
+        JsonNode columns = result.uiCompositionPlan().path("widgets").path(0).path("inputs").path("config").path("columns");
+        assertThat(columns).hasSize(3);
+        assertThat(columns.path(0).path("field").asText()).isEqualTo("ano");
+        assertThat(columns.path(0).path("type").asText()).isEqualTo("number");
+        assertThat(columns.path(2).path("field").asText()).isEqualTo("salarioLiquido");
+        assertThat(columns.path(2).path("type").asText()).isEqualTo("number");
+        assertThat(result.warnings()).contains("table-columns-materialized-from-schema");
         assertThat(result.uiCompositionPlan().path("widgets").toString())
                 .doesNotContain("schemaVerification")
                 .doesNotContain("schemaEvidenceSource")
@@ -2142,7 +2149,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.failureCodes()).doesNotContain("semantic-preview-axis-schema-verification-required");
         assertThat(result.warnings())
                 .doesNotContain("semantic-chart-metric-schema-verification-unsupported-field")
-                .contains("semantic-chart-metric-aggregation-repaired-with-schema-field");
+                .contains("semantic-chart-count-metric-preserved-for-record-count");
         String plan = result.uiCompositionPlan().toString();
         assertThat(plan)
                 .contains("\"field\":\"salarioLiquido\"")
@@ -2457,7 +2464,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.failureCodes()).doesNotContain("semantic-preview-axis-schema-verification-required");
         assertThat(result.warnings())
-                .contains("semantic-chart-axis-repaired-with-prompt-aligned-schema-field")
+                .contains("semantic-chart-timeseries-axis-repaired-with-governed-temporal-field")
                 .doesNotContain("semantic-axis-schema-verification-unsupported-axis");
         String plan = result.uiCompositionPlan().toString();
         assertThat(plan)
@@ -2469,6 +2476,120 @@ class AgenticAuthoringPreviewServiceTest {
                 .contains("\"granularity\":\"MONTH\"")
                 .contains("\"schemaProbeStatus\":\"verified\"");
         assertThat(plan).doesNotContain("\"field\":\"unresolved\"");
+    }
+
+    @Test
+    void previewRepairsStatsTimeseriesAxisAwayFromNumericMonthBucket() throws Exception {
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/stats/timeseries&operation=post&schemaType=response",
+                        "/api/human-resources/vw-analytics-folha-pagamento/stats/timeseries",
+                        "POST",
+                        0.95d,
+                        "matched payroll analytics",
+                        List.of("semantic-retrieval", "analytics-projection")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "calcular tendencia mensal de funcionarios",
+                "Vou criar uma pre-visualizacao governada.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "calcular tendencia mensal de funcionarios",
+                        "single-chart",
+                        "praxis-chart",
+                        List.of(new AgenticAuthoringVisualizationAxisDecision(
+                                "tempo",
+                                "mes",
+                                "Mes",
+                                "line_chart",
+                                "temporal",
+                                "count",
+                                null,
+                                "Total",
+                                "/api/human-resources/funcionarios")),
+                        false,
+                        false,
+                        List.of("praxis-table", "praxis-filter", "praxis-rich-content", "praxis-kpi"),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision"));
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "calcular tendencia mensal de funcionarios",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent);
+        ObjectNode responseSchema = objectMapper.createObjectNode();
+        ObjectNode responseProperties = responseSchema.putObject("properties");
+        responseProperties.putObject("mes")
+                .put("type", "integer")
+                .putObject("x-ui")
+                .put("label", "Mes");
+        responseProperties.putObject("competencia")
+                .put("type", "string")
+                .put("format", "date")
+                .putObject("x-ui")
+                .put("label", "Competencia");
+        ObjectNode statsRequestSchema = objectMapper.createObjectNode();
+        ObjectNode statsRequestProperties = statsRequestSchema.putObject("properties");
+        statsRequestProperties.putObject("field")
+                .put("type", "string")
+                .put("description", "Campo temporal da serie, como competencia.");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    if ("request".equals(context.getSchemaType())
+                            && context.getPath().contains("/stats/timeseries")) {
+                        return SchemaFetchResult.success(statsRequestSchema, "http://localhost/schemas/filtered");
+                    }
+                    return SchemaFetchResult.success(responseSchema, "http://localhost/schemas/filtered");
+                });
+        AgenticAuthoringUiCompositionPlanProvider provider = ignored -> java.util.Optional.of(
+                new AgenticAuthoringUiCompositionPlanResult(
+                        true,
+                        List.of(),
+                        List.of("ui-composition-plan-provider:test"),
+                        payrollTimeseriesPlanWithMonthAxis(),
+                        objectMapper.createObjectNode()));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(provider),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings())
+                .contains("semantic-chart-timeseries-axis-repaired-with-governed-temporal-field");
+        String plan = result.uiCompositionPlan().toString();
+        assertThat(plan)
+                .contains("\"requestedField\":\"mes\"")
+                .contains("\"field\":\"competencia\"")
+                .contains("\"statsRequest\":{\"filter\":{},\"field\":\"competencia\"")
+                .contains("\"dimensions\":[\"competencia\"]");
+        assertThat(plan).doesNotContain("\"statsRequest\":{\"filter\":{},\"field\":\"mes\"");
     }
 
     @Test
@@ -3183,6 +3304,60 @@ class AgenticAuthoringPreviewServiceTest {
                         true,
                         true,
                         "llm-authored-semantic-decision"));
+    }
+
+    private ObjectNode payrollTimeseriesPlanWithMonthAxis() {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("schemaVersion", "praxis-ui-composition-plan.v1");
+        plan.put("layoutPreset", "single-chart-page");
+        ArrayNode widgets = plan.putArray("widgets");
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", "vw-analytics-folha-pagamento-chart-mes");
+        widget.put("componentId", "praxis-chart");
+        ObjectNode config = widget.putObject("inputs").putObject("config");
+        config.put("type", "line");
+        config.put("title", "Registros por Mes");
+        ObjectNode semanticAxis = config.putObject("semanticAxis");
+        semanticAxis.put("concept", "tempo");
+        semanticAxis.put("field", "mes");
+        semanticAxis.put("label", "Mes");
+        ObjectNode axes = config.putObject("axes");
+        ObjectNode x = axes.putObject("x");
+        x.put("field", "mes");
+        x.put("type", "time");
+        axes.putObject("y").put("field", "total");
+        ObjectNode seriesItem = config.putArray("series").addObject();
+        seriesItem.put("type", "line");
+        ObjectNode metric = seriesItem.putObject("metric");
+        metric.put("aggregation", "count");
+        metric.put("alias", "total");
+        ObjectNode dataSource = config.putObject("dataSource");
+        dataSource.put("kind", "remote");
+        dataSource.put("resourcePath", "/api/human-resources/vw-analytics-folha-pagamento");
+        ObjectNode query = dataSource.putObject("query");
+        query.put("sourceKind", "praxis.stats");
+        query.put("statsOperation", "timeseries");
+        query.put("statsPath", "/api/human-resources/vw-analytics-folha-pagamento/stats/timeseries");
+        query.put("granularity", "month");
+        query.putArray("dimensions").add("mes");
+        ObjectNode queryMetric = query.putArray("metrics").addObject();
+        queryMetric.put("aggregation", "count");
+        queryMetric.put("alias", "total");
+        ObjectNode statsRequest = query.putObject("statsRequest");
+        statsRequest.putObject("filter");
+        statsRequest.put("field", "mes");
+        statsRequest.put("granularity", "MONTH");
+        ObjectNode statsMetric = statsRequest.putObject("metric");
+        statsMetric.put("operation", "COUNT");
+        statsMetric.put("alias", "total");
+        ObjectNode diagnostics = plan.putObject("diagnostics");
+        ArrayNode semanticAxes = diagnostics.putArray("semanticAxes");
+        ObjectNode diagnosticAxis = semanticAxes.addObject();
+        diagnosticAxis.put("concept", "tempo");
+        diagnosticAxis.put("field", "mes");
+        diagnosticAxis.put("label", "Mes");
+        diagnosticAxis.put("provenance", "/api/human-resources/funcionarios");
+        return plan;
     }
 
     private AgenticAuthoringIntentResolutionResult payrollAnalyticsDashboardIntentWithMetric(String metricField) {

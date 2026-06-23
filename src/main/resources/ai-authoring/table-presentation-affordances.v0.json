@@ -73,9 +73,27 @@
       "targetKind": "column",
       "category": "format",
       "description": "Format date values without changing the data source.",
-      "options": ["dd/MM/yyyy", "medium date", "long date", "date-time"],
+      "options": ["dd/MM/yyyy", "yyyy-MM-dd", "yyyy-MM-dd HH:mm", "medium date", "long date", "date-time"],
       "appliesToTypes": ["date"],
       "unknownCompatible": false
+    },
+    {
+      "id": "column.format.boolean",
+      "targetKind": "column",
+      "category": "format",
+      "description": "Format boolean values as human-facing status labels without changing the data source.",
+      "options": ["true-false", "yes-no", "active-inactive", "on-off", "enabled-disabled", "custom labels"],
+      "appliesToTypes": ["boolean"],
+      "unknownCompatible": false
+    },
+    {
+      "id": "column.presentation.status",
+      "targetKind": "column",
+      "category": "status-presentation",
+      "description": "Present boolean or categorical status values with governed visual affordances.",
+      "options": ["value labels", "badge", "chip", "icon", "toggle", "conditional renderer"],
+      "appliesToTypes": ["string", "boolean", "custom"],
+      "unknownCompatible": true
     }
   ]
 }
