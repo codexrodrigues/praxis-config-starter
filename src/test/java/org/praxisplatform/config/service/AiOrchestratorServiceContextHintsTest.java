@@ -494,6 +494,57 @@ class AiOrchestratorServiceContextHintsTest {
     }
 
     @Test
+    void buildExecutionPromptPromotesAuthoringScopePolicyAsContractBoundary() throws Exception {
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "authoringScopePolicy": {
+                    "kind": "praxis.authoring-scope-policy.v1",
+                    "outOfScopeResponseType": "info",
+                    "fallbackTone": "friendly-guided"
+                  }
+                }
+                """);
+
+        AiContextDTO context = AiContextDTO.builder()
+                .componentId("praxis-table")
+                .componentType("table")
+                .aiMode("assist")
+                .componentDefinition(objectMapper.createObjectNode())
+                .currentState(objectMapper.createObjectNode())
+                .build();
+
+        JsonNode authoringContract = ReflectionTestUtils.invokeMethod(
+                service,
+                "resolveAuthoringContract",
+                contextHints,
+                context,
+                null);
+
+        String prompt = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildExecutionPrompt",
+                "responda apenas OK",
+                context,
+                objectMapper.createObjectNode(),
+                List.of(),
+                "",
+                "",
+                null,
+                null,
+                "N/A",
+                authoringContract,
+                "N/A",
+                "N/A",
+                null);
+
+        assertThat(prompt).contains("CONTRATO DECLARATIVO DE AUTORIA");
+        assertThat(prompt).contains("\"authoringScopePolicy\"");
+        assertThat(prompt).contains("\"outOfScopeResponseType\" : \"info\"");
+        assertThat(prompt).contains("loose instruction, assistant meta request, greeting, or unrelated ask");
+        assertThat(prompt).contains("do not produce JSON Patch, componentEditPlan, runtimeOperations or preview artifacts");
+    }
+
+    @Test
     void buildExecutionPromptPromotesPresentationTargetGroundingAsGovernedRuntimeMetadata() throws Exception {
         JsonNode contextHints = objectMapper.readTree("""
                 {

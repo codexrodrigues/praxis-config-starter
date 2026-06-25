@@ -498,6 +498,10 @@ public class AgenticAuthoringLlmIntentResolverService {
         context.put("userPrompt", valueOrDefault(effectivePrompt, request.userPrompt()));
         context.put("route", valueOrDefault(request.currentRoute(), ""));
         context.set("currentPageSummary", currentPageSummary == null ? objectMapper.createObjectNode() : currentPageSummary);
+        JsonNode authoringScopePolicy = AgenticAuthoringContextBundle.authoringScopePolicy(request);
+        if (authoringScopePolicy != null) {
+            context.set("authoringScopePolicy", authoringScopePolicy);
+        }
         if (target != null) {
             ObjectNode targetNode = context.putObject("target");
             targetNode.put("widgetKey", valueOrDefault(target.widgetKey(), ""));
@@ -572,6 +576,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Select visualizationDecision.primaryComponent only from authorableComponents.
                 For a single requested chart, use artifactKind "chart", operationKind "create", layoutKind "single_chart", primaryComponent "praxis-chart", includeSummary=false, includeDetailTable=false, includeFilters=false, includeKpis=false, and excludedComponentIds for rejected components.
                 If the user asks which governed data can be used to create a table, form, chart, dashboard, page or other component, classify the turn as a consultative catalog answer: operationKind "explore" or "explain", artifactKind "api_catalog", changeKind "answer_api_catalog_question". Do not select a weak resource or ask for a materialization confirmation before answering the catalog question.
+                If authoringScopePolicy is present and the semantic user intent is a loose instruction, assistant meta request, greeting, or unrelated ask that does not request an authorable UI/business decision, answer as an informational chat reply using the policy outOfScopeResponseType; do not create a component preview, edit plan, or governed authoring route.
                 For a requested page organized as accordion/acordeon/expansion panels, use artifactKind "page", operationKind "create", layoutKind "accordion_layout" or "single_column_expansion_page", primaryComponent "praxis-expansion", and no chart axes unless the user asks for a chart.
                 For a requested page organized as tabs/abas, use artifactKind "page", operationKind "create", layoutKind "tabs_layout", primaryComponent "praxis-tabs", and no chart axes unless the user asks for a chart.
                 For chart axes, use the grouping/time field in axes[].field and numeric measures in metricField/metricAggregation.

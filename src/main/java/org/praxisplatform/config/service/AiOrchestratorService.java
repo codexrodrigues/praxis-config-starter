@@ -20612,16 +20612,58 @@ public class AiOrchestratorService {
         return authoringContract != null && authoringContract.isObject() ? authoringContract : null;
     }
 
+    private JsonNode extractAuthoringScopePolicy(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return null;
+        }
+        JsonNode authoringScopePolicy = contextHints.get("authoringScopePolicy");
+        return authoringScopePolicy != null && authoringScopePolicy.isObject() ? authoringScopePolicy : null;
+    }
+
     private JsonNode resolveAuthoringContract(
             JsonNode contextHints,
             AiContextDTO context,
             JsonNode authoringManifest) {
+        JsonNode runtimeContract = extractAuthoringContract(contextHints);
+        JsonNode authoringScopePolicy = extractAuthoringScopePolicy(contextHints);
         if (authoringManifest != null && authoringManifest.isObject()) {
-            return mergeRuntimeAuthoringContractHints(
+            return mergeAuthoringScopePolicyHints(mergeRuntimeAuthoringContractHints(
                     buildAuthoringContractFromManifest(context, authoringManifest),
-                    extractAuthoringContract(contextHints));
+                    runtimeContract), authoringScopePolicy);
         }
-        return extractAuthoringContract(contextHints);
+        return mergeAuthoringScopePolicyHints(runtimeContract, authoringScopePolicy);
+    }
+
+    private JsonNode mergeAuthoringScopePolicyHints(JsonNode authoringContract, JsonNode authoringScopePolicy) {
+        if (authoringScopePolicy == null || !authoringScopePolicy.isObject()) {
+            return authoringContract;
+        }
+        ObjectNode merged = authoringContract != null && authoringContract.isObject()
+                ? ((ObjectNode) authoringContract).deepCopy()
+                : objectMapper.createObjectNode();
+        if (!merged.hasNonNull("kind")) {
+            merged.put("kind", "praxis.component-authoring-context");
+        }
+        merged.set("authoringScopePolicy", authoringScopePolicy);
+        ArrayNode instructions = merged.get("instructions") instanceof ArrayNode existingInstructions
+                ? existingInstructions
+                : merged.putArray("instructions");
+        appendUniqueInstruction(instructions, "Use authoringScopePolicy as the governed boundary for this assistant surface before producing any patch, componentEditPlan or materialized preview.");
+        appendUniqueInstruction(instructions, "When the semantic user intent is a loose instruction, assistant meta request, greeting, or unrelated ask that does not request an authorable UI/business decision, answer with the policy outOfScopeResponseType as an informational chat reply and do not produce JSON Patch, componentEditPlan, runtimeOperations or preview artifacts.");
+        appendUniqueInstruction(instructions, "If the user asks the assistant to say something simple, comply conversationally while briefly grounding that this is Praxis and offering authoring help only as optional next steps.");
+        return merged;
+    }
+
+    private void appendUniqueInstruction(ArrayNode instructions, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        for (JsonNode instruction : instructions) {
+            if (instruction != null && value.equals(instruction.asText())) {
+                return;
+            }
+        }
+        instructions.add(value);
     }
 
     private JsonNode mergeRuntimeAuthoringContractHints(JsonNode canonicalContract, JsonNode runtimeContract) {

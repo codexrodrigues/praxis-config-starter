@@ -43,11 +43,14 @@ class AgenticAuthoringTableCapabilityCatalogTest {
     void declaresSupportedTableModificationChangeKinds() {
         assertThat(catalog.version()).isEqualTo("0.1.0");
         assertThat(catalog.componentId()).isEqualTo("praxis-table");
-        assertThat(catalog.capabilities())
-                .extracting(AgenticAuthoringComponentCapabilityCatalog.ComponentCapability::changeKind)
+        assertThat(catalog.capabilities().stream()
+                .map(AgenticAuthoringComponentCapabilityCatalog.ComponentCapability::changeKind)
+                .distinct()
+                .toList())
                 .containsExactly(
                         "rename_or_relabel",
                         "set_column_format",
+                        "set_column_presentation",
                         "set_column_visibility",
                         "set_column_order",
                         "configure_export");

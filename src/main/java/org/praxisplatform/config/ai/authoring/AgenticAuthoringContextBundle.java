@@ -144,7 +144,11 @@ final class AgenticAuthoringContextBundle {
                 target,
                 componentCapabilities));
         component.set("authorableComponents", authorableComponents(objectMapper, componentCapabilities));
-        component.set("platformGuide", platformGuide(objectMapper, componentCapabilities));
+        JsonNode authoringScopePolicy = authoringScopePolicy(request);
+        component.set("platformGuide", platformGuide(objectMapper, componentCapabilities, authoringScopePolicy));
+        if (authoringScopePolicy != null) {
+            component.set("authoringScopePolicy", authoringScopePolicy);
+        }
         component.put("formAuthoringPolicy", "Users can describe forms naturally, including fields and process goals. Praxis should ground final form materialization in governed domain resources, schemas, actions, and component capabilities; when grounding is incomplete, keep the form as a reviewable local/editorial draft instead of inventing business rules.");
         component.put("selectionRule", "Select visualizationDecision.primaryComponent from authorableComponents[].componentId when the user asks for a governed component. Do not invent component ids.");
         component.put("exampleRule", "Prefer examples[].prompt, examples[].intent, and examples[].configHints from the matching component capability when inferring UI configuration.");
@@ -319,10 +323,15 @@ final class AgenticAuthoringContextBundle {
 
     private static ObjectNode platformGuide(
             ObjectMapper objectMapper,
-            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            JsonNode authoringScopePolicy) {
         ObjectNode guide = objectMapper.createObjectNode();
         guide.put("platformSummary", "Praxis is a governed AI authoring platform. The assistant should understand user intent, explain the current domain and available governed components, and materialize only decisions that pass catalog, schema, action, component, and review constraints.");
         guide.put("consultativeUse", "For questions such as what can be done here, which components can be created, how to build an admin panel, or how free-form forms work, answer as guidance first and do not create a preview until the user asks to create or confirms a concrete direction.");
+        if (authoringScopePolicy != null) {
+            guide.set("authoringScopePolicy", authoringScopePolicy);
+            guide.put("outOfScopeUse", "When the semantic user intent is a loose instruction, assistant meta request, greeting, or unrelated ask that does not request an authorable UI/business decision, answer as an informational chat reply using the policy outOfScopeResponseType and do not create a component preview or edit plan.");
+        }
         guide.set("componentFamilies", componentFamilies(objectMapper, componentCapabilities));
         return guide;
     }
@@ -617,6 +626,14 @@ final class AgenticAuthoringContextBundle {
         if (StringUtils.hasText(value)) {
             target.put(targetFieldName, value);
         }
+    }
+
+    static JsonNode authoringScopePolicy(AgenticAuthoringIntentResolutionRequest request) {
+        JsonNode contextHints = request == null ? null : request.contextHints();
+        JsonNode policy = contextHints != null && contextHints.isObject()
+                ? contextHints.get("authoringScopePolicy")
+                : null;
+        return policy != null && policy.isObject() ? policy : null;
     }
 
     private static String policyProfile(AgenticAuthoringIntentResolutionRequest request) {

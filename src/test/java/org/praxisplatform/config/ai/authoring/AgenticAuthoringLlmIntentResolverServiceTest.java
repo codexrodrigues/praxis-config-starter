@@ -86,6 +86,15 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
 
         AgenticAuthoringLlmIntentResolverService service =
                 new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "authoringScopePolicy": {
+                    "kind": "praxis.authoring-scope-policy.v1",
+                    "outOfScopeResponseType": "info",
+                    "fallbackTone": "friendly-guided"
+                  }
+                }
+                """);
 
         AgenticAuthoringLlmIntentResolution result = service.resolve(
                 new AgenticAuthoringIntentResolutionRequest(
@@ -103,7 +112,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                         List.of(),
                         null,
                         List.of(),
-                        objectMapper.createObjectNode()),
+                        contextHints),
                 "Crie apenas um grafico de barras simples de incidentes por severidade. Use a fonte Indicadores Incidentes. Nao crie tabela, filtros nem KPIs.",
                 objectMapper.createObjectNode(),
                 null,
@@ -143,6 +152,9 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("which governed data can be used to create a table, form, chart, dashboard, page or other component")
                 .contains("Do not select a weak resource or ask for a materialization confirmation")
                 .contains("route_shared_rule_authoring")
+                .contains("\"authoringScopePolicy\"")
+                .contains("\"outOfScopeResponseType\" : \"info\"")
+                .contains("loose instruction, assistant meta request, greeting, or unrelated ask")
                 .contains("\"candidateResources\"")
                 .contains("/api/risk-intelligence/vw-indicadores-incidentes")
                 .contains("Indicadores de incidentes com campo severidade.")
@@ -698,7 +710,16 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                         List.of(new AgenticAuthoringConversationMessage("m1", "user", "quero um grafico", "2026-04-15T10:00:00Z")),
                         null,
                         List.of(),
-                        objectMapper.createObjectNode().put("source", "page-builder")),
+                        objectMapper.readTree("""
+                                {
+                                  "source": "page-builder",
+                                  "authoringScopePolicy": {
+                                    "kind": "praxis.authoring-scope-policy.v1",
+                                    "outOfScopeResponseType": "info",
+                                    "fallbackTone": "friendly-guided"
+                                  }
+                                }
+                                """)),
                 "crie painel de visualizacao de graficos",
                 objectMapper.createObjectNode().put("widgetCount", 1),
                 null,
@@ -728,6 +749,9 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(prompt).contains("\"authorableComponents\"");
         assertThat(prompt).contains("\"componentId\" : \"praxis-chart\"");
         assertThat(prompt).contains("\"platformGuide\"");
+        assertThat(prompt).contains("\"authoringScopePolicy\"");
+        assertThat(prompt).contains("\"outOfScopeResponseType\" : \"info\"");
+        assertThat(prompt).contains("loose instruction, assistant meta request, greeting, or unrelated ask");
         assertThat(prompt).contains("\"formAuthoringPolicy\"");
         assertThat(prompt).contains("consultativeRetrievalPlan");
         assertThat(prompt).contains("consultative platform guidance");
