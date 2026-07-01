@@ -162,6 +162,13 @@ safe DTOs. Navigation nodes may reference canonical Praxis concepts through
 the default provider returns an empty tree so the starter never invents host
 menus or private entitlements.
 
-Tenant switching and security events remain separate follow-up slices. They must
-not be inferred from local menus, private auth internals or HADES/Ergon-specific
-structures.
+The fourth code cut adds context switch through `PUT /api/praxis/runtime/context`,
+`EnterpriseRuntimeContextSwitchProvider`, a switch command DTO and a switch
+response DTO. The response makes the effective context explicit and returns safe
+propagation headers for subsequent metadata, config and resource calls. The
+default provider can materialize safe profile/module/locale/timezone choices, but
+it denies switching to a different tenant because tenant entitlement is
+host-owned.
+
+Security events remain a separate follow-up slice. They must not be inferred from
+local menus, private auth internals or HADES/Ergon-specific structures.

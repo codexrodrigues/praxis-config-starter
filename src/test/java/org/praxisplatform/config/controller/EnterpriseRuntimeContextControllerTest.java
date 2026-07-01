@@ -16,6 +16,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.dto.EnterpriseRuntimeContextRequest;
 import org.praxisplatform.config.dto.EnterpriseRuntimeContextResponse;
+import org.praxisplatform.config.dto.EnterpriseRuntimeContextSwitchCommand;
+import org.praxisplatform.config.dto.EnterpriseRuntimeContextSwitchResponse;
 import org.praxisplatform.config.dto.EnterpriseRuntimeNavigationNode;
 import org.praxisplatform.config.dto.EnterpriseRuntimeNavigationResponse;
 import org.praxisplatform.config.dto.EnterpriseRuntimeTenant;
@@ -24,6 +26,7 @@ import org.praxisplatform.config.dto.EnterpriseRuntimeUser;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.EnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.EnterpriseRuntimeContextSwitchProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeNavigationProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeTenantProvider;
 import org.springframework.http.ResponseEntity;
@@ -35,6 +38,7 @@ class EnterpriseRuntimeContextControllerTest {
 
     @Mock private AiPrincipalContextResolver principalContextResolver;
     @Mock private EnterpriseRuntimeContextProvider runtimeContextProvider;
+    @Mock private EnterpriseRuntimeContextSwitchProvider runtimeContextSwitchProvider;
     @Mock private EnterpriseRuntimeTenantProvider runtimeTenantProvider;
     @Mock private EnterpriseRuntimeNavigationProvider runtimeNavigationProvider;
 
@@ -45,6 +49,7 @@ class EnterpriseRuntimeContextControllerTest {
         controller = new EnterpriseRuntimeContextController(
                 principalContextResolver,
                 runtimeContextProvider,
+                runtimeContextSwitchProvider,
                 runtimeTenantProvider,
                 runtimeNavigationProvider);
     }
@@ -92,6 +97,73 @@ class EnterpriseRuntimeContextControllerTest {
         assertThat(runtimeRequest.timezone()).isEqualTo("America/Sao_Paulo");
         assertThat(runtimeRequest.activeProfileId()).isEqualTo("manager");
         assertThat(runtimeRequest.activeModuleKey()).isEqualTo("payroll");
+    }
+
+    @Test
+    void shouldResolveRuntimeContextSwitchFromServerPrincipalSafeHeadersAndCommand() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant-a", "user-a", "prod", true);
+        EnterpriseRuntimeContextSwitchCommand command = new EnterpriseRuntimeContextSwitchCommand(
+                "tenant-b",
+                "operator",
+                "payroll",
+                "pt-BR",
+                "America/Sao_Paulo",
+                "user selected tenant");
+        EnterpriseRuntimeContextResponse effectiveContext = new EnterpriseRuntimeContextResponse(
+                "praxis-enterprise-runtime-context.v1",
+                new EnterpriseRuntimeUser("user-a", "User A", true),
+                new EnterpriseRuntimeTenant("tenant-b", "Tenant B", true),
+                "prod",
+                "pt-BR",
+                "America/Sao_Paulo",
+                "operator",
+                "payroll",
+                List.of("runtime.context.read"),
+                Instant.parse("2026-07-01T12:00:00Z"));
+        EnterpriseRuntimeContextSwitchResponse providerResponse = new EnterpriseRuntimeContextSwitchResponse(
+                "praxis-enterprise-runtime-context-switch.v1",
+                true,
+                "accepted",
+                effectiveContext,
+                java.util.Map.of("X-Tenant-ID", "tenant-b"),
+                List.of("runtime.context.switch"),
+                Instant.parse("2026-07-01T12:00:01Z"));
+
+        when(principalContextResolver.resolve(request, "tenant-a", "user-hint", "dev"))
+                .thenReturn(principalContext);
+        when(runtimeContextSwitchProvider.switchContext(
+                any(EnterpriseRuntimeContextRequest.class),
+                any(EnterpriseRuntimeContextSwitchCommand.class)))
+                .thenReturn(providerResponse);
+
+        ResponseEntity<EnterpriseRuntimeContextSwitchResponse> response = controller.switchContext(
+                request,
+                "tenant-a",
+                "user-hint",
+                "dev",
+                "pt-BR,pt;q=0.9",
+                "America/Sao_Paulo",
+                "manager",
+                "benefits",
+                command);
+
+        assertThat(response.getBody()).isSameAs(providerResponse);
+        verify(principalContextResolver).resolve(request, "tenant-a", "user-hint", "dev");
+
+        ArgumentCaptor<EnterpriseRuntimeContextRequest> requestCaptor =
+                ArgumentCaptor.forClass(EnterpriseRuntimeContextRequest.class);
+        ArgumentCaptor<EnterpriseRuntimeContextSwitchCommand> commandCaptor =
+                ArgumentCaptor.forClass(EnterpriseRuntimeContextSwitchCommand.class);
+        verify(runtimeContextSwitchProvider).switchContext(requestCaptor.capture(), commandCaptor.capture());
+
+        EnterpriseRuntimeContextRequest runtimeRequest = requestCaptor.getValue();
+        assertThat(runtimeRequest.principalContext()).isSameAs(principalContext);
+        assertThat(runtimeRequest.locale()).isEqualTo("pt-BR");
+        assertThat(runtimeRequest.timezone()).isEqualTo("America/Sao_Paulo");
+        assertThat(runtimeRequest.activeProfileId()).isEqualTo("manager");
+        assertThat(runtimeRequest.activeModuleKey()).isEqualTo("benefits");
+        assertThat(commandCaptor.getValue()).isSameAs(command);
     }
 
     @Test

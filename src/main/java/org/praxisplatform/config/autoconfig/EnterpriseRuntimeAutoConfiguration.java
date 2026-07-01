@@ -3,9 +3,11 @@ package org.praxisplatform.config.autoconfig;
 import org.praxisplatform.config.controller.EnterpriseRuntimeContextController;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.DefaultEnterpriseRuntimeContextSwitchProvider;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeNavigationProvider;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeTenantProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.EnterpriseRuntimeContextSwitchProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeNavigationProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeTenantProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -44,6 +46,12 @@ public class EnterpriseRuntimeAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public EnterpriseRuntimeContextSwitchProvider enterpriseRuntimeContextSwitchProvider() {
+        return new DefaultEnterpriseRuntimeContextSwitchProvider();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public EnterpriseRuntimeTenantProvider enterpriseRuntimeTenantProvider() {
         return new DefaultEnterpriseRuntimeTenantProvider();
     }
@@ -59,11 +67,13 @@ public class EnterpriseRuntimeAutoConfiguration {
     public EnterpriseRuntimeContextController enterpriseRuntimeContextController(
             AiPrincipalContextResolver principalContextResolver,
             EnterpriseRuntimeContextProvider runtimeContextProvider,
+            EnterpriseRuntimeContextSwitchProvider runtimeContextSwitchProvider,
             EnterpriseRuntimeTenantProvider runtimeTenantProvider,
             EnterpriseRuntimeNavigationProvider runtimeNavigationProvider) {
         return new EnterpriseRuntimeContextController(
                 principalContextResolver,
                 runtimeContextProvider,
+                runtimeContextSwitchProvider,
                 runtimeTenantProvider,
                 runtimeNavigationProvider);
     }

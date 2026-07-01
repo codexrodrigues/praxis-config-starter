@@ -14,7 +14,7 @@ It owns persistence and runtime semantics for:
 - `ai_registry`: governed component definitions, templates, and executable authoring manifests.
 - `api_metadata`: ingested API catalog metadata used for search and AI grounding.
 - `/api/praxis/config/**`: configuration, registry, AI context, authoring, stream, and domain-decision APIs.
-- `/api/praxis/runtime/context`, `/api/praxis/runtime/tenants`, and `/api/praxis/runtime/navigation`: safe enterprise runtime projections for corporate shells and AI grounding.
+- `/api/praxis/runtime/context`, `/api/praxis/runtime/tenants`, `/api/praxis/runtime/navigation`, and context switches: safe enterprise runtime projections for corporate shells and AI grounding.
 - AI provider orchestration, RAG/project-knowledge retrieval, signed stream access, and governed authoring diagnostics.
 
 `praxis-config-starter` does not define backend resource semantics. That belongs to
@@ -258,9 +258,10 @@ source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted t
 | `/api/praxis/config/ai/authoring/**` | Validate, compile, preview, apply, stream, replay, and cancel agentic authoring turns. |
 | `/api/praxis/config/domain-rules/**` | Govern shared business rules and semantic decisions before publishing materializations. |
 | `/api/praxis/config/domain-knowledge/**` | Govern domain knowledge change sets and evidence lifecycle. |
-| `/api/praxis/runtime/context` | Return a safe, host-neutral enterprise runtime context projection. Private auth and authorization internals remain host-owned. |
-| `/api/praxis/runtime/tenants` | Return host-provided accessible tenant/company choices for corporate shells. The default provider exposes only the active tenant and never private entitlement internals. |
-| `/api/praxis/runtime/navigation` | Return host-provided navigation nodes for corporate shells, with optional canonical Praxis refs such as `resourceKey`, `surfaceRef`, `actionRef`, `moduleKey`, and `capabilityRef`. The default provider returns an empty safe tree. |
+| `GET /api/praxis/runtime/context` | Return a safe, host-neutral enterprise runtime context projection. Private auth and authorization internals remain host-owned. |
+| `PUT /api/praxis/runtime/context` | Request a host-authorized context switch. The response returns the effective context and safe propagation headers; the default provider never switches to a different tenant without a host-owned provider. |
+| `GET /api/praxis/runtime/tenants` | Return host-provided accessible tenant/company choices for corporate shells. The default provider exposes only the active tenant and never private entitlement internals. |
+| `GET /api/praxis/runtime/navigation` | Return host-provided navigation nodes for corporate shells, with optional canonical Praxis refs such as `resourceKey`, `surfaceRef`, `actionRef`, `moduleKey`, and `capabilityRef`. The default provider returns an empty safe tree. |
 
 ## Documentation
 
