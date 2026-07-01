@@ -14,6 +14,7 @@ It owns persistence and runtime semantics for:
 - `ai_registry`: governed component definitions, templates, and executable authoring manifests.
 - `api_metadata`: ingested API catalog metadata used for search and AI grounding.
 - `/api/praxis/config/**`: configuration, registry, AI context, authoring, stream, and domain-decision APIs.
+- `/api/praxis/runtime/context`: safe enterprise runtime context projection for corporate shells and AI grounding.
 - AI provider orchestration, RAG/project-knowledge retrieval, signed stream access, and governed authoring diagnostics.
 
 `praxis-config-starter` does not define backend resource semantics. That belongs to
@@ -28,7 +29,7 @@ The public Praxis UI site, examples, and documentation are available at
 | Concern | Canonical owner |
 | --- | --- |
 | Backend resource semantics, `x-ui`, `/schemas/filtered`, discovery, and capabilities | [`praxis-metadata-starter`](https://github.com/codexrodrigues/praxis-metadata-starter) |
-| Runtime configuration, AI registry, API metadata, templates, stream auth, and governed authoring state | `praxis-config-starter` |
+| Runtime configuration, enterprise context projection, AI registry, API metadata, templates, stream auth, and governed authoring state | `praxis-config-starter` |
 | Angular runtime rendering, materializers, editors, and host integration APIs | [`praxis-ui-angular`](https://github.com/codexrodrigues/praxis-ui-angular) |
 | Public site, examples, playgrounds, and platform documentation | [praxisui.dev](https://praxisui.dev/) |
 | Public operational proof and downstream HTTP validation | [`praxis-api-quickstart`](https://github.com/codexrodrigues/praxis-api-quickstart) |
@@ -51,6 +52,7 @@ CodeWiki is complementary navigation for code reading; the repository docs and s
 `praxis-config-starter` consumes and enriches that metadata boundary with governed runtime state:
 
 - persisted UI configuration per tenant, environment, user, resource, and component;
+- safe enterprise runtime context projection for corporate shells and AI grounding;
 - API metadata ingestion used by search, RAG, and AI authoring context;
 - AI registry definitions, authoring manifests, templates, and diagnostics;
 - signed or cookie-based stream access for browser-compatible authoring flows;
@@ -75,7 +77,7 @@ flowchart LR
     quickstart["praxis-api-quickstart<br/>Operational proof host"]
 
     metadata -->|"publishes /schemas and discovery"| host
-    config -->|"auto-configures /api/praxis/config/**"| host
+    config -->|"auto-configures /api/praxis/config/** and /api/praxis/runtime/context"| host
     host -->|"serves metadata and config APIs"| angular
     angular -->|"reads and writes runtime config"| config
     config -->|"persists governed state"| db
@@ -92,6 +94,7 @@ flowchart TD
     apiCatalog["/api/praxis/config/api-catalog/**<br/>Ingested API metadata"]
     registry["/api/praxis/config/ai-registry/**<br/>Component definitions and templates"]
     uiConfig["/api/praxis/config/ui<br/>Tenant and user runtime config"]
+    runtimeContext["/api/praxis/runtime/context<br/>Safe enterprise runtime context"]
     context["/api/praxis/config/ai-context/**<br/>Merged AI context"]
     runtime["Praxis UI runtime<br/>Forms, tables, pages, editors"]
 
@@ -99,6 +102,7 @@ flowchart TD
     apiCatalog --> context
     registry --> context
     uiConfig --> context
+    runtimeContext --> context
     context --> runtime
     runtime -->|"save or delete config with ETag"| uiConfig
     runtime -->|"request grounded suggestions"| context
@@ -254,6 +258,7 @@ source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted t
 | `/api/praxis/config/ai/authoring/**` | Validate, compile, preview, apply, stream, replay, and cancel agentic authoring turns. |
 | `/api/praxis/config/domain-rules/**` | Govern shared business rules and semantic decisions before publishing materializations. |
 | `/api/praxis/config/domain-knowledge/**` | Govern domain knowledge change sets and evidence lifecycle. |
+| `/api/praxis/runtime/context` | Return a safe, host-neutral enterprise runtime context projection. Private auth and authorization internals remain host-owned. |
 
 ## Documentation
 

@@ -1,6 +1,6 @@
 # Enterprise Runtime Context and Navigation RFC
 
-Status: proposed
+Status: accepted for first implementation slice
 
 Date: 2026-07-01
 
@@ -10,7 +10,9 @@ Related issue: https://github.com/codexrodrigues/praxis-config-starter/issues/18
 
 Overall initiative: `arquitetural` and future `contrato-publico`.
 
-This document-only step: `docs-apenas`.
+Initial RFC step: `docs-apenas`.
+
+First implementation slice: `contrato-publico`.
 
 ## Problem
 
@@ -140,7 +142,11 @@ Minimum payload semantics:
 
 ## Recommended Next Step
 
-Open the implementation PR only after the packaging decision is accepted. The first
-code cut should be small: provider SPI, safe DTOs and `GET /api/praxis/runtime/context`
-with tests. Navigation and security events should follow only after the context and
-tenant-switching semantics are proven.
+The packaging decision for the first slice is to implement the contract in
+`praxis-config-starter`, while keeping the provider SPI host-neutral enough to move
+or split into a future `praxis-enterprise-runtime-starter` if the boundary grows.
+
+The first code cut is intentionally small: provider SPI, safe DTOs and
+`GET /api/praxis/runtime/context` with tests. Navigation, tenant switching and
+security events should follow only after the context semantics are proven in a
+sample host.
