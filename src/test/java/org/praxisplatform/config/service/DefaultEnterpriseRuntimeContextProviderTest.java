@@ -9,6 +9,7 @@ import org.praxisplatform.config.dto.EnterpriseRuntimeContextResponse;
 import org.praxisplatform.config.dto.EnterpriseRuntimeContextSwitchCommand;
 import org.praxisplatform.config.dto.EnterpriseRuntimeContextSwitchResponse;
 import org.praxisplatform.config.dto.EnterpriseRuntimeNavigationResponse;
+import org.praxisplatform.config.dto.EnterpriseRuntimeSecurityEventsResponse;
 import org.praxisplatform.config.dto.EnterpriseRuntimeTenantsResponse;
 
 @Tag("unit")
@@ -141,6 +142,22 @@ class DefaultEnterpriseRuntimeContextProviderTest {
         assertThat(response.schemaVersion()).isEqualTo("praxis-enterprise-runtime-navigation.v1");
         assertThat(response.nodes()).isEmpty();
         assertThat(response.capabilities()).containsExactly("runtime.navigation.read");
+        assertThat(response.resolvedAt()).isNotNull();
+    }
+
+    @Test
+    void shouldReturnSafeEmptySecurityEventsByDefault() {
+        EnterpriseRuntimeSecurityEventsResponse response = new DefaultEnterpriseRuntimeSecurityEventProvider()
+                .getSecurityEvents(new EnterpriseRuntimeContextRequest(
+                        new AiPrincipalContext("tenant-a", "user-a", "prod", true),
+                        "pt-BR",
+                        "America/Sao_Paulo",
+                        "operator",
+                        "payroll"));
+
+        assertThat(response.schemaVersion()).isEqualTo("praxis-enterprise-runtime-security-events.v1");
+        assertThat(response.events()).isEmpty();
+        assertThat(response.capabilities()).containsExactly("runtime.security-events.read");
         assertThat(response.resolvedAt()).isNotNull();
     }
 }

@@ -14,7 +14,7 @@ It owns persistence and runtime semantics for:
 - `ai_registry`: governed component definitions, templates, and executable authoring manifests.
 - `api_metadata`: ingested API catalog metadata used for search and AI grounding.
 - `/api/praxis/config/**`: configuration, registry, AI context, authoring, stream, and domain-decision APIs.
-- `/api/praxis/runtime/context`, `/api/praxis/runtime/tenants`, `/api/praxis/runtime/navigation`, and context switches: safe enterprise runtime projections for corporate shells and AI grounding.
+- `/api/praxis/runtime/context`, `/api/praxis/runtime/tenants`, `/api/praxis/runtime/navigation`, context switches, and security/runtime events: safe enterprise runtime projections for corporate shells and AI grounding.
 - AI provider orchestration, RAG/project-knowledge retrieval, signed stream access, and governed authoring diagnostics.
 
 `praxis-config-starter` does not define backend resource semantics. That belongs to
@@ -262,6 +262,7 @@ source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted t
 | `PUT /api/praxis/runtime/context` | Request a host-authorized context switch. The response returns the effective context and safe propagation headers; the default provider never switches to a different tenant without a host-owned provider. |
 | `GET /api/praxis/runtime/tenants` | Return host-provided accessible tenant/company choices for corporate shells. The default provider exposes only the active tenant and never private entitlement internals. |
 | `GET /api/praxis/runtime/navigation` | Return host-provided navigation nodes for corporate shells, with optional canonical Praxis refs such as `resourceKey`, `surfaceRef`, `actionRef`, `moduleKey`, and `capabilityRef`. The default provider returns an empty safe tree. |
+| `GET /api/praxis/runtime/security-events` | Return host-provided safe runtime/security signals for corporate shells. The default provider returns an empty safe list and never exposes raw roles, policies, tokens, prompts, SQL or private audit internals. |
 
 ## Documentation
 

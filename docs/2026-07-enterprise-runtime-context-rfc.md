@@ -170,5 +170,10 @@ default provider can materialize safe profile/module/locale/timezone choices, bu
 it denies switching to a different tenant because tenant entitlement is
 host-owned.
 
-Security events remain a separate follow-up slice. They must not be inferred from
-local menus, private auth internals or HADES/Ergon-specific structures.
+The fifth code cut adds security/runtime events through
+`GET /api/praxis/runtime/security-events`,
+`EnterpriseRuntimeSecurityEventProvider` and safe DTOs. The default provider
+returns an empty list so the starter never invents host audit data. Corporate
+hosts may project safe signals such as session freshness, auth posture or runtime
+warnings, but must not expose raw roles, permissions, policies, tokens, prompts,
+SQL, private audit internals or sensitive attributes.
