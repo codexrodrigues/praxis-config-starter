@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.EnterpriseRuntimeContextRequest;
 import org.praxisplatform.config.dto.EnterpriseRuntimeContextResponse;
+import org.praxisplatform.config.dto.EnterpriseRuntimeTenantsResponse;
 
 @Tag("unit")
 class DefaultEnterpriseRuntimeContextProviderTest {
@@ -36,6 +37,25 @@ class DefaultEnterpriseRuntimeContextProviderTest {
         assertThat(response.activeProfileId()).isEqualTo("manager");
         assertThat(response.activeModuleKey()).isEqualTo("payroll");
         assertThat(response.capabilities()).containsExactly("runtime.context.read");
+        assertThat(response.resolvedAt()).isNotNull();
+    }
+
+    @Test
+    void shouldProjectActiveTenantAsDefaultTenantChoiceWithoutPrivateEntitlements() {
+        EnterpriseRuntimeTenantsResponse response = new DefaultEnterpriseRuntimeTenantProvider().getTenants(
+                new EnterpriseRuntimeContextRequest(
+                        new AiPrincipalContext("tenant-a", "user-a", "prod", true),
+                        "pt-BR",
+                        "America/Sao_Paulo",
+                        "manager",
+                        "payroll"));
+
+        assertThat(response.schemaVersion()).isEqualTo("praxis-enterprise-runtime-tenants.v1");
+        assertThat(response.activeTenant().tenantId()).isEqualTo("tenant-a");
+        assertThat(response.activeTenant().label()).isEqualTo("tenant-a");
+        assertThat(response.activeTenant().active()).isTrue();
+        assertThat(response.tenants()).containsExactly(response.activeTenant());
+        assertThat(response.capabilities()).containsExactly("runtime.tenants.read");
         assertThat(response.resolvedAt()).isNotNull();
     }
 }
