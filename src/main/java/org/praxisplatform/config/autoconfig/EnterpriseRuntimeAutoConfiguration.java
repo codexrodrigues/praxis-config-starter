@@ -3,7 +3,9 @@ package org.praxisplatform.config.autoconfig;
 import org.praxisplatform.config.controller.EnterpriseRuntimeContextController;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.DefaultEnterpriseRuntimeTenantProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.EnterpriseRuntimeTenantProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -40,9 +42,19 @@ public class EnterpriseRuntimeAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public EnterpriseRuntimeTenantProvider enterpriseRuntimeTenantProvider() {
+        return new DefaultEnterpriseRuntimeTenantProvider();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public EnterpriseRuntimeContextController enterpriseRuntimeContextController(
             AiPrincipalContextResolver principalContextResolver,
-            EnterpriseRuntimeContextProvider runtimeContextProvider) {
-        return new EnterpriseRuntimeContextController(principalContextResolver, runtimeContextProvider);
+            EnterpriseRuntimeContextProvider runtimeContextProvider,
+            EnterpriseRuntimeTenantProvider runtimeTenantProvider) {
+        return new EnterpriseRuntimeContextController(
+                principalContextResolver,
+                runtimeContextProvider,
+                runtimeTenantProvider);
     }
 }

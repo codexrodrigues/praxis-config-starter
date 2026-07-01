@@ -13,7 +13,9 @@ import org.praxisplatform.config.dto.EnterpriseRuntimeTenant;
 import org.praxisplatform.config.dto.EnterpriseRuntimeUser;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.DefaultEnterpriseRuntimeTenantProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.EnterpriseRuntimeTenantProvider;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
@@ -28,9 +30,12 @@ class EnterpriseRuntimeAutoConfigurationTest {
         contextRunner.run(context -> {
             assertThat(context).hasSingleBean(AiPrincipalContextResolver.class);
             assertThat(context).hasSingleBean(EnterpriseRuntimeContextProvider.class);
+            assertThat(context).hasSingleBean(EnterpriseRuntimeTenantProvider.class);
             assertThat(context).hasSingleBean(EnterpriseRuntimeContextController.class);
             assertThat(context.getBean(EnterpriseRuntimeContextProvider.class))
                     .isInstanceOf(DefaultEnterpriseRuntimeContextProvider.class);
+            assertThat(context.getBean(EnterpriseRuntimeTenantProvider.class))
+                    .isInstanceOf(DefaultEnterpriseRuntimeTenantProvider.class);
         });
     }
 
@@ -53,6 +58,19 @@ class EnterpriseRuntimeAutoConfigurationTest {
                 .run(context -> {
                     assertThat(context).hasSingleBean(EnterpriseRuntimeContextProvider.class);
                     assertThat(context.getBean(EnterpriseRuntimeContextProvider.class)).isSameAs(customProvider);
+                    assertThat(context).hasSingleBean(EnterpriseRuntimeContextController.class);
+                });
+    }
+
+    @Test
+    void shouldBackOffWhenHostProvidesRuntimeTenantProvider() {
+        EnterpriseRuntimeTenantProvider customProvider = request -> null;
+
+        contextRunner
+                .withBean(EnterpriseRuntimeTenantProvider.class, () -> customProvider)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(EnterpriseRuntimeTenantProvider.class);
+                    assertThat(context.getBean(EnterpriseRuntimeTenantProvider.class)).isSameAs(customProvider);
                     assertThat(context).hasSingleBean(EnterpriseRuntimeContextController.class);
                 });
     }

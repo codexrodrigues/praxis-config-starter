@@ -146,7 +146,15 @@ The packaging decision for the first slice is to implement the contract in
 `praxis-config-starter`, while keeping the provider SPI host-neutral enough to move
 or split into a future `praxis-enterprise-runtime-starter` if the boundary grows.
 
-The first code cut is intentionally small: provider SPI, safe DTOs and
-`GET /api/praxis/runtime/context` with tests. Navigation, tenant switching and
-security events should follow only after the context semantics are proven in a
-sample host.
+The first code cut delivered provider SPI, safe DTOs and
+`GET /api/praxis/runtime/context` with tests.
+
+The second code cut adds tenant/company choices through
+`GET /api/praxis/runtime/tenants`, `EnterpriseRuntimeTenantProvider` and safe
+DTOs. The default provider exposes only the active tenant from
+`AiPrincipalContext`; corporate hosts must provide their own provider when they
+have real entitlement data.
+
+Tenant switching, navigation discovery and security events remain separate
+follow-up slices. They must not be inferred from local menus, private auth
+internals or HADES/Ergon-specific structures.

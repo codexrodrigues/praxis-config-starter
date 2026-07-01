@@ -259,6 +259,7 @@ source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted t
 | `/api/praxis/config/domain-rules/**` | Govern shared business rules and semantic decisions before publishing materializations. |
 | `/api/praxis/config/domain-knowledge/**` | Govern domain knowledge change sets and evidence lifecycle. |
 | `/api/praxis/runtime/context` | Return a safe, host-neutral enterprise runtime context projection. Private auth and authorization internals remain host-owned. |
+| `/api/praxis/runtime/tenants` | Return host-provided accessible tenant/company choices for corporate shells. The default provider exposes only the active tenant and never private entitlement internals. |
 
 ## Documentation
 
