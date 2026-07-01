@@ -14,7 +14,7 @@ It owns persistence and runtime semantics for:
 - `ai_registry`: governed component definitions, templates, and executable authoring manifests.
 - `api_metadata`: ingested API catalog metadata used for search and AI grounding.
 - `/api/praxis/config/**`: configuration, registry, AI context, authoring, stream, and domain-decision APIs.
-- `/api/praxis/runtime/context`: safe enterprise runtime context projection for corporate shells and AI grounding.
+- `/api/praxis/runtime/context`, `/api/praxis/runtime/tenants`, and `/api/praxis/runtime/navigation`: safe enterprise runtime projections for corporate shells and AI grounding.
 - AI provider orchestration, RAG/project-knowledge retrieval, signed stream access, and governed authoring diagnostics.
 
 `praxis-config-starter` does not define backend resource semantics. That belongs to
@@ -77,7 +77,7 @@ flowchart LR
     quickstart["praxis-api-quickstart<br/>Operational proof host"]
 
     metadata -->|"publishes /schemas and discovery"| host
-    config -->|"auto-configures /api/praxis/config/** and /api/praxis/runtime/context"| host
+    config -->|"auto-configures /api/praxis/config/** and /api/praxis/runtime/**"| host
     host -->|"serves metadata and config APIs"| angular
     angular -->|"reads and writes runtime config"| config
     config -->|"persists governed state"| db
@@ -94,7 +94,7 @@ flowchart TD
     apiCatalog["/api/praxis/config/api-catalog/**<br/>Ingested API metadata"]
     registry["/api/praxis/config/ai-registry/**<br/>Component definitions and templates"]
     uiConfig["/api/praxis/config/ui<br/>Tenant and user runtime config"]
-    runtimeContext["/api/praxis/runtime/context<br/>Safe enterprise runtime context"]
+    runtimeContext["/api/praxis/runtime/**<br/>Safe enterprise runtime projections"]
     context["/api/praxis/config/ai-context/**<br/>Merged AI context"]
     runtime["Praxis UI runtime<br/>Forms, tables, pages, editors"]
 
@@ -260,6 +260,7 @@ source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted t
 | `/api/praxis/config/domain-knowledge/**` | Govern domain knowledge change sets and evidence lifecycle. |
 | `/api/praxis/runtime/context` | Return a safe, host-neutral enterprise runtime context projection. Private auth and authorization internals remain host-owned. |
 | `/api/praxis/runtime/tenants` | Return host-provided accessible tenant/company choices for corporate shells. The default provider exposes only the active tenant and never private entitlement internals. |
+| `/api/praxis/runtime/navigation` | Return host-provided navigation nodes for corporate shells, with optional canonical Praxis refs such as `resourceKey`, `surfaceRef`, `actionRef`, `moduleKey`, and `capabilityRef`. The default provider returns an empty safe tree. |
 
 ## Documentation
 

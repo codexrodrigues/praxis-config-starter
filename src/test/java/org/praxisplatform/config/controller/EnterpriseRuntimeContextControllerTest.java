@@ -16,12 +16,15 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.dto.EnterpriseRuntimeContextRequest;
 import org.praxisplatform.config.dto.EnterpriseRuntimeContextResponse;
+import org.praxisplatform.config.dto.EnterpriseRuntimeNavigationNode;
+import org.praxisplatform.config.dto.EnterpriseRuntimeNavigationResponse;
 import org.praxisplatform.config.dto.EnterpriseRuntimeTenant;
 import org.praxisplatform.config.dto.EnterpriseRuntimeTenantsResponse;
 import org.praxisplatform.config.dto.EnterpriseRuntimeUser;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.EnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.EnterpriseRuntimeNavigationProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeTenantProvider;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -33,6 +36,7 @@ class EnterpriseRuntimeContextControllerTest {
     @Mock private AiPrincipalContextResolver principalContextResolver;
     @Mock private EnterpriseRuntimeContextProvider runtimeContextProvider;
     @Mock private EnterpriseRuntimeTenantProvider runtimeTenantProvider;
+    @Mock private EnterpriseRuntimeNavigationProvider runtimeNavigationProvider;
 
     private EnterpriseRuntimeContextController controller;
 
@@ -41,7 +45,8 @@ class EnterpriseRuntimeContextControllerTest {
         controller = new EnterpriseRuntimeContextController(
                 principalContextResolver,
                 runtimeContextProvider,
-                runtimeTenantProvider);
+                runtimeTenantProvider,
+                runtimeNavigationProvider);
     }
 
     @Test
@@ -123,6 +128,56 @@ class EnterpriseRuntimeContextControllerTest {
         ArgumentCaptor<EnterpriseRuntimeContextRequest> captor =
                 ArgumentCaptor.forClass(EnterpriseRuntimeContextRequest.class);
         verify(runtimeTenantProvider).getTenants(captor.capture());
+        EnterpriseRuntimeContextRequest runtimeRequest = captor.getValue();
+        assertThat(runtimeRequest.principalContext()).isSameAs(principalContext);
+        assertThat(runtimeRequest.locale()).isEqualTo("pt-BR");
+        assertThat(runtimeRequest.timezone()).isEqualTo("America/Sao_Paulo");
+        assertThat(runtimeRequest.activeProfileId()).isEqualTo("manager");
+        assertThat(runtimeRequest.activeModuleKey()).isEqualTo("payroll");
+    }
+
+    @Test
+    void shouldResolveRuntimeNavigationFromServerPrincipalAndSafeHeaders() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant-a", "user-a", "prod", true);
+        EnterpriseRuntimeNavigationResponse providerResponse = new EnterpriseRuntimeNavigationResponse(
+                "praxis-enterprise-runtime-navigation.v1",
+                List.of(new EnterpriseRuntimeNavigationNode(
+                        "payroll",
+                        "Payroll",
+                        "resource",
+                        "/api/human-resources/folhas-pagamento",
+                        "/payroll",
+                        "payroll",
+                        "human-resources.folhas-pagamento",
+                        "table",
+                        "mark-paid",
+                        "resource.read",
+                        List.of())),
+                List.of("runtime.navigation.read"),
+                Instant.parse("2026-07-01T12:00:00Z"));
+
+        when(principalContextResolver.resolve(request, "tenant-hint", "user-hint", "dev"))
+                .thenReturn(principalContext);
+        when(runtimeNavigationProvider.getNavigation(any(EnterpriseRuntimeContextRequest.class)))
+                .thenReturn(providerResponse);
+
+        ResponseEntity<EnterpriseRuntimeNavigationResponse> response = controller.getNavigation(
+                request,
+                "tenant-hint",
+                "user-hint",
+                "dev",
+                "pt-BR,pt;q=0.9",
+                "America/Sao_Paulo",
+                "manager",
+                "payroll");
+
+        assertThat(response.getBody()).isSameAs(providerResponse);
+        verify(principalContextResolver).resolve(request, "tenant-hint", "user-hint", "dev");
+
+        ArgumentCaptor<EnterpriseRuntimeContextRequest> captor =
+                ArgumentCaptor.forClass(EnterpriseRuntimeContextRequest.class);
+        verify(runtimeNavigationProvider).getNavigation(captor.capture());
         EnterpriseRuntimeContextRequest runtimeRequest = captor.getValue();
         assertThat(runtimeRequest.principalContext()).isSameAs(principalContext);
         assertThat(runtimeRequest.locale()).isEqualTo("pt-BR");

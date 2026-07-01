@@ -155,6 +155,13 @@ DTOs. The default provider exposes only the active tenant from
 `AiPrincipalContext`; corporate hosts must provide their own provider when they
 have real entitlement data.
 
-Tenant switching, navigation discovery and security events remain separate
-follow-up slices. They must not be inferred from local menus, private auth
-internals or HADES/Ergon-specific structures.
+The third code cut adds navigation discovery through
+`GET /api/praxis/runtime/navigation`, `EnterpriseRuntimeNavigationProvider` and
+safe DTOs. Navigation nodes may reference canonical Praxis concepts through
+`resourceKey`, `surfaceRef`, `actionRef`, `moduleKey` and `capabilityRef`, but
+the default provider returns an empty tree so the starter never invents host
+menus or private entitlements.
+
+Tenant switching and security events remain separate follow-up slices. They must
+not be inferred from local menus, private auth internals or HADES/Ergon-specific
+structures.
