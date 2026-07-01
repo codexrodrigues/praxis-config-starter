@@ -13,9 +13,11 @@ import org.praxisplatform.config.dto.EnterpriseRuntimeTenant;
 import org.praxisplatform.config.dto.EnterpriseRuntimeUser;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.DefaultEnterpriseRuntimeContextSwitchProvider;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeNavigationProvider;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeTenantProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.EnterpriseRuntimeContextSwitchProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeNavigationProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeTenantProvider;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -32,11 +34,14 @@ class EnterpriseRuntimeAutoConfigurationTest {
         contextRunner.run(context -> {
             assertThat(context).hasSingleBean(AiPrincipalContextResolver.class);
             assertThat(context).hasSingleBean(EnterpriseRuntimeContextProvider.class);
+            assertThat(context).hasSingleBean(EnterpriseRuntimeContextSwitchProvider.class);
             assertThat(context).hasSingleBean(EnterpriseRuntimeTenantProvider.class);
             assertThat(context).hasSingleBean(EnterpriseRuntimeNavigationProvider.class);
             assertThat(context).hasSingleBean(EnterpriseRuntimeContextController.class);
             assertThat(context.getBean(EnterpriseRuntimeContextProvider.class))
                     .isInstanceOf(DefaultEnterpriseRuntimeContextProvider.class);
+            assertThat(context.getBean(EnterpriseRuntimeContextSwitchProvider.class))
+                    .isInstanceOf(DefaultEnterpriseRuntimeContextSwitchProvider.class);
             assertThat(context.getBean(EnterpriseRuntimeTenantProvider.class))
                     .isInstanceOf(DefaultEnterpriseRuntimeTenantProvider.class);
             assertThat(context.getBean(EnterpriseRuntimeNavigationProvider.class))
@@ -63,6 +68,19 @@ class EnterpriseRuntimeAutoConfigurationTest {
                 .run(context -> {
                     assertThat(context).hasSingleBean(EnterpriseRuntimeContextProvider.class);
                     assertThat(context.getBean(EnterpriseRuntimeContextProvider.class)).isSameAs(customProvider);
+                    assertThat(context).hasSingleBean(EnterpriseRuntimeContextController.class);
+                });
+    }
+
+    @Test
+    void shouldBackOffWhenHostProvidesRuntimeContextSwitchProvider() {
+        EnterpriseRuntimeContextSwitchProvider customProvider = (request, command) -> null;
+
+        contextRunner
+                .withBean(EnterpriseRuntimeContextSwitchProvider.class, () -> customProvider)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(EnterpriseRuntimeContextSwitchProvider.class);
+                    assertThat(context.getBean(EnterpriseRuntimeContextSwitchProvider.class)).isSameAs(customProvider);
                     assertThat(context).hasSingleBean(EnterpriseRuntimeContextController.class);
                 });
     }
