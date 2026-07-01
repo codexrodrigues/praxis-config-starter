@@ -20,6 +20,8 @@ import org.praxisplatform.config.dto.EnterpriseRuntimeContextSwitchCommand;
 import org.praxisplatform.config.dto.EnterpriseRuntimeContextSwitchResponse;
 import org.praxisplatform.config.dto.EnterpriseRuntimeNavigationNode;
 import org.praxisplatform.config.dto.EnterpriseRuntimeNavigationResponse;
+import org.praxisplatform.config.dto.EnterpriseRuntimeSecurityEvent;
+import org.praxisplatform.config.dto.EnterpriseRuntimeSecurityEventsResponse;
 import org.praxisplatform.config.dto.EnterpriseRuntimeTenant;
 import org.praxisplatform.config.dto.EnterpriseRuntimeTenantsResponse;
 import org.praxisplatform.config.dto.EnterpriseRuntimeUser;
@@ -28,6 +30,7 @@ import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.EnterpriseRuntimeContextProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeContextSwitchProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeNavigationProvider;
+import org.praxisplatform.config.service.EnterpriseRuntimeSecurityEventProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeTenantProvider;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -41,6 +44,7 @@ class EnterpriseRuntimeContextControllerTest {
     @Mock private EnterpriseRuntimeContextSwitchProvider runtimeContextSwitchProvider;
     @Mock private EnterpriseRuntimeTenantProvider runtimeTenantProvider;
     @Mock private EnterpriseRuntimeNavigationProvider runtimeNavigationProvider;
+    @Mock private EnterpriseRuntimeSecurityEventProvider runtimeSecurityEventProvider;
 
     private EnterpriseRuntimeContextController controller;
 
@@ -51,7 +55,8 @@ class EnterpriseRuntimeContextControllerTest {
                 runtimeContextProvider,
                 runtimeContextSwitchProvider,
                 runtimeTenantProvider,
-                runtimeNavigationProvider);
+                runtimeNavigationProvider,
+                runtimeSecurityEventProvider);
     }
 
     @Test
@@ -250,6 +255,53 @@ class EnterpriseRuntimeContextControllerTest {
         ArgumentCaptor<EnterpriseRuntimeContextRequest> captor =
                 ArgumentCaptor.forClass(EnterpriseRuntimeContextRequest.class);
         verify(runtimeNavigationProvider).getNavigation(captor.capture());
+        EnterpriseRuntimeContextRequest runtimeRequest = captor.getValue();
+        assertThat(runtimeRequest.principalContext()).isSameAs(principalContext);
+        assertThat(runtimeRequest.locale()).isEqualTo("pt-BR");
+        assertThat(runtimeRequest.timezone()).isEqualTo("America/Sao_Paulo");
+        assertThat(runtimeRequest.activeProfileId()).isEqualTo("manager");
+        assertThat(runtimeRequest.activeModuleKey()).isEqualTo("payroll");
+    }
+
+    @Test
+    void shouldResolveRuntimeSecurityEventsFromServerPrincipalAndSafeHeaders() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant-a", "user-a", "prod", true);
+        EnterpriseRuntimeSecurityEventsResponse providerResponse = new EnterpriseRuntimeSecurityEventsResponse(
+                "praxis-enterprise-runtime-security-events.v1",
+                List.of(new EnterpriseRuntimeSecurityEvent(
+                        "session-refresh-required",
+                        "session.refresh_required",
+                        "info",
+                        "Session refresh is recommended.",
+                        "tenant-a",
+                        "prod",
+                        Instant.parse("2026-07-01T12:00:00Z"),
+                        java.util.Map.of("refreshRecommended", "true"))),
+                List.of("runtime.security-events.read"),
+                Instant.parse("2026-07-01T12:00:01Z"));
+
+        when(principalContextResolver.resolve(request, "tenant-hint", "user-hint", "dev"))
+                .thenReturn(principalContext);
+        when(runtimeSecurityEventProvider.getSecurityEvents(any(EnterpriseRuntimeContextRequest.class)))
+                .thenReturn(providerResponse);
+
+        ResponseEntity<EnterpriseRuntimeSecurityEventsResponse> response = controller.getSecurityEvents(
+                request,
+                "tenant-hint",
+                "user-hint",
+                "dev",
+                "pt-BR,pt;q=0.9",
+                "America/Sao_Paulo",
+                "manager",
+                "payroll");
+
+        assertThat(response.getBody()).isSameAs(providerResponse);
+        verify(principalContextResolver).resolve(request, "tenant-hint", "user-hint", "dev");
+
+        ArgumentCaptor<EnterpriseRuntimeContextRequest> captor =
+                ArgumentCaptor.forClass(EnterpriseRuntimeContextRequest.class);
+        verify(runtimeSecurityEventProvider).getSecurityEvents(captor.capture());
         EnterpriseRuntimeContextRequest runtimeRequest = captor.getValue();
         assertThat(runtimeRequest.principalContext()).isSameAs(principalContext);
         assertThat(runtimeRequest.locale()).isEqualTo("pt-BR");
