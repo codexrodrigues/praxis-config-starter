@@ -3,8 +3,10 @@ package org.praxisplatform.config.autoconfig;
 import org.praxisplatform.config.controller.EnterpriseRuntimeContextController;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.DefaultEnterpriseRuntimeNavigationProvider;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeTenantProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.EnterpriseRuntimeNavigationProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeTenantProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -48,13 +50,21 @@ public class EnterpriseRuntimeAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public EnterpriseRuntimeNavigationProvider enterpriseRuntimeNavigationProvider() {
+        return new DefaultEnterpriseRuntimeNavigationProvider();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public EnterpriseRuntimeContextController enterpriseRuntimeContextController(
             AiPrincipalContextResolver principalContextResolver,
             EnterpriseRuntimeContextProvider runtimeContextProvider,
-            EnterpriseRuntimeTenantProvider runtimeTenantProvider) {
+            EnterpriseRuntimeTenantProvider runtimeTenantProvider,
+            EnterpriseRuntimeNavigationProvider runtimeNavigationProvider) {
         return new EnterpriseRuntimeContextController(
                 principalContextResolver,
                 runtimeContextProvider,
-                runtimeTenantProvider);
+                runtimeTenantProvider,
+                runtimeNavigationProvider);
     }
 }
