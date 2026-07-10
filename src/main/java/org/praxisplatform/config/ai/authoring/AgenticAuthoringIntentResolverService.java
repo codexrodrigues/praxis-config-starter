@@ -6173,10 +6173,18 @@ public class AgenticAuthoringIntentResolverService {
         if (candidates == null || candidates.isEmpty()) {
             return null;
         }
-        return candidates.stream()
+        List<CandidatePromptAlignment> alignments = candidates.stream()
                 .filter(Objects::nonNull)
                 .map(candidate -> new CandidatePromptAlignment(candidate, directPromptCandidateAlignmentScore(prompt, candidate)))
                 .filter(alignment -> alignment.score() > 0)
+                .toList();
+        List<CandidatePromptAlignment> trustedAlignments = alignments.stream()
+                .filter(alignment -> !isWeakLexicalCandidate(alignment.candidate())
+                        || hasTrustedSelectionEvidence(alignment.candidate()))
+                .toList();
+        List<CandidatePromptAlignment> eligibleAlignments =
+                trustedAlignments.isEmpty() ? alignments : trustedAlignments;
+        return eligibleAlignments.stream()
                 .max(Comparator
                         .comparingInt(CandidatePromptAlignment::score)
                         .thenComparingDouble(alignment -> alignment.candidate().score()))
