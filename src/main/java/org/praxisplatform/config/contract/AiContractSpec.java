@@ -9,7 +9,7 @@ import java.util.List;
 public final class AiContractSpec {
 
     public static final String CONTRACT_VERSION = "v1.1";
-    public static final String CONTRACT_SCHEMA_HASH = "d86a329315d5863bbcd0d02599158381aab6bb2da40760cb8b7aa3167b7c22cd";
+    public static final String CONTRACT_SCHEMA_HASH = "66579be4b7637d3c8579e299388e45b89a17e164e72886f0895e98be5fa83c16";
     public static final String STREAM_EVENT_SCHEMA_VERSION = "v1";
     public static final String DOMAIN_CATALOG_CONTEXT_HINT_SCHEMA_VERSION = "praxis.ai.context-hints.domain-catalog/v0.2";
     public static final List<String> STREAM_EVENT_TYPES = List.of("status", "thought.step", "heartbeat", "intent.resolved", "result", "error", "cancelled");

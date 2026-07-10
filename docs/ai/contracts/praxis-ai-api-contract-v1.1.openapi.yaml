@@ -514,8 +514,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
+        '429':
+          description: Limite ativo por tenant ou usuario esgotado para stream de authoring
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
         '503':
-          description: Stream de authoring nao configurado ou executor indisponivel
+          description: Stream de authoring nao configurado, capacidade global esgotada ou executor indisponivel
           content:
             application/json:
               schema:
@@ -568,6 +574,18 @@ paths:
                 $ref: '#/components/schemas/ProblemResponse'
         '410':
           description: Stream expirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '429':
+          description: Limite de emitters ativos esgotado para o stream
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '503':
+          description: Limite de pollers de replay esgotado para streams remotos
           content:
             application/json:
               schema:
@@ -1529,7 +1547,7 @@ components:
       required: false
       schema:
         type: string
-        default: d86a329315d5863bbcd0d02599158381aab6bb2da40760cb8b7aa3167b7c22cd
+        default: 66579be4b7637d3c8579e299388e45b89a17e164e72886f0895e98be5fa83c16
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1559,7 +1577,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: d86a329315d5863bbcd0d02599158381aab6bb2da40760cb8b7aa3167b7c22cd
+        example: 66579be4b7637d3c8579e299388e45b89a17e164e72886f0895e98be5fa83c16
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:

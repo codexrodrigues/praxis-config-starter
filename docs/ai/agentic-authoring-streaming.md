@@ -84,6 +84,29 @@ mesmo `clientTurnId` chegar com prompt, alvo, decisao semantica ou contexto
 material diferente, o endpoint `start` responde `409` com razao publica
 `agentic-authoring-idempotency-conflict`, em vez de devolver trabalho antigo.
 
+O start tambem executa admissao canônica antes de reservar processamento novo.
+Starts idempotentes que encontram o evento inicial persistido nao consomem nova
+capacidade. Starts novos podem ser rejeitados com:
+
+- `429 agentic-authoring-stream-capacity-exceeded` quando o limite por tenant ou
+  por usuario estiver esgotado;
+- `503 agentic-authoring-stream-capacity-exceeded` quando o limite global estiver
+  esgotado;
+- `503 agentic-authoring-stream-executor-saturated` quando o executor bounded de
+  authoring nao aceitar novo trabalho.
+
+Essas rejeicoes sao transientes e devem ser apresentadas como retry seguro pelo
+cliente. Quando o trabalho ja iniciou mas o executor rejeita antes de processar,
+o backend tenta persistir um evento terminal `error` com `retryable=true`,
+`phase=capacity.rejected` e codigo publico estavel. Cancelamento, timeout,
+resultado terminal e replay terminal liberam a capacidade exatamente uma vez.
+
+O endpoint de conexao SSE tambem possui limites de protecao: excesso de emitters
+por stream responde `429 agentic-authoring-stream-emitter-limit-exceeded`; excesso
+de pollers de replay responde `503 agentic-authoring-stream-replay-capacity-exceeded`.
+Esses limites nao alteram o envelope `AiTurnEventEnvelope`; eles governam somente
+admissao, filas, emissores e pollers do transporte.
+
 `runtimeComponentObservations` e um envelope opcional de evidencia de runtime
 enviado por componentes do cockpit. O backend aceita essa evidencia somente com
 `runtimeComponentObservationTrustBoundary=untrusted_frontend_observation`, copia
