@@ -3219,12 +3219,24 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .contains("preciso confirmar");
         assertThat(result.warnings())
                 .contains("llm-intent-resolution-used", "llm-needs-artifact-kind")
-                .doesNotContain("keyword-fallback-applied", "llm-intent-resolution-fallback-deterministic");
+                .doesNotContain(
+                        "keyword-fallback-applied",
+                        "keyword-fallback-fail-safe-applied",
+                        "llm-intent-resolution-fallback-deterministic");
     }
 
     @Test
-    void exposesKeywordFallbackAsFailSafeTelemetryWhenLlmIsUnavailable() {
-        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+    void wordingAloneDoesNotResolvePrimaryIntentWhenLlmIsUnavailable() {
+        AgenticAuthoringIntentResolverService canonicalService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY,
+                null,
+                false);
+
+        AgenticAuthoringIntentResolutionResult result = canonicalService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "crie uma tabela de funcionarios",
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
@@ -3235,12 +3247,17 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
+        assertThat(result.valid()).isFalse();
+        assertThat(result.operationKind()).isEqualTo("unknown");
+        assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.changeKind()).isEqualTo("unknown");
         assertThat(result.warnings())
-                .contains("keyword-fallback-applied", "keyword-fallback-fail-safe-applied");
+                .contains("semantic-intent-resolution-not-attempted")
+                .doesNotContain("keyword-fallback-applied", "keyword-fallback-fail-safe-applied");
         assertThat(result.llmDiagnostics().path("resolutionTelemetry").path("fallbackPolicy").asText())
-                .isEqualTo("fail-safe");
+                .isEqualTo("semantic_intent_required");
         assertThat(result.llmDiagnostics().path("resolutionTelemetry").path("keywordFallbackApplied").asBoolean())
-                .isTrue();
+                .isFalse();
     }
 
     @Test
