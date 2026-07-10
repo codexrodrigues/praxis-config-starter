@@ -14,6 +14,7 @@ import org.praxisplatform.config.service.DomainFederationIngestDryRunService;
 import org.praxisplatform.config.service.DomainFederationIngestPersistenceService;
 import org.praxisplatform.config.service.DomainFederationQueryService;
 import org.praxisplatform.config.service.DomainFederationReleaseService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController("configDomainFederationController")
 @RequestMapping("/api/praxis/config/domain-federation")
 @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "praxis.domain-federation", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class DomainFederationController {
 
     private final DomainFederationContractValidator domainFederationContractValidator;

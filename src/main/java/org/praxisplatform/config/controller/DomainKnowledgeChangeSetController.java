@@ -10,6 +10,7 @@ import org.praxisplatform.config.dto.DomainKnowledgeChangeSetTimelineResponse;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationResponse;
 import org.praxisplatform.config.service.DomainKnowledgeChangeSetService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/praxis/config/domain-knowledge/change-sets")
 @RequiredArgsConstructor
 @ConditionalOnBean(DomainKnowledgeChangeSetService.class)
+@ConditionalOnProperty(prefix = "praxis.domain-knowledge.change-sets", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class DomainKnowledgeChangeSetController {
 
     private final DomainKnowledgeChangeSetService changeSetService;
