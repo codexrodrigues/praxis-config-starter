@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -22,9 +23,13 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
@@ -337,8 +342,12 @@ class AgenticAuthoringTurnStreamServiceTest {
 
         when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), eq("Quem participa da missão selecionada?")))
                 .thenReturn(AiThread.builder().threadId(threadId).build());
-        when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class))).thenReturn(Optional.empty());
-        when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
+        org.mockito.Mockito.lenient()
+                .when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class)))
+                .thenReturn(Optional.empty());
+        org.mockito.Mockito.lenient()
+                .when(streamAccessTokenService.resolveAuthMode())
+                .thenReturn("cookie");
         when(turnEngine.execute(any(), eq(principalContext), any(), eq("http://localhost")))
                 .thenAnswer(invocation -> {
                     processed.countDown();
@@ -617,6 +626,174 @@ class AgenticAuthoringTurnStreamServiceTest {
         verify(turnService).reserveTurnForStreaming(threadId, turnId);
         verify(turnEngine, never()).execute(any(), any(), any(), anyString());
         verify(turnEventService, never()).appendEvent(any(), any(UUID.class), eq(threadId), eq(turnId), anyString(), any());
+    }
+
+    @Test
+    void startRejectsWhenGlobalCapacityIsExhaustedAndReleasesAfterCompletion() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CountDownLatch firstExecutionStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstExecution = new CountDownLatch(1);
+        CountDownLatch firstExecutionFinished = new CountDownLatch(1);
+        AgenticAuthoringTurnEngine turnEngine = blockingTurnEngine(
+                firstExecutionStarted,
+                releaseFirstExecution,
+                firstExecutionFinished);
+        AgenticAuthoringTurnStreamService service = service(turnEngine);
+        ReflectionTestUtils.setField(service, "maxActiveGlobal", 1);
+        ReflectionTestUtils.setField(service, "maxActivePerTenant", 10);
+        ReflectionTestUtils.setField(service, "maxActivePerUser", 10);
+        ReflectionTestUtils.setField(service, "processingProgressSeconds", 0L);
+        ReflectionTestUtils.setField(service, "processingTimeoutSeconds", 60L);
+        stubSuccessfulStreamStart(threadId, principalContext);
+
+        AgenticAuthoringTurnStreamService.StartResult first =
+                service.start(requestWithClientTurnId("turn-client-1"), "http://localhost", principalContext);
+        org.assertj.core.api.Assertions.assertThat(first.created()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(firstExecutionStarted.await(2, TimeUnit.SECONDS)).isTrue();
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> service.start(requestWithClientTurnId("turn-client-2"), "http://localhost", principalContext))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> {
+                    ResponseStatusException response = (ResponseStatusException) ex;
+                    org.assertj.core.api.Assertions.assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+                    org.assertj.core.api.Assertions.assertThat(response.getReason())
+                            .isEqualTo("agentic-authoring-stream-capacity-exceeded");
+                });
+        verify(turnService, times(1)).reserveTurnForStreaming(eq(threadId), any(UUID.class));
+
+        releaseFirstExecution.countDown();
+        org.assertj.core.api.Assertions.assertThat(firstExecutionFinished.await(2, TimeUnit.SECONDS)).isTrue();
+        AgenticAuthoringTurnStreamService.StartResult afterCleanup =
+                service.start(requestWithClientTurnId("turn-client-3"), "http://localhost", principalContext);
+        service.shutdown();
+
+        org.assertj.core.api.Assertions.assertThat(afterCleanup.created()).isTrue();
+        verify(turnService, times(2)).reserveTurnForStreaming(eq(threadId), any(UUID.class));
+    }
+
+    @Test
+    void startRejectsWhenTenantCapacityIsExhausted() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        AiPrincipalContext userA = new AiPrincipalContext("tenant", "user-a", "local", true);
+        AiPrincipalContext userB = new AiPrincipalContext("tenant", "user-b", "local", true);
+        CountDownLatch firstExecutionStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstExecution = new CountDownLatch(1);
+        CountDownLatch firstExecutionFinished = new CountDownLatch(1);
+        AgenticAuthoringTurnStreamService service = service(blockingTurnEngine(
+                firstExecutionStarted,
+                releaseFirstExecution,
+                firstExecutionFinished));
+        ReflectionTestUtils.setField(service, "maxActiveGlobal", 10);
+        ReflectionTestUtils.setField(service, "maxActivePerTenant", 1);
+        ReflectionTestUtils.setField(service, "maxActivePerUser", 10);
+        ReflectionTestUtils.setField(service, "processingProgressSeconds", 0L);
+        ReflectionTestUtils.setField(service, "processingTimeoutSeconds", 60L);
+        stubSuccessfulStreamStart(threadId, userA);
+        stubSuccessfulStreamStart(threadId, userB);
+
+        service.start(requestWithClientTurnId("turn-client-tenant-a"), "http://localhost", userA);
+        org.assertj.core.api.Assertions.assertThat(firstExecutionStarted.await(2, TimeUnit.SECONDS)).isTrue();
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> service.start(requestWithClientTurnId("turn-client-tenant-b"), "http://localhost", userB))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> org.assertj.core.api.Assertions.assertThat(((ResponseStatusException) ex).getStatusCode())
+                        .isEqualTo(HttpStatus.TOO_MANY_REQUESTS));
+        releaseFirstExecution.countDown();
+        firstExecutionFinished.await(2, TimeUnit.SECONDS);
+        service.shutdown();
+    }
+
+    @Test
+    void startRejectsWhenUserCapacityIsExhausted() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CountDownLatch firstExecutionStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstExecution = new CountDownLatch(1);
+        CountDownLatch firstExecutionFinished = new CountDownLatch(1);
+        AgenticAuthoringTurnStreamService service = service(blockingTurnEngine(
+                firstExecutionStarted,
+                releaseFirstExecution,
+                firstExecutionFinished));
+        ReflectionTestUtils.setField(service, "maxActiveGlobal", 10);
+        ReflectionTestUtils.setField(service, "maxActivePerTenant", 10);
+        ReflectionTestUtils.setField(service, "maxActivePerUser", 1);
+        ReflectionTestUtils.setField(service, "processingProgressSeconds", 0L);
+        ReflectionTestUtils.setField(service, "processingTimeoutSeconds", 60L);
+        stubSuccessfulStreamStart(threadId, principalContext);
+
+        service.start(requestWithClientTurnId("turn-client-user-a"), "http://localhost", principalContext);
+        org.assertj.core.api.Assertions.assertThat(firstExecutionStarted.await(2, TimeUnit.SECONDS)).isTrue();
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> service.start(requestWithClientTurnId("turn-client-user-b"), "http://localhost", principalContext))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> org.assertj.core.api.Assertions.assertThat(((ResponseStatusException) ex).getStatusCode())
+                        .isEqualTo(HttpStatus.TOO_MANY_REQUESTS));
+        releaseFirstExecution.countDown();
+        firstExecutionFinished.await(2, TimeUnit.SECONDS);
+        service.shutdown();
+    }
+
+    @Test
+    void duplicateIdempotentStartDoesNotConsumeAdditionalCapacity() {
+        UUID threadId = UUID.randomUUID();
+        UUID streamId = UUID.randomUUID();
+        Instant createdAt = Instant.now().minusSeconds(5);
+        Instant expiresAt = Instant.now().plusSeconds(300);
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringTurnStreamRequest request = request();
+        AgenticAuthoringTurnEngine turnEngine = org.mockito.Mockito.mock(AgenticAuthoringTurnEngine.class);
+
+        when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), eq("Crie um painel")))
+                .thenReturn(AiThread.builder().threadId(threadId).build());
+        when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class)))
+                .thenReturn(Optional.of(new AiTurnEventService.StreamStartMetadata(
+                        streamId,
+                        threadId,
+                        UUID.randomUUID(),
+                        createdAt,
+                        expiresAt,
+                        requestHash(request),
+                        "status")));
+        when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
+
+        AgenticAuthoringTurnStreamService service = service(turnEngine);
+        ReflectionTestUtils.setField(service, "maxActiveGlobal", 0);
+
+        AgenticAuthoringTurnStreamService.StartResult result =
+                service.start(request, "http://localhost", principalContext);
+        service.shutdown();
+
+        org.assertj.core.api.Assertions.assertThat(result.created()).isFalse();
+        verify(turnService, never()).reserveTurnForStreaming(any(), any());
+        verify(turnEngine, never()).execute(any(), any(), any(), anyString());
+    }
+
+    @Test
+    void streamServiceUsesBoundedWorkerQueueAndBoundedSchedulerPolicy() {
+        AgenticAuthoringTurnStreamService service =
+                service(org.mockito.Mockito.mock(AgenticAuthoringTurnEngine.class));
+
+        Object executor = ReflectionTestUtils.getField(service, "executor");
+        org.assertj.core.api.Assertions.assertThat(executor).isInstanceOf(ThreadPoolExecutor.class);
+        ThreadPoolExecutor workerPool = (ThreadPoolExecutor) executor;
+        org.assertj.core.api.Assertions.assertThat(workerPool.getQueue()).isInstanceOf(ArrayBlockingQueue.class);
+        org.assertj.core.api.Assertions.assertThat(workerPool.getCorePoolSize()).isEqualTo(4);
+        org.assertj.core.api.Assertions.assertThat(workerPool.getMaximumPoolSize()).isEqualTo(16);
+        org.assertj.core.api.Assertions.assertThat(workerPool.getQueue().remainingCapacity()).isEqualTo(500);
+
+        Object scheduler = ReflectionTestUtils.getField(service, "scheduler");
+        org.assertj.core.api.Assertions.assertThat(scheduler).isInstanceOf(ScheduledThreadPoolExecutor.class);
+        ScheduledThreadPoolExecutor scheduledPool = (ScheduledThreadPoolExecutor) scheduler;
+        org.assertj.core.api.Assertions.assertThat(scheduledPool.getCorePoolSize()).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(scheduledPool.getRemoveOnCancelPolicy()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(scheduledPool.getExecuteExistingDelayedTasksAfterShutdownPolicy()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(scheduledPool.getContinueExistingPeriodicTasksAfterShutdownPolicy()).isFalse();
+
+        service.shutdown();
     }
 
     @Test
@@ -1278,6 +1455,80 @@ class AgenticAuthoringTurnStreamServiceTest {
                 List.of(),
                 null,
                 null);
+    }
+
+    private AgenticAuthoringTurnStreamRequest requestWithClientTurnId(String clientTurnId) {
+        AgenticAuthoringTurnStreamRequest request = request();
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                clientTurnId,
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                request.contextHints(),
+                request.componentCapabilities(),
+                request.activeSemanticDecision());
+    }
+
+    private void stubSuccessfulStreamStart(UUID threadId, AiPrincipalContext principalContext) {
+        org.mockito.Mockito.lenient()
+                .when(threadService.resolveThread(
+                        any(),
+                        eq(principalContext.tenantId()),
+                        eq(principalContext.userId()),
+                        eq(principalContext.environment()),
+                        anyString()))
+                .thenReturn(AiThread.builder().threadId(threadId).build());
+        org.mockito.Mockito.lenient()
+                .when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class)))
+                .thenReturn(Optional.empty());
+        org.mockito.Mockito.lenient()
+                .when(streamAccessTokenService.resolveAuthMode())
+                .thenReturn("cookie");
+    }
+
+    private AgenticAuthoringTurnEngine blockingTurnEngine(
+            CountDownLatch firstExecutionStarted,
+            CountDownLatch releaseFirstExecution,
+            CountDownLatch firstExecutionFinished) {
+        AgenticAuthoringTurnEngine turnEngine = org.mockito.Mockito.mock(AgenticAuthoringTurnEngine.class);
+        AtomicInteger calls = new AtomicInteger();
+        org.mockito.Mockito.lenient()
+                .when(turnEngine.execute(any(), any(), any(), anyString()))
+                .thenAnswer(invocation -> {
+                    if (calls.incrementAndGet() == 1) {
+                        firstExecutionStarted.countDown();
+                        try {
+                            releaseFirstExecution.await(5, TimeUnit.SECONDS);
+                        } finally {
+                            firstExecutionFinished.countDown();
+                        }
+                    }
+                    return AgenticAuthoringTurnEngine.AgenticAuthoringTurnOutcome.completed(
+                            new AgenticAuthoringTurnEngine.AgenticAuthoringTurnState(
+                                    "component_authoring",
+                                    null,
+                                    null));
+                });
+        return turnEngine;
+    }
+
+    private AgenticAuthoringTurnStreamService service(AgenticAuthoringTurnEngine turnEngine) {
+        return new AgenticAuthoringTurnStreamService(
+                turnEngine,
+                threadService,
+                turnService,
+                turnEventService,
+                streamAccessTokenService);
     }
 
     private AgenticAuthoringTurnStreamRequest withSemanticDecision(

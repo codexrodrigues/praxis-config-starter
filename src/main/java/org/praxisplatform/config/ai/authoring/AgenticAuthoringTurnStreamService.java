@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.micrometer.core.instrument.Metrics;
 import jakarta.annotation.PreDestroy;
 import java.security.MessageDigest;
 import java.nio.charset.StandardCharsets;
@@ -16,14 +17,19 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,10 +58,18 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @Slf4j
 public class AgenticAuthoringTurnStreamService {
 
+    private static final int WORKER_CORE_POOL_SIZE = 4;
+    private static final int WORKER_MAX_POOL_SIZE = 16;
+    private static final int WORKER_QUEUE_CAPACITY = 500;
+    private static final int SCHEDULER_POOL_SIZE = 2;
     private static final String REQUEST_FINGERPRINT_SCHEMA_VERSION =
             "praxis-agentic-authoring-turn-request-fingerprint.v1";
     private static final String IDEMPOTENCY_CONFLICT_REASON =
             "agentic-authoring-idempotency-conflict";
+    private static final String CAPACITY_REJECTED_CODE =
+            "agentic-authoring-stream-capacity-exceeded";
+    private static final String EXECUTOR_REJECTED_CODE =
+            "agentic-authoring-stream-executor-saturated";
 
     private final AgenticAuthoringTurnEngine turnEngine;
     private final AiThreadService threadService;
@@ -79,8 +93,12 @@ public class AgenticAuthoringTurnStreamService {
     private final Map<UUID, Instant> streamStartedAtByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicBoolean> terminalByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AiTurnEventEnvelope> latestEventByStream = new ConcurrentHashMap<>();
-    private final ExecutorService executor = Executors.newFixedThreadPool(4);
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    private final Map<UUID, CapacityOwner> capacityOwnersByStream = new ConcurrentHashMap<>();
+    private final Map<String, AtomicInteger> tenantActiveCounts = new ConcurrentHashMap<>();
+    private final Map<String, AtomicInteger> tenantUserActiveCounts = new ConcurrentHashMap<>();
+    private final Object capacityLock = new Object();
+    private final ExecutorService executor = createExecutor();
+    private final ScheduledExecutorService scheduler = createScheduler();
 
     @Value("${praxis.ai.stream.event-schema-version:v1}")
     private String eventSchemaVersion;
@@ -102,6 +120,21 @@ public class AgenticAuthoringTurnStreamService {
 
     @Value("${praxis.ai.authoring.stream.processing-progress-seconds:8}")
     private long processingProgressSeconds;
+
+    @Value("${praxis.ai.authoring.stream.max-active-global:${praxis.ai.stream.max-active-global:200}}")
+    private int maxActiveGlobal;
+
+    @Value("${praxis.ai.authoring.stream.max-active-per-tenant:${praxis.ai.stream.max-active-per-tenant:50}}")
+    private int maxActivePerTenant;
+
+    @Value("${praxis.ai.authoring.stream.max-active-per-user:${praxis.ai.stream.max-active-per-user:10}}")
+    private int maxActivePerUser;
+
+    @Value("${praxis.ai.authoring.stream.max-emitters-per-stream:4}")
+    private int maxEmittersPerStream;
+
+    @Value("${praxis.ai.authoring.stream.max-replay-pollers:${praxis.ai.authoring.stream.max-active-global:${praxis.ai.stream.max-active-global:200}}}")
+    private int maxReplayPollers;
 
     public StartResult start(
             AgenticAuthoringTurnStreamRequest request,
@@ -163,45 +196,71 @@ public class AgenticAuthoringTurnStreamService {
                 turnId,
                 request.userPrompt());
         Instant expiresAt = Instant.now().plusSeconds(Math.max(streamExpiresSeconds, 60L));
-        turnService.reserveTurnForStreaming(threadId, turnId);
-        AiTurnEventService.StreamStartAppendResult startAppend =
-                turnEventService.appendStartEventIfAbsent(principalContext, streamId, threadId, turnId, Map.of(
-                "state", "started",
-                "phase", "context.bundle",
-                "message", "Recebi seu pedido e estou preparando o contexto governado.",
-                "requestHash", requestHash,
-                "activeSemanticDecisionId", activeSemanticDecision == null ? "" : activeSemanticDecision.decisionId(),
-                "expiresAt", expiresAt.toString()));
-        AiTurnEventEnvelope startEvent = startAppend.event();
-        rememberLatestEvent(startEvent.getStreamId(), startEvent);
-        if (!startAppend.appended()) {
-            validateIdempotentRequest(requestHash(startEvent), requestHash);
-            UUID existingObservationId = captureObservation(
-                    threadRequest,
+        boolean capacityReserved = false;
+        try {
+            reserveCapacityPermit(streamId, principalContext);
+            capacityReserved = true;
+            turnService.reserveTurnForStreaming(threadId, turnId);
+            AiTurnEventService.StreamStartAppendResult startAppend =
+                    turnEventService.appendStartEventIfAbsent(principalContext, streamId, threadId, turnId, Map.of(
+                    "state", "started",
+                    "phase", "context.bundle",
+                    "message", "Recebi seu pedido e estou preparando o contexto governado.",
+                    "requestHash", requestHash,
+                    "activeSemanticDecisionId", activeSemanticDecision == null ? "" : activeSemanticDecision.decisionId(),
+                    "expiresAt", expiresAt.toString()));
+            AiTurnEventEnvelope startEvent = startAppend.event();
+            rememberLatestEvent(startEvent.getStreamId(), startEvent);
+            if (!startAppend.appended()) {
+                releaseCapacityPermit(streamId);
+                capacityReserved = false;
+                validateIdempotentRequest(requestHash(startEvent), requestHash);
+                UUID existingObservationId = captureObservation(
+                        threadRequest,
+                        principalContext,
+                        startEvent.getStreamId(),
+                        startEvent.getThreadId(),
+                        startEvent.getTurnId(),
+                        request.userPrompt());
+                return new StartResult(startResponse(
+                        startEvent.getStreamId(),
+                        existingObservationId,
+                        startEvent.getThreadId(),
+                        startEvent.getTurnId(),
+                        expiresAt(startEvent),
+                        baseUrl,
+                        principalContext), false);
+            }
+            streamStartedAtByStream.put(streamId, Instant.now());
+            scheduleProcessingTimeout(principalContext, streamId, threadId, turnId);
+            scheduleProcessingProgress(principalContext, streamId, threadId, turnId);
+            Future<?> processingTask =
+                    executor.submit(() -> process(principalContext, streamId, threadId, turnId, effectiveRequest, baseUrl));
+            processingTasks.put(streamId, processingTask);
+            if (processingTask.isDone()) {
+                processingTasks.remove(streamId, processingTask);
+            }
+            return new StartResult(startResponse(streamId, observationId, threadId, turnId, expiresAt, baseUrl, principalContext), true);
+        } catch (RejectedExecutionException ex) {
+            recordCapacityRejection("executor");
+            safeAppendCapacityError(
                     principalContext,
-                    startEvent.getStreamId(),
-                    startEvent.getThreadId(),
-                    startEvent.getTurnId(),
-                    request.userPrompt());
-            return new StartResult(startResponse(
-                    startEvent.getStreamId(),
-                    existingObservationId,
-                    startEvent.getThreadId(),
-                    startEvent.getTurnId(),
-                    expiresAt(startEvent),
-                    baseUrl,
-                    principalContext), false);
+                    streamId,
+                    threadId,
+                    turnId,
+                    EXECUTOR_REJECTED_CODE,
+                    "Executor de authoring agentico saturado. Tente novamente em instantes.");
+            complete(streamId);
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    EXECUTOR_REJECTED_CODE,
+                    ex);
+        } catch (RuntimeException ex) {
+            if (capacityReserved) {
+                releaseCapacityPermit(streamId);
+            }
+            throw ex;
         }
-        streamStartedAtByStream.put(streamId, Instant.now());
-        scheduleProcessingTimeout(principalContext, streamId, threadId, turnId);
-        scheduleProcessingProgress(principalContext, streamId, threadId, turnId);
-        Future<?> processingTask =
-                executor.submit(() -> process(principalContext, streamId, threadId, turnId, effectiveRequest, baseUrl));
-        processingTasks.put(streamId, processingTask);
-        if (processingTask.isDone()) {
-            processingTasks.remove(streamId, processingTask);
-        }
-        return new StartResult(startResponse(streamId, observationId, threadId, turnId, expiresAt, baseUrl, principalContext), true);
     }
 
     private AgenticAuthoringTurnStreamRequest withActiveSemanticDecision(
@@ -312,25 +371,37 @@ public class AgenticAuthoringTurnStreamService {
     public SseEmitter connect(UUID streamId, String lastEventId, AiPrincipalContext principalContext) {
         AiTurnEventService.ReplayResult replay = turnEventService.replay(streamId, lastEventId, principalContext);
         SseEmitter emitter = new SseEmitter(Math.max(10_000L, emitterTimeoutMs));
-        emittersByStream.computeIfAbsent(streamId, ignored -> ConcurrentHashMap.newKeySet()).add(emitter);
+        Set<SseEmitter> emitters = emittersByStream.computeIfAbsent(streamId, ignored -> ConcurrentHashMap.newKeySet());
+        if (maxEmittersPerStream > 0 && emitters.size() >= maxEmittersPerStream) {
+            throw new ResponseStatusException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "agentic-authoring-stream-emitter-limit-exceeded");
+        }
+        emitters.add(emitter);
         emitter.onCompletion(() -> unregister(streamId, emitter));
         emitter.onTimeout(() -> unregister(streamId, emitter));
         emitter.onError(error -> unregister(streamId, emitter));
-        replayCursorByStream.computeIfAbsent(streamId, ignored -> new AtomicLong(replay.afterSeq()));
-        for (AiTurnEventEnvelope event : replay.events()) {
-            send(emitter, event);
-            replayCursorByStream.get(streamId).set(Math.max(replayCursorByStream.get(streamId).get(), event.getSeq()));
-            rememberLatestEvent(streamId, event);
+        try {
+            replayCursorByStream.computeIfAbsent(streamId, ignored -> new AtomicLong(replay.afterSeq()));
+            for (AiTurnEventEnvelope event : replay.events()) {
+                send(emitter, event);
+                replayCursorByStream.get(streamId).set(Math.max(replayCursorByStream.get(streamId).get(), event.getSeq()));
+                rememberLatestEvent(streamId, event);
+            }
+            if (!isLocalActiveStream(streamId)) {
+                ensureReplay(streamId, principalContext);
+            }
+            ensureHeartbeat(streamId, replay.ownership());
+            AiTurnEventEnvelope tail = latestEvent(streamId, true);
+            if (tail != null && turnEventService.isTerminalType(tail.getType())) {
+                complete(streamId);
+            }
+            return emitter;
+        } catch (RuntimeException ex) {
+            unregister(streamId, emitter);
+            emitter.completeWithError(ex);
+            throw ex;
         }
-        if (!isLocalActiveStream(streamId)) {
-            ensureReplay(streamId, principalContext);
-        }
-        ensureHeartbeat(streamId, replay.ownership());
-        AiTurnEventEnvelope tail = latestEvent(streamId, true);
-        if (tail != null && turnEventService.isTerminalType(tail.getType())) {
-            complete(streamId);
-        }
-        return emitter;
     }
 
     public void probe(UUID streamId, AiPrincipalContext principalContext) {
@@ -531,6 +602,13 @@ public class AgenticAuthoringTurnStreamService {
     }
 
     private void ensureReplay(UUID streamId, AiPrincipalContext principalContext) {
+        if (!replayTasks.containsKey(streamId)
+                && maxReplayPollers > 0
+                && replayTasks.size() >= maxReplayPollers) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "agentic-authoring-stream-replay-capacity-exceeded");
+        }
         replayTasks.computeIfAbsent(streamId, ignored -> scheduler.scheduleAtFixedRate(() -> {
             try {
                 AtomicLong cursor = replayCursorByStream.computeIfAbsent(streamId, key -> new AtomicLong(0));
@@ -821,6 +899,7 @@ public class AgenticAuthoringTurnStreamService {
         streamStartedAtByStream.remove(streamId);
         terminalByStream.remove(streamId);
         latestEventByStream.remove(streamId);
+        releaseCapacityPermit(streamId);
     }
 
     private void cancelProcessing(UUID streamId, boolean mayInterruptIfRunning) {
@@ -1013,6 +1092,129 @@ public class AgenticAuthoringTurnStreamService {
                 IDEMPOTENCY_CONFLICT_REASON);
     }
 
+    private void reserveCapacityPermit(UUID streamId, AiPrincipalContext principalContext) {
+        if (streamId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "streamId is required.");
+        }
+        if (principalContext == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Identity context is required.");
+        }
+        String tenantKey = normalize(principalContext.tenantId());
+        String userKey = normalize(principalContext.userId());
+        if (tenantKey == null || userKey == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Identity context is required.");
+        }
+        String tenantUserKey = tenantUserKey(tenantKey, userKey);
+        synchronized (capacityLock) {
+            if (capacityOwnersByStream.containsKey(streamId)) {
+                return;
+            }
+            if (maxActiveGlobal > 0 && capacityOwnersByStream.size() >= maxActiveGlobal) {
+                recordCapacityRejection("global");
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, CAPACITY_REJECTED_CODE);
+            }
+            if (maxActivePerTenant > 0 && currentCount(tenantActiveCounts, tenantKey) >= maxActivePerTenant) {
+                recordCapacityRejection("tenant");
+                throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, CAPACITY_REJECTED_CODE);
+            }
+            if (maxActivePerUser > 0 && currentCount(tenantUserActiveCounts, tenantUserKey) >= maxActivePerUser) {
+                recordCapacityRejection("user");
+                throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, CAPACITY_REJECTED_CODE);
+            }
+            if (executor instanceof ThreadPoolExecutor pool
+                    && pool.getQueue().remainingCapacity() <= 0
+                    && pool.getActiveCount() >= pool.getMaximumPoolSize()) {
+                recordCapacityRejection("executor");
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, EXECUTOR_REJECTED_CODE);
+            }
+            capacityOwnersByStream.put(streamId, new CapacityOwner(tenantKey, tenantUserKey));
+            incrementCounter(tenantActiveCounts, tenantKey);
+            incrementCounter(tenantUserActiveCounts, tenantUserKey);
+        }
+    }
+
+    private void releaseCapacityPermit(UUID streamId) {
+        if (streamId == null) {
+            return;
+        }
+        synchronized (capacityLock) {
+            CapacityOwner owner = capacityOwnersByStream.remove(streamId);
+            if (owner == null) {
+                return;
+            }
+            decrementCounter(tenantActiveCounts, owner.tenantKey());
+            decrementCounter(tenantUserActiveCounts, owner.tenantUserKey());
+        }
+    }
+
+    private int currentCount(Map<String, AtomicInteger> counters, String key) {
+        if (counters == null || key == null) {
+            return 0;
+        }
+        AtomicInteger value = counters.get(key);
+        return value != null ? Math.max(0, value.get()) : 0;
+    }
+
+    private void incrementCounter(Map<String, AtomicInteger> counters, String key) {
+        if (counters == null || key == null) {
+            return;
+        }
+        counters.computeIfAbsent(key, ignored -> new AtomicInteger()).incrementAndGet();
+    }
+
+    private void decrementCounter(Map<String, AtomicInteger> counters, String key) {
+        if (counters == null || key == null) {
+            return;
+        }
+        counters.computeIfPresent(key, (ignored, current) -> current.decrementAndGet() <= 0 ? null : current);
+    }
+
+    private String tenantUserKey(String tenantKey, String userKey) {
+        return tenantKey + ":" + userKey;
+    }
+
+    private String normalize(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private void recordCapacityRejection(String reason) {
+        Metrics.counter(
+                "praxis_ai_authoring_stream_capacity_rejected_total",
+                "reason",
+                safeMetricTag(reason)).increment();
+    }
+
+    private String safeMetricTag(String value) {
+        if (value == null || value.isBlank()) {
+            return "unknown";
+        }
+        String sanitized = value.replaceAll("[^A-Za-z0-9_.:-]", "_");
+        return sanitized.isBlank() ? "unknown" : sanitized;
+    }
+
+    private void safeAppendCapacityError(
+            AiPrincipalContext principalContext,
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            String code,
+            String message) {
+        try {
+            appendAndEmit(principalContext, streamId, threadId, turnId, "error", Map.of(
+                    "code", code,
+                    "message", message,
+                    "assistantMessage", "A capacidade de processamento esta cheia agora. Tente novamente em instantes.",
+                    "phase", "capacity.rejected",
+                    "retryable", true));
+        } catch (Exception ex) {
+            log.debug("[AgenticAuthoringTurnStreamService] Failed to append capacity error event: {}", ex.getMessage());
+        }
+    }
+
     private String requestHash(AiTurnEventEnvelope startEvent) {
         if (startEvent == null || startEvent.getPayload() == null) {
             return null;
@@ -1109,6 +1311,39 @@ public class AgenticAuthoringTurnStreamService {
         return node;
     }
 
+    private ExecutorService createExecutor() {
+        AtomicInteger threadIndex = new AtomicInteger(1);
+        ThreadFactory threadFactory = runnable -> {
+            Thread thread = new Thread(runnable);
+            thread.setName("agentic-authoring-stream-worker-" + threadIndex.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
+        };
+        return new ThreadPoolExecutor(
+                WORKER_CORE_POOL_SIZE,
+                WORKER_MAX_POOL_SIZE,
+                60L,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(WORKER_QUEUE_CAPACITY),
+                threadFactory,
+                new ThreadPoolExecutor.AbortPolicy());
+    }
+
+    private ScheduledExecutorService createScheduler() {
+        AtomicInteger threadIndex = new AtomicInteger(1);
+        ThreadFactory threadFactory = runnable -> {
+            Thread thread = new Thread(runnable);
+            thread.setName("agentic-authoring-stream-scheduler-" + threadIndex.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
+        };
+        ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(SCHEDULER_POOL_SIZE, threadFactory);
+        executor.setRemoveOnCancelPolicy(true);
+        executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+        executor.setContinueExistingPeriodicTasksAfterShutdownPolicy(false);
+        return executor;
+    }
+
     private UUID stableUuid(String namespace, String value) {
         return UUID.nameUUIDFromBytes((namespace + ":" + nonBlank(value, "")).getBytes(StandardCharsets.UTF_8));
     }
@@ -1118,5 +1353,8 @@ public class AgenticAuthoringTurnStreamService {
     }
 
     public record StartResult(AgenticAuthoringTurnStreamStartResponse response, boolean created) {
+    }
+
+    private record CapacityOwner(String tenantKey, String tenantUserKey) {
     }
 }
