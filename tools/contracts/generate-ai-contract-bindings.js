@@ -492,6 +492,7 @@ export interface AgenticAuthoringSemanticSelectedResourceContract {
   schemaUrl?: string | null;
   submitUrl?: string | null;
   submitMethod?: string | null;
+  label?: string | null;
   [key: string]: AiJsonValue | undefined;
 }
 

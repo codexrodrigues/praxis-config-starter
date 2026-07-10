@@ -2,10 +2,15 @@ package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.annotation.PreDestroy;
+import java.security.MessageDigest;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HexFormat;
+import java.util.Iterator;
 import java.util.List;
 import java.time.Instant;
 import java.util.Map;
@@ -46,6 +51,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RequiredArgsConstructor
 @Slf4j
 public class AgenticAuthoringTurnStreamService {
+
+    private static final String REQUEST_FINGERPRINT_SCHEMA_VERSION =
+            "praxis-agentic-authoring-turn-request-fingerprint.v1";
+    private static final String IDEMPOTENCY_CONFLICT_REASON =
+            "agentic-authoring-idempotency-conflict";
 
     private final AgenticAuthoringTurnEngine turnEngine;
     private final AiThreadService threadService;
@@ -121,10 +131,12 @@ public class AgenticAuthoringTurnStreamService {
                 ? request.activeSemanticDecision()
                 : turnEventService.findLatestSemanticDecision(threadId, principalContext).orElse(null);
         AgenticAuthoringTurnStreamRequest effectiveRequest = withActiveSemanticDecision(request, activeSemanticDecision);
+        String requestHash = requestHash(effectiveRequest);
 
         AiTurnEventService.StreamStartMetadata existing = turnEventService.findStartMetadata(threadId, turnId)
                 .orElse(null);
         if (existing != null) {
+            validateIdempotentRequest(existing.requestHash(), requestHash);
             UUID observationId = captureObservation(
                     threadRequest,
                     principalContext,
@@ -157,12 +169,13 @@ public class AgenticAuthoringTurnStreamService {
                 "state", "started",
                 "phase", "context.bundle",
                 "message", "Recebi seu pedido e estou preparando o contexto governado.",
-                "requestHash", stableUuid("agentic-authoring-request", request.userPrompt() + "|" + request.clientTurnId()).toString(),
+                "requestHash", requestHash,
                 "activeSemanticDecisionId", activeSemanticDecision == null ? "" : activeSemanticDecision.decisionId(),
                 "expiresAt", expiresAt.toString()));
         AiTurnEventEnvelope startEvent = startAppend.event();
         rememberLatestEvent(startEvent.getStreamId(), startEvent);
         if (!startAppend.appended()) {
+            validateIdempotentRequest(requestHash(startEvent), requestHash);
             UUID existingObservationId = captureObservation(
                     threadRequest,
                     principalContext,
@@ -986,6 +999,114 @@ public class AgenticAuthoringTurnStreamService {
         if (request.clientTurnId() == null || request.clientTurnId().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "clientTurnId is required for stream start.");
         }
+    }
+
+    private void validateIdempotentRequest(String storedHash, String incomingHash) {
+        if (storedHash == null || storedHash.isBlank() || incomingHash == null || incomingHash.isBlank()) {
+            return;
+        }
+        if (storedHash.equals(incomingHash)) {
+            return;
+        }
+        throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                IDEMPOTENCY_CONFLICT_REASON);
+    }
+
+    private String requestHash(AiTurnEventEnvelope startEvent) {
+        if (startEvent == null || startEvent.getPayload() == null) {
+            return null;
+        }
+        JsonNode requestHash = startEvent.getPayload().get("requestHash");
+        if (requestHash == null || requestHash.isNull()) {
+            return null;
+        }
+        String value = requestHash.asText(null);
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private String requestHash(AgenticAuthoringTurnStreamRequest request) {
+        try {
+            ObjectNode fingerprint = objectMapper.createObjectNode();
+            fingerprint.put("schemaVersion", REQUEST_FINGERPRINT_SCHEMA_VERSION);
+            putIfPresent(fingerprint, "userPrompt", request.userPrompt());
+            putIfPresent(fingerprint, "targetApp", request.targetApp());
+            putIfPresent(fingerprint, "targetComponentId", request.targetComponentId());
+            putIfPresent(fingerprint, "currentRoute", request.currentRoute());
+            putIfPresent(fingerprint, "currentPage", request.currentPage());
+            putIfPresent(fingerprint, "selectedWidgetKey", request.selectedWidgetKey());
+            putIfPresent(fingerprint, "provider", request.provider());
+            putIfPresent(fingerprint, "model", request.model());
+            putIfPresent(fingerprint, "sessionId", request.sessionId());
+            putIfPresent(fingerprint, "conversationMessages", request.conversationMessages());
+            putIfPresent(fingerprint, "pendingClarification", request.pendingClarification());
+            putIfPresent(fingerprint, "attachmentSummaries", request.attachmentSummaries());
+            putIfPresent(fingerprint, "contextHints", contextHintsForFingerprint(request.contextHints()));
+            putIfPresent(fingerprint, "componentCapabilities", request.componentCapabilities());
+            putIfPresent(fingerprint, "activeSemanticDecision", request.activeSemanticDecision());
+            putIfPresent(fingerprint, "diagnostics", request.diagnostics());
+            putIfPresent(
+                    fingerprint,
+                    "runtimeComponentObservationTrustBoundary",
+                    request.runtimeComponentObservationTrustBoundary());
+            byte[] raw = objectMapper.writeValueAsBytes(canonicalize(fingerprint));
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return "sha256:" + HexFormat.of().formatHex(digest.digest(raw));
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to hash authoring turn request.", ex);
+        }
+    }
+
+    private JsonNode contextHintsForFingerprint(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return contextHints;
+        }
+        ObjectNode copy = contextHints.deepCopy();
+        copy.remove("requestBaseUrl");
+        if (copy.isEmpty()) {
+            return null;
+        }
+        return copy;
+    }
+
+    private void putIfPresent(ObjectNode target, String fieldName, Object value) {
+        if (value == null) {
+            return;
+        }
+        JsonNode node = value instanceof JsonNode jsonNode ? jsonNode : objectMapper.valueToTree(value);
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return;
+        }
+        target.set(fieldName, node);
+    }
+
+    private JsonNode canonicalize(JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return objectMapper.nullNode();
+        }
+        if (node.isObject()) {
+            ObjectNode canonical = objectMapper.createObjectNode();
+            List<String> fieldNames = new ArrayList<>();
+            Iterator<String> iterator = node.fieldNames();
+            while (iterator.hasNext()) {
+                fieldNames.add(iterator.next());
+            }
+            Collections.sort(fieldNames);
+            for (String fieldName : fieldNames) {
+                canonical.set(fieldName, canonicalize(node.get(fieldName)));
+            }
+            return canonical;
+        }
+        if (node.isArray()) {
+            ArrayNode canonical = objectMapper.createArrayNode();
+            for (JsonNode item : node) {
+                canonical.add(canonicalize(item));
+            }
+            return canonical;
+        }
+        return node;
     }
 
     private UUID stableUuid(String namespace, String value) {
