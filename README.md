@@ -241,6 +241,7 @@ source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted t
 
 | Property | Default | Notes |
 | --- | --- | --- |
+| `praxis.ai.authoring.legacy-keyword-fallback-enabled` | `false` | Compatibility switch for old deterministic keyword intent fallback. Keep disabled in canonical hosts; enable only for legacy smoke/test fixtures while migrating to semantic intent resolution. |
 | `praxis.ai.authoring.component-capabilities.cache-ttl-ms` | `60000` | TTL for component capability discovery. Use `0` to disable local caching when validating registry changes without restarting the host. |
 | `praxis.ai.authoring.consultative.api-catalog.compact-cache-ttl-ms` | `60000` | TTL for compact API catalog projections used during consultative answers. Use `0` to force fresh projection per request. |
 | `praxis.ai.authoring.consultative.api-catalog.compact-cache-max-entries` | `256` | Maximum compact projection entries retained per starter instance. Older entries are evicted before expired entries can accumulate unbounded. |

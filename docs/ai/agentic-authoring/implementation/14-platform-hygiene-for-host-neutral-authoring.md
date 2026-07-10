@@ -98,7 +98,6 @@ its canonical authoring path.
 Canonical backend:
 
 - `AgenticAuthoringIntentResolverService`
-- `AgenticAuthoringKeywordFallbackResolver`
 - `AgenticAuthoringApiMetadataCandidateCatalog`
 - `AgenticAuthoringPlanService`
 - `AgenticAuthoringPreviewService`
@@ -197,10 +196,10 @@ participating in the default production authoring path.
 
    Current suspicious surfaces include:
 
-   - `AgenticAuthoringKeywordFallbackResolver`;
+   - removed keyword fallback resolver code paths;
    - intent fallback promotion in `AgenticAuthoringIntentResolverService`;
-   - warnings such as `keyword-fallback-applied` that still allow a successful
-     preview.
+   - warnings such as `keyword-fallback-applied` in legacy payloads that must
+     never allow a successful preview.
 
    Target replacement:
 
@@ -484,8 +483,8 @@ Exit criteria:
 
 - terminal `result` includes
   `decisionDiagnostics.schemaVersion=praxis-agentic-authoring-decision-diagnostics.v1`;
-- `keywordFallbackApplied=true` forces `requiresReview=true` and
-  `canApply=false`;
+- `keywordFallbackApplied=true`, when present in legacy diagnostics, forces
+  `requiresReview=true` and `canApply=false`;
 - `selectedCandidateUsesDomainAnchor=true` forces `requiresReview=true` and
   `canApply=false`;
 - `selectedCandidateUsesBroadArtifactDiscovery=true` forces

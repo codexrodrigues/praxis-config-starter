@@ -43,6 +43,7 @@ public class AgenticAuthoringIntentResolverService {
                     formCapabilityCatalog,
                     tableCapabilityCatalog,
                     chartCapabilityCatalog);
+    private final boolean legacyKeywordFallbackEnabled;
     private final AgenticAuthoringConversationTurnOrchestrator conversationTurnOrchestrator =
             new AgenticAuthoringConversationTurnOrchestrator();
     private final AgenticAuthoringSemanticDecisionPolicy semanticDecisionPolicy =
@@ -93,6 +94,24 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
             String domainCatalogServiceKey,
             AgenticAuthoringDomainCatalogCandidateEnhancer domainCatalogCandidateEnhancer) {
+        this(
+                objectMapper,
+                apiMetadataCandidateCatalog,
+                llmIntentResolverService,
+                componentCapabilitiesService,
+                domainCatalogServiceKey,
+                domainCatalogCandidateEnhancer,
+                true);
+    }
+
+    public AgenticAuthoringIntentResolverService(
+            ObjectMapper objectMapper,
+            AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog,
+            AgenticAuthoringLlmIntentResolverService llmIntentResolverService,
+            AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
+            String domainCatalogServiceKey,
+            AgenticAuthoringDomainCatalogCandidateEnhancer domainCatalogCandidateEnhancer,
+            boolean legacyKeywordFallbackEnabled) {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.currentPageAnalyzer = new AgenticAuthoringCurrentPageAnalyzer(objectMapper);
         this.eligibilityGate = new AgenticAuthoringCandidateEligibilityGate();
@@ -101,6 +120,7 @@ public class AgenticAuthoringIntentResolverService {
         this.componentCapabilitiesService = componentCapabilitiesService;
         this.domainCatalogServiceKey = domainCatalogServiceKey;
         this.domainCatalogCandidateEnhancer = domainCatalogCandidateEnhancer;
+        this.legacyKeywordFallbackEnabled = legacyKeywordFallbackEnabled;
         this.presentationAffordanceDiscoveryService =
                 AgenticAuthoringPresentationAffordanceDiscoveryService.defaultService(objectMapper);
     }
@@ -140,8 +160,7 @@ public class AgenticAuthoringIntentResolverService {
         String effectiveSelectedWidgetKey = effectiveSelectedWidgetKey(request);
         JsonNode currentPageSummary = currentPageAnalyzer.summarize(request.currentPage(), effectiveSelectedWidgetKey);
         AgenticAuthoringTarget target = currentPageAnalyzer.resolveTarget(request.currentPage(), effectiveSelectedWidgetKey);
-        AgenticAuthoringKeywordFallbackResolution fallbackResolution =
-                keywordFallbackResolver.resolve(prompt, currentPageSummary, target);
+        AgenticAuthoringKeywordFallbackResolution fallbackResolution = legacyKeywordFallback(prompt, currentPageSummary, target);
         String operationKind = fallbackResolution.operationKind();
         String artifactKind = fallbackResolution.artifactKind();
         String changeKind = fallbackResolution.changeKind();
@@ -285,8 +304,9 @@ public class AgenticAuthoringIntentResolverService {
                 && isLlmFollowUpKind(llmIntent, "new_instruction");
         boolean llmSecondPassUsed = false;
         boolean primaryLlmIntentProviderFailure = isPrimaryLlmIntentProviderFailure(shouldResolveLlmIntent, llmIntent);
-        boolean deterministicFallbackApplied = !shouldResolveLlmIntent
-                || (shouldResolveLlmIntent
+        boolean deterministicFallbackApplied = legacyKeywordFallbackEnabled && !shouldResolveLlmIntent
+                || (legacyKeywordFallbackEnabled
+                && shouldResolveLlmIntent
                 && (llmIntent == null || (!llmIntent.resolved() && !primaryLlmIntentProviderFailure)));
         boolean providerFailureRecoveredByGroundedCandidates = false;
         boolean semanticPolicyRefinedVisualProjection = false;
@@ -303,12 +323,12 @@ public class AgenticAuthoringIntentResolverService {
         if (llmTreatsPendingAsContinuation) {
             effectivePrompt = turn.effectivePrompt();
             prompt = normalize(effectivePrompt);
-            fallbackResolution = keywordFallbackResolver.resolve(prompt, currentPageSummary, target);
-            if (!shouldResolveLlmIntent || llmIntent == null || !llmIntent.resolved()) {
+            fallbackResolution = legacyKeywordFallback(prompt, currentPageSummary, target);
+            if (llmIntent == null || !llmIntent.resolved()) {
                 operationKind = fallbackResolution.operationKind();
                 artifactKind = fallbackResolution.artifactKind();
-                changeKind = fallbackResolution.changeKind();
-                deterministicFallbackApplied = true;
+                changeKind = primaryLlmIntentProviderFailure ? "provider_error" : fallbackResolution.changeKind();
+                deterministicFallbackApplied = legacyKeywordFallbackEnabled;
             }
             candidates = shouldResolveLlmIntent
                     ? discoverInitialCandidates(prompt, artifactKind, target, tenantId, environment)
@@ -322,12 +342,12 @@ public class AgenticAuthoringIntentResolverService {
         } else if (llmTreatsPendingAsNewInstruction) {
             effectivePrompt = rawPrompt;
             prompt = normalize(effectivePrompt);
-            fallbackResolution = keywordFallbackResolver.resolve(prompt, currentPageSummary, target);
-            if (!shouldResolveLlmIntent || llmIntent == null || !llmIntent.resolved()) {
+            fallbackResolution = legacyKeywordFallback(prompt, currentPageSummary, target);
+            if (llmIntent == null || !llmIntent.resolved()) {
                 operationKind = fallbackResolution.operationKind();
                 artifactKind = fallbackResolution.artifactKind();
-                changeKind = fallbackResolution.changeKind();
-                deterministicFallbackApplied = true;
+                changeKind = primaryLlmIntentProviderFailure ? "provider_error" : fallbackResolution.changeKind();
+                deterministicFallbackApplied = legacyKeywordFallbackEnabled;
             }
             candidates = shouldResolveLlmIntent
                     ? discoverInitialCandidates(prompt, artifactKind, target, tenantId, environment)
@@ -431,7 +451,7 @@ public class AgenticAuthoringIntentResolverService {
             }
         } else if (llmIntent != null) {
             if (primaryLlmIntentProviderFailure) {
-                if (shouldRecoverProviderFailureWithGroundedAuthoring(prompt, candidates)) {
+                if (legacyKeywordFallbackEnabled && shouldRecoverProviderFailureWithGroundedAuthoring(prompt, candidates)) {
                     operationKind = "create";
                     artifactKind = "page";
                     changeKind = "create_artifact";
@@ -448,7 +468,7 @@ public class AgenticAuthoringIntentResolverService {
                 operationKind = fallbackResolution.operationKind();
                 artifactKind = fallbackResolution.artifactKind();
                 changeKind = fallbackResolution.changeKind();
-                deterministicFallbackApplied = true;
+                deterministicFallbackApplied = legacyKeywordFallbackEnabled;
                 if (shouldNormalizeGroundedResourceDiscoveryAuthoringDrift(
                         request,
                         prompt,
@@ -472,7 +492,7 @@ public class AgenticAuthoringIntentResolverService {
                 }
             }
         } else if (shouldResolveLlmIntent && !"unknown".equals(artifactKind)) {
-            deterministicFallbackApplied = true;
+            deterministicFallbackApplied = legacyKeywordFallbackEnabled;
             if (candidates.isEmpty()
                     || isBroadArtifactDiscoveryOnly(candidates)) {
                 candidates = discoverCandidates(prompt, artifactKind, target, tenantId, environment);
@@ -507,13 +527,13 @@ public class AgenticAuthoringIntentResolverService {
         if (explicitLocalPageComposition) {
             artifactKind = "page";
             if (!isMaterializablePageCompositionOperation(operationKind)) {
-                operationKind = materializablePageCompositionOperation(fallbackResolution.operationKind(), prompt);
+                operationKind = materializablePageCompositionOperation(operationKind, prompt);
             }
             changeKind = materializablePageCompositionChangeKind(changeKind, operationKind, prompt);
         } else if (explicitLocalTargetedComposition) {
             artifactKind = explicitLocalTargetedArtifactKind(request, prompt, artifactKind);
             if (!isMaterializablePageCompositionOperation(operationKind)) {
-                operationKind = materializablePageCompositionOperation(fallbackResolution.operationKind(), prompt);
+                operationKind = materializablePageCompositionOperation(operationKind, prompt);
             }
             changeKind = materializablePageCompositionChangeKind(changeKind, operationKind, prompt);
         } else if (shouldPromoteTargetlessBusinessDashboardPrompt(prompt, operationKind, artifactKind, target)) {
@@ -1229,6 +1249,11 @@ public class AgenticAuthoringIntentResolverService {
             warnings = withWarning(warnings, "llm-single-chart-decision-requires-explicit-analytical-intent");
         }
         if (keywordFallbackAppliedForGovernance) {
+            if (llmIntent == null) {
+                warnings = withWarning(warnings, "llm-intent-resolution-fallback-deterministic");
+            } else if (!llmIntent.resolved() && !isLlmProviderFailure(llmIntent)) {
+                warnings = withWarning(warnings, "llm-intent-resolution-unresolved-fallback-deterministic");
+            }
             warnings = withWarning(warnings, "keyword-fallback-applied");
             warnings = withWarning(warnings, "keyword-fallback-fail-safe-applied");
         } else if (governedDeterministicResolution) {
@@ -1384,6 +1409,16 @@ public class AgenticAuthoringIntentResolverService {
                     .forEach(presentationCandidates::add);
         }
         return presentationCandidates;
+    }
+
+    private AgenticAuthoringKeywordFallbackResolution legacyKeywordFallback(
+            String prompt,
+            JsonNode currentPageSummary,
+            AgenticAuthoringTarget target) {
+        if (!legacyKeywordFallbackEnabled) {
+            return new AgenticAuthoringKeywordFallbackResolution("unknown", "unknown", "unknown");
+        }
+        return keywordFallbackResolver.resolve(prompt, currentPageSummary, target);
     }
 
     private AgenticAuthoringVisualizationDecision governedVisualizationDecision(
@@ -5079,13 +5114,13 @@ public class AgenticAuthoringIntentResolverService {
         List<String> warnings = new ArrayList<>();
         warnings.add("metadata-probe-not-run");
         if (llmIntent == null) {
-            warnings.add("llm-intent-resolution-fallback-deterministic");
+            warnings.add("semantic-intent-resolution-not-attempted");
         } else {
             warnings.add("llm-intent-resolution-used");
             if (!llmIntent.resolved()) {
                 warnings.add(isLlmProviderFailure(llmIntent)
                         ? "llm-intent-resolution-provider-failed-clarification-required"
-                        : "llm-intent-resolution-unresolved-fallback-deterministic");
+                        : "llm-intent-resolution-unresolved-clarification-required");
             }
             if (llmIntent.warnings() != null) {
                 warnings.addAll(llmIntent.warnings());
@@ -5240,7 +5275,7 @@ public class AgenticAuthoringIntentResolverService {
             JsonNode diagnostics,
             boolean llmResolutionAttempted,
             AgenticAuthoringLlmIntentResolution llmIntent,
-            boolean deterministicFallbackApplied,
+            boolean keywordFallbackApplied,
             boolean semanticPolicyCorrectedAnalyticalDashboardIntent,
             AgenticAuthoringCandidate selectedCandidate,
             List<AgenticAuthoringCandidate> candidates) {
@@ -5251,8 +5286,8 @@ public class AgenticAuthoringIntentResolverService {
         telemetry.put("schemaVersion", "praxis-agentic-authoring-resolution-telemetry.v1");
         telemetry.put("llmResolutionAttempted", llmResolutionAttempted);
         telemetry.put("llmResolved", llmIntent != null && llmIntent.resolved());
-        telemetry.put("fallbackPolicy", "fail-safe");
-        telemetry.put("keywordFallbackApplied", deterministicFallbackApplied);
+        telemetry.put("fallbackPolicy", "semantic_intent_required");
+        telemetry.put("keywordFallbackApplied", keywordFallbackApplied);
         telemetry.put("semanticPolicyApplied", semanticPolicyCorrectedAnalyticalDashboardIntent);
         telemetry.put("selectedCandidateUsesDomainAnchor",
                 hasEvidence(selectedCandidate, "domain-anchor") && !hasStrongGroundingEvidence(selectedCandidate));
@@ -6142,7 +6177,6 @@ public class AgenticAuthoringIntentResolverService {
                 .filter(Objects::nonNull)
                 .map(candidate -> new CandidatePromptAlignment(candidate, directPromptCandidateAlignmentScore(prompt, candidate)))
                 .filter(alignment -> alignment.score() > 0)
-                .filter(alignment -> canUsePromptAlignedCandidate(alignment.candidate(), candidates))
                 .max(Comparator
                         .comparingInt(CandidatePromptAlignment::score)
                         .thenComparingDouble(alignment -> alignment.candidate().score()))

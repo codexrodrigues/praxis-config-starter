@@ -34,11 +34,15 @@ final class AgenticAuthoringSemanticDecisionPolicy {
         boolean implicitAuthoringHasGroundedSource = selectedCandidate != null
                 || input.contextHintCandidate() != null
                 || hasGroundedCandidate(candidates);
-        boolean materializationRequest = directMaterializationRequest
-                || (implicitAuthoringRequest
+        boolean governedMaterializationScope = llmResolved && !"unknown".equals(artifactKind)
+                || (!llmResolved && !"unknown".equals(operationKind) && !"unknown".equals(artifactKind))
+                || input.resourceChoiceClarificationAnswer()
+                || input.governedResourceConfirmation();
+        boolean materializationRequest = governedMaterializationScope
+                && (directMaterializationRequest
+                || implicitAuthoringRequest
                 && implicitAuthoringHasGroundedSource
-                && !input.resourceChoiceClarificationAnswer()
-                && (!llmResolved || !"unknown".equals(artifactKind)));
+                && !input.resourceChoiceClarificationAnswer());
 
         if (optionalDataSourceHint) {
             selectedCandidate = null;

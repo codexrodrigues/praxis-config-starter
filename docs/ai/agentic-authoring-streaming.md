@@ -513,8 +513,10 @@ Campos canonicos atuais:
   `rationale` e `confidence`;
 - `selectedResourcePath`, quando houver recurso selecionado;
 - `llmResolutionAttempted` e `llmResolved`;
-- `fallbackPolicy`, hoje `fail-safe` quando telemetry de resolucao existir;
-- `keywordFallbackApplied`;
+- `fallbackPolicy`, hoje `semantic_intent_required` quando telemetry de
+  resolucao existir;
+- `keywordFallbackApplied`, mantido como compatibilidade diagnostica e esperado
+  como `false` no caminho primario de resolucao;
 - `semanticPolicyApplied`, quando uma politica semantica governada ajustou a
   decisao sem promover fallback de keyword a autoridade;
 - `selectedCandidateUsesLexicalFallback`;
@@ -549,9 +551,10 @@ Regra de aplicacao:
   compilar, mas trocar o componente pedido por outro, deve retornar
   `failureCodes=["semantic-preview-primary-component-required"]`,
   `reviewReason=semantic-preview-materialization-mismatch` e `canApply=false`.
-- `keywordFallbackApplied=true` deve forcar
-  `decisionDiagnostics.requiresReview=true`,
-  `reviewReason=keyword-fallback-fail-safe` e `canApply=false`.
+- `keywordFallbackApplied=true`, quando recebido de payload legado ou fixture
+  de compatibilidade, deve forcar `decisionDiagnostics.requiresReview=true`,
+  `reviewReason=keyword-fallback-fail-safe` e `canApply=false`. O resolver
+  primario nao deve produzir essa condicao como politica suportada.
 - Quando a LLM selecionar um recurso abaixo do candidato governado mais forte
   recuperado, sem o prompt nomear explicitamente esse recurso escolhido, a
   decisao deve retornar `reviewReason=llm-selection-lower-ranked-than-governed-candidate`
