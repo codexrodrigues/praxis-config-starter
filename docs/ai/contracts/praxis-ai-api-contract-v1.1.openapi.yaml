@@ -508,6 +508,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
+        '409':
+          description: clientTurnId reutilizado com fingerprint canonico de request diferente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
         '503':
           description: Stream de authoring nao configurado ou executor indisponivel
           content:
@@ -1523,7 +1529,7 @@ components:
       required: false
       schema:
         type: string
-        default: 39e28310b20a9f2bb5e58df32f4f3f98bb1a4236761dfc7d9ee5d18fb588894c
+        default: d86a329315d5863bbcd0d02599158381aab6bb2da40760cb8b7aa3167b7c22cd
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1553,7 +1559,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 39e28310b20a9f2bb5e58df32f4f3f98bb1a4236761dfc7d9ee5d18fb588894c
+        example: d86a329315d5863bbcd0d02599158381aab6bb2da40760cb8b7aa3167b7c22cd
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -2733,6 +2739,9 @@ components:
               type: string
               nullable: true
             submitMethod:
+              type: string
+              nullable: true
+            label:
               type: string
               nullable: true
           additionalProperties: true

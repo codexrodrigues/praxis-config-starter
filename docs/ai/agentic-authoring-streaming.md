@@ -70,6 +70,20 @@ O endpoint `start` recebe um request de turno agentic que contenha, no minimo:
 - `runtimeComponentObservationTrustBoundary`
 - `provider`, `model` e `apiKey` quando aplicavel
 
+`clientTurnId` e uma identidade idempotente do turno. Quando o mesmo
+`clientTurnId` resolve para o mesmo `threadId`/`turnId`, o backend so reutiliza
+o stream existente se o fingerprint canonico do request bater com o evento
+inicial persistido. O fingerprint usa `sha256` sobre os campos que podem alterar
+o resultado do authoring, como prompt, alvo, rota, pagina atual,
+conversacao/clarificacao/anexos resumidos, `contextHints`, capabilities,
+diagnostics seguros e `activeSemanticDecision`. Ele exclui `apiKey`,
+observacoes runtime brutas e `requestBaseUrl`; observacoes de frontend so entram
+indiretamente quando o backend as aterra em
+`contextHints.groundedRuntimeComponentContext` com campos permitidos. Se o
+mesmo `clientTurnId` chegar com prompt, alvo, decisao semantica ou contexto
+material diferente, o endpoint `start` responde `409` com razao publica
+`agentic-authoring-idempotency-conflict`, em vez de devolver trabalho antigo.
+
 `runtimeComponentObservations` e um envelope opcional de evidencia de runtime
 enviado por componentes do cockpit. O backend aceita essa evidencia somente com
 `runtimeComponentObservationTrustBoundary=untrusted_frontend_observation`, copia
