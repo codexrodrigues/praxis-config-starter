@@ -6272,13 +6272,20 @@ public class AgenticAuthoringIntentResolverService {
                 .flatMap(evidence -> includeMatchedTerms
                         ? Stream.concat(
                         Stream.of(evidence.ref(), evidence.summary()),
-                        evidence.matchedTerms() == null ? Stream.empty() : evidence.matchedTerms().stream())
+                        weakLexicalEvidence(evidence)
+                                || evidence.matchedTerms() == null
+                                ? Stream.empty()
+                                : evidence.matchedTerms().stream())
                         : Stream.of(evidence.ref(), evidence.summary()));
         return normalize(Stream.concat(
                         Stream.of(candidate.resourcePath(), candidate.submitUrl(), candidate.reason()),
                         evidenceText)
                 .filter(Objects::nonNull)
                 .collect(java.util.stream.Collectors.joining(" ")));
+    }
+
+    private boolean weakLexicalEvidence(AgenticAuthoringEvidenceBundle.Evidence evidence) {
+        return evidence != null && "weak_lexical_match".equals(valueOrDefault(evidence.kind(), ""));
     }
 
     private int strongestPromptCandidateAlignmentScore(String prompt, List<AgenticAuthoringCandidate> candidates) {
