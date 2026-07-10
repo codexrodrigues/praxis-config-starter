@@ -13489,6 +13489,66 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void businessRulePromptDoesNotLetWeakLexicalEchoOverrideSemanticSupplierCandidate() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.empty());
+        AgenticAuthoringCandidate weakVehicleCandidate = weakLexicalCandidateWithMatchedTerms(
+                "/api/assets/veiculos",
+                0.70d,
+                "Cadastro de ativos de transporte com capacidade, proprietario e status.",
+                List.of(
+                        "fornecedor",
+                        "bloqueado",
+                        "compras",
+                        "capacidade",
+                        "validacao",
+                        "governado"));
+        AgenticAuthoringCandidate semanticSupplierCandidate = withEvidence(candidateWithEvidence(
+                        "/api/procurement/suppliers",
+                        0.52d,
+                        List.of("procurement", "fornecedor", "fornecedores", "compras", "bloqueado", "elegibilidade")),
+                "semantic-role:operational-resource");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(weakVehicleCandidate, semanticSupplierCandidate));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras",
+                "deterministic-smoke-disabled",
+                objectMapper.createObjectNode()));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
+        assertThat(result.selectedCandidate().evidence()).contains("semantic-retrieval");
+        assertThat(result.gate().status()).isEqualTo("route_required");
+        assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
+        assertThat(result.warnings()).doesNotContain("resource-selection-lexical-fallback-selected");
+    }
+
+    @Test
     void metadataBackedResourceQuickReplyIdsRemainUniqueWhenResourcePathRepeats() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of(
@@ -13763,6 +13823,34 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 "tenant",
 	                                "local",
 	                                "release"))));
+    }
+
+    private AgenticAuthoringCandidate weakLexicalCandidateWithMatchedTerms(
+            String resourcePath,
+            double score,
+            String summary,
+            List<String> matchedTerms) {
+        String submitUrl = resourcePath + "/filter/cursor";
+        return new AgenticAuthoringCandidate(
+                resourcePath,
+                "post",
+                "/schemas/filtered?path=" + submitUrl + "&operation=post&schemaType=response",
+                submitUrl,
+                "POST",
+                score,
+                "api_metadata weak lexical fallback evidence",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence", "schema-probe-pending"),
+                AgenticAuthoringEvidenceBundle.of("lexical_fallback", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "weak_lexical_match",
+                                resourcePath,
+                                summary,
+                                Math.min(score, 0.49d),
+                                matchedTerms,
+                                "tenant",
+                                "local",
+                                "release"))));
     }
 
     private AgenticAuthoringCandidate broadArtifactCandidate(
