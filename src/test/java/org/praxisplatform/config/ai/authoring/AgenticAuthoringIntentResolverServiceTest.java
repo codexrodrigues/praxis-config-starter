@@ -13516,6 +13516,11 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "capacidade",
                         "validacao",
                         "governado"));
+        AgenticAuthoringCandidate weakCompanyCandidate = weakLexicalCandidateWithMatchedTerms(
+                "/api/procurement/companies",
+                0.61d,
+                "Cadastro de empresas compradoras, documentos legais, compliance e notas.",
+                List.of("fornecedor", "bloqueado", "selecionado", "compras"));
         AgenticAuthoringCandidate semanticSupplierCandidate = withEvidence(candidateWithEvidence(
                         "/api/procurement/suppliers",
                         0.52d,
@@ -13527,7 +13532,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any(),
                         Mockito.any(),
                         Mockito.any()))
-                .thenReturn(List.of(weakVehicleCandidate, semanticSupplierCandidate));
+                .thenReturn(List.of(weakVehicleCandidate, weakCompanyCandidate, semanticSupplierCandidate));
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
