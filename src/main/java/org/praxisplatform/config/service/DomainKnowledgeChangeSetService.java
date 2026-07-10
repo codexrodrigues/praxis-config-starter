@@ -37,6 +37,7 @@ import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -47,6 +48,7 @@ import org.springframework.util.StringUtils;
         DomainKnowledgeConceptRepository.class,
         DomainKnowledgeEvidenceRepository.class
 })
+@ConditionalOnProperty(prefix = "praxis.domain-knowledge.change-sets", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class DomainKnowledgeChangeSetService {
 
     private static final String VALIDATION_STATUS_VALID = "valid";

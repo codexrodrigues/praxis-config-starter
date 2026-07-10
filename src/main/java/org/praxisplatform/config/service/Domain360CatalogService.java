@@ -16,11 +16,13 @@ import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.dto.DomainFederationContextQueryResponse;
 import org.praxisplatform.config.dto.DomainFederationRetrievalPolicyOptions;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 @Service
 @ConditionalOnBean(DomainFederationQueryService.class)
+@ConditionalOnProperty(prefix = "praxis.domain-360", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class Domain360CatalogService {
 
     private static final String SCHEMA_VERSION = "praxis.domain-360-catalog/v0.1";

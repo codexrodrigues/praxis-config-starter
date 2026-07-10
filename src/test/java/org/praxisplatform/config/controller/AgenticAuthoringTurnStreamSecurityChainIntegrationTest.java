@@ -2,19 +2,17 @@ package org.praxisplatform.config.controller;
 
 import org.junit.jupiter.api.Tag;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.UUID;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.TestApplication;
-import org.praxisplatform.config.service.AiStreamAccessTokenService;
-import org.praxisplatform.config.service.AiStreamService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamService;
 import org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiTextEmbeddingAutoConfiguration;
@@ -28,8 +26,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
@@ -46,7 +44,7 @@ import org.springframework.test.web.servlet.MockMvc;
         classes = TestApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.MOCK,
         properties = {
-                "spring.datasource.url=jdbc:h2:mem:ai_stream_security_it;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
+                "spring.datasource.url=jdbc:h2:mem:agentic_authoring_stream_security_it;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
                 "spring.datasource.driver-class-name=org.h2.Driver",
                 "spring.datasource.username=sa",
                 "spring.datasource.password=",
@@ -60,6 +58,7 @@ import org.springframework.test.web.servlet.MockMvc;
                 "praxis.domain-360.enabled=false",
                 "praxis.domain-federation.enabled=false",
                 "praxis.domain-knowledge.change-sets.enabled=false",
+                "praxis.ai.authoring.http-enabled=true",
                 "praxis.ai.rag.vector-store.enabled=false",
                 "praxis.ai.registry.bootstrap.enabled=false",
                 "praxis.ai.security.corporate-mode=true",
@@ -67,7 +66,7 @@ import org.springframework.test.web.servlet.MockMvc;
         })
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Import(AiPatchStreamSecurityChainIntegrationTest.SecurityTestConfig.class)
+@Import(AgenticAuthoringTurnStreamSecurityChainIntegrationTest.SecurityTestConfig.class)
 @EnableAutoConfiguration(exclude = {
         GoogleGenAiEmbeddingConnectionAutoConfiguration.class,
         GoogleGenAiTextEmbeddingAutoConfiguration.class,
@@ -80,7 +79,7 @@ import org.springframework.test.web.servlet.MockMvc;
         OpenAiModerationAutoConfiguration.class
 })
 @Tag("integration")
-class AiPatchStreamSecurityChainIntegrationTest {
+class AgenticAuthoringTurnStreamSecurityChainIntegrationTest {
 
     private static final String BASIC_AUTH = "Basic c3RyZWFtLXVzZXI6c2VjcmV0";
 
@@ -88,44 +87,47 @@ class AiPatchStreamSecurityChainIntegrationTest {
     private MockMvc mockMvc;
 
     @MockBean
-    private AiStreamService aiStreamService;
-
-    @MockBean
-    private AiStreamAccessTokenService streamAccessTokenService;
-
-    @BeforeEach
-    void setUp() {
-        when(streamAccessTokenService.isSignedUrlTokenMode()).thenReturn(false);
-    }
+    private AgenticAuthoringTurnStreamService turnStreamService;
 
     @Test
     void shouldReturnUnauthorizedWhenAuthenticationIsMissing() throws Exception {
-        mockMvc.perform(get("/api/praxis/config/ai/patch/stream/{streamId}/probe", UUID.randomUUID())
+        UUID streamId = UUID.randomUUID();
+
+        mockMvc.perform(get("/api/praxis/config/ai/authoring/turn/stream/{streamId}/probe", streamId)
                         .header("X-Tenant-ID", "tenant-a")
                         .header("X-Env", "dev"))
                 .andExpect(status().isUnauthorized());
 
-        verify(aiStreamService, never()).probeStream(any(), any(), any());
+        verify(turnStreamService, never()).probe(any(), any());
     }
 
     @Test
     void shouldReturnForbiddenWhenCorporateTenantIsNotProjectedServerSide() throws Exception {
-        mockMvc.perform(get("/api/praxis/config/ai/patch/stream/{streamId}/probe", UUID.randomUUID())
+        UUID streamId = UUID.randomUUID();
+
+        mockMvc.perform(get("/api/praxis/config/ai/authoring/turn/stream/{streamId}/probe", streamId)
                         .header("Authorization", BASIC_AUTH))
                 .andExpect(status().isForbidden());
 
-        verify(aiStreamService, never()).probeStream(any(), any(), any());
+        verify(turnStreamService, never()).probe(any(), any());
     }
 
     @Test
     void shouldAllowAuthenticatedRequestWhenCorporateIdentityIsProjectedServerSide() throws Exception {
-        mockMvc.perform(get("/api/praxis/config/ai/patch/stream/{streamId}/probe", UUID.randomUUID())
+        UUID streamId = UUID.randomUUID();
+
+        mockMvc.perform(get("/api/praxis/config/ai/authoring/turn/stream/{streamId}/probe", streamId)
                         .header("Authorization", BASIC_AUTH)
                         .requestAttr("tenantId", "tenant-a")
                         .requestAttr("environment", "dev"))
                 .andExpect(status().isNoContent());
 
-        verify(aiStreamService).probeStream(any(), isNull(), any());
+        verify(turnStreamService).probe(eq(streamId), argThat(context ->
+                context != null
+                        && "tenant-a".equals(context.tenantId())
+                        && "stream-user".equals(context.userId())
+                        && "dev".equals(context.environment())
+                        && context.resolvedFromServerPrincipal()));
     }
 
     @TestConfiguration

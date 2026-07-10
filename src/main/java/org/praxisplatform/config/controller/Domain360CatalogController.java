@@ -5,6 +5,7 @@ import org.praxisplatform.config.dto.Domain360CatalogResponse;
 import org.praxisplatform.config.service.Domain360CatalogService;
 import org.praxisplatform.config.service.DomainFederationQueryService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/praxis/config/domain-360")
 @RequiredArgsConstructor
 @ConditionalOnBean(DomainFederationQueryService.class)
+@ConditionalOnProperty(prefix = "praxis.domain-360", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class Domain360CatalogController {
 
     private final Domain360CatalogService domain360CatalogService;

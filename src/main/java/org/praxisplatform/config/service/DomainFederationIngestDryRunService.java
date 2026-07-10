@@ -11,11 +11,13 @@ import org.praxisplatform.config.dto.DomainFederationIngestPreviewItemResponse;
 import org.praxisplatform.config.dto.DomainFederationSource;
 import org.praxisplatform.config.dto.DomainFederationValidationReport;
 import org.praxisplatform.config.dto.DomainFederationValidationRequest;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "praxis.domain-federation", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class DomainFederationIngestDryRunService {
 
     private static final String SCHEMA_VERSION = "praxis.domain-federation-ingest-dry-run/v0.1";
