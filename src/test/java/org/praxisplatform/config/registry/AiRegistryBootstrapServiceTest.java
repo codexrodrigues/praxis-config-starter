@@ -14,6 +14,7 @@ import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -117,6 +118,32 @@ class AiRegistryBootstrapServiceTest {
                 .isEqualTo(2);
         assertThat(state.isSucceeded()).isTrue();
         assertThat(state.getPreviousSnapshotHash()).isEqualTo("old-hash");
+    }
+
+    @Test
+    void rotatesSnapshotMetadataVersionAndEtagOnlyWhenPayloadChanges() throws Exception {
+        String originalHash = "old-hash";
+        UUID originalEtag = UUID.fromString("123e4567-e89b-12d3-a456-426614174020");
+        AiRegistry existingMetadata = snapshotMetadata(originalHash);
+        existingMetadata.setVersion(8L);
+        existingMetadata.setEtag(originalEtag);
+
+        when(resourceLoader.getResource(anyString())).thenReturn(snapshotResource());
+        when(statusService.getStatus()).thenReturn(readyStatus());
+        when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                anyString(), anyString(), anyString(), any(Scope.class), anyString()))
+                .thenReturn(Optional.of(existingMetadata), Optional.of(existingMetadata));
+
+        service().bootstrapIfNeeded();
+
+        ArgumentCaptor<AiRegistry> metadataCaptor = ArgumentCaptor.forClass(AiRegistry.class);
+        verify(repository).save(metadataCaptor.capture());
+        AiRegistry saved = metadataCaptor.getValue();
+        assertThat(saved).isSameAs(existingMetadata);
+        assertThat(saved.getVersion()).isEqualTo(9L);
+        assertThat(saved.getEtag()).isNotEqualTo(originalEtag);
+        assertThat(objectMapper.readTree(saved.getPayload()).path("snapshotHash").asText())
+                .isEqualTo(sha256(SNAPSHOT));
     }
 
     @Test

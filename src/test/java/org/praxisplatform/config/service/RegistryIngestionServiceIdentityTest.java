@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -13,6 +14,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -172,6 +174,101 @@ class RegistryIngestionServiceIdentityTest {
         assertThat(document.getMetadata().get(RagMetadataKeys.AUTHORING_MANIFEST_VERSION)).isEqualTo("2.0.0");
         assertThat(document.getMetadata().get(RagMetadataKeys.AUTHORING_OPERATION_COUNT)).isEqualTo(1);
         assertThat(document.getMetadata().get(RagMetadataKeys.AUTHORING_TARGET_COUNT)).isEqualTo(1);
+    }
+
+    @Test
+    void shouldRotateVersionAndEtagWhenExistingComponentDefinitionMaterialChanges() {
+        RegistryIngestionRequest.ComponentEntry component = RegistryIngestionRequest.ComponentEntry.builder()
+                .description("Updated table component")
+                .inputs(List.of())
+                .outputs(List.of())
+                .build();
+        RegistryIngestionRequest request = RegistryIngestionRequest.builder()
+                .version("registry-v3")
+                .components(Map.of("table", component))
+                .build();
+        UUID originalEtag = UUID.fromString("123e4567-e89b-12d3-a456-426614174010");
+        AiRegistry existing = AiRegistry.builder()
+                .registryType("component_definition")
+                .registryKey("table")
+                .componentType("component-definition")
+                .scope(org.praxisplatform.config.domain.Scope.SYSTEM)
+                .scopeKey("GLOBAL")
+                .payload("{\"componentDefinition\":{\"id\":\"table\",\"description\":\"Old\"}}")
+                .embedding(List.of(0.1f))
+                .status("active")
+                .version(3L)
+                .etag(originalEtag)
+                .build();
+
+        when(embeddingService.embed(anyString())).thenReturn(List.of(0.9f));
+        when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(),
+                        anyString()))
+                .thenReturn(Optional.of(existing));
+        when(repository.save(any(AiRegistry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.ingestRegistry(request, null, null);
+
+        ArgumentCaptor<AiRegistry> saved = ArgumentCaptor.forClass(AiRegistry.class);
+        verify(repository).save(saved.capture());
+        assertThat(saved.getValue()).isSameAs(existing);
+        assertThat(existing.getVersion()).isEqualTo(4L);
+        assertThat(existing.getEtag()).isNotEqualTo(originalEtag);
+        assertThat(existing.getPayload()).contains("Updated table component");
+        assertThat(existing.getEmbedding()).containsExactly(0.9f);
+    }
+
+    @Test
+    void shouldPreserveVersionAndEtagWhenComponentDefinitionReingestionIsIdentical() {
+        RegistryIngestionRequest.ComponentEntry component = RegistryIngestionRequest.ComponentEntry.builder()
+                .description("Stable table component")
+                .inputs(List.of())
+                .outputs(List.of())
+                .build();
+        RegistryIngestionRequest request = RegistryIngestionRequest.builder()
+                .version("registry-v3")
+                .components(Map.of("table", component))
+                .build();
+
+        when(embeddingService.embed(anyString())).thenReturn(List.of(0.4f));
+        when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(),
+                        anyString()))
+                .thenReturn(Optional.empty());
+        when(repository.save(any(AiRegistry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.ingestRegistry(request, null, null);
+
+        ArgumentCaptor<AiRegistry> inserted = ArgumentCaptor.forClass(AiRegistry.class);
+        verify(repository).save(inserted.capture());
+        AiRegistry existing = inserted.getValue();
+        existing.onInsert();
+        existing.setVersion(6L);
+        existing.setEtag(UUID.fromString("123e4567-e89b-12d3-a456-426614174011"));
+
+        org.mockito.Mockito.reset(repository, ragVectorStoreService);
+        when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        any(),
+                        anyString()))
+                .thenReturn(Optional.of(existing));
+
+        service.ingestRegistry(request, null, null);
+
+        verify(repository, never()).save(any(AiRegistry.class));
+        assertThat(existing.getVersion()).isEqualTo(6L);
+        assertThat(existing.getEtag())
+                .isEqualTo(UUID.fromString("123e4567-e89b-12d3-a456-426614174011"));
+        verify(ragVectorStoreService).upsertDocuments(any());
     }
 
     @Test

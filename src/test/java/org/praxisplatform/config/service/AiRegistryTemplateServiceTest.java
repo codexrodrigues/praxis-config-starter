@@ -102,6 +102,8 @@ class AiRegistryTemplateServiceTest {
             .embedding(List.of(0.1f))
             .source("previous-source")
             .status("active")
+            .version(2L)
+            .etag(UUID.fromString("123e4567-e89b-12d3-a456-426614174000"))
             .build();
 
     when(embeddingService.embed(anyString())).thenReturn(List.of(0.7f, 0.8f));
@@ -123,10 +125,45 @@ class AiRegistryTemplateServiceTest {
     assertThat(saved.getEmbedding()).containsExactly(0.7f, 0.8f);
     assertThat(saved.getSource()).isNull();
     assertThat(saved.getStatus()).isEqualTo("active");
+    assertThat(saved.getVersion()).isEqualTo(3L);
+    assertThat(saved.getEtag())
+        .isNotEqualTo(UUID.fromString("123e4567-e89b-12d3-a456-426614174000"));
 
     JsonNode payload = objectMapper.readTree(saved.getPayload());
     assertThat(payload.path("aiDescription").asText()).isEqualTo("Nova descricao");
     assertThat(payload.path("templateMeta").path("rank").asInt()).isEqualTo(1);
+  }
+
+  @Test
+  void identicalTemplateUpsertPreservesVersionAndEtagAndSkipsSave() throws Exception {
+    JsonNode configJson = objectMapper.readTree("{\"columns\":[]}");
+    UUID originalEtag = UUID.fromString("123e4567-e89b-12d3-a456-426614174001");
+    AiRegistry existing =
+        AiRegistry.builder()
+            .registryType(REGISTRY_TYPE)
+            .registryKey("praxis-table")
+            .componentType(COMPONENT_TYPE)
+            .scope(Scope.SYSTEM)
+            .scopeKey(SCOPE_KEY)
+            .payload(
+                "{\"componentId\":\"praxis-table\",\"aiDescription\":\"Tabela\",\"configJson\":{\"columns\":[]}}")
+            .embedding(List.of(0.7f))
+            .status("active")
+            .version(5L)
+            .etag(originalEtag)
+            .build();
+
+    when(embeddingService.embed(anyString())).thenReturn(List.of(0.7f));
+    when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+            REGISTRY_TYPE, "praxis-table", COMPONENT_TYPE, Scope.SYSTEM, SCOPE_KEY))
+        .thenReturn(Optional.of(existing));
+
+    AiRegistry saved = service.upsertTemplate("praxis-table", configJson, "Tabela", null);
+
+    assertThat(saved).isSameAs(existing);
+    assertThat(saved.getVersion()).isEqualTo(5L);
+    assertThat(saved.getEtag()).isEqualTo(originalEtag);
+    verify(repository, never()).save(existing);
   }
 
   @Test
