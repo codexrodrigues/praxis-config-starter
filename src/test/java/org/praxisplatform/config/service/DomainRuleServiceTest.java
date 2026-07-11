@@ -225,7 +225,8 @@ class DomainRuleServiceTest {
                                 """),
                         objectMapper.readTree("""
                                 {
-                                  "ruleAuthoring": "governed"
+                                  "ruleAuthoring": "governed",
+                                  "requiredApprovals": ["procurement-owner"]
                                 }
                                 """),
                         "llm",
@@ -574,7 +575,7 @@ class DomainRuleServiceTest {
                           "var": "complianceHold"
                         }
                         """)
-                .governance("{\"approval\":\"finance-owner\"}")
+                .governance("{\"requiredApprovals\":[\"finance-owner\"]}")
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
@@ -700,7 +701,7 @@ class DomainRuleServiceTest {
                           ]
                         }
                         """)
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"payroll-manager\"]}")
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
@@ -884,6 +885,70 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void blocksLlmAuthoredGovernedDefinitionCreationAsActive() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        assertThatThrownBy(() -> service.createDefinition(new DomainRuleDefinitionRequest(
+                "procurement.suppliers.rule.selection-eligibility",
+                null,
+                "selection_eligibility",
+                "active",
+                "procurement",
+                "procurement.suppliers",
+                "praxis-api-quickstart",
+                "procurement-owner",
+                "procurement-owner",
+                null,
+                null,
+                objectMapper.readTree("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}"),
+                objectMapper.readTree("{\"optionSourceKey\":\"supplier\"}"),
+                null,
+                objectMapper.readTree("{\"requiredApprovals\":[\"procurement-owner\"]}"),
+                null,
+                "llm",
+                "openai:gpt-5.4-mini",
+                null), "tenant-a", "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("must be created as draft or proposed");
+
+        verify(definitionRepository, org.mockito.Mockito.never()).save(any(DomainRuleDefinition.class));
+    }
+
+    @Test
+    void blocksGovernedDefinitionCreationWithoutRequiredApprovals() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        assertThatThrownBy(() -> service.createDefinition(new DomainRuleDefinitionRequest(
+                "procurement.suppliers.rule.selection-eligibility",
+                null,
+                "selection_eligibility",
+                "proposed",
+                "procurement",
+                "procurement.suppliers",
+                "praxis-api-quickstart",
+                "procurement-owner",
+                "procurement-owner",
+                null,
+                null,
+                objectMapper.readTree("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}"),
+                objectMapper.readTree("{\"optionSourceKey\":\"supplier\"}"),
+                null,
+                objectMapper.readTree("{}"),
+                null,
+                "llm",
+                "openai:gpt-5.4-mini",
+                null), "tenant-a", "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("governance.requiredApprovals");
+
+        verify(definitionRepository, org.mockito.Mockito.never()).save(any(DomainRuleDefinition.class));
+    }
+
+    @Test
     void createsFormConfigMaterializationForSharedRuleDefinition() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
@@ -900,7 +965,7 @@ class DomainRuleServiceTest {
                 .status("active")
                 .definition("{}")
                 .parameters("{}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
@@ -984,7 +1049,7 @@ class DomainRuleServiceTest {
                 .status("active")
                 .definition("{}")
                 .parameters("{}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         DomainRuleMaterialization existing = DomainRuleMaterialization.builder()
                 .id(materializationId)
@@ -1051,7 +1116,7 @@ class DomainRuleServiceTest {
                 .status("active")
                 .definition("{}")
                 .parameters("{}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         DomainRuleDefinition existingDefinition = DomainRuleDefinition.builder()
                 .id(existingDefinitionId)
@@ -1063,7 +1128,7 @@ class DomainRuleServiceTest {
                 .status("active")
                 .definition("{}")
                 .parameters("{}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         DomainRuleMaterialization existing = DomainRuleMaterialization.builder()
                 .id(UUID.randomUUID())
@@ -1125,7 +1190,7 @@ class DomainRuleServiceTest {
                 .resourceKey("procurement.suppliers")
                 .definition("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}")
                 .parameters("{\"optionSourceKey\":\"supplier\"}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
@@ -1169,7 +1234,7 @@ class DomainRuleServiceTest {
                 .resourceKey("procurement.suppliers")
                 .definition("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}")
                 .parameters("{\"optionSourceKey\":\"supplier\"}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
@@ -1214,7 +1279,7 @@ class DomainRuleServiceTest {
                 .resourceKey("procurement.suppliers")
                 .definition("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}")
                 .parameters("{\"optionSourceKey\":\"supplier\"}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
@@ -1283,7 +1348,7 @@ class DomainRuleServiceTest {
                           ]
                         }
                         """)
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
@@ -1355,7 +1420,7 @@ class DomainRuleServiceTest {
                           ]
                         }
                         """)
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
@@ -1415,7 +1480,7 @@ class DomainRuleServiceTest {
                 .resourceKey("procurement.suppliers")
                 .definition("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}")
                 .parameters("{\"optionSourceKey\":\"supplier\"}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
@@ -1453,7 +1518,7 @@ class DomainRuleServiceTest {
                 .status("active")
                 .definition("{}")
                 .parameters("{}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
                 eq("tenant-a"),
@@ -1525,6 +1590,42 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void blocksLlmActorFromApprovingGovernedDefinition() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("proposed")
+                .definition("{\"summary\":\"Impedir seleção de fornecedores bloqueados.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
+                .build();
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+
+        assertThatThrownBy(() -> service.transitionDefinitionStatus(
+                definitionId,
+                new DomainRuleStatusTransitionRequest(
+                        "approved",
+                        "llm",
+                        "procurement-owner",
+                        objectMapper.readTree("{\"review\":\"approved\"}")),
+                "tenant-a",
+                "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("requires a human or system actor");
+
+        assertThat(definition.getStatus()).isEqualTo("proposed");
+        verify(definitionRepository, org.mockito.Mockito.never()).save(any(DomainRuleDefinition.class));
+    }
+
+    @Test
     void blocksDefinitionTransitionFromRetiredBackToActive() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
@@ -1540,7 +1641,7 @@ class DomainRuleServiceTest {
                 .status("retired")
                 .definition("{}")
                 .parameters("{}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
 
@@ -1926,7 +2027,7 @@ class DomainRuleServiceTest {
                 .serviceKey("praxis-api-quickstart")
                 .definition("{\"summary\":\"Impedir seleção de fornecedores bloqueados.\"}")
                 .parameters("{\"optionSourceKey\":\"supplier\"}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
                 .id(UUID.randomUUID())
@@ -2015,6 +2116,55 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void blocksPublicationWhenActorIsNotAuthorizedByGovernance() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository, eventRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(2)
+                .ruleType("selection_eligibility")
+                .status("approved")
+                .contextKey("procurement")
+                .resourceKey("procurement.suppliers")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Impedir seleção de fornecedores bloqueados.\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.publish(
+                new DomainRulePublicationRequest(
+                        definitionId,
+                        null,
+                        true,
+                        "human",
+                        "finance-owner",
+                        null),
+                "tenant-a",
+                "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("actor is not authorized by governance");
+
+        verify(definitionRepository, org.mockito.Mockito.never()).save(any(DomainRuleDefinition.class));
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
+    }
+
+    @Test
     void reportsExistingDerivedMaterializationAsReusedDuringPublication() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
@@ -2034,7 +2184,7 @@ class DomainRuleServiceTest {
                 .serviceKey("praxis-api-quickstart")
                 .definition("{\"summary\":\"Impedir seleção de fornecedores bloqueados.\"}")
                 .parameters("{\"optionSourceKey\":\"supplier\"}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
                 .id(UUID.randomUUID())
@@ -2111,7 +2261,7 @@ class DomainRuleServiceTest {
                 .serviceKey("praxis-api-quickstart")
                 .definition("{\"summary\":\"Impedir seleção de fornecedores bloqueados.\"}")
                 .parameters("{\"optionSourceKey\":\"supplier\"}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
                 .id(materializationId)
@@ -2173,7 +2323,7 @@ class DomainRuleServiceTest {
                 .serviceKey("praxis-api-quickstart")
                 .definition("{\"summary\":\"Impedir seleção de fornecedores bloqueados.\"}")
                 .parameters("{\"optionSourceKey\":\"supplier\"}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
@@ -2254,7 +2404,7 @@ class DomainRuleServiceTest {
                           ]
                         }
                         """)
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
@@ -2369,7 +2519,7 @@ class DomainRuleServiceTest {
                           ]
                         }
                         """)
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         java.util.Map<String, AtomicInteger> keyLookups = new java.util.HashMap<>();
         java.util.Map<String, DomainRuleMaterialization> savedMaterializations = new java.util.HashMap<>();
@@ -2511,7 +2661,7 @@ class DomainRuleServiceTest {
                           ]
                         }
                         """)
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         DomainRuleMaterialization existing = DomainRuleMaterialization.builder()
                 .id(UUID.randomUUID())
@@ -2591,7 +2741,7 @@ class DomainRuleServiceTest {
                           ]
                         }
                         """)
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         DomainRuleDefinition otherDefinition = DomainRuleDefinition.builder()
                 .id(UUID.randomUUID())
@@ -2607,7 +2757,7 @@ class DomainRuleServiceTest {
                 .definition("{\"summary\":\"Outra decisao.\"}")
                 .parameters("{\"optionSourceKey\":\"supplier\"}")
                 .condition("{}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         DomainRuleMaterialization existing = DomainRuleMaterialization.builder()
                 .id(UUID.randomUUID())
@@ -2688,7 +2838,7 @@ class DomainRuleServiceTest {
                           ]
                         }
                         """)
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         DomainRuleDefinition suspendedDefinition = DomainRuleDefinition.builder()
                 .id(suspendedDefinitionId)
@@ -2711,7 +2861,7 @@ class DomainRuleServiceTest {
                           ]
                         }
                         """)
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
 
         when(definitionRepository.findById(inactiveDefinitionId)).thenReturn(Optional.of(inactiveDefinition));
@@ -2810,7 +2960,7 @@ class DomainRuleServiceTest {
                           ]
                         }
                         """)
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
@@ -2954,7 +3104,7 @@ class DomainRuleServiceTest {
                 .status("active")
                 .definition("{}")
                 .parameters("{}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
                 .id(materializationId)
@@ -3003,7 +3153,7 @@ class DomainRuleServiceTest {
                 .status("active")
                 .definition("{}")
                 .parameters("{}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
                 .id(materializationId)
@@ -3049,7 +3199,7 @@ class DomainRuleServiceTest {
                 .status("approved")
                 .definition("{}")
                 .parameters("{}")
-                .governance("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .build();
         DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
                 .id(materializationId)

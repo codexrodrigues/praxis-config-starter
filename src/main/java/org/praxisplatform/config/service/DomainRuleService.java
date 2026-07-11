@@ -51,9 +51,11 @@ public class DomainRuleService {
 
     private static final List<String> DEFINITION_STATUSES = List.of(
             "draft", "proposed", "approved", "active", "deprecated", "retired", "rejected");
+    private static final List<String> INITIAL_DEFINITION_STATUSES = List.of("draft", "proposed");
     private static final List<String> MATERIALIZATION_STATUSES = List.of(
             "draft", "pending_review", "applied", "failed", "superseded", "reverted");
     private static final List<String> COVERAGE_STATUSES = List.of("approved", "active");
+    private static final List<String> GOVERNANCE_ACTOR_TYPES = List.of("human", "system");
 
     private final DomainRuleDefinitionRepository definitionRepository;
     private final DomainRuleMaterializationRepository materializationRepository;
@@ -195,10 +197,21 @@ public class DomainRuleService {
         definition.setRuleKey(request.ruleKey().trim());
         definition.setVersion(request.version());
         definition.setRuleType(request.ruleType().trim());
-        definition.setStatus(requireAllowedStatus(
+        String requestedStatus = requireAllowedStatus(
                 normalizeOrDefault(request.status(), "draft"),
                 "status",
-                DEFINITION_STATUSES));
+                DEFINITION_STATUSES);
+        JsonNode requestedGovernance = request.governance();
+        JsonNode requestedDefinition = request.definition();
+        JsonNode requestedParameters = request.parameters();
+        requireDefinitionCreationGovernance(
+                request.ruleType().trim(),
+                requestedStatus,
+                normalizeOrDefault(request.createdByType(), "system"),
+                requestedDefinition,
+                requestedParameters,
+                requestedGovernance);
+        definition.setStatus(requestedStatus);
         definition.setContextKey(normalize(request.contextKey()));
         definition.setResourceKey(normalize(request.resourceKey()));
         definition.setServiceKey(normalize(request.serviceKey()));
@@ -206,10 +219,10 @@ public class DomainRuleService {
         definition.setSteward(normalize(request.steward()));
         definition.setSourceRelease(resolveRelease(request.sourceReleaseId()));
         definition.setSourceChangeSet(resolveChangeSet(request.sourceChangeSetId()));
-        definition.setDefinition(writeOrDefault(request.definition(), "{}"));
-        definition.setParameters(writeOrDefault(request.parameters(), "{}"));
+        definition.setDefinition(writeOrDefault(requestedDefinition, "{}"));
+        definition.setParameters(writeOrDefault(requestedParameters, "{}"));
         definition.setCondition(writeNullable(request.condition()));
-        definition.setGovernance(writeOrDefault(request.governance(), "{}"));
+        definition.setGovernance(writeOrDefault(requestedGovernance, "{}"));
         definition.setValidationResult(writeNullable(request.validationResult()));
         definition.setCreatedByType(normalizeOrDefault(request.createdByType(), "system"));
         definition.setCreatedBy(normalize(request.createdBy()));
@@ -300,6 +313,9 @@ public class DomainRuleService {
         requireScope(definition.getTenantId(), tenantId, "tenantId");
         requireScope(definition.getEnvironment(), environment, "environment");
         requireAllowedDefinitionTransition(definition.getStatus(), status);
+        if (isApprovalSatisfiedDefinitionStatus(status)) {
+            requireGovernedDecisionAuthorization(definition, request.decidedByType(), request.decidedBy(), status);
+        }
 
         String previousStatus = definition.getStatus();
         boolean hadApprovedAt = definition.getApprovedAt() != null;
@@ -401,6 +417,9 @@ public class DomainRuleService {
                 definition,
                 parameters);
         ArrayNode requiredApprovals = buildRequiredApprovals(governance);
+        if (persistedDefinition != null && isApprovalSatisfiedDefinitionStatus(persistedDefinition.getStatus())) {
+            requiredApprovals = objectMapper.createArrayNode();
+        }
         ArrayNode warnings = buildWarnings(ruleType, predictedMaterializations, existingCoverage, governance);
         ObjectNode explainability = buildExplainability(
                 ruleKey,
@@ -496,8 +515,10 @@ public class DomainRuleService {
         String readiness = simulation.explainability() != null
                 ? normalize(simulation.explainability().path("publicationReadiness").asText(null))
                 : null;
-        if ("ready_to_publish".equals(readiness) && !isPublishableDefinitionStatus(definition.getStatus())) {
+        if (isTerminalOrInactiveDefinitionStatus(definition.getStatus())) {
             readiness = "blocked_by_definition_status";
+        } else if (!isApprovalSatisfiedDefinitionStatus(definition.getStatus())) {
+            readiness = "approval_required";
         }
 
         if (!"ready_to_publish".equals(readiness)) {
@@ -518,6 +539,7 @@ public class DomainRuleService {
                     withBlockedPublicationDiagnostics(simulation.explainability(), readiness, definition),
                     Instant.now());
         }
+        requireGovernedDecisionAuthorization(definition, request.publishedByType(), request.publishedBy(), "publication");
 
         Instant publicationRequestedAt = Instant.now();
         UUID publicationId = UUID.randomUUID();
@@ -1282,6 +1304,106 @@ public class DomainRuleService {
         return approvals;
     }
 
+    private void requireDefinitionCreationGovernance(
+            String ruleType,
+            String requestedStatus,
+            String createdByType,
+            JsonNode definition,
+            JsonNode parameters,
+            JsonNode governance) {
+        if (!isGovernedDecision(ruleType, definition, parameters)) {
+            return;
+        }
+        if (!INITIAL_DEFINITION_STATUSES.contains(requestedStatus)) {
+            throw new ConfigurationIngestionException(
+                    "Governed domain rule definitions must be created as draft or proposed");
+        }
+        if ("llm".equals(createdByType) || "ai".equals(createdByType)) {
+            if (!"draft".equals(requestedStatus) && !"proposed".equals(requestedStatus)) {
+                throw new ConfigurationIngestionException(
+                        "LLM-authored governed domain rule definitions cannot bypass review");
+            }
+        }
+        requireRequiredApprovals(governance);
+    }
+
+    private void requireGovernedDecisionAuthorization(
+            DomainRuleDefinition definition,
+            String actorType,
+            String actor,
+            String action) {
+        if (definition == null || !isGovernedDecision(
+                definition.getRuleType(),
+                read(definition.getDefinition()),
+                read(definition.getParameters()))) {
+            return;
+        }
+        JsonNode governance = read(definition.getGovernance());
+        ArrayNode requiredApprovals = requireRequiredApprovals(governance);
+        String normalizedActorType = normalizeOrDefault(actorType, "human");
+        if (!GOVERNANCE_ACTOR_TYPES.contains(normalizedActorType)) {
+            throw new ConfigurationIngestionException(
+                    "Governed domain rule " + action + " requires a human or system actor");
+        }
+        String normalizedActor = normalize(actor);
+        if (!StringUtils.hasText(normalizedActor)) {
+            throw new ConfigurationIngestionException(
+                    "Governed domain rule " + action + " requires an authorized actor");
+        }
+        List<String> authorizedApprovers = authorizedApprovers(governance, requiredApprovals);
+        if (!authorizedApprovers.contains(normalizedActor)) {
+            throw new ConfigurationIngestionException(
+                    "Governed domain rule " + action + " actor is not authorized by governance");
+        }
+    }
+
+    private ArrayNode requireRequiredApprovals(JsonNode governance) {
+        ArrayNode requiredApprovals = buildRequiredApprovals(governance);
+        if (requiredApprovals.isEmpty()) {
+            throw new ConfigurationIngestionException(
+                    "Governed domain rule definitions require governance.requiredApprovals");
+        }
+        return requiredApprovals;
+    }
+
+    private List<String> authorizedApprovers(JsonNode governance, ArrayNode requiredApprovals) {
+        java.util.LinkedHashSet<String> values = new java.util.LinkedHashSet<>();
+        collectTextArray(requiredApprovals).stream()
+                .map(this::normalize)
+                .filter(StringUtils::hasText)
+                .forEach(values::add);
+        if (governance != null && governance.isObject()) {
+            JsonNode explicit = governance.get("authorizedApprovers");
+            if (explicit != null && explicit.isArray()) {
+                collectTextArray(explicit).stream()
+                        .map(this::normalize)
+                        .filter(StringUtils::hasText)
+                        .forEach(values::add);
+            }
+        }
+        return List.copyOf(values);
+    }
+
+    private boolean isGovernedDecision(String ruleType, JsonNode definition, JsonNode parameters) {
+        if (isBackendValidationRuleType(ruleType)
+                || isWorkflowActionRuleType(ruleType)
+                || isApprovalPolicyRuleType(ruleType)
+                || "visual_guidance".equals(ruleType)
+                || "form_rule".equals(ruleType)) {
+            return true;
+        }
+        if (definition != null && definition.isObject()) {
+            JsonNode targets = definition.path("materializationTargets");
+            if (targets.isArray() && !targets.isEmpty()) {
+                return true;
+            }
+        }
+        return parameters != null
+                && parameters.isObject()
+                && (StringUtils.hasText(parameters.path("optionSourceKey").asText(null))
+                || StringUtils.hasText(parameters.path("lookupSource").asText(null)));
+    }
+
     private ArrayNode buildWarnings(
             String ruleType,
             ArrayNode predictedMaterializations,
@@ -1464,7 +1586,15 @@ public class DomainRuleService {
     }
 
     private boolean isPublishableDefinitionStatus(String status) {
-        return "draft".equals(status) || "proposed".equals(status) || "approved".equals(status) || "active".equals(status);
+        return "approved".equals(status) || "active".equals(status);
+    }
+
+    private boolean isApprovalSatisfiedDefinitionStatus(String status) {
+        return "approved".equals(status) || "active".equals(status);
+    }
+
+    private boolean isTerminalOrInactiveDefinitionStatus(String status) {
+        return "rejected".equals(status) || "retired".equals(status) || "deprecated".equals(status);
     }
 
     private JsonNode withPublicationDiagnostics(JsonNode explainability, ArrayNode materializationOutcomes) {
