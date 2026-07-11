@@ -198,12 +198,13 @@ public class AiRegistryBootstrapService {
             payload.put("generatedAt", request.getGeneratedAt());
         }
 
-        AiRegistry metadata = repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+        var existing = repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
                         SNAPSHOT_METADATA_REGISTRY_TYPE,
                         SNAPSHOT_METADATA_REGISTRY_KEY,
                         SNAPSHOT_METADATA_COMPONENT_TYPE,
                         Scope.SYSTEM,
-                        SNAPSHOT_METADATA_SCOPE_KEY)
+                        SNAPSHOT_METADATA_SCOPE_KEY);
+        AiRegistry metadata = existing
                 .orElseGet(() -> AiRegistry.builder()
                         .registryType(SNAPSHOT_METADATA_REGISTRY_TYPE)
                         .registryKey(SNAPSHOT_METADATA_REGISTRY_KEY)
@@ -211,11 +212,24 @@ public class AiRegistryBootstrapService {
                         .scope(Scope.SYSTEM)
                         .scopeKey(SNAPSHOT_METADATA_SCOPE_KEY)
                         .build());
-        metadata.setPayload(payload.toString());
-        metadata.setSource(resolvedSnapshot.source);
-        metadata.setSourceRef(resolvedSnapshot.location);
-        metadata.setEmbedding(null);
-        repository.save(metadata);
+        if (existing.isEmpty()) {
+            metadata.setPayload(payload.toString());
+            metadata.setSource(resolvedSnapshot.source);
+            metadata.setSourceRef(resolvedSnapshot.location);
+            metadata.setEmbedding(null);
+            repository.save(metadata);
+            return;
+        }
+        boolean changed = metadata.applyMaterialState(
+                payload.toString(),
+                null,
+                metadata.getTags(),
+                resolvedSnapshot.source,
+                resolvedSnapshot.location,
+                metadata.getStatus());
+        if (changed) {
+            repository.save(metadata);
+        }
     }
 
     private long authoringManifestCount(RegistryIngestionRequest request) {

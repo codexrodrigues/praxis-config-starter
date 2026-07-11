@@ -13,6 +13,7 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -116,5 +117,49 @@ public class AiRegistry {
   @PreUpdate
   public void onUpdate() {
     this.updatedAt = Instant.now();
+  }
+
+  /**
+   * Applies governed registry materialization state and rotates revision tokens only when the
+   * persisted material state actually changes.
+   */
+  public boolean applyMaterialState(
+      String payload,
+      List<Float> embedding,
+      String tags,
+      String source,
+      String sourceRef,
+      String status) {
+    String resolvedStatus =
+        status != null && !status.isBlank()
+            ? status
+            : this.status != null && !this.status.isBlank() ? this.status : "active";
+    boolean changed =
+        !Objects.equals(this.payload, payload)
+            || !Objects.equals(this.embedding, embedding)
+            || !Objects.equals(this.tags, tags)
+            || !Objects.equals(this.source, source)
+            || !Objects.equals(this.sourceRef, sourceRef)
+            || !Objects.equals(this.status, resolvedStatus);
+    if (!changed) {
+      return false;
+    }
+
+    this.payload = payload;
+    this.embedding = embedding;
+    this.tags = tags;
+    this.source = source;
+    this.sourceRef = sourceRef;
+    this.status = resolvedStatus;
+    rotateRevision();
+    return true;
+  }
+
+  private void rotateRevision() {
+    if (this.version <= 0) {
+      this.version = 1L;
+    }
+    this.version += 1L;
+    this.etag = UUID.randomUUID();
   }
 }

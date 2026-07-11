@@ -172,12 +172,15 @@ public class AiRegistryTemplateService {
 
     if (existing.isPresent()) {
       AiRegistry dbConfig = existing.get();
-      dbConfig.setPayload(config.getPayload());
-      dbConfig.setEmbedding(config.getEmbedding());
-      dbConfig.setSource(config.getSource());
-      dbConfig.setSourceRef(config.getSourceRef());
-      dbConfig.setStatus(config.getStatus() != null ? config.getStatus() : dbConfig.getStatus());
-      return repository.save(dbConfig);
+      boolean changed =
+          dbConfig.applyMaterialState(
+              config.getPayload(),
+              config.getEmbedding(),
+              config.getTags(),
+              config.getSource(),
+              config.getSourceRef(),
+              config.getStatus());
+      return changed ? repository.save(dbConfig) : dbConfig;
     }
     return repository.save(config);
   }

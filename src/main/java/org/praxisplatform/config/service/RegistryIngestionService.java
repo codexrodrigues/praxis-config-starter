@@ -667,9 +667,16 @@ public class RegistryIngestionService {
 
         if (existing.isPresent()) {
             AiRegistry db = existing.get();
-            db.setPayload(config.getPayload());
-            db.setEmbedding(config.getEmbedding());
-            repository.save(db);
+            boolean changed = db.applyMaterialState(
+                    config.getPayload(),
+                    config.getEmbedding(),
+                    db.getTags(),
+                    db.getSource(),
+                    db.getSourceRef(),
+                    db.getStatus());
+            if (changed) {
+                repository.save(db);
+            }
             return;
         }
         repository.save(config);

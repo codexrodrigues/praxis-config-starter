@@ -254,6 +254,18 @@ source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted t
 | `praxis.ai.authoring.consultative.api-catalog.compact-cache-max-entries` | `256` | Maximum compact projection entries retained per starter instance. Older entries are evicted before expired entries can accumulate unbounded. |
 | `praxis.ai.authoring.consultative.api-catalog.api-metadata-cache-ttl-ms` | `60000` | TTL for `api_metadata` lookups used by the consultative catalog projection. Use `0` when validating metadata ingestion changes interactively. |
 
+## AI Registry Revision Semantics
+
+`ai_registry.version` and `ai_registry.etag` are internal freshness tokens for governed registry
+records. Inserts start at `version=1` with a generated `etag`. Component definitions, templates and
+snapshot metadata increment `version` and rotate `etag` only when persisted material state changes:
+payload, embedding, tags, source, source reference or status. Reingesting identical material keeps
+the stable registry identity tuple and preserves both tokens.
+
+These fields are not exposed as public HTTP conditional request semantics for
+`/api/praxis/config/ai-registry/**` in this release. HTTP ETag behavior remains owned by the
+surfaces that explicitly publish it, such as `ui_user_config`.
+
 ## Key HTTP Surfaces
 
 | Surface | Purpose |
