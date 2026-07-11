@@ -8,6 +8,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -202,6 +203,133 @@ class UserConfigServiceTest {
     verifyAtomicUpsertSql()
         .contains(
             "ON CONFLICT (tenant_id, user_id, component_type, component_id, environment)");
+  }
+
+  @Test
+  void shouldNormalizeBlankEnvironmentToGlobalScopeBeforeAtomicUpsert() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode payload = mapper.readTree("{\"density\":\"compact\"}");
+    UiUserConfig atomicResult =
+        UiUserConfig.builder()
+            .tenantId("tenant-a")
+            .componentType("praxis-table")
+            .componentId("table-config:employees")
+            .environment(null)
+            .payload(payload.toString())
+            .version(1L)
+            .etag(UUID.fromString("123e4567-e89b-12d3-a456-426614174010"))
+            .build();
+
+    when(repository
+            .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdIsNullOrderByUpdatedAtDesc(
+                "tenant-a", "praxis-table", "table-config:employees"))
+        .thenReturn(Optional.empty());
+    when(apiKeyProtectionService.sanitizeForStorage(payload, null)).thenReturn(payload);
+    when(jdbcTemplate.queryForObject(
+            anyString(),
+            any(MapSqlParameterSource.class),
+            ArgumentMatchers.<RowMapper<UiUserConfig>>any()))
+        .thenReturn(atomicResult);
+
+    UiUserConfig saved =
+        service.upsert(
+            UserConfigService.Scope.TENANT,
+            " tenant-a ",
+            null,
+            " praxis-table ",
+            " table-config:employees ",
+            "   ",
+            payload,
+            null,
+            null,
+            " qa-user ");
+
+    assertThat(saved.getEnvironment()).isNull();
+    ArgumentCaptor<MapSqlParameterSource> paramsCaptor =
+        ArgumentCaptor.forClass(MapSqlParameterSource.class);
+    verify(jdbcTemplate)
+        .queryForObject(
+            anyString(),
+            paramsCaptor.capture(),
+            ArgumentMatchers.<RowMapper<UiUserConfig>>any());
+    MapSqlParameterSource params = paramsCaptor.getValue();
+    assertThat(params.getValue("tenantId")).isEqualTo("tenant-a");
+    assertThat(params.getValue("componentType")).isEqualTo("praxis-table");
+    assertThat(params.getValue("componentId")).isEqualTo("table-config:employees");
+    assertThat(params.getValue("environment")).isNull();
+    assertThat(params.getValue("updatedBy")).isEqualTo("qa-user");
+    verifyAtomicUpsertSql()
+        .contains(
+            "ON CONFLICT (tenant_id, component_type, component_id) WHERE environment IS NULL AND user_id IS NULL");
+  }
+
+  @Test
+  void shouldRejectOversizedComponentTypeBeforeRepositoryLookup() {
+    String componentType = "x".repeat(65);
+
+    assertThatThrownBy(
+            () ->
+                service.getResolved(
+                    "tenant-a",
+                    null,
+                    componentType,
+                    "table-config:employees",
+                    null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("componentType exceeds max length of 64 characters");
+
+    verifyNoInteractions(repository);
+  }
+
+  @Test
+  void shouldRejectOversizedEnvironmentBeforeRepositoryLookup() {
+    String environment = "e".repeat(65);
+
+    assertThatThrownBy(
+            () ->
+                service.getResolved(
+                    "tenant-a",
+                    null,
+                    "praxis-table",
+                    "table-config:employees",
+                    environment))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("environment exceeds max length of 64 characters");
+
+    verifyNoInteractions(repository);
+  }
+
+  @Test
+  void shouldRejectBlankTenantBeforeRepositoryLookup() {
+    assertThatThrownBy(
+            () ->
+                service.getResolved(
+                    "   ",
+                    null,
+                    "praxis-table",
+                    "table-config:employees",
+                    null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("tenantId is required");
+
+    verifyNoInteractions(repository);
+  }
+
+  @Test
+  void shouldRequireUserIdForExplicitUserScopeReads() {
+    assertThatThrownBy(
+            () ->
+                service.getByScope(
+                    UserConfigService.Scope.USER,
+                    "tenant-a",
+                    "   ",
+                    "praxis-table",
+                    "table-config:employees",
+                    null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("User scope requires X-User-ID header");
+
+    verifyNoInteractions(repository);
   }
 
   private UiUserConfig runAtomicUpsert(String userId, String environment, UiUserConfig atomicResult)

@@ -29,7 +29,10 @@ import org.springframework.stereotype.Service;
 public class UserConfigService {
 
   private static final int MAX_PAYLOAD_BYTES = 256 * 1024; // 256 KB safeguard
+  private static final int MAX_SCOPE_ID_LENGTH = 255;
+  private static final int MAX_COMPONENT_TYPE_LENGTH = 64;
   private static final int MAX_COMPONENT_ID_LENGTH = 255;
+  private static final int MAX_ENVIRONMENT_LENGTH = 64;
 
   private final UiUserConfigRepository repository;
   private final ObjectMapper objectMapper;
@@ -56,18 +59,17 @@ public class UserConfigService {
 
   public Optional<ResolvedConfig> getResolved(
       String tenantId, String userId, String componentType, String componentId, String environment) {
-    validateComponentType(componentType);
-    validateComponentId(componentId);
-    if (userId != null && !userId.isBlank()) {
+    ConfigIdentity identity = normalizeIdentity(tenantId, userId, componentType, componentId, environment);
+    if (identity.userId() != null) {
       Optional<UiUserConfig> userConfig =
-          findUserConfig(tenantId, userId, componentType, componentId, environment);
+          findUserConfig(identity);
       if (userConfig.isPresent()) {
         return Optional.of(new ResolvedConfig(userConfig.get(), Scope.USER));
       }
     }
 
     Optional<UiUserConfig> tenantConfig =
-        findTenantConfig(tenantId, componentType, componentId, environment);
+        findTenantConfig(identity);
     if (tenantConfig.isPresent()) {
       return Optional.of(new ResolvedConfig(tenantConfig.get(), Scope.TENANT));
     }
@@ -76,12 +78,14 @@ public class UserConfigService {
 
   public Optional<ResolvedConfig> getByScope(
       Scope scope, String tenantId, String userId, String componentType, String componentId, String environment) {
-    validateComponentType(componentType);
-    validateComponentId(componentId);
+    ConfigIdentity identity = normalizeIdentity(tenantId, userId, componentType, componentId, environment);
+    if (scope == Scope.USER && identity.userId() == null) {
+      throw new IllegalArgumentException("User scope requires X-User-ID header");
+    }
     Optional<UiUserConfig> resolved =
         switch (scope) {
-          case USER -> findUserConfig(tenantId, userId, componentType, componentId, environment);
-          case TENANT -> findTenantConfig(tenantId, componentType, componentId, environment);
+          case USER -> findUserConfig(identity);
+          case TENANT -> findTenantConfig(identity);
         };
     return resolved.map(cfg -> new ResolvedConfig(cfg, scope));
   }
@@ -97,16 +101,16 @@ public class UserConfigService {
       JsonNode tags,
       String ifMatch,
       String updatedBy) {
-    validateComponentType(componentType);
-    validateComponentId(componentId);
-    if (scope == Scope.USER && (userId == null || userId.isBlank())) {
+    ConfigIdentity identity = normalizeIdentity(tenantId, userId, componentType, componentId, environment);
+    String normalizedUpdatedBy = optionalIdentityValue(updatedBy, "updatedBy", MAX_SCOPE_ID_LENGTH);
+    if (scope == Scope.USER && identity.userId() == null) {
       throw new IllegalArgumentException("User scope requires X-User-ID header");
     }
 
-    String effectiveUserId = scope == Scope.USER ? userId : null;
+    ConfigIdentity effectiveIdentity = scope == Scope.USER ? identity : identity.withUserId(null);
 
     Optional<UiUserConfig> existing =
-        findConfig(tenantId, effectiveUserId, componentType, componentId, environment);
+        findConfig(effectiveIdentity);
     validateIfMatch(existing, ifMatch);
     JsonNode existingPayload = existing.map(cfg -> readJson(cfg.getPayload())).orElse(null);
     JsonNode sanitizedPayload = apiKeyProtectionService.sanitizeForStorage(payload, existingPayload);
@@ -117,59 +121,47 @@ public class UserConfigService {
 
     if (ifMatch == null || ifMatch.isBlank()) {
       return upsertWithoutPrecondition(
-          tenantId,
-          effectiveUserId,
-          componentType,
-          componentId,
-          environment,
+          effectiveIdentity,
           payloadJson,
           tagsJson,
-          updatedBy);
+          normalizedUpdatedBy);
     }
 
     if (existing.isEmpty()) {
       UiUserConfig created =
           UiUserConfig.builder()
-              .tenantId(tenantId)
-              .userId(effectiveUserId)
-              .componentType(componentType)
-              .componentId(componentId)
-              .environment(environment)
+              .tenantId(effectiveIdentity.tenantId())
+              .userId(effectiveIdentity.userId())
+              .componentType(effectiveIdentity.componentType())
+              .componentId(effectiveIdentity.componentId())
+              .environment(effectiveIdentity.environment())
               .payload(payloadJson)
               .tags(tagsJson)
               .version(1L)
               .etag(UUID.randomUUID())
-              .updatedBy(updatedBy)
+              .updatedBy(normalizedUpdatedBy)
               .build();
       try {
         return repository.saveAndFlush(created);
       } catch (DataIntegrityViolationException ex) {
         return recoverConcurrentCreate(
-            tenantId,
-            effectiveUserId,
-            componentType,
-            componentId,
-            environment,
+            effectiveIdentity,
             payloadJson,
             tagsJson,
-            updatedBy,
+            normalizedUpdatedBy,
             ex);
       }
     }
 
-    return updateExisting(existing.get(), payloadJson, tagsJson, updatedBy);
+    return updateExisting(existing.get(), payloadJson, tagsJson, normalizedUpdatedBy);
   }
 
   private UiUserConfig upsertWithoutPrecondition(
-      String tenantId,
-      String effectiveUserId,
-      String componentType,
-      String componentId,
-      String environment,
+      ConfigIdentity identity,
       String payloadJson,
       String tagsJson,
       String updatedBy) {
-    String conflictTarget = conflictTarget(effectiveUserId, environment);
+    String conflictTarget = conflictTarget(identity.userId(), identity.environment());
     UUID insertEtag = UUID.randomUUID();
     UUID updateEtag = UUID.randomUUID();
     UUID id = UUID.randomUUID();
@@ -201,11 +193,11 @@ public class UserConfigService {
     MapSqlParameterSource params =
         new MapSqlParameterSource()
             .addValue("id", id.toString())
-            .addValue("tenantId", tenantId)
-            .addValue("userId", effectiveUserId)
-            .addValue("componentType", componentType)
-            .addValue("componentId", componentId)
-            .addValue("environment", environment)
+            .addValue("tenantId", identity.tenantId())
+            .addValue("userId", identity.userId())
+            .addValue("componentType", identity.componentType())
+            .addValue("componentId", identity.componentId())
+            .addValue("environment", identity.environment())
             .addValue("payload", payloadJson)
             .addValue("tags", tagsJson)
             .addValue("insertEtag", insertEtag.toString())
@@ -259,17 +251,13 @@ public class UserConfigService {
   }
 
   private UiUserConfig recoverConcurrentCreate(
-      String tenantId,
-      String effectiveUserId,
-      String componentType,
-      String componentId,
-      String environment,
+      ConfigIdentity identity,
       String payloadJson,
       String tagsJson,
       String updatedBy,
       DataIntegrityViolationException cause) {
     UiUserConfig current =
-        findConfig(tenantId, effectiveUserId, componentType, componentId, environment)
+        findConfig(identity)
             .orElseThrow(() -> cause);
     return updateExisting(current, payloadJson, tagsJson, updatedBy);
   }
@@ -292,15 +280,14 @@ public class UserConfigService {
       String componentId,
       String environment,
       String ifMatch) {
-    validateComponentType(componentType);
-    validateComponentId(componentId);
-    if (scope == Scope.USER && (userId == null || userId.isBlank())) {
+    ConfigIdentity identity = normalizeIdentity(tenantId, userId, componentType, componentId, environment);
+    if (scope == Scope.USER && identity.userId() == null) {
       throw new IllegalArgumentException("User scope requires X-User-ID header");
     }
 
-    String effectiveUserId = scope == Scope.USER ? userId : null;
+    ConfigIdentity effectiveIdentity = scope == Scope.USER ? identity : identity.withUserId(null);
     Optional<UiUserConfig> existing =
-        findConfig(tenantId, effectiveUserId, componentType, componentId, environment);
+        findConfig(effectiveIdentity);
     validateIfMatch(existing, ifMatch);
     if (existing.isEmpty()) {
       throw new NotFoundException("Configuration not found for the requested scope");
@@ -330,51 +317,75 @@ public class UserConfigService {
     }
   }
 
-  private Optional<UiUserConfig> findConfig(
-      String tenantId, String userId, String componentType, String componentId, String environment) {
-    if (userId != null) {
-      return findUserConfig(tenantId, userId, componentType, componentId, environment);
+  private Optional<UiUserConfig> findConfig(ConfigIdentity identity) {
+    if (identity.userId() != null) {
+      return findUserConfig(identity);
     }
-    return findTenantConfig(tenantId, componentType, componentId, environment);
+    return findTenantConfig(identity);
   }
 
-  private Optional<UiUserConfig> findUserConfig(
-      String tenantId, String userId, String componentType, String componentId, String environment) {
-    if (environment == null) {
+  private Optional<UiUserConfig> findUserConfig(ConfigIdentity identity) {
+    if (identity.environment() == null) {
       return repository
           .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdOrderByUpdatedAtDesc(
-              tenantId, componentType, componentId, userId);
+              identity.tenantId(), identity.componentType(), identity.componentId(), identity.userId());
     }
     return repository
         .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentAndUserIdOrderByUpdatedAtDesc(
-            tenantId, componentType, componentId, environment, userId);
+            identity.tenantId(), identity.componentType(), identity.componentId(), identity.environment(), identity.userId());
   }
 
-  private Optional<UiUserConfig> findTenantConfig(
-      String tenantId, String componentType, String componentId, String environment) {
-    if (environment == null) {
+  private Optional<UiUserConfig> findTenantConfig(ConfigIdentity identity) {
+    if (identity.environment() == null) {
       return repository
           .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdIsNullOrderByUpdatedAtDesc(
-              tenantId, componentType, componentId);
+              identity.tenantId(), identity.componentType(), identity.componentId());
     }
     return repository
         .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentAndUserIdIsNullOrderByUpdatedAtDesc(
-            tenantId, componentType, componentId, environment);
+            identity.tenantId(), identity.componentType(), identity.componentId(), identity.environment());
   }
 
-  private void validateComponentType(String componentType) {
-    if (componentType == null || componentType.isBlank()) {
-      throw new IllegalArgumentException("componentType is required");
-    }
+  private ConfigIdentity normalizeIdentity(
+      String tenantId, String userId, String componentType, String componentId, String environment) {
+    return new ConfigIdentity(
+        requiredIdentityValue(tenantId, "tenantId", MAX_SCOPE_ID_LENGTH),
+        optionalIdentityValue(userId, "userId", MAX_SCOPE_ID_LENGTH),
+        requiredIdentityValue(componentType, "componentType", MAX_COMPONENT_TYPE_LENGTH),
+        requiredIdentityValue(componentId, "componentId", MAX_COMPONENT_ID_LENGTH),
+        optionalIdentityValue(environment, "environment", MAX_ENVIRONMENT_LENGTH));
   }
 
-  private void validateComponentId(String componentId) {
-    if (componentId == null || componentId.isBlank()) {
-      throw new IllegalArgumentException("componentId is required");
+  private String requiredIdentityValue(String value, String fieldName, int maxLength) {
+    String normalized = normalizeToNull(value);
+    if (normalized == null) {
+      throw new IllegalArgumentException(fieldName + " is required");
     }
-    if (componentId.length() > MAX_COMPONENT_ID_LENGTH) {
+    validateMaxLength(fieldName, normalized, maxLength);
+    return normalized;
+  }
+
+  private String optionalIdentityValue(String value, String fieldName, int maxLength) {
+    String normalized = normalizeToNull(value);
+    if (normalized == null) {
+      return null;
+    }
+    validateMaxLength(fieldName, normalized, maxLength);
+    return normalized;
+  }
+
+  private String normalizeToNull(String value) {
+    if (value == null) {
+      return null;
+    }
+    String trimmed = value.trim();
+    return trimmed.isEmpty() ? null : trimmed;
+  }
+
+  private void validateMaxLength(String fieldName, String value, int maxLength) {
+    if (value.length() > maxLength) {
       throw new IllegalArgumentException(
-          "componentId exceeds max length of " + MAX_COMPONENT_ID_LENGTH + " characters");
+          fieldName + " exceeds max length of " + maxLength + " characters");
     }
   }
 
@@ -425,6 +436,17 @@ public class UserConfigService {
   public static class PreconditionFailedException extends RuntimeException {
     public PreconditionFailedException(String message) {
       super(message);
+    }
+  }
+
+  private record ConfigIdentity(
+      String tenantId,
+      String userId,
+      String componentType,
+      String componentId,
+      String environment) {
+    ConfigIdentity withUserId(String userId) {
+      return new ConfigIdentity(tenantId, userId, componentType, componentId, environment);
     }
   }
 }

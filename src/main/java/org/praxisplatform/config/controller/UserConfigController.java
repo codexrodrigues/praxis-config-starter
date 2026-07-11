@@ -111,9 +111,9 @@ public class UserConfigController {
 
     UserConfigResponse body =
         UserConfigResponse.builder()
-            .componentType(componentType)
-            .componentId(componentId)
-            .environment(environment)
+            .componentType(cfg.getComponentType())
+            .componentId(cfg.getComponentId())
+            .environment(cfg.getEnvironment())
             .scope(resolved.get().scope().name().toLowerCase())
             .version(cfg.getVersion())
             .etag(etag)
@@ -211,9 +211,9 @@ public class UserConfigController {
 
     UserConfigResponse body =
         UserConfigResponse.builder()
-            .componentType(componentType)
-            .componentId(componentId)
-            .environment(environment)
+            .componentType(saved.getComponentType())
+            .componentId(saved.getComponentId())
+            .environment(saved.getEnvironment())
             .scope(scope.name().toLowerCase())
             .version(saved.getVersion())
             .etag(etag)
@@ -367,4 +367,3 @@ public class UserConfigController {
     return ResponseEntity.badRequest().body(ex.getMessage());
   }
 }
-
