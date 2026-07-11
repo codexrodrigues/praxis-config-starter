@@ -449,6 +449,13 @@ tenant/environment and attached to the target concept, then marks it
 evidence payloads, evidence keys, replacement keys, source pointers, source
 URIs, patch hashes, prompts or chat history.
 
+Validation publishes operation capability diagnostics so reviewers can
+distinguish operation types proposed by the semantic model from operation types
+that are executable in the current backend. In this cut, only `add_evidence`
+and `revert_evidence` are executable. Planned concept, alias, binding and
+relationship operations remain non-executable until a canonical applier and
+lifecycle/indexing proof exist, and they are rejected before approval.
+
 Status transition endpoints accept a compact governance decision payload:
 
 ```json

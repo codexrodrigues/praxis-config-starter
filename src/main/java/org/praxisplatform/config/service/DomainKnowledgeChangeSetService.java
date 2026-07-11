@@ -363,7 +363,7 @@ public class DomainKnowledgeChangeSetService {
                 patch);
         DomainKnowledgeChangeSetValidationResponse validation =
                 validator.validateCreateRequest(changeSet.getTenantId(), changeSet.getEnvironment(), validationRequest);
-        changeSet.setValidationResult(writeValidationResult(validation, sha256(writePatch(patch))));
+        changeSet.setValidationResult(writeValidationResult(validation, sha256(writePatch(patch)), patch));
         repository.save(changeSet);
         return validation;
     }
@@ -382,6 +382,7 @@ public class DomainKnowledgeChangeSetService {
         requireAllowedStatusTransition(changeSet.getStatus(), status);
         if ("approved".equals(status)) {
             requireValidChangeSet(changeSet);
+            requireExecutablePatch(changeSet);
             requireText(request.reviewerId(), "reviewerId");
         }
         if ("rejected".equals(status)) {
@@ -414,6 +415,7 @@ public class DomainKnowledgeChangeSetService {
         }
         requireValidChangeSet(changeSet);
         List<DomainKnowledgeChangeSetOperationRequest> operations = readPatchRequests(changeSet.getPatch());
+        requireExecutablePatch(operations);
         if (operations.isEmpty()) {
             throw new ConfigurationIngestionException("Domain knowledge change set patch is empty");
         }
@@ -448,7 +450,7 @@ public class DomainKnowledgeChangeSetService {
         changeSet.setIntent(normalize(request.intent()));
         changeSet.setReason(request.reason().trim());
         changeSet.setPatch(patch);
-        changeSet.setValidationResult(writeValidationResult(validation, patchHash));
+        changeSet.setValidationResult(writeValidationResult(validation, patchHash, request.patch()));
         return toResponse(repository.save(changeSet));
     }
 
@@ -753,12 +755,14 @@ public class DomainKnowledgeChangeSetService {
 
     private String writeValidationResult(
             DomainKnowledgeChangeSetValidationResponse validation,
-            String patchHash) {
+            String patchHash,
+            List<DomainKnowledgeChangeSetOperationRequest> patch) {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("validationStatus", validation.valid() ? VALIDATION_STATUS_VALID : VALIDATION_STATUS_INVALID);
         root.put("patchHash", patchHash);
         root.put("errorCount", validation.errorCount());
         root.put("warningCount", validation.warningCount());
+        writeOperationCapabilityDiagnostics(root, patch);
         ArrayNode issues = root.putArray("issues");
         validation.issues().forEach(issue -> {
             ObjectNode item = issues.addObject();
@@ -768,6 +772,40 @@ public class DomainKnowledgeChangeSetService {
             item.put("message", issue.message());
         });
         return write(root);
+    }
+
+    private void writeOperationCapabilityDiagnostics(
+            ObjectNode root,
+            List<DomainKnowledgeChangeSetOperationRequest> patch) {
+        List<String> proposedPatchTypes = operationTypes(patch);
+        writeArray(root.putArray("proposedOperationTypes"), proposedPatchTypes);
+        writeArray(root.putArray("executableOperationTypes"),
+                DomainKnowledgeChangeSetValidator.executableOperationTypes().stream().sorted().toList());
+        writeArray(root.putArray("executablePatchOperationTypes"),
+                proposedPatchTypes.stream()
+                        .filter(DomainKnowledgeChangeSetValidator.executableOperationTypes()::contains)
+                        .toList());
+        writeArray(root.putArray("nonExecutableOperationTypes"),
+                proposedPatchTypes.stream()
+                        .filter(DomainKnowledgeChangeSetValidator.proposedOperationTypes()::contains)
+                        .filter(type -> !DomainKnowledgeChangeSetValidator.executableOperationTypes().contains(type))
+                        .toList());
+    }
+
+    private List<String> operationTypes(List<DomainKnowledgeChangeSetOperationRequest> patch) {
+        if (patch == null) {
+            return List.of();
+        }
+        return patch.stream()
+                .map(operation -> operation == null ? null : normalize(operation.operationType()))
+                .filter(StringUtils::hasText)
+                .collect(java.util.stream.Collectors.collectingAndThen(
+                        java.util.stream.Collectors.toCollection(LinkedHashSet::new),
+                        List::copyOf));
+    }
+
+    private void writeArray(ArrayNode target, List<String> values) {
+        values.forEach(target::add);
     }
 
     private String writePatch(List<DomainKnowledgeChangeSetOperationRequest> patch) {
@@ -865,6 +903,21 @@ public class DomainKnowledgeChangeSetService {
         if (!VALIDATION_STATUS_VALID.equals(validation.path("validationStatus").asText(null))
                 || validation.path("errorCount").asInt(0) > 0) {
             throw new ConfigurationIngestionException("Domain knowledge change set must be valid before approval");
+        }
+    }
+
+    private void requireExecutablePatch(DomainKnowledgeChangeSet changeSet) {
+        requireExecutablePatch(readPatchRequests(changeSet.getPatch()));
+    }
+
+    private void requireExecutablePatch(List<DomainKnowledgeChangeSetOperationRequest> operations) {
+        List<String> nonExecutableTypes = operationTypes(operations).stream()
+                .filter(type -> !DomainKnowledgeChangeSetValidator.executableOperationTypes().contains(type))
+                .toList();
+        if (!nonExecutableTypes.isEmpty()) {
+            throw new ConfigurationIngestionException(
+                    "Domain knowledge change set contains operation types without canonical appliers: "
+                            + nonExecutableTypes);
         }
     }
 

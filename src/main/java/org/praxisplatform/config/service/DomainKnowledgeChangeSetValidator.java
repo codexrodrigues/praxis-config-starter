@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -22,13 +23,17 @@ public class DomainKnowledgeChangeSetValidator {
 
     private static final Set<String> AUTHOR_TYPES = Set.of("human", "llm", "system");
     private static final Set<String> INITIAL_STATUSES = Set.of(STATUS_DRAFT, STATUS_PROPOSED);
-    private static final Set<String> OPERATION_TYPES = Set.of(
+    private static final Set<String> PROPOSED_OPERATION_TYPES = Set.of(
             "create_concept",
             "update_concept_summary",
             "set_concept_visibility",
             "add_alias",
             "add_binding",
             "add_relationship",
+            "add_evidence",
+            "revert_evidence"
+    );
+    private static final Set<String> EXECUTABLE_OPERATION_TYPES = Set.of(
             "add_evidence",
             "revert_evidence"
     );
@@ -104,7 +109,7 @@ public class DomainKnowledgeChangeSetValidator {
             validateOperation(tenantId, environment, request, operations.get(i), i, operationIds, issues);
         }
 
-        return report(issues);
+        return report(issues, operations);
     }
 
     private void validateOperation(
@@ -135,9 +140,12 @@ public class DomainKnowledgeChangeSetValidator {
         } else if (DESTRUCTIVE_OPERATION_TYPES.contains(operationType)) {
             error(issues, "destructive_operation_not_supported", pointer + "/operationType",
                     "destructive operations are not supported in this cut");
-        } else if (!OPERATION_TYPES.contains(operationType)) {
+        } else if (!PROPOSED_OPERATION_TYPES.contains(operationType)) {
             error(issues, "unsupported_operation_type", pointer + "/operationType",
                     "operationType is not supported");
+        } else if (!EXECUTABLE_OPERATION_TYPES.contains(operationType)) {
+            error(issues, "non_executable_operation_type", pointer + "/operationType",
+                    "operationType is proposed but has no canonical applier in this cut");
         }
 
         requireText(operation.reason(), pointer + "/reason", "missing_reason",
@@ -298,17 +306,45 @@ public class DomainKnowledgeChangeSetValidator {
 
     private DomainKnowledgeChangeSetValidationResponse report(
             List<DomainKnowledgeChangeSetValidationIssue> issues) {
+        return report(issues, List.of());
+    }
+
+    private DomainKnowledgeChangeSetValidationResponse report(
+            List<DomainKnowledgeChangeSetValidationIssue> issues,
+            List<DomainKnowledgeChangeSetOperationRequest> operations) {
         int errorCount = (int) issues.stream()
                 .filter(issue -> "error".equals(issue.severity()))
                 .count();
         int warningCount = (int) issues.stream()
                 .filter(issue -> "warning".equals(issue.severity()))
                 .count();
+        List<String> proposedOperationTypes = operationTypes(operations);
         return new DomainKnowledgeChangeSetValidationResponse(
                 errorCount == 0,
                 errorCount,
                 warningCount,
-                List.copyOf(issues));
+                List.copyOf(issues),
+                proposedOperationTypes,
+                EXECUTABLE_OPERATION_TYPES.stream().sorted().toList(),
+                proposedOperationTypes.stream()
+                        .filter(EXECUTABLE_OPERATION_TYPES::contains)
+                        .toList(),
+                proposedOperationTypes.stream()
+                        .filter(PROPOSED_OPERATION_TYPES::contains)
+                        .filter(type -> !EXECUTABLE_OPERATION_TYPES.contains(type))
+                        .toList());
+    }
+
+    private List<String> operationTypes(List<DomainKnowledgeChangeSetOperationRequest> operations) {
+        if (operations == null) {
+            return List.of();
+        }
+        return operations.stream()
+                .map(operation -> operation == null ? null : normalize(operation.operationType()))
+                .filter(StringUtils::hasText)
+                .collect(java.util.stream.Collectors.collectingAndThen(
+                        java.util.stream.Collectors.toCollection(LinkedHashSet::new),
+                        List::copyOf));
     }
 
     private void error(
@@ -333,5 +369,13 @@ public class DomainKnowledgeChangeSetValidator {
 
     private String normalizeKey(String value) {
         return normalize(value).replace("_", "").replace("-", "");
+    }
+
+    public static Set<String> proposedOperationTypes() {
+        return PROPOSED_OPERATION_TYPES;
+    }
+
+    public static Set<String> executableOperationTypes() {
+        return EXECUTABLE_OPERATION_TYPES;
     }
 }
