@@ -616,6 +616,165 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldGroundChartValidatorsInApiMetadataStatsCapabilitiesAndTargets() throws Exception {
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "apiMetadata": {
+                    "resources": [
+                      {
+                        "resourcePath": "/api/sales/orders",
+                        "statsCapabilities": {
+                          "operations": ["group-by", "timeseries"],
+                          "fields": [
+                            { "field": "month", "allowedAggregations": ["count"] },
+                            { "field": "revenue", "allowedAggregations": ["sum", "avg"] }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "availableTargets": [
+                    {
+                      "id": "orders-filter",
+                      "kind": "filter-widget",
+                      "supportedActions": ["filter-widget"]
+                    }
+                  ],
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "bar",
+                    "source": { "kind": "praxis.stats", "resource": "/api/sales/orders" },
+                    "dimensions": [{ "field": "month" }],
+                    "metrics": [{ "field": "revenue", "aggregation": "sum", "axis": "primary" }]
+                  }
+                }
+                """);
+
+        List<String> failures = new ArrayList<>();
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", false,
+                        "remote-resource-in-api-metadata,stats-operation-supported,bound-fields-exist"),
+                plan("{}", "{ \"sourceKind\": \"praxis.stats\", \"resourcePath\": { \"path\": \"/api/sales/orders\" }, \"operation\": \"group-by\", \"dimensions\": [{ \"field\": \"month\" }], \"metrics\": [{ \"field\": \"revenue\" }] }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("series.add", "series", "x-ui-chart-metric-by-field", false,
+                        "series-field-exists,series-field-aggregable"),
+                plan("{}", "{ \"field\": \"revenue\", \"aggregation\": \"avg\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("crossFilter.configure", "crossFilter", "x-ui-chart-events-cross-filter", false,
+                        "event-target-governed,event-action-supported,event-mapping-fields-exist"),
+                plan("{}", "{ \"action\": \"filter-widget\", \"target\": \"orders-filter\", \"mapping\": { \"month\": \"month\" } }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+    }
+
+    @Test
+    void shouldFailClosedWhenChartGroundingCatalogsAreMissingOrUnsupported() throws Exception {
+        List<String> failures = new ArrayList<>();
+        JsonNode chartOnlyConfig = objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "bar",
+                    "source": { "kind": "praxis.stats", "resource": "/api/sales/orders" },
+                    "dimensions": [{ "field": "month" }],
+                    "metrics": [{ "field": "revenue", "aggregation": "sum" }]
+                  }
+                }
+                """);
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", false,
+                        "remote-resource-in-api-metadata,stats-operation-supported,bound-fields-exist"),
+                plan("{}", "{ \"sourceKind\": \"praxis.stats\", \"resource\": \"/api/sales/orders\", \"operation\": \"group-by\", \"dimensions\": [{ \"field\": \"month\" }] }"),
+                chartOnlyConfig,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("crossFilter.configure", "crossFilter", "x-ui-chart-events-cross-filter", false,
+                        "event-target-governed"),
+                plan("{}", "{ \"action\": \"filter-widget\", \"target\": \"orders-filter\" }"),
+                chartOnlyConfig,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator remote-resource-in-api-metadata failed for data.resource.bind: required API metadata resource catalog is unavailable",
+                        "validator stats-operation-supported failed for data.resource.bind: required stats capabilities are unavailable for /api/sales/orders",
+                        "validator chart-fields-exist failed for data.resource.bind: required field catalog is unavailable",
+                        "validator event-target-governed failed for crossFilter.configure: required event target catalog is unavailable");
+
+        failures.clear();
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "apiMetadata": {
+                    "resources": [
+                      {
+                        "resourcePath": "/api/sales/orders",
+                        "statsCapabilities": {
+                          "operations": ["group-by"],
+                          "fields": [
+                            { "field": "month", "allowedAggregations": ["count"] },
+                            { "field": "revenue", "allowedAggregations": ["sum"] }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "availableTargets": [
+                    { "id": "orders-detail", "kind": "detail", "supportedActions": ["open-detail"] }
+                  ]
+                }
+                """);
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", false,
+                        "remote-resource-in-api-metadata,stats-operation-supported,bound-fields-exist"),
+                plan("{}", "{ \"sourceKind\": \"praxis.stats\", \"resource\": \"/api/sales/missing\", \"operation\": \"distribution\", \"dimensions\": [{ \"field\": \"unknown\" }] }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("series.add", "series", "x-ui-chart-metric-by-field", false,
+                        "series-field-exists,series-field-aggregable"),
+                plan("{}", "{ \"field\": \"revenue\", \"aggregation\": \"avg\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("crossFilter.configure", "crossFilter", "x-ui-chart-events-cross-filter", false,
+                        "event-target-governed,event-action-supported"),
+                plan("{}", "{ \"action\": \"filter-widget\", \"target\": \"orders-detail\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator remote-resource-in-api-metadata failed for data.resource.bind: resource is not published in API metadata /api/sales/missing",
+                        "validator stats-operation-supported failed for data.resource.bind: required stats capabilities are unavailable for /api/sales/missing",
+                        "validator chart-fields-exist failed for data.resource.bind: unknown field unknown",
+                        "validator series-field-aggregable failed for series.add: unsupported aggregation avg",
+                        "validator event-target-governed failed for crossFilter.configure: target orders-detail does not support action filter-widget");
+    }
+
+    @Test
     void shouldValidateVisualBuilderGraphVariablesAndEffects() throws Exception {
         List<String> failures = new ArrayList<>();
         JsonNode config = objectMapper.readTree("""
