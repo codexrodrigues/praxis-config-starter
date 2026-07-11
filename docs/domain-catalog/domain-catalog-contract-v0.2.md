@@ -24,8 +24,8 @@ The top-level shape remains unchanged:
 {
   "schemaVersion": "praxis.domain-catalog/v0.2",
   "service": {},
-              "release": {},
-              "resourceKey": "human-resources.folhas-pagamento",
+  "release": {},
+  "resourceKey": "human-resources.folhas-pagamento",
   "contexts": [],
   "nodes": [],
   "edges": [],
