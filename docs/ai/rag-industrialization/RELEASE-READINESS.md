@@ -35,6 +35,7 @@ No `praxis-config-starter`:
 cp ../praxis-ui-angular/dist/praxis-component-registry-ingestion.json src/main/resources/ai-registry/registry-snapshot.json
 mvn -B -Dtest=RagVectorStoreServiceTest,RegistryIngestionServiceIdentityTest,ContextRetrievalServiceTest,AgenticAuthoringToolRegistryTest,AgenticAuthoringTurnEngineTest test
 mvn -B -Dtest=AiRegistrySnapshotContractTest,AiRegistryBootstrapServiceTest test
+mvn -B -Dtest=AiRegistryTemplateServiceTest,AiRegistryTemplateControllerTest test
 git diff --check
 ```
 
