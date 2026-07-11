@@ -55,7 +55,7 @@ public class AgenticAuthoringApplyService {
                 environment,
                 payload,
                 tags,
-                normalizeConditionHeader(ifMatch),
+                ifMatch,
                 updatedBy);
 
         String etag = saved.getEtag() != null ? saved.getEtag().toString() : null;
@@ -130,23 +130,6 @@ public class AgenticAuthoringApplyService {
             case "tenant" -> UserConfigService.Scope.TENANT;
             default -> throw new IllegalArgumentException("Invalid scope. Use user or tenant.");
         };
-    }
-
-    private String normalizeConditionHeader(String headerValue) {
-        if (headerValue == null || headerValue.isBlank()) {
-            return null;
-        }
-        String trimmed = headerValue.trim();
-        if ("*".equals(trimmed)) {
-            return trimmed;
-        }
-        if (trimmed.regionMatches(true, 0, "W/", 0, 2)) {
-            trimmed = trimmed.substring(2).trim();
-        }
-        if (trimmed.startsWith("\"") && trimmed.endsWith("\"") && trimmed.length() >= 2) {
-            return trimmed.substring(1, trimmed.length() - 1);
-        }
-        return trimmed;
     }
 
     private String defaultIfBlank(String value, String fallback) {

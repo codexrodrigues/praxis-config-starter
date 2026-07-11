@@ -136,6 +136,74 @@ class UserConfigControllerTest {
   }
 
   @Test
+  void shouldReturn304WhenIfNoneMatchWildcardTargetsExistingConfig() {
+    UiUserConfig config =
+        buildConfig("tenant-a", null, "praxis-dynamic-page", "page:demo:sales:dashboard", "{\"widgets\":[]}");
+
+    when(service.getResolved("tenant-a", null, "praxis-dynamic-page", "page:demo:sales:dashboard", null))
+        .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(config, UserConfigService.Scope.TENANT)));
+
+    ResponseEntity<UserConfigResponse> response =
+        controller.getConfigByParams(
+            "praxis-dynamic-page",
+            "page:demo:sales:dashboard",
+            "tenant-a",
+            null,
+            null,
+            "*",
+            null);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_MODIFIED);
+    assertThat(response.getHeaders().getETag()).isEqualTo("\"" + config.getEtag() + "\"");
+    assertThat(response.getBody()).isNull();
+  }
+
+  @Test
+  void shouldReturn304WhenIfNoneMatchListContainsWeakCurrentEtag() {
+    UiUserConfig config =
+        buildConfig("tenant-a", null, "praxis-dynamic-page", "page:demo:sales:dashboard", "{\"widgets\":[]}");
+
+    when(service.getResolved("tenant-a", null, "praxis-dynamic-page", "page:demo:sales:dashboard", null))
+        .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(config, UserConfigService.Scope.TENANT)));
+
+    ResponseEntity<UserConfigResponse> response =
+        controller.getConfigByParams(
+            "praxis-dynamic-page",
+            "page:demo:sales:dashboard",
+            "tenant-a",
+            null,
+            null,
+            "\"stale-etag\", W/\"" + config.getEtag() + "\"",
+            null);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_MODIFIED);
+    assertThat(response.getHeaders().getETag()).isEqualTo("\"" + config.getEtag() + "\"");
+    assertThat(response.getBody()).isNull();
+  }
+
+  @Test
+  void shouldRejectMalformedIfNoneMatchHeader() {
+    UiUserConfig config =
+        buildConfig("tenant-a", null, "praxis-dynamic-page", "page:demo:sales:dashboard", "{\"widgets\":[]}");
+
+    when(service.getResolved("tenant-a", null, "praxis-dynamic-page", "page:demo:sales:dashboard", null))
+        .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(config, UserConfigService.Scope.TENANT)));
+
+    assertThatThrownBy(
+            () ->
+                controller.getConfigByParams(
+                    "praxis-dynamic-page",
+                    "page:demo:sales:dashboard",
+                    "tenant-a",
+                    null,
+                    null,
+                    "stale-etag",
+                    null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Invalid ETag condition header");
+  }
+
+  @Test
   void shouldReturnPersistedPayloadAndQuotedEtagOnUpsert() {
     when(apiKeyProtectionService.sanitizeForResponse(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -208,7 +276,7 @@ class UserConfigControllerTest {
   }
 
   @Test
-  void shouldNormalizeWeakIfMatchBeforeDelegatingUpsert() {
+  void shouldDelegateIfMatchHeaderWithoutSingleValueNormalization() {
     when(apiKeyProtectionService.sanitizeForResponse(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
     JsonNode payload = readJson("{\"density\":\"compact\"}");
@@ -229,7 +297,7 @@ class UserConfigControllerTest {
             eq("local"),
             any(JsonNode.class),
             eq(null),
-            eq("etag-123"),
+            eq("\"etag-123\", \"etag-456\""),
             eq("qa-user")))
         .thenReturn(saved);
 
@@ -244,7 +312,7 @@ class UserConfigControllerTest {
             "user-9",
             "local",
             "qa-user",
-            "W/\"etag-123\"",
+            "\"etag-123\", \"etag-456\"",
             null,
             request);
 

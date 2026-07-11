@@ -726,6 +726,10 @@ paths:
         - name: If-Match
           in: header
           required: false
+          description: >
+            Condicao de concorrencia delegada a ui_user_config. Aceita *, entity tags fortes
+            entre aspas ou lista separada por virgula; validadores fracos sao sintaticamente
+            aceitos, mas nao satisfazem If-Match.
           schema:
             type: string
       requestBody:

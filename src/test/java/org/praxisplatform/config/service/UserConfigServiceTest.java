@@ -99,10 +99,126 @@ class UserConfigServiceTest {
                     null,
                     payload,
                     null,
-                    "stale-etag",
+                    "\"stale-etag\"",
                     "qa-user"))
         .isInstanceOf(UserConfigService.PreconditionFailedException.class)
         .hasMessageContaining("If-Match precondition failed");
+
+    verify(repository, never()).saveAndFlush(any(UiUserConfig.class));
+  }
+
+  @Test
+  void shouldAcceptUpsertWhenIfMatchListContainsCurrentStrongEtag() throws Exception {
+    JsonNode payload = new ObjectMapper().readTree("{\"columns\":[\"id\"]}");
+    UiUserConfig current =
+        UiUserConfig.builder()
+            .tenantId("tenant-a")
+            .userId("user-1")
+            .componentType("praxis-table")
+            .componentId("table-config:employees")
+            .payload("{\"columns\":[]}")
+            .version(2L)
+            .etag(UUID.fromString("123e4567-e89b-12d3-a456-426614174000"))
+            .build();
+
+    when(repository
+            .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdOrderByUpdatedAtDesc(
+                "tenant-a", "praxis-table", "table-config:employees", "user-1"))
+        .thenReturn(Optional.of(current));
+    when(apiKeyProtectionService.sanitizeForStorage(payload, readJson("{\"columns\":[]}"))).thenReturn(payload);
+    when(repository.saveAndFlush(current)).thenReturn(current);
+
+    UiUserConfig saved =
+        service.upsert(
+            UserConfigService.Scope.USER,
+            "tenant-a",
+            "user-1",
+            "praxis-table",
+            "table-config:employees",
+            null,
+            payload,
+            null,
+            "\"stale\", \"123e4567-e89b-12d3-a456-426614174000\"",
+            "qa-user");
+
+    assertThat(saved).isSameAs(current);
+    assertThat(saved.getVersion()).isEqualTo(3L);
+    assertThat(saved.getEtag()).isNotEqualTo(UUID.fromString("123e4567-e89b-12d3-a456-426614174000"));
+    verify(repository).saveAndFlush(current);
+  }
+
+  @Test
+  void shouldRejectWeakIfMatchEvenWhenValueMatchesCurrentEtag() throws Exception {
+    JsonNode payload = new ObjectMapper().readTree("{\"columns\":[\"id\"]}");
+    UiUserConfig current =
+        UiUserConfig.builder()
+            .tenantId("tenant-a")
+            .userId("user-1")
+            .componentType("praxis-table")
+            .componentId("table-config:employees")
+            .payload("{\"columns\":[]}")
+            .version(2L)
+            .etag(UUID.fromString("123e4567-e89b-12d3-a456-426614174000"))
+            .build();
+
+    when(repository
+            .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdOrderByUpdatedAtDesc(
+                "tenant-a", "praxis-table", "table-config:employees", "user-1"))
+        .thenReturn(Optional.of(current));
+
+    assertThatThrownBy(
+            () ->
+                service.upsert(
+                    UserConfigService.Scope.USER,
+                    "tenant-a",
+                    "user-1",
+                    "praxis-table",
+                    "table-config:employees",
+                    null,
+                    payload,
+                    null,
+                    "W/\"123e4567-e89b-12d3-a456-426614174000\"",
+                    "qa-user"))
+        .isInstanceOf(UserConfigService.PreconditionFailedException.class)
+        .hasMessageContaining("If-Match precondition failed");
+
+    verify(repository, never()).saveAndFlush(any(UiUserConfig.class));
+  }
+
+  @Test
+  void shouldRejectMalformedIfMatchHeaderBeforePersisting() throws Exception {
+    JsonNode payload = new ObjectMapper().readTree("{\"columns\":[\"id\"]}");
+    UiUserConfig current =
+        UiUserConfig.builder()
+            .tenantId("tenant-a")
+            .userId("user-1")
+            .componentType("praxis-table")
+            .componentId("table-config:employees")
+            .payload("{\"columns\":[]}")
+            .version(2L)
+            .etag(UUID.fromString("123e4567-e89b-12d3-a456-426614174000"))
+            .build();
+
+    when(repository
+            .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdOrderByUpdatedAtDesc(
+                "tenant-a", "praxis-table", "table-config:employees", "user-1"))
+        .thenReturn(Optional.of(current));
+
+    assertThatThrownBy(
+            () ->
+                service.upsert(
+                    UserConfigService.Scope.USER,
+                    "tenant-a",
+                    "user-1",
+                    "praxis-table",
+                    "table-config:employees",
+                    null,
+                    payload,
+                    null,
+                    "123e4567-e89b-12d3-a456-426614174000",
+                    "qa-user"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Invalid ETag condition header");
 
     verify(repository, never()).saveAndFlush(any(UiUserConfig.class));
   }
@@ -134,9 +250,92 @@ class UserConfigServiceTest {
                     "praxis-table",
                     "table-config:employees",
                     null,
-                    "stale-etag"))
+                    "\"stale-etag\""))
         .isInstanceOf(UserConfigService.PreconditionFailedException.class)
         .hasMessageContaining("If-Match precondition failed");
+
+    verify(repository, never()).delete(any(UiUserConfig.class));
+  }
+
+  @Test
+  void shouldAllowDeleteWhenIfMatchWildcardTargetsExistingConfig() {
+    UiUserConfig current =
+        UiUserConfig.builder()
+            .tenantId("tenant-a")
+            .userId("user-1")
+            .componentType("praxis-table")
+            .componentId("table-config:employees")
+            .payload("{\"columns\":[]}")
+            .version(2L)
+            .etag(UUID.fromString("123e4567-e89b-12d3-a456-426614174001"))
+            .build();
+
+    when(repository
+            .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdOrderByUpdatedAtDesc(
+                "tenant-a", "praxis-table", "table-config:employees", "user-1"))
+        .thenReturn(Optional.of(current));
+
+    service.delete(
+        UserConfigService.Scope.USER,
+        "tenant-a",
+        "user-1",
+        "praxis-table",
+        "table-config:employees",
+        null,
+        "*");
+
+    verify(repository).delete(current);
+  }
+
+  @Test
+  void shouldAllowDeleteWhenIfMatchListContainsCurrentStrongEtag() {
+    UiUserConfig current =
+        UiUserConfig.builder()
+            .tenantId("tenant-a")
+            .userId("user-1")
+            .componentType("praxis-table")
+            .componentId("table-config:employees")
+            .payload("{\"columns\":[]}")
+            .version(2L)
+            .etag(UUID.fromString("123e4567-e89b-12d3-a456-426614174001"))
+            .build();
+
+    when(repository
+            .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdOrderByUpdatedAtDesc(
+                "tenant-a", "praxis-table", "table-config:employees", "user-1"))
+        .thenReturn(Optional.of(current));
+
+    service.delete(
+        UserConfigService.Scope.USER,
+        "tenant-a",
+        "user-1",
+        "praxis-table",
+        "table-config:employees",
+        null,
+        "\"stale\", \"123e4567-e89b-12d3-a456-426614174001\"");
+
+    verify(repository).delete(current);
+  }
+
+  @Test
+  void shouldRejectIfMatchWildcardWhenTargetDoesNotExist() {
+    when(repository
+            .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdOrderByUpdatedAtDesc(
+                "tenant-a", "praxis-table", "table-config:employees", "user-1"))
+        .thenReturn(Optional.empty());
+
+    assertThatThrownBy(
+            () ->
+                service.delete(
+                    UserConfigService.Scope.USER,
+                    "tenant-a",
+                    "user-1",
+                    "praxis-table",
+                    "table-config:employees",
+                    null,
+                    "*"))
+        .isInstanceOf(UserConfigService.PreconditionFailedException.class)
+        .hasMessageContaining("configuration not found");
 
     verify(repository, never()).delete(any(UiUserConfig.class));
   }
@@ -403,5 +602,9 @@ class UserConfigServiceTest {
             any(MapSqlParameterSource.class),
             ArgumentMatchers.<RowMapper<UiUserConfig>>any());
     return assertThat(sqlCaptor.getValue());
+  }
+
+  private JsonNode readJson(String raw) throws Exception {
+    return new ObjectMapper().readTree(raw);
   }
 }

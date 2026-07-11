@@ -47,7 +47,7 @@ class AgenticAuthoringApplyServiceTest {
                 eq("local"),
                 org.mockito.ArgumentMatchers.any(JsonNode.class),
                 org.mockito.ArgumentMatchers.any(JsonNode.class),
-                eq("stale-etag"),
+                eq("\"stale-etag\""),
                 eq("author"))).thenReturn(saved);
         when(apiKeyProtectionService.sanitizeForResponse(savedPayload)).thenReturn(savedPayload);
 
@@ -76,7 +76,7 @@ class AgenticAuthoringApplyServiceTest {
                 eq("local"),
                 payloadCaptor.capture(),
                 tagsCaptor.capture(),
-                eq("stale-etag"),
+                eq("\"stale-etag\""),
                 eq("author"));
         assertThat(payloadCaptor.getValue()).isEqualTo(savedPayload);
         JsonNode persistedInputs = payloadCaptor.getValue()

@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.domain.UiUserConfig;
 import org.praxisplatform.config.dto.UpsertUserConfigRequest;
 import org.praxisplatform.config.dto.UserConfigResponse;
+import org.praxisplatform.config.http.HttpEntityTagCondition;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.UiConfigWriteAuthorizationRequest;
 import org.praxisplatform.config.service.UiConfigWriteAuthorizer;
@@ -204,7 +205,7 @@ public class UserConfigController {
             environment,
             request.getPayload(),
             request.getTags(),
-            normalizeConditionHeader(ifMatch),
+            ifMatch,
             updatedBy);
 
     String etag = saved.getEtag() != null ? saved.getEtag().toString() : null;
@@ -279,7 +280,7 @@ public class UserConfigController {
         componentType,
         componentId,
         environment,
-        normalizeConditionHeader(ifMatch));
+        ifMatch);
     return ResponseEntity.noContent().build();
   }
 
@@ -300,31 +301,7 @@ public class UserConfigController {
 
   private boolean matches(String ifNoneMatch, String etag) {
     if (ifNoneMatch == null || etag == null) return false;
-    String clean = stripQuotes(ifNoneMatch);
-    return clean.equals(etag);
-  }
-
-  private String stripQuotes(String value) {
-    if (value == null) return null;
-    String trimmed = value.trim();
-    if (trimmed.regionMatches(true, 0, "W/", 0, 2)) {
-      trimmed = trimmed.substring(2).trim();
-    }
-    if (trimmed.startsWith("\"") && trimmed.endsWith("\"") && trimmed.length() >= 2) {
-      return trimmed.substring(1, trimmed.length() - 1);
-    }
-    return trimmed;
-  }
-
-  private String normalizeConditionHeader(String headerValue) {
-    if (headerValue == null || headerValue.isBlank()) {
-      return null;
-    }
-    String trimmed = headerValue.trim();
-    if ("*".equals(trimmed)) {
-      return trimmed;
-    }
-    return stripQuotes(trimmed);
+    return HttpEntityTagCondition.parse(ifNoneMatch).matchesWeak(etag);
   }
 
   private String formatEtag(String etag) {
