@@ -36,7 +36,26 @@ class AiRegistryBootstrapServiceTest {
               "generatedAt": "2026-04-23T00:00:00Z",
               "components": {
                 "praxis-table": {
-                  "description": "Table"
+                  "description": "Table",
+                  "authoringManifest": {
+                    "operations": [
+                      {
+                        "operationId": "columns.add"
+                      }
+                    ]
+                  },
+                  "chunks": [
+                    {
+                      "chunkIndex": 0,
+                      "chunkKind": "summary",
+                      "content": "Table summary"
+                    },
+                    {
+                      "chunkIndex": 1,
+                      "chunkKind": "authoring_manifest",
+                      "content": "Table authoring manifest"
+                    }
+                  ]
                 }
               }
             }
@@ -90,6 +109,12 @@ class AiRegistryBootstrapServiceTest {
                 .isEqualTo(sha256(SNAPSHOT));
         assertThat(objectMapper.readTree(metadata.getPayload()).path("componentCount").asLong())
                 .isEqualTo(1);
+        assertThat(objectMapper.readTree(metadata.getPayload()).path("authoringManifestCount").asLong())
+                .isEqualTo(1);
+        assertThat(objectMapper.readTree(metadata.getPayload()).path("chunkedComponentCount").asLong())
+                .isEqualTo(1);
+        assertThat(objectMapper.readTree(metadata.getPayload()).path("chunkCount").asLong())
+                .isEqualTo(2);
         assertThat(state.isSucceeded()).isTrue();
         assertThat(state.getPreviousSnapshotHash()).isEqualTo("old-hash");
     }

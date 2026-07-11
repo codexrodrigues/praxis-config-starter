@@ -13,9 +13,10 @@ O release esta pronto quando o corpus canonico pode ser regenerado, validado, pu
 1. Gerar e validar o corpus canonico no `praxis-ui-angular`.
 2. Gerar a projecao compacta deprecated apenas para consumidores legados.
 3. Gerar a provider projection opcional, sem upload real.
-4. Rodar testes focais do backend RAG/authoring.
-5. Conferir hygiene de diff.
-6. Registrar qualquer validacao nao executada.
+4. Sincronizar o snapshot classpath derivado do starter a partir do corpus canonico.
+5. Rodar testes focais do backend RAG/authoring.
+6. Conferir hygiene de diff.
+7. Registrar qualquer validacao nao executada.
 
 ## Comandos locais
 
@@ -31,7 +32,9 @@ git diff --check
 No `praxis-config-starter`:
 
 ```bash
+cp ../praxis-ui-angular/dist/praxis-component-registry-ingestion.json src/main/resources/ai-registry/registry-snapshot.json
 mvn -B -Dtest=RagVectorStoreServiceTest,RegistryIngestionServiceIdentityTest,ContextRetrievalServiceTest,AgenticAuthoringToolRegistryTest,AgenticAuthoringTurnEngineTest test
+mvn -B -Dtest=AiRegistrySnapshotContractTest,AiRegistryBootstrapServiceTest test
 git diff --check
 ```
 
@@ -62,6 +65,9 @@ Provider projection opcional:
 
 Backend:
 
+- `src/main/resources/ai-registry/registry-snapshot.json` e derivado do corpus canonico Angular;
+- `AiRegistrySnapshotContractTest` deve travar hash SHA-256, `version`, `generatedAt`, release id, total de componentes, cobertura de manifests e total de chunks do snapshot sincronizado;
+- a metadata `registry_snapshot_metadata` registra `snapshotHash`, `componentCount`, `authoringManifestCount`, `chunkedComponentCount`, `chunkCount`, `releaseId`, `version` e `generatedAt`;
 - `RegistryIngestionService.reindexRegistry(...)` retorna `RegistryReindexResult`;
 - `RagVectorStoreService.corpusReleaseStatus(...)` retorna `available=true` e `reconciled=true` para release publicada;
 - warnings vazios para release pronta.
@@ -89,6 +95,7 @@ Bloquear o corte se:
 - `sourcePointer` vazar caminho absoluto local ou URI local de arquivo;
 - `praxis-component-registry-rag.json` parecer corpus canonico;
 - provider projection contiver segredo, API key ou ID externo persistido;
+- snapshot classpath do starter divergir do corpus canonico Angular sem atualizar o teste de contrato com o novo hash e contagens;
 - reconciliation do backend retornar `corpus-chunk-count-mismatch`;
 - retrieval semantico normalizar query natural como token tecnico;
 - authoring pular `validate-plan`, `compile-patch`, preview ou apply.

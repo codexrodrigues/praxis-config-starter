@@ -6,15 +6,27 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
+import org.praxisplatform.config.rag.RagDocumentIdentity;
 import org.springframework.core.io.ClassPathResource;
 
 @Tag("unit")
 class AiRegistrySnapshotContractTest {
+
+    private static final String EXPECTED_SNAPSHOT_HASH =
+            "7113d8b2e173b8df9ccf8122af27ab86ec120dd5f635f5c285590372a79fab61";
+    private static final String EXPECTED_VERSION = "1.0.0";
+    private static final String EXPECTED_GENERATED_AT = "2026-07-11T00:48:07.010Z";
+    private static final int EXPECTED_COMPONENT_COUNT = 105;
+    private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 95;
+    private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 105;
+    private static final int EXPECTED_CHUNK_COUNT = 476;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -45,6 +57,27 @@ class AiRegistrySnapshotContractTest {
     }
 
     @Test
+    void classpathSnapshotMatchesCanonicalAngularIngestionRelease() throws Exception {
+        byte[] snapshotBytes = readSnapshotBytes();
+        JsonNode snapshot = objectMapper.readTree(snapshotBytes);
+        JsonNode components = snapshot.path("components");
+
+        assertThat(sha256(snapshotBytes)).isEqualTo(EXPECTED_SNAPSHOT_HASH);
+        assertThat(snapshot.path("version").asText()).isEqualTo(EXPECTED_VERSION);
+        assertThat(snapshot.path("generatedAt").asText()).isEqualTo(EXPECTED_GENERATED_AT);
+        assertThat(RagDocumentIdentity.resolveReleaseId(
+                null,
+                snapshot.path("version").asText(null),
+                snapshot.path("generatedAt").asText(null)))
+                .isEqualTo(EXPECTED_VERSION);
+        assertThat(components.isObject()).isTrue();
+        assertThat(components.size()).isEqualTo(EXPECTED_COMPONENT_COUNT);
+        assertThat(authoringManifestCount(components)).isEqualTo(EXPECTED_AUTHORING_MANIFEST_COUNT);
+        assertThat(chunkedComponentCount(components)).isEqualTo(EXPECTED_CHUNKED_COMPONENT_COUNT);
+        assertThat(chunkCount(components)).isEqualTo(EXPECTED_CHUNK_COUNT);
+    }
+
+    @Test
     void classpathSnapshotDoesNotReferenceUnsupportedBackendValidators() throws IOException {
         JsonNode components = readSnapshot().path("components");
         List<String> unsupportedValidators = new ArrayList<>();
@@ -71,10 +104,14 @@ class AiRegistrySnapshotContractTest {
     }
 
     private JsonNode readSnapshot() throws IOException {
+        return objectMapper.readTree(readSnapshotBytes());
+    }
+
+    private byte[] readSnapshotBytes() throws IOException {
         ClassPathResource resource = new ClassPathResource("ai-registry/registry-snapshot.json");
         assertThat(resource.exists()).isTrue();
         try (InputStream input = resource.getInputStream()) {
-            return objectMapper.readTree(input);
+            return input.readAllBytes();
         }
     }
 
@@ -87,6 +124,35 @@ class AiRegistrySnapshotContractTest {
             }
         }
         return count;
+    }
+
+    private long chunkedComponentCount(JsonNode components) {
+        long count = 0;
+        var fields = components.fields();
+        while (fields.hasNext()) {
+            JsonNode chunks = fields.next().getValue().path("chunks");
+            if (chunks.isArray() && !chunks.isEmpty()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private long chunkCount(JsonNode components) {
+        long count = 0;
+        var fields = components.fields();
+        while (fields.hasNext()) {
+            JsonNode chunks = fields.next().getValue().path("chunks");
+            if (chunks.isArray()) {
+                count += chunks.size();
+            }
+        }
+        return count;
+    }
+
+    private String sha256(byte[] bytes) throws Exception {
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(bytes);
+        return HexFormat.of().formatHex(digest);
     }
 
     private List<String> requiredAuthoringComponents() {

@@ -61,6 +61,7 @@ public final class AgenticAuthoringValidatorRegistry {
             "column-field-unique",
             "column-width-valid",
             "computed-expression-valid",
+            "computed-value-envelope-valid",
             "css-style-safe",
             "row-action-id-unique",
             "toolbar-action-id-unique",
@@ -277,6 +278,7 @@ public final class AgenticAuthoringValidatorRegistry {
             "permissions-delete-valid",
             "open-mode-supported",
             "modal-size-valid",
+            "drawer-runtime-available",
             "drawer-adapter-available-when-needed",
             "back-policy-valid",
             "settings-panel-shell-compatible",
@@ -457,9 +459,11 @@ public final class AgenticAuthoringValidatorRegistry {
             "timeline-item-field-supported",
             "timeline-item-id-unique",
             "timeline-item-valid",
+            "timeline-setting-supported",
             "timeline-target-valid",
             "unsafe-style-rejected",
-            "visible-when-json-logic");
+            "visible-when-json-logic",
+            "runtime-operation-declared");
 
     private final AgenticAuthoringTargetResolverRegistry targetResolverRegistry;
 
@@ -600,6 +604,9 @@ public final class AgenticAuthoringValidatorRegistry {
                 }
                 case "json-logic-valid", "logic-valid", "conditional-style-valid" ->
                         validateJsonLogicLikeInput(operationId, planOperation.path("input"), failures);
+                case "computed-value-envelope-valid" -> {
+                    // The closed input schema enforces expression/literal envelope shape; JsonLogic content is validated above.
+                }
                 case "grouping-fields-exist", "filter-fields-exist" ->
                         validateInputFieldsExist(operationId, planOperation.path("input"), config, failures);
                 case "control-type-unique" -> validateDynamicControlTypeUnique(operationId, planOperation, config, failures);
@@ -725,6 +732,9 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "table-child-operation-delegated", "form-child-operation-delegated" -> validateCrudChildPatchDelegated(operationId, planOperation, failures);
                 case "query-context-valid", "filter-criteria-bridge-valid", "crud-context-stable" -> validateCrudSerializableObjectInputs(operationId, planOperation, failures);
                 case "open-mode-binding-complete", "open-mode-supported", "drawer-adapter-available-when-needed" -> validateCrudOpenMode(operationId, planOperation, failures);
+                case "drawer-runtime-available" -> {
+                    // CRUD drawer uses the built-in dialog-backed runtime; host drawer adapters are optional presentation boundaries.
+                }
                 case "resource-create-supported", "resource-edit-supported", "resource-view-supported", "resource-delete-supported" -> validateCrudResourceCapability(operationId, validatorId, planOperation, config, failures);
                 case "delete-action-exists" -> validateCrudDeleteActionExists(operationId, config, failures);
                 case "destructive-delete-confirmed", "delete-permission-requires-confirmation" -> validateCrudDeleteConfirmed(operationId, planOperation, failures);
@@ -761,6 +771,9 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "feature-toggle-valid" -> validateChartFeatureToggle(operationId, planOperation, failures);
                 case "editor-runtime-round-trip" -> {
                     // Round-trip is enforced by compiling only canonical chartDocument paths consumed by editor and runtime.
+                }
+                case "runtime-operation-declared", "timeline-setting-supported" -> {
+                    // Input schemas enumerate the runtime operation and timeline setting contracts published by the Angular manifests.
                 }
                 case "scope-supported" -> validateTableRuleScope(operationId, planOperation, failures);
                 case "condition-table-context-valid", "condition-operators-supported" -> validateTableRuleCondition(operationId, planOperation, failures);
