@@ -632,8 +632,9 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "pie-single-metric" -> validateChartPieSingleMetric(operationId, planOperation, config, failures);
                 case "combo-minimum-series" -> validateChartComboMinimumSeries(operationId, planOperation, config, failures);
                 case "series-field-exists", "axis-field-exists", "bound-fields-exist",
-                     "query-context-fields-exist", "event-mapping-fields-exist" ->
+                     "query-context-fields-exist" ->
                         validateChartInputFieldsExist(operationId, planOperation, config, failures);
+                case "event-mapping-fields-exist" -> validateChartEventMappingFields(operationId, planOperation, config, failures);
                 case "series-field-aggregable" -> validateChartAggregation(operationId, planOperation, config, failures);
                 case "series-id-unique" -> validateChartSeriesUnique(operationId, planOperation, config, failures);
                 case "series-exists" -> validateChartSeriesExists(operationId, planOperation, config, failures);
@@ -3085,6 +3086,51 @@ public final class AgenticAuthoringValidatorRegistry {
         }
     }
 
+    private void validateChartEventMappingFields(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode mapping = planOperation.path("input").path("mapping");
+        if (!mapping.isObject() || mapping.isEmpty()) {
+            return;
+        }
+        Set<String> sourceFields = chartOutputFields(config);
+        if (sourceFields.isEmpty()) {
+            failures.add("validator event-mapping-fields-exist failed for " + operationId
+                    + ": required chart output field catalog is unavailable");
+            return;
+        }
+
+        JsonNode targetDescriptor = MissingNode.getInstance();
+        String target = text(planOperation.path("input"), "target");
+        if (!target.isBlank()) {
+            targetDescriptor = findTargetDescriptor(config.path("availableTargets"), target);
+        }
+        Set<String> targetFields = chartTargetInputFields(targetDescriptor);
+        boolean targetFieldsRequired = !target.isBlank() && !targetDescriptor.isMissingNode();
+        if (targetFieldsRequired && targetFields.isEmpty()) {
+            failures.add("validator event-mapping-fields-exist failed for " + operationId
+                    + ": required event target input catalog is unavailable for " + target);
+            return;
+        }
+
+        Iterator<Map.Entry<String, JsonNode>> fields = mapping.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            String sourceField = entry.getKey();
+            String targetField = entry.getValue().asText("");
+            if (!sourceFields.contains(sourceField)) {
+                failures.add("validator event-mapping-fields-exist failed for " + operationId
+                        + ": unknown chart output field " + sourceField);
+            }
+            if (targetFieldsRequired && !targetFields.contains(targetField)) {
+                failures.add("validator event-mapping-fields-exist failed for " + operationId
+                        + ": target " + target + " does not accept mapped field " + targetField);
+            }
+        }
+    }
+
     private void validateChartFeatureToggle(String operationId, JsonNode planOperation, List<String> failures) {
         JsonNode input = planOperation.path("input");
         if (!input.path("enabled").isBoolean()) {
@@ -3134,6 +3180,15 @@ public final class AgenticAuthoringValidatorRegistry {
         collectFieldNames(config.path("apiMetadata").path("fields"), fields, "name", "field", "id");
         collectFieldsFromResources(config.path("apiMetadata").path("resources"), fields);
         collectFieldsFromResources(config.path("resources"), fields);
+        return fields;
+    }
+
+    private Set<String> chartOutputFields(JsonNode config) {
+        Set<String> fields = new HashSet<>();
+        collectFieldNames(config.path("chartDocument").path("dimensions"), fields, "field", "name", "id");
+        collectFieldNames(config.path("chartDocument").path("metrics"), fields, "field", "name", "id");
+        collectFieldNames(config.path("chartDocument").path("aggregations"), fields, "field", "name", "id", "as");
+        collectTextValues(config.path("chartDocument").path("groupBy"), fields);
         return fields;
     }
 
@@ -3335,6 +3390,35 @@ public final class AgenticAuthoringValidatorRegistry {
             case "emit" -> Set.of("event", "event-bus", "output").contains(kind);
             default -> false;
         };
+    }
+
+    private Set<String> chartTargetInputFields(JsonNode targetDescriptor) {
+        Set<String> fields = new HashSet<>();
+        if (targetDescriptor == null || targetDescriptor.isMissingNode() || targetDescriptor.isNull()) {
+            return fields;
+        }
+        collectFieldNames(targetDescriptor.path("inputFields"), fields, "field", "name", "id");
+        collectFieldNames(targetDescriptor.path("fields"), fields, "field", "name", "id");
+        collectFieldNames(targetDescriptor.path("queryFields"), fields, "field", "name", "id");
+        collectFieldNames(targetDescriptor.path("acceptedFields"), fields, "field", "name", "id");
+        collectFieldNames(targetDescriptor.path("contract").path("inputFields"), fields, "field", "name", "id");
+        collectObjectFieldNames(targetDescriptor.path("inputSchema").path("properties"), fields);
+        collectObjectFieldNames(targetDescriptor.path("schema").path("properties"), fields);
+        collectObjectFieldNames(targetDescriptor.path("contract").path("inputSchema").path("properties"), fields);
+        return fields;
+    }
+
+    private void collectObjectFieldNames(JsonNode object, Set<String> fields) {
+        if (!object.isObject()) {
+            return;
+        }
+        Iterator<String> names = object.fieldNames();
+        while (names.hasNext()) {
+            String name = names.next();
+            if (!name.isBlank()) {
+                fields.add(name);
+            }
+        }
     }
 
     private void collectTextValues(JsonNode node, Set<String> values, String... objectKeys) {

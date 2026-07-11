@@ -565,7 +565,7 @@ class AgenticAuthoringValidatorRegistryTest {
                     { "name": "revenue" }
                   ],
                   "availableTargets": [
-                    { "id": "orders-table" }
+                    { "id": "orders-table", "inputFields": [{ "field": "month" }] }
                   ],
                   "chartDocument": {
                     "version": "0.1.0",
@@ -612,7 +612,7 @@ class AgenticAuthoringValidatorRegistryTest {
                         "validator chart-fields-exist failed for data.resource.bind: unknown field unknown",
                         "validator event-target-governed failed for crossFilter.configure: unknown event target unknown-widget",
                         "validator event-action-supported failed for crossFilter.configure: unsupported event action unsafe",
-                        "validator chart-fields-exist failed for crossFilter.configure: unknown field missing");
+                        "validator event-mapping-fields-exist failed for crossFilter.configure: unknown chart output field date");
     }
 
     @Test
@@ -637,7 +637,8 @@ class AgenticAuthoringValidatorRegistryTest {
                     {
                       "id": "orders-filter",
                       "kind": "filter-widget",
-                      "supportedActions": ["filter-widget"]
+                      "supportedActions": ["filter-widget"],
+                      "inputFields": [{ "field": "month" }]
                     }
                   ],
                   "chartDocument": {
@@ -736,8 +737,15 @@ class AgenticAuthoringValidatorRegistryTest {
                     ]
                   },
                   "availableTargets": [
-                    { "id": "orders-detail", "kind": "detail", "supportedActions": ["open-detail"] }
-                  ]
+                    { "id": "orders-detail", "kind": "detail", "supportedActions": ["open-detail"], "inputFields": [{ "field": "month" }] }
+                  ],
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "bar",
+                    "source": { "kind": "praxis.stats", "resource": "/api/sales/orders" },
+                    "dimensions": [{ "field": "month" }],
+                    "metrics": [{ "field": "revenue", "aggregation": "sum" }]
+                  }
                 }
                 """);
         registry.executeOperationValidators(
@@ -759,8 +767,8 @@ class AgenticAuthoringValidatorRegistryTest {
         registry.executeOperationValidators(
                 "praxis-chart",
                 operation("crossFilter.configure", "crossFilter", "x-ui-chart-events-cross-filter", false,
-                        "event-target-governed,event-action-supported"),
-                plan("{}", "{ \"action\": \"filter-widget\", \"target\": \"orders-detail\" }"),
+                        "event-target-governed,event-action-supported,event-mapping-fields-exist"),
+                plan("{}", "{ \"action\": \"filter-widget\", \"target\": \"orders-detail\", \"mapping\": { \"unknownSource\": \"unknownTarget\", \"month\": \"unknownTarget\" } }"),
                 config,
                 failures,
                 new ArrayList<>());
@@ -771,7 +779,9 @@ class AgenticAuthoringValidatorRegistryTest {
                         "validator stats-operation-supported failed for data.resource.bind: required stats capabilities are unavailable for /api/sales/missing",
                         "validator chart-fields-exist failed for data.resource.bind: unknown field unknown",
                         "validator series-field-aggregable failed for series.add: unsupported aggregation avg",
-                        "validator event-target-governed failed for crossFilter.configure: target orders-detail does not support action filter-widget");
+                        "validator event-target-governed failed for crossFilter.configure: target orders-detail does not support action filter-widget",
+                        "validator event-mapping-fields-exist failed for crossFilter.configure: unknown chart output field unknownSource",
+                        "validator event-mapping-fields-exist failed for crossFilter.configure: target orders-detail does not accept mapped field unknownTarget");
     }
 
     @Test

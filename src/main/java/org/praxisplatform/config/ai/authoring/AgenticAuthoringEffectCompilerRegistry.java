@@ -194,6 +194,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "chart-data-resource-bind".equals(handler)
                 || "chart-event-cross-filter-configure".equals(handler)
                 || "chart-event-drilldown-configure".equals(handler)
+                || "chart-event-selection-configure".equals(handler)
                 || "page-builder-page-configure".equals(handler)
                 || "page-builder-canvas-configure".equals(handler)
                 || "page-builder-widget-add".equals(handler)
@@ -805,6 +806,15 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     proposedConfig,
                     "drillDown",
                     "configure-chart-drilldown-event",
+                    failures);
+            case "chart-event-selection-configure" -> compileChartEventConfigure(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    "selectionChange",
+                    "configure-chart-selection-event",
                     failures);
             case "page-builder-page-configure" -> compilePageBuilderPageConfigure(
                     componentId, operation, effect, planOperation, proposedConfig);
@@ -5409,7 +5419,6 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             return null;
         }
         ObjectNode event = objectMapper.createObjectNode();
-        event.put("event", textOrDefault(input, "event", eventKey));
         copyIfPresent(input, event, "action");
         copyIfPresent(input, event, "target");
         copyIfPresent(input, event, "mapping");

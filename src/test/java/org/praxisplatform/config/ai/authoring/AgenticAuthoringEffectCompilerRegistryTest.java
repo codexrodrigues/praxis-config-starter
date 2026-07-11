@@ -2226,16 +2226,42 @@ class AgenticAuthoringEffectCompilerRegistryTest {
                 patchOperations,
                 failures,
                 new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operationWithHandler("drilldown.configure", "drilldown", "x-ui-chart-events-drill-down", false,
+                        "compile-domain-patch", "chart-event-drilldown-configure", "chartDocument.events.drillDown"),
+                plan("{}", "{ \"event\": \"pointClick\", \"action\": \"navigate\", \"target\": \"orders-detail\", \"mapping\": { \"date\": \"month\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operationWithHandler("selection.configure", "selection", "x-ui-chart-events-selection-change", false,
+                        "compile-domain-patch", "chart-event-selection-configure", "chartDocument.events.selectionChange"),
+                plan("{}", "{ \"event\": \"crossFilter\", \"action\": \"emit\", \"mapping\": { \"date\": \"month\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
 
         assertThat(failures).isEmpty();
-        assertThat(patchOperations).hasSize(4);
+        assertThat(patchOperations).hasSize(6);
         assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("add-chart-series");
         assertThat(patchOperations.get(1).path("op").asText()).isEqualTo("configure-chart-axis");
         assertThat(patchOperations.get(2).path("op").asText()).isEqualTo("bind-chart-data-resource");
         assertThat(patchOperations.get(3).path("op").asText()).isEqualTo("configure-chart-cross-filter-event");
+        assertThat(patchOperations.get(4).path("op").asText()).isEqualTo("configure-chart-drilldown-event");
+        assertThat(patchOperations.get(5).path("op").asText()).isEqualTo("configure-chart-selection-event");
         assertThat(proposedConfig.path("chartDocument").path("source").path("resource").asText()).isEqualTo("/api/sales/stats");
         assertThat(proposedConfig.path("chartDocument").path("metrics").get(0).path("field").asText()).isEqualTo("revenue");
         assertThat(proposedConfig.path("chartDocument").path("events").path("crossFilter").path("mapping").path("date").asText()).isEqualTo("month");
+        assertThat(proposedConfig.path("chartDocument").path("events").path("crossFilter").has("event")).isFalse();
+        assertThat(proposedConfig.path("chartDocument").path("events").path("drillDown").has("event")).isFalse();
+        assertThat(proposedConfig.path("chartDocument").path("events").path("selectionChange").has("event")).isFalse();
+        assertThat(patchOperations.get(3).path("value").has("event")).isFalse();
+        assertThat(patchOperations.get(4).path("value").has("event")).isFalse();
+        assertThat(patchOperations.get(5).path("value").has("event")).isFalse();
     }
 
     @Test

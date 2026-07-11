@@ -667,7 +667,12 @@ class AgenticAuthoringManifestServiceTest {
                       ]
                     },
                     "availableTargets": [
-                      { "id": "orders-filter", "kind": "filter-widget", "supportedActions": ["filter-widget"] }
+                      {
+                        "id": "orders-filter",
+                        "kind": "filter-widget",
+                        "supportedActions": ["filter-widget"],
+                        "inputFields": [{ "field": "month" }]
+                      }
                     ]
                   },
                   "plan": {
@@ -2421,7 +2426,7 @@ class AgenticAuthoringManifestServiceTest {
                             },
                             "inputSchema": {
                               "type": "object",
-                              "required": ["action", "target"],
+                              "required": ["action"],
                               "properties": {
                                 "action": { "type": "string" },
                                 "target": { "type": "string" },
@@ -2429,9 +2434,9 @@ class AgenticAuthoringManifestServiceTest {
                               }
                             },
                             "effects": [
-                              { "kind": "merge-object", "path": "chartDocument.events" }
+                              { "kind": "compile-domain-patch", "handler": "chart-event-cross-filter-configure" }
                             ],
-                            "affectedPaths": ["chartDocument.events"],
+                            "affectedPaths": ["chartDocument.events.crossFilter"],
                             "preconditions": ["config-initialized"],
                             "validators": [
                               "event-target-governed",
