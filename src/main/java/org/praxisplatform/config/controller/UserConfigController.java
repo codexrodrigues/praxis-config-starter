@@ -10,6 +10,8 @@ import org.praxisplatform.config.domain.UiUserConfig;
 import org.praxisplatform.config.dto.UpsertUserConfigRequest;
 import org.praxisplatform.config.dto.UserConfigResponse;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
+import org.praxisplatform.config.service.UiConfigWriteAuthorizationRequest;
+import org.praxisplatform.config.service.UiConfigWriteAuthorizer;
 import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -53,6 +55,7 @@ public class UserConfigController {
   private final UserConfigService service;
   private final ObjectMapper objectMapper;
   private final AiApiKeyProtectionService apiKeyProtectionService;
+  private final UiConfigWriteAuthorizer writeAuthorizer;
 
   @GetMapping(params = {"componentType", "componentId"})
   public ResponseEntity<UserConfigResponse> getConfigByParams(
@@ -178,6 +181,18 @@ public class UserConfigController {
       String scopeParam,
       UpsertUserConfigRequest request) {
     UserConfigService.Scope scope = resolveScope(scopeParam, userId);
+    writeAuthorizer.authorize(
+        new UiConfigWriteAuthorizationRequest(
+            "upsert",
+            scope.name().toLowerCase(),
+            tenantId,
+            userId,
+            componentType,
+            componentId,
+            environment,
+            updatedBy,
+            request.getPayload(),
+            request.getTags()));
 
     UiUserConfig saved =
         service.upsert(
@@ -244,6 +259,18 @@ public class UserConfigController {
       String ifMatch,
       String scopeParam) {
     UserConfigService.Scope scope = resolveScope(scopeParam, userId);
+    writeAuthorizer.authorize(
+        new UiConfigWriteAuthorizationRequest(
+            "delete",
+            scope.name().toLowerCase(),
+            tenantId,
+            userId,
+            componentType,
+            componentId,
+            environment,
+            null,
+            null,
+            null));
 
     service.delete(
         scope,
