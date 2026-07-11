@@ -288,7 +288,7 @@ discarded instead of falling back to a legacy or unscoped corpus.
 
 | Surface | Purpose |
 | --- | --- |
-| `/api/praxis/config/ui` | Read, write, and delete tenant/user scoped UI configuration. |
+| `/api/praxis/config/ui` | Read, write, and delete tenant/user scoped UI configuration. Hosts can register `UiConfigWriteAuthorizer` to authorize governed writes from server-side identity and capability policy. |
 | `/api/praxis/config/api-catalog/**` | Ingest and search API metadata for grounding and retrieval. |
 | `/api/praxis/config/ai-registry/**` | Manage component definitions, templates, and authoring manifest projections. |
 | `/api/praxis/config/ai-context/**` | Build AI context from component metadata, runtime state, templates, and schema hints. |

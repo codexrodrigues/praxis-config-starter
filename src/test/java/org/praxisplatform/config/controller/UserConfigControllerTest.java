@@ -1,9 +1,11 @@
 package org.praxisplatform.config.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -20,10 +22,12 @@ import org.praxisplatform.config.domain.UiUserConfig;
 import org.praxisplatform.config.dto.UpsertUserConfigRequest;
 import org.praxisplatform.config.dto.UserConfigResponse;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
+import org.praxisplatform.config.service.UiConfigWriteAuthorizer;
 import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 @Tag("unit")
@@ -31,13 +35,14 @@ class UserConfigControllerTest {
 
   @Mock private UserConfigService service;
   @Mock private AiApiKeyProtectionService apiKeyProtectionService;
+  @Mock private UiConfigWriteAuthorizer writeAuthorizer;
 
   private final ObjectMapper objectMapper = new ObjectMapper();
   private UserConfigController controller;
 
   @BeforeEach
   void setUp() {
-    controller = new UserConfigController(service, objectMapper, apiKeyProtectionService);
+    controller = new UserConfigController(service, objectMapper, apiKeyProtectionService, writeAuthorizer);
   }
 
   @Test
@@ -175,6 +180,31 @@ class UserConfigControllerTest {
     assertThat(response.getBody().getScope()).isEqualTo("user");
     assertThat(response.getBody().getPayload().get("theme").asText()).isEqualTo("corporate");
     assertThat(response.getBody().getTags().get("team").asText()).isEqualTo("sales");
+    verify(writeAuthorizer).authorize(any());
+  }
+
+  @Test
+  void shouldRejectWriteBeforePersistingWhenHostPolicyDeniesIt() {
+    UpsertUserConfigRequest request = new UpsertUserConfigRequest();
+    request.setPayload(readJson("{\"columns\":[]}"));
+    doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "Missing ui.authoring.configure"))
+        .when(writeAuthorizer)
+        .authorize(any());
+
+    assertThatThrownBy(
+            () ->
+                controller.upsertConfigByParams(
+                    "praxis-table",
+                    "table-config:employees",
+                    "tenant-a",
+                    "user-9",
+                    "prod",
+                    "qa-user",
+                    null,
+                    null,
+                    request))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("Missing ui.authoring.configure");
   }
 
   @Test
