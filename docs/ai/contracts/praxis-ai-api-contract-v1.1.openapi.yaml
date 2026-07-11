@@ -3966,6 +3966,7 @@ components:
           type: string
           example: selection_eligibility
         status:
+          description: Status inicial solicitado. Definicoes governadas devem nascer como `draft` ou `proposed`; `approved` e `active` exigem transicao de status com ator autorizado pela governanca.
           $ref: '#/components/schemas/DomainRuleDefinitionStatus'
         contextKey:
           type: string
@@ -3999,6 +4000,7 @@ components:
         condition:
           $ref: '#/components/schemas/DomainRuleJsonObject'
         governance:
+          description: Metadados canonicos de governanca. Definicoes governadas exigem `requiredApprovals`; `authorizedApprovers` pode ampliar quem pode aprovar, ativar ou publicar sem substituir autorizacao do host.
           $ref: '#/components/schemas/DomainRuleJsonObject'
         validationResult:
           $ref: '#/components/schemas/DomainRuleJsonObject'
@@ -4563,6 +4565,7 @@ components:
 
     DomainRulePublicationRequest:
       type: object
+      description: Publica uma definicao governada ja aprovada. O endpoint nao aprova draft/proposed; definicoes governadas publicaveis precisam estar `approved` ou `active` e o ator deve ser `human` ou `system` autorizado por `governance.requiredApprovals` ou `governance.authorizedApprovers`.
       properties:
         ruleDefinitionId:
           type: string
@@ -4576,10 +4579,12 @@ components:
           type: boolean
           default: true
         publishedByType:
+          description: Tipo do ator que solicita a publicacao. Para definicoes governadas, apenas `human` e `system` podem publicar.
           $ref: '#/components/schemas/DomainRuleActorType'
         publishedBy:
           type: string
           nullable: true
+          description: Identificador do ator autorizado pela governanca da definicao.
         publicationNotes:
           $ref: '#/components/schemas/DomainRuleJsonObject'
       additionalProperties: false
@@ -4599,6 +4604,7 @@ components:
           enum: [published, blocked]
         publicationReadiness:
           type: string
+          description: Estado canonico de prontidao para publicacao, como `ready_to_publish`, `approval_required` ou `blocked_by_definition_status`.
           example: ready_to_publish
         ruleDefinitionId:
           type: string
@@ -4786,6 +4792,7 @@ components:
         publicationReadiness:
           type: string
           nullable: true
+          description: Estado canonico de prontidao para publicacao, incluindo `approval_required` para definicoes draft/proposed e `blocked_by_definition_status` para definicoes inativas ou terminais.
         publicationDiagnostics:
           $ref: '#/components/schemas/DomainRulePublicationDiagnostics'
       additionalProperties: true

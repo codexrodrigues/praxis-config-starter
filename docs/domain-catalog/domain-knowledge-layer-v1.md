@@ -351,10 +351,14 @@ not create a generic approval inbox, BPM engine or UI-local approval rule.
 5. Human/LLM curation creates `domain_knowledge_change_set`.
 6. Approved change sets update curated knowledge rows.
 7. Approved shared rules are stored as `domain_rule_definition` rows.
-8. `POST /api/praxis/config/domain-rules/publications` promotes eligible
-   definitions through the governed lifecycle and applies eligible target
+8. `POST /api/praxis/config/domain-rules/publications` publishes eligible
+   definitions that already passed governed approval and applies eligible target
    materializations without requiring each host to reconstruct publication
-   policy heuristics locally. For `selection_eligibility`, this step can
+   policy heuristics locally. Publication is not an approval shortcut: governed
+   definitions must be created as `draft` or `proposed`, declare
+   `governance.requiredApprovals`, transition to `approved` or `active` through
+   an authorized `human` or `system` actor, and only then reach publication. For
+   `selection_eligibility`, this step can
    already derive canonical `option_source` and `backend_validation`
    materialization payloads: the lookup projection explains and disables
    invalid selections, while the backend validation projection preserves the
@@ -480,6 +484,12 @@ or transitioning to `applied` sets `applied_at` when missing and is only valid
 when the linked definition is already `active`. These endpoints are for
 lifecycle governance; they still do not execute rules.
 
+Governed rule definitions require `governance.requiredApprovals`. Approval,
+activation and publication fail closed unless the actor type is `human` or
+`system` and the actor appears in `requiredApprovals` or
+`governance.authorizedApprovers`. LLM-authored definitions may propose governed
+decisions, but cannot approve, activate or publish them.
+
 Definition status transitions are deliberately directional:
 
 - `draft` -> `proposed`, `approved`, `rejected`, `retired`
@@ -497,10 +507,14 @@ Materialization status transitions are also directional:
 - `applied` -> `superseded`, `reverted`
 - `failed`, `superseded` and `reverted` -> `draft`, `pending_review`
 
-Publication may only apply materializations in `draft`, `pending_review` or
-already `applied` status. Terminal materializations such as `failed`,
-`superseded` or `reverted` must be reviewed, replaced or explicitly moved back
-through governance before they can participate in a publication.
+Publication may only start from definition status `approved` or `active`.
+Definitions in `draft` or `proposed` return `publicationReadiness=approval_required`;
+definitions in `deprecated`, `rejected` or `retired` return
+`publicationReadiness=blocked_by_definition_status`. Publication may only apply
+materializations in `draft`, `pending_review` or already `applied` status.
+Terminal materializations such as `failed`, `superseded` or `reverted` must be
+reviewed, replaced or explicitly moved back through governance before they can
+participate in a publication.
 
 Published responses include additive `explainability.publicationDiagnostics`
 metadata. Its `materializationOutcomes[]` entries explain whether a target
