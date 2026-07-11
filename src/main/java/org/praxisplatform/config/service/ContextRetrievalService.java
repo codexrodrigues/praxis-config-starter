@@ -1,7 +1,11 @@
 package org.praxisplatform.config.service;
 
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -151,7 +155,7 @@ public class ContextRetrievalService {
         }
         String vectorLiteral = toVectorLiteral(embeddingService.embed(query, embeddingConfig));
         String methodFilter = method == null ? "" : method;
-        String tagsFilter = tags == null ? "" : tags;
+        String tagsFilter = normalizeTagsForFilter(tags);
         List<ApiMetadataProjection> projections = apiMetadataRepository.findByVectorSimilarity(
                 vectorLiteral, methodFilter, tagsFilter, limit > 0 ? limit : DEFAULT_SEARCH_LIMIT);
         if (log.isDebugEnabled()) {
@@ -369,9 +373,7 @@ public class ContextRetrievalService {
         if (!ragVectorStoreService.isAvailable()) {
             return List.of();
         }
-        if (tags != null && !tags.isBlank()) {
-            return List.of();
-        }
+        List<String> requestedTags = normalizeTags(tags);
         FilterExpressionBuilder builder = new FilterExpressionBuilder();
         FilterExpressionBuilder.Op filter = builder.eq(RagMetadataKeys.RESOURCE_TYPE, RagResourceTypes.API_METADATA);
         FilterExpressionBuilder.Op scopeFilter = RagFilters.buildScopedFilter(
@@ -385,14 +387,20 @@ public class ContextRetrievalService {
         if (normalizedMethod != null) {
             filter = builder.and(filter, builder.eq(RagMetadataKeys.METHOD, normalizedMethod));
         }
+        int effectiveLimit = limit > 0 ? limit : DEFAULT_SEARCH_LIMIT;
+        int vectorLimit = requestedTags.isEmpty()
+                ? effectiveLimit
+                : Math.max(effectiveLimit * 4, DEFAULT_SEARCH_LIMIT);
         List<Document> documents = ragVectorStoreService.search(
                 query,
-                limit > 0 ? limit : DEFAULT_SEARCH_LIMIT,
+                vectorLimit,
                 filter.build());
         if (documents.isEmpty()) {
             return List.of();
         }
         return documents.stream()
+                .filter(document -> matchesTags(document, requestedTags))
+                .limit(effectiveLimit)
                 .map(this::mapToApiSearchResult)
                 .collect(Collectors.toList());
     }
@@ -620,6 +628,37 @@ public class ContextRetrievalService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private List<String> normalizeTags(String tags) {
+        String normalized = normalizeToken(tags);
+        if (normalized == null) {
+            return List.of();
+        }
+        return Arrays.stream(normalized.split("[,;|]"))
+                .map(this::normalizeTag)
+                .filter(tag -> tag != null)
+                .distinct()
+                .toList();
+    }
+
+    private String normalizeTagsForFilter(String tags) {
+        List<String> normalizedTags = normalizeTags(tags);
+        return normalizedTags.isEmpty() ? "" : String.join(",", normalizedTags);
+    }
+
+    private String normalizeTag(String tag) {
+        String normalized = normalizeToken(tag);
+        return normalized != null ? normalized.toLowerCase(Locale.ROOT) : null;
+    }
+
+    private boolean matchesTags(Document document, List<String> requestedTags) {
+        if (requestedTags == null || requestedTags.isEmpty()) {
+            return true;
+        }
+        Map<String, Object> metadata = document != null ? document.getMetadata() : Map.of();
+        Set<String> documentTags = new LinkedHashSet<>(normalizeTags(toString(metadata.get(RagMetadataKeys.TAGS))));
+        return documentTags.containsAll(requestedTags);
     }
 
     private String firstNonBlank(String... values) {

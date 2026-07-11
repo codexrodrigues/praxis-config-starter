@@ -48,7 +48,18 @@ public interface ApiMetadataRepository extends JpaRepository<ApiMetadata, Long> 
             (1 - (e.embedding <=> CAST(:vector AS vector))) as similarityScore
         FROM api_metadata e
         WHERE (:method IS NULL OR :method = '' OR e.method ILIKE :method)
-          AND (:tags IS NULL OR :tags = '' OR e.tags ILIKE CONCAT('%', :tags, '%'))
+          AND (
+              :tags IS NULL OR :tags = '' OR NOT EXISTS (
+                  SELECT 1
+                  FROM unnest(regexp_split_to_array(lower(:tags), '[,;|]')) AS requested_tag(tag)
+                  WHERE btrim(requested_tag.tag) <> ''
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM unnest(regexp_split_to_array(lower(coalesce(e.tags, '')), '[,;|]')) AS document_tag(tag)
+                        WHERE btrim(document_tag.tag) = btrim(requested_tag.tag)
+                    )
+              )
+          )
         ORDER BY e.embedding <=> CAST(:vector AS vector)
         LIMIT :limit
     """, nativeQuery = true)

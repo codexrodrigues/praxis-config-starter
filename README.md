@@ -279,6 +279,11 @@ cleanup, but it must not become the authority for schemas, endpoints or business
 Scoped API candidate retrieval fails closed when no tenant/environment result is available; it must
 not retry against an unscoped corpus that could include another tenant's API evidence.
 
+API metadata `tags` filters are normalized as comma, semicolon or pipe separated tokens and matched
+case-insensitively as an AND set. Structured retrieval and RAG retrieval must both preserve method,
+tenant, environment and release filters; when RAG is available, nonmatching tagged candidates are
+discarded instead of falling back to a legacy or unscoped corpus.
+
 ## Key HTTP Surfaces
 
 | Surface | Purpose |
