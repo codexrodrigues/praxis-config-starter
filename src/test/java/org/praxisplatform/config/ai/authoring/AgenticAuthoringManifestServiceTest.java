@@ -833,8 +833,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: tab-exists for tab.label.set");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-tabs",
@@ -885,9 +884,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: tab-exists for tab.order.set")
-                .contains("validator declared without backend implementation: tab-order-deterministic for tab.order.set");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-tabs",
@@ -943,10 +940,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: tab-exists for tab.remove")
-                .contains("validator declared without backend implementation: active-tab-removal-safe for tab.remove")
-                .contains("validator declared without backend implementation: tab-content-removal-confirmed for tab.remove");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-tabs",
@@ -1006,9 +1000,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: active-tab-exists for tab.active.set")
-                .contains("validator declared without backend implementation: selected-index-in-range for tab.active.set");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-tabs",
@@ -1202,8 +1194,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: step-label-valid for step.label.set");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-stepper",
@@ -1252,9 +1243,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: step-order-deterministic for step.order.set")
-                .contains("validator declared without backend implementation: selected-index-preserved for step.order.set");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-stepper",
@@ -1432,10 +1421,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: node-types-supported for block.add")
-                .contains("validator declared without backend implementation: block-id-unique for block.add")
-                .contains("validator declared without backend implementation: document-shape-canonical for block.add");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-rich-content",
@@ -1499,10 +1485,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: block-exists for mediaBlock.update")
-                .contains("validator declared without backend implementation: media-block-target-valid for mediaBlock.update")
-                .contains("validator declared without backend implementation: document-shape-canonical for mediaBlock.update");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-rich-content",
@@ -1559,9 +1542,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: link-target-exists for link.remove")
-                .contains("validator declared without backend implementation: document-shape-canonical for link.remove");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-rich-content",
@@ -1627,10 +1608,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: block-exists for timeline.item.add")
-                .contains("validator declared without backend implementation: timeline-target-valid for timeline.item.add")
-                .contains("validator declared without backend implementation: timeline-item-id-unique for timeline.item.add");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-rich-content",
@@ -1696,10 +1674,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: block-exists for timeline.item.update")
-                .contains("validator declared without backend implementation: timeline-item-exists for timeline.item.update")
-                .contains("validator declared without backend implementation: timeline-item-field-supported for timeline.item.update");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-rich-content",
@@ -1765,9 +1740,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: timeline-target-valid for timeline.item.remove")
-                .contains("validator declared without backend implementation: timeline-item-exists for timeline.item.remove");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-rich-content",
@@ -1829,8 +1802,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .doesNotContain("validator declared without backend implementation: editor-runtime-round-trip for sanitizationPolicy.set");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-rich-content",
@@ -1926,10 +1898,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(validation.valid()).isTrue();
         assertThat(validation.failures()).isEmpty();
-        assertThat(validation.warnings())
-                .contains("validator declared without backend implementation: preset-exists-or-host-mediated for preset.apply")
-                .contains("validator declared without backend implementation: document-shape-canonical for preset.apply")
-                .doesNotContain("validator declared without backend implementation: editor-runtime-round-trip for preset.apply");
+        assertThat(validation.warnings()).isEmpty();
 
         AgenticAuthoringManifestCompileResult result = service.compilePatch(
                 "praxis-rich-content",
@@ -2031,10 +2000,19 @@ class AgenticAuthoringManifestServiceTest {
                 COMPONENT_ID,
                 objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
 
-        assertThat(result.valid()).isTrue();
-        assertThat(result.failures()).isEmpty();
-        assertThat(result.warnings())
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failures())
                 .contains("validator declared without backend implementation: not-implemented-validator for column.header.set");
+        assertThat(result.warnings()).isEmpty();
+
+        AgenticAuthoringManifestCompileResult compileResult = service.compilePatch(
+                COMPONENT_ID,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(compileResult.compiled()).isFalse();
+        assertThat(compileResult.failures())
+                .contains("validator declared without backend implementation: not-implemented-validator for column.header.set");
+        assertThat(compileResult.patch()).isEmpty();
     }
 
     private AgenticAuthoringManifestService serviceWithPayload(String payload) {

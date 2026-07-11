@@ -6,9 +6,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
 import org.springframework.core.io.ClassPathResource;
 
 @Tag("unit")
@@ -40,6 +42,32 @@ class AiRegistrySnapshotContractTest {
                     .as("%s authoringManifest validators", componentId)
                     .isGreaterThan(0);
         }
+    }
+
+    @Test
+    void classpathSnapshotDoesNotReferenceUnsupportedBackendValidators() throws IOException {
+        JsonNode components = readSnapshot().path("components");
+        List<String> unsupportedValidators = new ArrayList<>();
+        var componentFields = components.fields();
+        while (componentFields.hasNext()) {
+            var component = componentFields.next();
+            String componentId = component.getKey();
+            JsonNode manifest = component.getValue().path("authoringManifest");
+            if (!manifest.isObject()) {
+                continue;
+            }
+            for (JsonNode operation : manifest.path("operations")) {
+                String operationId = operation.path("operationId").asText("");
+                for (JsonNode validator : operation.path("validators")) {
+                    String validatorId = validator.asText("");
+                    if (!validatorId.isBlank() && !AgenticAuthoringValidatorRegistry.supportsValidator(validatorId)) {
+                        unsupportedValidators.add(componentId + ":" + operationId + " -> " + validatorId);
+                    }
+                }
+            }
+        }
+
+        assertThat(unsupportedValidators).isEmpty();
     }
 
     private JsonNode readSnapshot() throws IOException {

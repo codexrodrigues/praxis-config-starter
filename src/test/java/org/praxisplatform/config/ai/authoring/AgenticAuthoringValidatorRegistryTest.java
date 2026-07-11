@@ -291,7 +291,7 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
-    void shouldWarnWhenValidatorHasNoBackendImplementation() throws Exception {
+    void shouldFailWhenValidatorHasNoBackendImplementation() throws Exception {
         List<String> failures = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
 
@@ -309,9 +309,9 @@ class AgenticAuthoringValidatorRegistryTest {
                 failures,
                 warnings);
 
-        assertThat(failures).isEmpty();
-        assertThat(warnings)
+        assertThat(failures)
                 .contains("validator declared without backend implementation: not-implemented-validator for column.header.set");
+        assertThat(warnings).isEmpty();
     }
 
     @Test
