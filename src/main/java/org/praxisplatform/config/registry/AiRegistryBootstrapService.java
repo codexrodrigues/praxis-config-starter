@@ -83,6 +83,9 @@ public class AiRegistryBootstrapService {
             String snapshotHash = sha256(snapshotBytes);
             RegistryIngestionRequest request = objectMapper.readValue(snapshotBytes, RegistryIngestionRequest.class);
             long componentCount = request.getComponents() != null ? request.getComponents().size() : 0;
+            long authoringManifestCount = authoringManifestCount(request);
+            long chunkedComponentCount = chunkedComponentCount(request);
+            long chunkCount = chunkCount(request);
             bootstrapState.setSnapshotHash(snapshotHash);
             bootstrapState.setSnapshotComponentCount(componentCount);
 
@@ -106,7 +109,14 @@ public class AiRegistryBootstrapService {
             bootstrapState.setAttempted(true);
             ingestionService.ingestRegistry(request, null, null);
             pruneObsoleteDefinitions(request, previousSnapshotMetadata);
-            upsertSnapshotMetadata(request, resolvedSnapshot, snapshotHash, componentCount);
+            upsertSnapshotMetadata(
+                    request,
+                    resolvedSnapshot,
+                    snapshotHash,
+                    componentCount,
+                    authoringManifestCount,
+                    chunkedComponentCount,
+                    chunkCount);
             bootstrapState.setSucceeded(true);
             log.info("AI registry bootstrap completed from {} (components={}, snapshotHash={}).",
                     resolvedSnapshot.location,
@@ -168,10 +178,16 @@ public class AiRegistryBootstrapService {
             RegistryIngestionRequest request,
             ResolvedSnapshot resolvedSnapshot,
             String snapshotHash,
-            long componentCount) {
+            long componentCount,
+            long authoringManifestCount,
+            long chunkedComponentCount,
+            long chunkCount) {
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("snapshotHash", snapshotHash);
         payload.put("componentCount", componentCount);
+        payload.put("authoringManifestCount", authoringManifestCount);
+        payload.put("chunkedComponentCount", chunkedComponentCount);
+        payload.put("chunkCount", chunkCount);
         payload.put("snapshotLocation", resolvedSnapshot.location);
         payload.put("source", resolvedSnapshot.source);
         payload.put("releaseId", RagDocumentIdentity.resolveReleaseId(null, request.getVersion(), request.getGeneratedAt()));
@@ -200,6 +216,37 @@ public class AiRegistryBootstrapService {
         metadata.setSourceRef(resolvedSnapshot.location);
         metadata.setEmbedding(null);
         repository.save(metadata);
+    }
+
+    private long authoringManifestCount(RegistryIngestionRequest request) {
+        if (request == null || request.getComponents() == null) {
+            return 0;
+        }
+        return request.getComponents().values().stream()
+                .filter(entry -> entry != null
+                        && entry.getAdditionalProperties() != null
+                        && entry.getAdditionalProperties().get("authoringManifest") != null
+                        && entry.getAdditionalProperties().get("authoringManifest").isObject())
+                .count();
+    }
+
+    private long chunkedComponentCount(RegistryIngestionRequest request) {
+        if (request == null || request.getComponents() == null) {
+            return 0;
+        }
+        return request.getComponents().values().stream()
+                .filter(entry -> entry != null && entry.getChunks() != null && !entry.getChunks().isEmpty())
+                .count();
+    }
+
+    private long chunkCount(RegistryIngestionRequest request) {
+        if (request == null || request.getComponents() == null) {
+            return 0;
+        }
+        return request.getComponents().values().stream()
+                .filter(entry -> entry != null && entry.getChunks() != null)
+                .mapToLong(entry -> entry.getChunks().size())
+                .sum();
     }
 
     private void pruneObsoleteDefinitions(

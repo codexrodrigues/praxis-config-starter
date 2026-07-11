@@ -34,6 +34,13 @@ The public Praxis UI site, examples, and documentation are available at
 | Public site, examples, playgrounds, and platform documentation | [praxisui.dev](https://praxisui.dev/) |
 | Public operational proof and downstream HTTP validation | [`praxis-api-quickstart`](https://github.com/codexrodrigues/praxis-api-quickstart) |
 
+The classpath AI registry snapshot at `src/main/resources/ai-registry/registry-snapshot.json`
+is a derived bootstrap artifact. Its canonical publication input is
+`praxis-ui-angular/dist/praxis-component-registry-ingestion.json`; release cuts must regenerate and
+validate the Angular corpus first, copy that artifact into the starter, and let
+`AiRegistrySnapshotContractTest` lock the resulting hash, release identity, manifest coverage, and
+chunk counts.
+
 Assisted repository exploration is available through [CodeWiki](https://codewiki.google/github.com/codexrodrigues/praxis-config-starter/).
 CodeWiki is complementary navigation for code reading; the repository docs and source remain normative.
 
