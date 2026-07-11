@@ -2019,7 +2019,9 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void evidenceBundleSupportsHostNeutralApiMetadataFixture() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant-a", "staging", "default", "release-2026.05"))
+                .thenReturn(List.of(
                 new ApiMetadata(
                         "/api/risk-intelligence/vw-indicadores-incidentes",
                         "POST",

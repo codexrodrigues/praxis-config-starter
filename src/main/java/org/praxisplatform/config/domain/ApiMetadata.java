@@ -21,7 +21,7 @@ import java.util.List;
  */
 @Entity
 @Table(name = "api_metadata", uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"path", "method"})
+        @UniqueConstraint(columnNames = {"tenant_id", "environment", "service_key", "release_id", "path", "method"})
 })
 public class ApiMetadata {
 
@@ -34,6 +34,24 @@ public class ApiMetadata {
 
     @Column(nullable = false)
     private String method;
+
+    @Column(name = "tenant_id", nullable = false)
+    private String tenantId = "GLOBAL";
+
+    @Column(nullable = false)
+    private String environment = "default";
+
+    @Column(name = "service_key", nullable = false)
+    private String serviceKey = "default";
+
+    @Column(name = "release_id", nullable = false)
+    private String releaseId = "v1";
+
+    @Column(name = "release_version")
+    private String releaseVersion;
+
+    @Column(name = "generated_at")
+    private String generatedAt;
 
     @Column
     private String tags;
@@ -82,6 +100,19 @@ public class ApiMetadata {
         this.embedding = embedding;
     }
 
+    public ApiMetadata(String path, String method, String tenantId, String environment, String serviceKey,
+                       String releaseId, String releaseVersion, String generatedAt, String tags, String summary,
+                       String description, String operationId, String requestSchema, String responseSchema,
+                       String parameters, String rawJson, List<Float> embedding) {
+        this(path, method, tags, summary, description, operationId, requestSchema, responseSchema, parameters, rawJson, embedding);
+        this.tenantId = tenantId;
+        this.environment = environment;
+        this.serviceKey = serviceKey;
+        this.releaseId = releaseId;
+        this.releaseVersion = releaseVersion;
+        this.generatedAt = generatedAt;
+    }
+
     public Long getId() {
         return id;
     }
@@ -100,6 +131,54 @@ public class ApiMetadata {
 
     public void setMethod(String method) {
         this.method = method;
+    }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
+    }
+
+    public String getEnvironment() {
+        return environment;
+    }
+
+    public void setEnvironment(String environment) {
+        this.environment = environment;
+    }
+
+    public String getServiceKey() {
+        return serviceKey;
+    }
+
+    public void setServiceKey(String serviceKey) {
+        this.serviceKey = serviceKey;
+    }
+
+    public String getReleaseId() {
+        return releaseId;
+    }
+
+    public void setReleaseId(String releaseId) {
+        this.releaseId = releaseId;
+    }
+
+    public String getReleaseVersion() {
+        return releaseVersion;
+    }
+
+    public void setReleaseVersion(String releaseVersion) {
+        this.releaseVersion = releaseVersion;
+    }
+
+    public String getGeneratedAt() {
+        return generatedAt;
+    }
+
+    public void setGeneratedAt(String generatedAt) {
+        this.generatedAt = generatedAt;
     }
 
     public String getTags() {

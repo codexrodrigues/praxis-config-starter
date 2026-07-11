@@ -248,7 +248,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (resourceFocus.isBlank()) {
             return List.of();
         }
-        List<ApiMetadata> focusedMetadata = findLlmFocusedMetadata(resourceFocus, context.expectedMethod());
+        List<ApiMetadata> focusedMetadata = findLlmFocusedMetadata(resourceFocus, context);
         return focusedMetadata.stream()
                 .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
                 .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
@@ -262,33 +262,46 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 .toList();
     }
 
-    private List<ApiMetadata> findLlmFocusedMetadata(String resourceFocus, String expectedMethod) {
+    private List<ApiMetadata> findLlmFocusedMetadata(String resourceFocus, RetrievalContext context) {
         String basePath = resourceFocusToApiBasePath(resourceFocus);
         if (basePath.isBlank()) {
             return List.of();
         }
-        List<ApiMetadata> exactMatches = exactLlmFocusedMetadataMatches(basePath, expectedMethod);
+        List<ApiMetadata> exactMatches = exactLlmFocusedMetadataMatches(basePath, context);
         if (!exactMatches.isEmpty()) {
             return exactMatches;
         }
-        return repository.findAll().stream()
+        return structuredMetadata(context).stream()
                 .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
                 .filter(metadata -> resourceFocus.equals(resourceKey(baseResourcePath(metadata.getPath()))))
                 .toList();
     }
 
-    private List<ApiMetadata> exactLlmFocusedMetadataMatches(String basePath, String expectedMethod) {
-        List<String> methods = expectedMethod == null || expectedMethod.isBlank()
+    private List<ApiMetadata> exactLlmFocusedMetadataMatches(String basePath, RetrievalContext context) {
+        List<String> methods = context.expectedMethod() == null || context.expectedMethod().isBlank()
                 ? List.of("POST", "GET")
-                : List.of(expectedMethod.toUpperCase(Locale.ROOT));
+                : List.of(context.expectedMethod().toUpperCase(Locale.ROOT));
         LinkedHashSet<String> paths = new LinkedHashSet<>();
         paths.add(basePath + "/filter/cursor");
         paths.add(basePath + "/filter");
         paths.add(basePath);
         List<ApiMetadata> matches = new ArrayList<>();
+        if (!hasScope(context.tenantId(), context.environment())) {
+            List<ApiMetadata> metadata = structuredMetadata(context);
+            for (String method : methods) {
+                for (String path : paths) {
+                    metadata.stream()
+                            .filter(candidate -> path.equals(candidate.getPath()))
+                            .filter(candidate -> method.equalsIgnoreCase(candidate.getMethod()))
+                            .findFirst()
+                            .ifPresent(matches::add);
+                }
+            }
+            return matches;
+        }
         for (String method : methods) {
             for (String path : paths) {
-                Optional<ApiMetadata> metadata = repository.findByPathAndMethod(path, method);
+                Optional<ApiMetadata> metadata = findStructuredMetadataByPathAndMethod(context, path, method);
                 metadata.ifPresent(matches::add);
             }
         }
@@ -436,11 +449,12 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     private List<AgenticAuthoringCandidate> discoverBroadCandidates(
             String artifactKind,
             String expectedMethod,
-            String normalizedPrompt) {
+            String normalizedPrompt,
+            RetrievalContext context) {
         if (!isBroadDiscoveryArtifact(artifactKind)) {
             return List.of();
         }
-        return repository.findAll().stream()
+        return structuredMetadata(context).stream()
                 .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
                 .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
                 .filter(metadata -> expectedMethod == null || expectedMethod.equalsIgnoreCase(metadata.getMethod()))
@@ -449,9 +463,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                         expectedMethod,
                         artifactKind,
                         normalizedPrompt,
-                        null,
-                        null,
-                        null))
+                        context.tenantId(),
+                        context.environment(),
+                        context.releaseId()))
                 .filter(scored -> scored.score() >= 0.36d)
                 .sorted(CandidateRankingPolicy.byScoreDescending())
                 .limit(CANDIDATE_LIMIT)
@@ -528,7 +542,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
 
         @Override
         public List<AgenticAuthoringCandidate> retrieve(RetrievalContext context) {
-            return repository.findAll().stream()
+            return structuredMetadata(context).stream()
                     .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
                     .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
                     .filter(metadata -> context.expectedMethod() == null
@@ -557,8 +571,43 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             return discoverBroadCandidates(
                     context.artifactKind(),
                     context.expectedMethod(),
-                    context.normalizedPrompt());
+                    context.normalizedPrompt(),
+                    context);
         }
+    }
+
+    private List<ApiMetadata> structuredMetadata(RetrievalContext context) {
+        if (context != null && hasScope(context.tenantId(), context.environment())) {
+            return repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                    normalizeOrDefault(context.tenantId(), "GLOBAL"),
+                    normalizeOrDefault(context.environment(), "default"),
+                    "default",
+                    normalizeOrDefault(context.releaseId(), "v1"));
+        }
+        return repository.findAll();
+    }
+
+    private Optional<ApiMetadata> findStructuredMetadataByPathAndMethod(
+            RetrievalContext context,
+            String path,
+            String method) {
+        if (context != null && hasScope(context.tenantId(), context.environment())) {
+            return repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                    normalizeOrDefault(context.tenantId(), "GLOBAL"),
+                    normalizeOrDefault(context.environment(), "default"),
+                    "default",
+                    normalizeOrDefault(context.releaseId(), "v1"),
+                    path,
+                    method);
+        }
+        return repository.findAll().stream()
+                .filter(metadata -> path.equals(metadata.getPath()))
+                .filter(metadata -> method.equalsIgnoreCase(metadata.getMethod()))
+                .findFirst();
+    }
+
+    private String normalizeOrDefault(String value, String defaultValue) {
+        return value == null || value.isBlank() ? defaultValue : value.trim();
     }
 
     private static final class CandidateRankingPolicy {

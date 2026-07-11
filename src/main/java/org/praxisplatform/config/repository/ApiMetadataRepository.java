@@ -11,9 +11,27 @@ import org.springframework.data.repository.query.Param;
 
 public interface ApiMetadataRepository extends JpaRepository<ApiMetadata, Long> {
 
-    Optional<ApiMetadata> findByPathAndMethod(String path, String method);
+    Optional<ApiMetadata> findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId,
+            String path,
+            String method);
 
-    List<ApiMetadata> findAllByOperationIdAndMethod(String operationId, String method);
+    List<ApiMetadata> findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndOperationIdAndMethod(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId,
+            String operationId,
+            String method);
+
+    List<ApiMetadata> findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId);
 
     @Query(value = """
         SELECT

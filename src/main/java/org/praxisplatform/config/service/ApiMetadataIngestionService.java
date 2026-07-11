@@ -40,6 +40,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 public class ApiMetadataIngestionService {
 
+    private static final String DEFAULT_TENANT_ID = "GLOBAL";
+    private static final String DEFAULT_ENVIRONMENT = "default";
+    private static final String DEFAULT_SERVICE_KEY = "default";
+
     private final ApiMetadataRepository repository;
     private final ObjectMapper objectMapper;
     private final EmbeddingService embeddingService;
@@ -53,13 +57,16 @@ public class ApiMetadataIngestionService {
             return;
         }
 
-        String resolvedTenant = normalize(tenantId);
-        String resolvedEnv = normalize(environment);
+        String resolvedTenant = normalizeOrDefault(tenantId, DEFAULT_TENANT_ID);
+        String resolvedEnv = normalizeOrDefault(environment, DEFAULT_ENVIRONMENT);
         String releaseId = RagDocumentIdentity.resolveReleaseId(
                 request.getReleaseId(),
                 request.getVersion(),
                 request.getGeneratedAt());
         String requestVersion = normalize(request.getVersion());
+        String resolvedReleaseId = normalizeOrDefault(releaseId, "v1");
+        String generatedAt = normalize(request.getGeneratedAt());
+        String serviceKey = DEFAULT_SERVICE_KEY;
         for (ApiCatalogRequest.ApiEndpointEntry ep : request.getEndpoints()) {
             try {
                 String path = ep.getPath();
@@ -96,8 +103,24 @@ public class ApiMetadataIngestionService {
                     ingestLog.info("Embedding size={} for {} {}", embedding.size(), method, path);
                 }
 
-                ApiMetadata meta = upsert(path, method, tags, summary, description, operationId,
-                        requestSchema, responseSchema, parameters, rawJson, embedding);
+                ApiMetadata meta = upsert(
+                        resolvedTenant,
+                        resolvedEnv,
+                        serviceKey,
+                        resolvedReleaseId,
+                        requestVersion,
+                        generatedAt,
+                        path,
+                        method,
+                        tags,
+                        summary,
+                        description,
+                        operationId,
+                        requestSchema,
+                        responseSchema,
+                        parameters,
+                        rawJson,
+                        embedding);
 
                 log.info("Ingested api metadata: {} {}", meta.getMethod(), meta.getPath());
                 ingestLog.info("Ingest saved: id={} method={} path={} embeddingSize={}",
@@ -116,7 +139,7 @@ public class ApiMetadataIngestionService {
                         rawJson,
                         resolvedTenant,
                         resolvedEnv,
-                        releaseId,
+                        resolvedReleaseId,
                         requestVersion);
                 ragVectorStoreService.upsertDocuments(List.of(ragDocument));
             } catch (Exception e) {
@@ -246,12 +269,46 @@ public class ApiMetadataIngestionService {
         return "inline";
     }
 
-    private ApiMetadata upsert(String path, String method, String tags, String summary, String description,
-                               String operationId, String requestSchema, String responseSchema, String parameters,
-                               String rawJson, List<Float> embedding) {
-        Optional<ApiMetadata> existing = repository.findByPathAndMethod(path, method)
-                .or(() -> findExistingByStableOperationIdentity(operationId, method));
+    private ApiMetadata upsert(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId,
+            String releaseVersion,
+            String generatedAt,
+            String path,
+            String method,
+            String tags,
+            String summary,
+            String description,
+            String operationId,
+            String requestSchema,
+            String responseSchema,
+            String parameters,
+            String rawJson,
+            List<Float> embedding) {
+        Optional<ApiMetadata> existing =
+                repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                                tenantId,
+                                environment,
+                                serviceKey,
+                                releaseId,
+                                path,
+                                method)
+                        .or(() -> findExistingByStableOperationIdentity(
+                                tenantId,
+                                environment,
+                                serviceKey,
+                                releaseId,
+                                operationId,
+                                method));
         ApiMetadata meta = existing.orElse(new ApiMetadata());
+        meta.setTenantId(tenantId);
+        meta.setEnvironment(environment);
+        meta.setServiceKey(serviceKey);
+        meta.setReleaseId(releaseId);
+        meta.setReleaseVersion(releaseVersion);
+        meta.setGeneratedAt(generatedAt);
         meta.setPath(path);
         meta.setMethod(method);
         meta.setTags(tags);
@@ -266,12 +323,25 @@ public class ApiMetadataIngestionService {
         return repository.save(meta);
     }
 
-    private Optional<ApiMetadata> findExistingByStableOperationIdentity(String operationId, String method) {
+    private Optional<ApiMetadata> findExistingByStableOperationIdentity(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId,
+            String operationId,
+            String method) {
         String normalizedOperationId = normalize(operationId);
         if (normalizedOperationId == null) {
             return Optional.empty();
         }
-        return repository.findAllByOperationIdAndMethod(normalizedOperationId, method).stream()
+        return repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndOperationIdAndMethod(
+                        tenantId,
+                        environment,
+                        serviceKey,
+                        releaseId,
+                        normalizedOperationId,
+                        method)
+                .stream()
                 .max(Comparator.comparing(ApiMetadata::getId, Comparator.nullsFirst(Comparator.naturalOrder())));
     }
 
@@ -341,10 +411,19 @@ public class ApiMetadataIngestionService {
         String normalizedMethod = normalize(metadata.getMethod());
         String normalizedPath = normalize(metadata.getPath());
         StringJoiner joiner = new StringJoiner("|");
+        joiner.add(normalize(metadata.getTenantId()) != null ? normalize(metadata.getTenantId()) : "");
+        joiner.add(normalize(metadata.getEnvironment()) != null ? normalize(metadata.getEnvironment()) : "");
+        joiner.add(normalize(metadata.getServiceKey()) != null ? normalize(metadata.getServiceKey()) : "");
+        joiner.add(normalize(metadata.getReleaseId()) != null ? normalize(metadata.getReleaseId()) : "");
         joiner.add(normalizedMethod != null ? normalizedMethod : "");
         joiner.add(normalizedPath != null ? normalizedPath : "");
         joiner.add(rawJson != null ? rawJson : "");
         return joiner.toString();
+    }
+
+    private String normalizeOrDefault(String value, String defaultValue) {
+        String normalized = normalize(value);
+        return normalized == null ? defaultValue : normalized;
     }
 
     private String normalize(String value) {
