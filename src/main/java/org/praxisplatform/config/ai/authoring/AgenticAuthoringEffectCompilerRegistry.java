@@ -5313,6 +5313,11 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.put("keyValue", field);
         compiled.put("insertedIndex", insertedIndex);
         compiled.set("value", metric);
+        addWriteDelta(compiled, "chartDocument.metrics[]", metric);
+        if (!assertAffectedPathsCoverWrites(compiled, failures)) {
+            metrics.remove(insertedIndex);
+            return null;
+        }
         return compiled;
     }
 
@@ -5330,13 +5335,47 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             return null;
         }
 
+        ArrayNode writeDeltas = objectMapper.createArrayNode();
+        JsonNode orientationValue = input.has("orientation") ? input.path("orientation").deepCopy() : MissingNode.getInstance();
+        String dimensionField = text(input, "dimensionField");
+        ArrayNode dimensions = null;
+        ObjectNode dimension = null;
+        if (!dimensionField.isBlank()) {
+            dimensions = arrayAt(proposedConfig, "chartDocument.dimensions", true);
+            dimension = findObjectByKey(dimensions, "field", dimensionField);
+        }
+        String metricField = text(input, "metricField");
+        ArrayNode metrics = null;
+        ObjectNode metric = null;
+        if (!metricField.isBlank()) {
+            metrics = arrayAt(proposedConfig, "chartDocument.metrics", true);
+            metric = findObjectByKey(metrics, "field", metricField);
+            if (metric == null) {
+                failures.add("chart-axis-configure metric target not found: " + metricField);
+                return null;
+            }
+        }
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-chart-axis");
+        compiled.put("path", "chartDocument");
+        if (!orientationValue.isMissingNode()) {
+            addWriteDelta(writeDeltas, "chartDocument.orientation", orientationValue);
+        }
+        if (!dimensionField.isBlank() && input.has("dimensionRole")) {
+            addWriteDelta(writeDeltas, "chartDocument.dimensions[].role", input.path("dimensionRole"));
+        }
+        if (!metricField.isBlank() && input.has("metricAxis")) {
+            addWriteDelta(writeDeltas, "chartDocument.metrics[].axis", input.path("metricAxis"));
+        }
+        compiled.set("writeDeltas", writeDeltas);
+        if (!assertAffectedPathsCoverWrites(compiled, failures)) {
+            return null;
+        }
+
         if (input.has("orientation")) {
             chartDocument.set("orientation", input.path("orientation"));
         }
-        String dimensionField = text(input, "dimensionField");
         if (!dimensionField.isBlank()) {
-            ArrayNode dimensions = arrayAt(proposedConfig, "chartDocument.dimensions", true);
-            ObjectNode dimension = findObjectByKey(dimensions, "field", dimensionField);
             if (dimension == null) {
                 dimension = objectMapper.createObjectNode();
                 dimension.put("field", dimensionField);
@@ -5344,21 +5383,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             }
             copyIfPresent(input, dimension, "dimensionRole", "role");
         }
-        String metricField = text(input, "metricField");
         if (!metricField.isBlank()) {
-            ArrayNode metrics = arrayAt(proposedConfig, "chartDocument.metrics", true);
-            ObjectNode metric = findObjectByKey(metrics, "field", metricField);
-            if (metric == null) {
-                failures.add("chart-axis-configure metric target not found: " + metricField);
-                return null;
-            }
             copyIfPresent(input, metric, "metricAxis", "axis");
         }
-
-        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
-        compiled.put("op", "configure-chart-axis");
-        compiled.put("path", "chartDocument");
-        compiled.set("value", input);
+        compiled.set("value", chartDocument.deepCopy());
         return compiled;
     }
 
@@ -5384,6 +5412,20 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         source.put("kind", sourceKind);
         copyIfPresent(input, source, "resource");
         copyIfPresent(input, source, "operation");
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "bind-chart-data-resource");
+        compiled.put("path", "chartDocument");
+        addWriteDelta(compiled, "chartDocument.source", source);
+        if (input.path("dimensions").isArray()) {
+            addWriteDelta(compiled, "chartDocument.dimensions[]", input.path("dimensions"));
+        }
+        if (input.path("metrics").isArray()) {
+            addWriteDelta(compiled, "chartDocument.metrics[]", input.path("metrics"));
+        }
+        if (!assertAffectedPathsCoverWrites(compiled, failures)) {
+            return null;
+        }
         chartDocument.set("source", source);
         if (input.path("dimensions").isArray()) {
             chartDocument.set("dimensions", input.path("dimensions").deepCopy());
@@ -5391,11 +5433,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         if (input.path("metrics").isArray()) {
             chartDocument.set("metrics", input.path("metrics").deepCopy());
         }
-
-        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
-        compiled.put("op", "bind-chart-data-resource");
-        compiled.put("path", "chartDocument.source");
-        compiled.set("value", chartDocument);
+        compiled.set("value", chartDocument.deepCopy());
         return compiled;
     }
 
@@ -5422,13 +5460,69 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         copyIfPresent(input, event, "action");
         copyIfPresent(input, event, "target");
         copyIfPresent(input, event, "mapping");
-        events.set(eventKey, event);
 
         ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
         compiled.put("op", op);
         compiled.put("path", "chartDocument.events." + eventKey);
         compiled.set("value", event);
+        addWriteDelta(compiled, "chartDocument.events." + eventKey, event);
+        if (!assertAffectedPathsCoverWrites(compiled, failures)) {
+            return null;
+        }
+        events.set(eventKey, event);
         return compiled;
+    }
+
+    private void addWriteDelta(ObjectNode compiled, String path, JsonNode value) {
+        ArrayNode writeDeltas = compiled.path("writeDeltas") instanceof ArrayNode existing
+                ? existing
+                : compiled.putArray("writeDeltas");
+        addWriteDelta(writeDeltas, path, value);
+    }
+
+    private void addWriteDelta(ArrayNode writeDeltas, String path, JsonNode value) {
+        ObjectNode delta = objectMapper.createObjectNode();
+        delta.put("path", path);
+        delta.set("value", value.deepCopy());
+        writeDeltas.add(delta);
+    }
+
+    private boolean assertAffectedPathsCoverWrites(ObjectNode compiled, List<String> failures) {
+        JsonNode writeDeltas = compiled.path("writeDeltas");
+        if (!writeDeltas.isArray() || writeDeltas.isEmpty()) {
+            return true;
+        }
+        for (JsonNode delta : writeDeltas) {
+            String writePath = text(delta, "path");
+            if (!isAffectedPathCovered(writePath, compiled.path("affectedPaths"))) {
+                failures.add("domain compiler "
+                        + text(compiled, "domainHandler")
+                        + " wrote outside affectedPaths for "
+                        + text(compiled, "operationId")
+                        + ": "
+                        + writePath);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isAffectedPathCovered(String writePath, JsonNode affectedPaths) {
+        if (writePath == null || writePath.isBlank()) {
+            return true;
+        }
+        if (!affectedPaths.isArray()) {
+            return false;
+        }
+        for (JsonNode affectedPath : affectedPaths) {
+            String affected = affectedPath.asText("");
+            if (affected.equals(writePath)
+                    || writePath.startsWith(affected + ".")
+                    || affected.endsWith("[]") && writePath.startsWith(affected + ".")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void collapseAllPanelsExcept(ArrayNode panels, String expandedPanelId) {

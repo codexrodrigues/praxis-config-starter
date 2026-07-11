@@ -2202,7 +2202,8 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         registry.appendCompiledEffects(
                 "praxis-chart",
                 operationWithHandler("axis.configure", "axis", "x-ui-chart-dimension-or-metric-axis", false,
-                        "compile-domain-patch", "chart-axis-configure", "chartDocument.metrics[].axis"),
+                        "compile-domain-patch", "chart-axis-configure",
+                        "chartDocument.dimensions[]", "chartDocument.metrics[].axis", "chartDocument.orientation"),
                 plan("{}", "{ \"metricField\": \"margin\", \"metricAxis\": \"secondary\", \"dimensionField\": \"month\", \"dimensionRole\": \"time\", \"orientation\": \"vertical\" }"),
                 proposedConfig,
                 patchOperations,
@@ -2211,7 +2212,8 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         registry.appendCompiledEffects(
                 "praxis-chart",
                 operationWithHandler("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", false,
-                        "compile-domain-patch", "chart-data-resource-bind", "chartDocument.source"),
+                        "compile-domain-patch", "chart-data-resource-bind",
+                        "chartDocument.source", "chartDocument.dimensions[]", "chartDocument.metrics[]"),
                 plan("{}", "{ \"sourceKind\": \"praxis.stats\", \"resource\": \"/api/sales/stats\", \"operation\": \"timeseries\", \"dimensions\": [{ \"field\": \"month\" }], \"metrics\": [{ \"field\": \"revenue\", \"aggregation\": \"sum\" }] }"),
                 proposedConfig,
                 patchOperations,
@@ -2253,6 +2255,32 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(patchOperations.get(3).path("op").asText()).isEqualTo("configure-chart-cross-filter-event");
         assertThat(patchOperations.get(4).path("op").asText()).isEqualTo("configure-chart-drilldown-event");
         assertThat(patchOperations.get(5).path("op").asText()).isEqualTo("configure-chart-selection-event");
+        assertThat(patchOperations.get(0).path("path").asText()).isEqualTo("chartDocument.metrics[]");
+        assertThat(patchOperations.get(0).path("keyValue").asText()).isEqualTo("margin");
+        assertThat(patchOperations.get(0).path("insertedIndex").asInt()).isEqualTo(1);
+        assertThat(patchOperations.get(0).path("writeDeltas").get(0).path("path").asText())
+                .isEqualTo("chartDocument.metrics[]");
+        assertThat(patchOperations.get(1).path("path").asText()).isEqualTo("chartDocument");
+        assertThat(patchOperations.get(1).path("value").path("orientation").asText()).isEqualTo("vertical");
+        assertThat(patchOperations.get(1).path("value").path("dimensions").get(0).path("role").asText())
+                .isEqualTo("time");
+        assertThat(patchOperations.get(1).path("value").path("metrics").get(1).path("axis").asText())
+                .isEqualTo("secondary");
+        assertThat(patchOperations.get(1).path("writeDeltas"))
+                .extracting(node -> node.path("path").asText())
+                .containsExactly(
+                        "chartDocument.orientation",
+                        "chartDocument.dimensions[].role",
+                        "chartDocument.metrics[].axis");
+        assertThat(patchOperations.get(2).path("path").asText()).isEqualTo("chartDocument");
+        assertThat(patchOperations.get(2).path("value").path("source").path("resource").asText())
+                .isEqualTo("/api/sales/stats");
+        assertThat(patchOperations.get(2).path("writeDeltas"))
+                .extracting(node -> node.path("path").asText())
+                .containsExactly("chartDocument.source", "chartDocument.dimensions[]", "chartDocument.metrics[]");
+        assertThat(patchOperations.get(3).path("path").asText()).isEqualTo("chartDocument.events.crossFilter");
+        assertThat(patchOperations.get(4).path("path").asText()).isEqualTo("chartDocument.events.drillDown");
+        assertThat(patchOperations.get(5).path("path").asText()).isEqualTo("chartDocument.events.selectionChange");
         assertThat(proposedConfig.path("chartDocument").path("source").path("resource").asText()).isEqualTo("/api/sales/stats");
         assertThat(proposedConfig.path("chartDocument").path("metrics").get(0).path("field").asText()).isEqualTo("revenue");
         assertThat(proposedConfig.path("chartDocument").path("events").path("crossFilter").path("mapping").path("date").asText()).isEqualTo("month");
@@ -2262,6 +2290,80 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(patchOperations.get(3).path("value").has("event")).isFalse();
         assertThat(patchOperations.get(4).path("value").has("event")).isFalse();
         assertThat(patchOperations.get(5).path("value").has("event")).isFalse();
+    }
+
+    @Test
+    void shouldRejectChartDomainCompilerWritesOutsideAffectedPaths() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "combo",
+                    "dimensions": [
+                      { "field": "month", "role": "category" }
+                    ],
+                    "metrics": [
+                      { "field": "revenue", "aggregation": "sum", "axis": "primary" }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operationWithHandler("axis.configure", "axis", "x-ui-chart-dimension-or-metric-axis", false,
+                        "compile-domain-patch", "chart-axis-configure", "chartDocument.metrics[].axis"),
+                plan("{}", "{ \"metricField\": \"revenue\", \"metricAxis\": \"secondary\", \"orientation\": \"horizontal\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(patchOperations).isEmpty();
+        assertThat(failures)
+                .contains("domain compiler chart-axis-configure wrote outside affectedPaths for axis.configure: chartDocument.orientation");
+        assertThat(proposedConfig.path("chartDocument").has("orientation")).isFalse();
+        assertThat(proposedConfig.path("chartDocument").path("metrics").get(0).path("axis").asText()).isEqualTo("primary");
+    }
+
+    @Test
+    void shouldNotExposePartialChartPatchWhenHandlerFailsLate() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "combo",
+                    "dimensions": [
+                      { "field": "month", "role": "category" }
+                    ],
+                    "metrics": [
+                      { "field": "revenue", "aggregation": "sum", "axis": "primary" }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operationWithHandler("axis.configure", "axis", "x-ui-chart-dimension-or-metric-axis", false,
+                        "compile-domain-patch", "chart-axis-configure",
+                        "chartDocument.dimensions[]", "chartDocument.metrics[].axis", "chartDocument.orientation"),
+                plan("{}", "{ \"metricField\": \"missing\", \"metricAxis\": \"secondary\", \"dimensionField\": \"month\", \"dimensionRole\": \"time\", \"orientation\": \"horizontal\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(patchOperations).isEmpty();
+        assertThat(failures).contains("chart-axis-configure metric target not found: missing");
+        assertThat(proposedConfig.path("chartDocument").has("orientation")).isFalse();
+        assertThat(proposedConfig.path("chartDocument").path("dimensions").get(0).path("role").asText())
+                .isEqualTo("category");
+        assertThat(proposedConfig.path("chartDocument").path("metrics").get(0).path("axis").asText()).isEqualTo("primary");
     }
 
     @Test
@@ -2911,7 +3013,10 @@ class AgenticAuthoringEffectCompilerRegistryTest {
             boolean required,
             String effectKind,
             String handler,
-            String affectedPath) throws Exception {
+            String... affectedPaths) throws Exception {
+        String affectedPathsJson = java.util.Arrays.stream(affectedPaths)
+                .map(path -> "\"" + path + "\"")
+                .collect(java.util.stream.Collectors.joining(", "));
         return objectMapper.readTree("""
                 {
                   "operationId": "%s",
@@ -2924,10 +3029,10 @@ class AgenticAuthoringEffectCompilerRegistryTest {
                   "effects": [
                     { "kind": "%s", "handler": "%s" }
                   ],
-                  "affectedPaths": ["%s"],
+                  "affectedPaths": [%s],
                   "submissionImpact": "config-only"
                 }
-                """.formatted(operationId, targetKind, resolver, required, effectKind, handler, affectedPath));
+                """.formatted(operationId, targetKind, resolver, required, effectKind, handler, affectedPathsJson));
     }
 
     private JsonNode plan(String targetJson, String inputJson) throws Exception {
