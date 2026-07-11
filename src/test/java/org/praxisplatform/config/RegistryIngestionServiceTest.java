@@ -4,150 +4,66 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractValidator;
 import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.dto.RegistryIngestionRequest;
+import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
-import org.praxisplatform.config.repository.UiUserConfigRepository;
+import org.praxisplatform.config.service.EmbeddingService;
 import org.praxisplatform.config.service.RegistryIngestionService;
-import org.springframework.ai.embedding.Embedding;
-import org.springframework.ai.embedding.EmbeddingResponse;
-import org.springframework.ai.google.genai.text.GoogleGenAiTextEmbeddingModel;
-import org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration;
-import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration;
-import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiTextEmbeddingAutoConfiguration;
-import org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.core.io.ClassPathResource;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.TestPropertySource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest(classes = TestApplication.class)
-@ActiveProfiles("test")
-@EnableAutoConfiguration(exclude = {
-    DataSourceAutoConfiguration.class,
-    GoogleGenAiEmbeddingConnectionAutoConfiguration.class,
-    GoogleGenAiTextEmbeddingAutoConfiguration.class,
-    GoogleGenAiChatAutoConfiguration.class,
-    OpenAiAudioSpeechAutoConfiguration.class
-})
-@TestPropertySource(properties = {
-        "spring.jpa.hibernate.ddl-auto=none",
-        "spring.flyway.enabled=false",
-        "spring.ai.vectorstore.pgvector.initialize-schema=false",
-        "spring.ai.vectorstore.pgvector.vector-table-validations-enabled=false",
-        "praxis.ai.rag.vector-store.enabled=false",
-        "spring.ai.openai.api-key=dummy",
-        "praxis.ai.registry.bootstrap.enabled=false"
-})
-@Tag("integration")
+@ExtendWith(MockitoExtension.class)
+@Tag("unit")
 class RegistryIngestionServiceTest {
 
-    @Autowired
     private RegistryIngestionService registryIngestionService;
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @MockBean
+    @Mock
     private AiRegistryRepository repository;
 
-    @MockBean
-    private UiUserConfigRepository uiUserConfigRepository;
+    @Mock
+    private EmbeddingService embeddingService;
 
-    @MockBean
-    private org.praxisplatform.config.repository.ApiMetadataRepository apiMetadataRepository;
-
-    @MockBean
-    private org.praxisplatform.config.repository.ConfigEntryRepository configEntryRepository;
-
-    @MockBean
-    private org.praxisplatform.config.repository.AiThreadRepository aiThreadRepository;
-
-    @MockBean
-    private org.praxisplatform.config.repository.AiTurnRepository aiTurnRepository;
-
-    @MockBean
-    private org.praxisplatform.config.repository.AiTurnEventRepository aiTurnEventRepository;
-
-    @MockBean
-    private org.praxisplatform.config.repository.AiMessageRepository aiMessageRepository;
-
-    @MockBean
-    private org.praxisplatform.config.repository.AiActionRepository aiActionRepository;
-
-    @MockBean(name = "transactionManager")
-    private org.springframework.transaction.PlatformTransactionManager transactionManager;
-
-    // Use MockBean for the model to ensure we control it fully, assuming it's not already mocked by TestAiConfig
-    @MockBean
-    private GoogleGenAiTextEmbeddingModel googleGenAiTextEmbeddingModel;
-
-    @MockBean
-    private org.praxisplatform.config.service.DomainCatalogIngestionService domainCatalogIngestionService;
-
-    @MockBean
-    private org.praxisplatform.config.service.DomainFederationQueryService domainFederationQueryService;
-
-    @MockBean
-    private org.praxisplatform.config.service.DomainFederationIngestDryRunService domainFederationIngestDryRunService;
-
-    @MockBean
-    private org.praxisplatform.config.service.DomainFederationIngestPersistenceService domainFederationIngestPersistenceService;
-
-    @MockBean
-    private org.praxisplatform.config.service.DomainFederationReleaseService domainFederationReleaseService;
-
-    @MockBean
-    private org.praxisplatform.config.service.DomainFederationContractValidator domainFederationContractValidator;
-
-    @MockBean
-    private org.praxisplatform.config.service.DomainCatalogPromptContextService domainCatalogPromptContextService;
-
-    @MockBean
-    private org.praxisplatform.config.service.DomainKnowledgeChangeSetService domainKnowledgeChangeSetService;
+    @Mock
+    private RagVectorStoreService ragVectorStoreService;
 
     private static final String COMPONENT_ID = "demo-component";
-    private static final String REGISTRY_TYPE_COMPONENT_DEF = "component_definition";
-    private static final String COMPONENT_DEF_COMPONENT_TYPE = "component-definition";
-    private static final String SYSTEM_SCOPE_KEY = "GLOBAL";
 
     @BeforeEach
-    void cleanBefore() {
-        // deleteExisting(); // No DB to clean
+    void setUp() {
+        registryIngestionService = new RegistryIngestionService(
+                repository,
+                objectMapper,
+                embeddingService,
+                ragVectorStoreService,
+                new AgenticAuthoringManifestContractValidator());
         setupMocks();
     }
 
     private void setupMocks() {
-        float[] dummyEmbedding = new float[768];
-        for (int i = 0; i < 768; i++) {
-            dummyEmbedding[i] = 0.1f;
-        }
-        Embedding embedding = new Embedding(dummyEmbedding, 0);
-        EmbeddingResponse response = new EmbeddingResponse(List.of(embedding));
-        when(googleGenAiTextEmbeddingModel.call(any(org.springframework.ai.embedding.EmbeddingRequest.class))).thenReturn(response);
+        when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
+        when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                anyString(), anyString(), anyString(), any(), anyString()))
+                .thenReturn(java.util.Optional.empty());
+        when(repository.save(any(AiRegistry.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
-
-    @AfterEach
-    void cleanAfter() {
-        // deleteExisting(); // No DB to clean
-    }
-
-    // private void deleteExisting() { ... } // Removed
 
     @Test
     void shouldIngestRegistryAndPersistVector() {
@@ -168,10 +84,10 @@ class RegistryIngestionServiceTest {
             .components(Map.of(COMPONENT_ID, componentEntry))
             .build();
 
-        registryIngestionService.ingestRegistry(request, null, null); // Chamada atualizada
+        registryIngestionService.ingestRegistry(request, null, null);
 
-        // Verify save was called
         verify(repository, times(1)).save(any(AiRegistry.class));
+        verify(ragVectorStoreService, times(1)).upsertDocuments(any());
     }
 
     @Test
@@ -186,6 +102,7 @@ class RegistryIngestionServiceTest {
 
         ArgumentCaptor<AiRegistry> savedDefinitions = ArgumentCaptor.forClass(AiRegistry.class);
         verify(repository, times(request.getComponents().size())).save(savedDefinitions.capture());
+        verify(ragVectorStoreService, times(request.getComponents().size())).upsertDocuments(any());
 
         AiRegistry tableDefinition = savedDefinitions.getAllValues().stream()
                 .filter(definition -> "praxis-table".equals(definition.getRegistryKey()))
