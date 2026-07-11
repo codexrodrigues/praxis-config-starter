@@ -1671,6 +1671,141 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void simulatesPolicyReferenceWithExplicitMaterializationTargetWithoutTextHeuristics() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+
+        var portuguese = service.simulate(
+                new DomainRuleSimulationRequest(
+                        null,
+                        "procurement.suppliers.rule.selection-policy.pt",
+                        "policy_reference",
+                        "procurement",
+                        "procurement.suppliers",
+                        "praxis-api-quickstart",
+                        objectMapper.readTree("""
+                                {
+                                  "summary": "Impedir seleção de fornecedores bloqueados em pedidos.",
+                                  "materializationTargets": [
+                                    {
+                                      "targetLayer": "option_source",
+                                      "targetArtifactType": "resource-option-source",
+                                      "targetArtifactKey": "supplier"
+                                    }
+                                  ]
+                                }
+                                """),
+                        objectMapper.readTree("{}"),
+                        objectMapper.readTree("""
+                                {
+                                  "in": [
+                                    { "var": "status" },
+                                    ["INACTIVE", "BLOCKED"]
+                                  ]
+                                }
+                                """),
+                        objectMapper.readTree("{}")),
+                "tenant-a",
+                "dev");
+
+        var english = service.simulate(
+                new DomainRuleSimulationRequest(
+                        null,
+                        "procurement.suppliers.rule.selection-policy.en",
+                        "policy_reference",
+                        "procurement",
+                        "procurement.suppliers",
+                        "praxis-api-quickstart",
+                        objectMapper.readTree("""
+                                {
+                                  "summary": "Prevent blocked vendors from being selectable in purchase orders.",
+                                  "materializationTargets": [
+                                    {
+                                      "targetLayer": "option_source",
+                                      "targetArtifactType": "resource-option-source",
+                                      "targetArtifactKey": "supplier"
+                                    }
+                                  ]
+                                }
+                                """),
+                        objectMapper.readTree("{}"),
+                        objectMapper.readTree("""
+                                {
+                                  "in": [
+                                    { "var": "status" },
+                                    ["INACTIVE", "BLOCKED"]
+                                  ]
+                                }
+                                """),
+                        objectMapper.readTree("{}")),
+                "tenant-a",
+                "dev");
+
+        assertThat(portuguese.predictedMaterializations()).hasSize(1);
+        assertThat(english.predictedMaterializations()).hasSize(1);
+        assertThat(portuguese.predictedMaterializations().get(0).path("targetLayer").asText())
+                .isEqualTo("option_source");
+        assertThat(portuguese.predictedMaterializations().get(0).path("targetArtifactType").asText())
+                .isEqualTo("resource-option-source");
+        assertThat(portuguese.predictedMaterializations().get(0).path("targetArtifactKey").asText())
+                .isEqualTo("supplier");
+        assertThat(english.predictedMaterializations().get(0))
+                .isEqualTo(portuguese.predictedMaterializations().get(0));
+    }
+
+    @Test
+    void doesNotPromotePolicyReferenceToOptionSourceFromResourceOrSummaryText() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "procurement.suppliers",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+
+        var response = service.simulate(
+                new DomainRuleSimulationRequest(
+                        null,
+                        "procurement.suppliers.rule.policy-reference",
+                        "policy_reference",
+                        "procurement",
+                        "procurement.suppliers",
+                        "praxis-api-quickstart",
+                        objectMapper.readTree("""
+                                {
+                                  "summary": "Impedir seleção de fornecedores bloqueados em pedidos."
+                                }
+                                """),
+                        objectMapper.readTree("{}"),
+                        objectMapper.readTree("""
+                                {
+                                  "in": [
+                                    { "var": "status" },
+                                    ["INACTIVE", "BLOCKED"]
+                                  ]
+                                }
+                                """),
+                        objectMapper.readTree("{}")),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.predictedMaterializations()).hasSize(1);
+        assertThat(response.predictedMaterializations().get(0).path("targetLayer").asText())
+                .isEqualTo("shared_rule_review");
+        assertThat(response.explainability().path("publicationReadiness").asText())
+                .isEqualTo("ready_for_definition_review");
+    }
+
+    @Test
     void persistedSimulationRecordsSafeTimelineEventsWithoutDiagnosticsPayloads() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);

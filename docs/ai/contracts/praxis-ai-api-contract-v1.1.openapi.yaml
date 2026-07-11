@@ -3916,6 +3916,28 @@ components:
       nullable: true
       additionalProperties: true
 
+    DomainRuleMaterializationTarget:
+      type: object
+      description: Alvo canonico de materializacao resolvido por IA/tool grounding. O backend pode projetar esses alvos em predictedMaterializations sem usar keywords de resourceKey ou summary como decisao primaria.
+      properties:
+        targetLayer:
+          $ref: '#/components/schemas/DomainRuleTargetLayer'
+        targetArtifactType:
+          type: string
+          description: Tipo de artefato runtime derivado, por exemplo resource-option-source, resource-validation, resource-workflow-action ou resource-action-approval.
+        targetArtifactKey:
+          type: string
+          description: Identidade canonica do artefato alvo ja resolvido semanticamente.
+        operation:
+          type: string
+          nullable: true
+          description: Operacao de revisao/materializacao recomendada para o alvo.
+      required:
+        - targetLayer
+        - targetArtifactType
+        - targetArtifactKey
+      additionalProperties: true
+
     DomainRuleDefinitionStatus:
       type: string
       enum: [draft, proposed, approved, active, deprecated, retired, rejected]
@@ -3969,7 +3991,9 @@ components:
           format: uuid
           nullable: true
         definition:
-          $ref: '#/components/schemas/DomainRuleJsonObject'
+          description: Corpo canonico da decisao. Pode incluir `materializationTargets[]` com itens `DomainRuleMaterializationTarget` quando a IA/tool grounding ja resolveu explicitamente quais projecoes runtime devem existir; `policy_reference` sem esse contrato explicito nao e promovido por resourceKey ou summary textual.
+          allOf:
+            - $ref: '#/components/schemas/DomainRuleJsonObject'
         parameters:
           $ref: '#/components/schemas/DomainRuleJsonObject'
         condition:
