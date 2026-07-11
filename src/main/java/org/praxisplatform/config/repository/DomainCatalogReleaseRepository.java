@@ -16,12 +16,14 @@ public interface DomainCatalogReleaseRepository extends JpaRepository<DomainCata
     @Query("""
         select r from DomainCatalogRelease r
         where (:serviceKey is null or :serviceKey = '' or r.serviceKey = :serviceKey)
+          and (:resourceKey is null or :resourceKey = '' or r.resourceKey = :resourceKey)
           and (:tenantId is null or :tenantId = '' or r.tenantId = :tenantId)
           and (:environment is null or :environment = '' or r.environment = :environment)
         order by coalesce(r.generatedAt, r.createdAt) desc, r.createdAt desc
     """)
     List<DomainCatalogRelease> findLatest(
             @Param("serviceKey") String serviceKey,
+            @Param("resourceKey") String resourceKey,
             @Param("tenantId") String tenantId,
             @Param("environment") String environment,
             Pageable pageable);

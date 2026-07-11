@@ -137,9 +137,15 @@ public class DomainCatalogController {
     @GetMapping("/releases")
     public ResponseEntity<List<DomainCatalogReleaseResponse>> releases(
             @RequestParam(required = false) String serviceKey,
+            @RequestParam(required = false) String resourceKey,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment,
             @RequestParam(defaultValue = "20") int limit) {
-        return ResponseEntity.ok(domainCatalogIngestionService.releases(serviceKey, tenantId, environment, limit));
+        return ResponseEntity.ok(domainCatalogIngestionService.releases(
+                serviceKey,
+                resourceKey,
+                tenantId,
+                environment,
+                limit));
     }
 }

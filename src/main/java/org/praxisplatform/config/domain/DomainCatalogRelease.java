@@ -42,6 +42,9 @@ public class DomainCatalogRelease {
   @Column(name = "service_version", length = 64)
   private String serviceVersion;
 
+  @Column(name = "resource_key", length = 255)
+  private String resourceKey;
+
   @Column(name = "generated_at")
   private Instant generatedAt;
 

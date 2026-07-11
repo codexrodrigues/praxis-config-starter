@@ -63,6 +63,17 @@ The operational status surface for this derived materialization is:
 GET /api/praxis/config/domain-catalog/rag/status?serviceKey={serviceKey}&resourceKey={resourceKey}
 ```
 
+Release discovery supports an exact optional resource scope:
+
+```text
+GET /api/praxis/config/domain-catalog/releases?serviceKey={serviceKey}&resourceKey={resourceKey}&limit={limit}
+```
+
+When `resourceKey` is present, filtering occurs in the canonical store before
+ordering and pagination. Consumers that need the latest release of one resource
+must use this parameter instead of scanning a globally limited service release
+list. Tenant and environment headers remain part of the release scope.
+
 It resolves the latest release for the requested tenant, environment, service
 and optional resource, then reports `domain_catalog` vector-store document
 counts, source breakdowns, visibility breakdowns, latest publication timestamp

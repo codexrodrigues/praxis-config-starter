@@ -8864,7 +8864,8 @@ class AgenticAuthoringTurnEngineTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant", "local", "default", "v1")).thenReturn(List.of(
                 new ApiMetadata(
                         "/api/human-resources/vw-analytics-folha-pagamento",
                         "GET",
@@ -8925,7 +8926,8 @@ class AgenticAuthoringTurnEngineTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(new ApiMetadata(
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
                 "/api/human-resources/funcionarios",
                 "GET",
                 "pessoas,funcionarios,rh",
@@ -8985,7 +8987,8 @@ class AgenticAuthoringTurnEngineTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(new ApiMetadata(
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
                 "/api/human-resources/funcionarios",
                 "GET",
                 "pessoas,funcionarios,cargos,departamentos,folha,rh",
@@ -9037,7 +9040,8 @@ class AgenticAuthoringTurnEngineTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(new ApiMetadata(
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
                 "/api/human-resources/funcionarios",
                 "GET",
                 "human-resources,funcionarios,pessoas,colaboradores",
@@ -9085,7 +9089,8 @@ class AgenticAuthoringTurnEngineTest {
         AgenticAuthoringIntentResolutionResult firstIntent = clarificationRequiredIntent();
         AgenticAuthoringIntentResolutionResult secondIntent = validIntentWithToolCandidate();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant", "local", "default", "v1")).thenReturn(List.of(
                 new ApiMetadata(
                         "/api/human-resources/vw-analytics-folha-pagamento",
                         "GET",
@@ -9174,7 +9179,8 @@ class AgenticAuthoringTurnEngineTest {
         verify(intentResolverService, org.mockito.Mockito.times(1))
                 .resolve(any(), eq("tenant"), eq("user"), eq("local"));
         verify(previewService, never()).preview(any(), eq("tenant"), eq("user"), eq("local"));
-        verify(repository).findAll();
+        verify(repository).findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant", "local", "default", "v1");
         org.assertj.core.api.Assertions.assertThat(sink.payloads)
                 .noneSatisfy(payload -> {
                     JsonNode node = objectMapper.valueToTree(payload);
@@ -9220,7 +9226,8 @@ class AgenticAuthoringTurnEngineTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(new ApiMetadata(
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
                 "/api/human-resources/funcionarios",
                 "GET",
                 "funcionarios,colaboradores,recursos humanos,pessoas",
@@ -9367,7 +9374,8 @@ class AgenticAuthoringTurnEngineTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(new ApiMetadata(
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
                 "/api/human-resources/funcionarios",
                 "GET",
                 "funcionarios,colaboradores,recursos humanos,pessoas",

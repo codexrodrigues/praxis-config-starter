@@ -213,6 +213,7 @@ public class DomainCatalogIngestionService {
         release.setServiceKey(text(payload.path("service"), "serviceKey"));
         release.setServiceName(text(payload.path("service"), "name"));
         release.setServiceVersion(text(payload.path("service"), "version"));
+        release.setResourceKey(text(payload, "resourceKey"));
         release.setGeneratedAt(parseInstant(text(payload.path("release"), "generatedAt")));
         release.setSourceHash(sourceHash);
         release.setTenantId(normalize(tenantId));
@@ -282,10 +283,16 @@ public class DomainCatalogIngestionService {
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
-    public List<DomainCatalogReleaseResponse> releases(String serviceKey, String tenantId, String environment, int limit) {
+    public List<DomainCatalogReleaseResponse> releases(
+            String serviceKey,
+            String resourceKey,
+            String tenantId,
+            String environment,
+            int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 100);
         return releaseRepository.findLatest(
                         normalize(serviceKey),
+                        normalize(resourceKey),
                         normalize(tenantId),
                         normalize(environment),
                         PageRequest.of(0, resolvedLimit))
@@ -752,11 +759,11 @@ public class DomainCatalogIngestionService {
         String normalizedResourceKey = normalize(resourceKey);
         return releaseRepository.findLatest(
                         normalize(serviceKey),
+                        normalizedResourceKey,
                         normalize(tenantId),
                         normalize(environment),
-                        PageRequest.of(0, StringUtils.hasText(normalizedResourceKey) ? 100 : 1))
+                        PageRequest.of(0, 1))
                 .stream()
-                .filter(release -> matchesResourceKey(release, normalizedResourceKey))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("No domain catalog release found for the requested scope"));
     }
@@ -786,6 +793,7 @@ public class DomainCatalogIngestionService {
             String environment) {
         List<DomainCatalogRelease> releases = releaseRepository.findLatest(
                 normalize(serviceKey),
+                null,
                 normalize(tenantId),
                 normalize(environment),
                 PageRequest.of(0, 100));
@@ -808,14 +816,12 @@ public class DomainCatalogIngestionService {
         String normalizedResourceKey = normalize(resourceKey);
         List<DomainCatalogRelease> releases = releaseRepository.findLatest(
                 null,
+                normalizedResourceKey,
                 normalize(tenantId),
                 normalize(environment),
                 PageRequest.of(0, 100));
         Map<String, DomainCatalogRelease> latestByService = new LinkedHashMap<>();
         for (DomainCatalogRelease release : releases) {
-            if (!matchesResourceKey(release, normalizedResourceKey)) {
-                continue;
-            }
             String serviceKey = normalize(release.getServiceKey());
             String key = StringUtils.hasText(serviceKey)
                     ? latestByServiceKey(serviceKey, release, normalizedResourceKey)

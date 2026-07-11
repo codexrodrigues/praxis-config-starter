@@ -285,7 +285,7 @@ class DomainCatalogIngestionServiceTest {
                 "2026-04-21T12:00:02Z",
                 List.of());
 
-        when(releaseRepository.findLatest(eq("praxis-service"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+        when(releaseRepository.findLatest(eq("praxis-service"), eq("human-resources.funcionarios"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(latestRelease));
         when(itemRepository.findByRelease(latestRelease)).thenReturn(List.of(indexed, denied, blank));
         when(ragVectorStoreService.corpusReleaseStatus(
@@ -351,7 +351,7 @@ class DomainCatalogIngestionServiceTest {
                     """)
                 .build();
 
-        when(releaseRepository.findLatest(eq("praxis-api-quickstart"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+        when(releaseRepository.findLatest(eq("praxis-api-quickstart"), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(latestRelease));
         when(itemRepository.search(
                 eq("praxis-api-quickstart:latest"),
@@ -438,7 +438,7 @@ class DomainCatalogIngestionServiceTest {
                 .payload("{\"label\":\"Invoice total\"}")
                 .build();
 
-        when(releaseRepository.findLatest(eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+        when(releaseRepository.findLatest(eq(null), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(hrLatest, financeLatest, hrOlder));
         when(itemRepository.search(eq("hr:latest"), eq("node"), eq(null), eq("field"), eq("field"), any(Pageable.class)))
                 .thenReturn(List.of(hrField));
@@ -492,7 +492,7 @@ class DomainCatalogIngestionServiceTest {
                 .payload("{\"label\":\"Salary visibility\"}")
                 .build();
 
-        when(releaseRepository.findLatest(eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+        when(releaseRepository.findLatest(eq(null), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(hrLatest));
         when(itemRepository.search(
                 eq("hr:latest"),
@@ -583,7 +583,7 @@ class DomainCatalogIngestionServiceTest {
                     """)
                 .build();
 
-        when(releaseRepository.findLatest(eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+        when(releaseRepository.findLatest(eq(null), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(hrLatest, financeLatest));
         when(itemRepository.search(eq("hr:latest"), eq("edge"), eq(null), eq(null), eq(null), any(Pageable.class)))
                 .thenReturn(List.of(crossServiceReference));
@@ -647,7 +647,7 @@ class DomainCatalogIngestionServiceTest {
                     """)
                 .build();
 
-        when(releaseRepository.findLatest(eq("hr-service"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+        when(releaseRepository.findLatest(eq("hr-service"), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(hrLatest));
         when(itemRepository.search(eq("hr:latest"), eq("edge"), eq(null), eq(null), eq("salary"), any(Pageable.class)))
                 .thenReturn(List.of(governedByEdge));
@@ -704,7 +704,7 @@ class DomainCatalogIngestionServiceTest {
                     """)
                 .build();
 
-        when(releaseRepository.findLatest(eq("praxis-api-quickstart"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+        when(releaseRepository.findLatest(eq("praxis-api-quickstart"), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(latestRelease));
         when(itemRepository.search(
                 eq("praxis-api-quickstart:latest"),
@@ -788,8 +788,8 @@ class DomainCatalogIngestionServiceTest {
                     """)
                 .build();
 
-        when(releaseRepository.findLatest(eq("praxis-service"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
-                .thenReturn(List.of(operationsRelease, funcionariosRelease));
+        when(releaseRepository.findLatest(eq("praxis-service"), eq("human-resources.funcionarios"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+                .thenReturn(List.of(funcionariosRelease));
         when(itemRepository.search(
                 eq("praxis-service:human-resources.funcionarios:2026-04-22T11:01:23Z"),
                 eq("governance"),
@@ -863,7 +863,7 @@ class DomainCatalogIngestionServiceTest {
         DomainCatalogItem funcionariosNode = nodeItem(funcionariosRelease, "human-resources.funcionarios", "Funcionarios");
         DomainCatalogItem cargosNode = nodeItem(cargosRelease, "human-resources.cargos", "Cargos");
 
-        when(releaseRepository.findLatest(eq("praxis-service"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+        when(releaseRepository.findLatest(eq("praxis-service"), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(folhaRelease, funcionariosRelease, cargosRelease));
         when(itemRepository.search(
                 eq(folhaRelease.getReleaseKey()),
@@ -975,7 +975,7 @@ class DomainCatalogIngestionServiceTest {
                     """)
                 .build();
 
-        when(releaseRepository.findLatest(eq("praxis-api-quickstart"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+        when(releaseRepository.findLatest(eq("praxis-api-quickstart"), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(latestRelease));
         when(itemRepository.search(
                 eq("praxis-api-quickstart:latest"),
