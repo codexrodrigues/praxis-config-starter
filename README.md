@@ -253,6 +253,7 @@ source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted t
 | `praxis.ai.authoring.consultative.api-catalog.compact-cache-ttl-ms` | `60000` | TTL for compact API catalog projections used during consultative answers. Use `0` to force fresh projection per request. |
 | `praxis.ai.authoring.consultative.api-catalog.compact-cache-max-entries` | `256` | Maximum compact projection entries retained per starter instance. Older entries are evicted before expired entries can accumulate unbounded. |
 | `praxis.ai.authoring.consultative.api-catalog.api-metadata-cache-ttl-ms` | `60000` | TTL for `api_metadata` lookups used by the consultative catalog projection. Use `0` when validating metadata ingestion changes interactively. |
+| `praxis.api-metadata.rag-publication.enabled` | `true` | Enables after-commit publication of derived API metadata RAG documents. Disable only when the structured `api_metadata` corpus must persist without vector indexing. |
 
 ## AI Registry Revision Semantics
 
@@ -278,6 +279,13 @@ metadata carries the same tenant, environment and release identity for determini
 cleanup, but it must not become the authority for schemas, endpoints or business resource semantics.
 Scoped API candidate retrieval fails closed when no tenant/environment result is available; it must
 not retry against an unscoped corpus that could include another tenant's API evidence.
+
+API catalog ingestion persists the canonical `api_metadata` rows before publishing the derived RAG
+corpus. RAG publication is scheduled after the database commit and can be replayed from canonical
+rows with `POST /api/praxis/config/api-catalog/rag/reconcile?releaseId=...`; operators can inspect
+readiness with `GET /api/praxis/config/api-catalog/rag/status?releaseId=...`. A vector-store outage
+or publication failure must not roll back canonical ingestion, and RAG diagnostics should be used to
+decide whether semantic retrieval is operational for that scope.
 
 API metadata `tags` filters are normalized as comma, semicolon or pipe separated tokens and matched
 case-insensitively as an AND set. Structured retrieval and RAG retrieval must both preserve method,

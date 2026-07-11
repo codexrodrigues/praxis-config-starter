@@ -2,9 +2,12 @@ package org.praxisplatform.config.service;
 
 import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -20,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.dto.ApiCatalogRequest;
+import org.praxisplatform.config.dto.ApiMetadataRagReconcileResponse;
 import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
@@ -73,6 +77,10 @@ class ApiMetadataIngestionServiceTest {
                 "GLOBAL", "default", "default", "v1", "/api/demo", "GET"))
                 .thenReturn(Optional.empty());
         when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "GLOBAL", "default", "default", "v1"))
+                .thenAnswer(invocation -> List.of(savedMetadataFromRepositorySave()));
 
         service.ingestCatalog(request, null, null);
 
@@ -113,6 +121,10 @@ class ApiMetadataIngestionServiceTest {
                 "tenant-a", "prod", "default", "release-2026-02", "listUsers", "GET"))
                 .thenReturn(List.of());
         when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant-a", "prod", "default", "release-2026-02"))
+                .thenAnswer(invocation -> List.of(savedMetadataFromRepositorySave()));
 
         service.ingestCatalog(request, "tenant-a", "prod");
 
@@ -146,6 +158,7 @@ class ApiMetadataIngestionServiceTest {
         assertThat(document.getMetadata().get(RagMetadataKeys.ENVIRONMENT)).isEqualTo("prod");
         assertThat(document.getMetadata().get(RagMetadataKeys.VERSION)).isEqualTo("2026.02");
         assertThat(document.getMetadata().get(RagMetadataKeys.TAGS)).isEqualTo("users");
+        assertThat(document.getMetadata().get(RagMetadataKeys.PUBLISHED_AT)).isInstanceOf(String.class);
     }
 
     @Test
@@ -231,5 +244,147 @@ class ApiMetadataIngestionServiceTest {
         assertThat(saved.getTenantId()).isEqualTo("tenant-a");
         assertThat(saved.getReleaseId()).isEqualTo("release-new");
         assertThat(saved.getPath()).isEqualTo("/api/current/users/filter");
+    }
+
+    @Test
+    void shouldNotPublishRagDocumentsWhenBatchFailsBeforeCommitBoundary() {
+        ApiCatalogRequest.ApiEndpointEntry first = ApiCatalogRequest.ApiEndpointEntry.builder()
+                .path("/api/ok")
+                .method("GET")
+                .build();
+        ApiCatalogRequest.ApiEndpointEntry second = ApiCatalogRequest.ApiEndpointEntry.builder()
+                .path("/api/fail")
+                .method("GET")
+                .build();
+        ApiCatalogRequest request = ApiCatalogRequest.builder()
+                .endpoints(List.of(first, second))
+                .build();
+
+        when(embeddingService.embed(anyString()))
+                .thenReturn(List.of(0.1f, 0.2f))
+                .thenThrow(new IllegalStateException("embedding unavailable"));
+        when(repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                "GLOBAL", "default", "default", "v1", "/api/ok", "GET"))
+                .thenReturn(Optional.empty());
+        when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertThatThrownBy(() -> service.ingestCatalog(request, null, null))
+                .isInstanceOf(org.praxisplatform.config.exception.ConfigurationIngestionException.class)
+                .hasMessageContaining("Error ingesting endpoint: GET /api/fail");
+
+        verify(ragVectorStoreService, never()).deleteDocumentsByRelease(
+                anyString(),
+                anyString(),
+                anyString(),
+                anyString());
+        verify(ragVectorStoreService, never()).upsertDocuments(any());
+    }
+
+    @Test
+    void shouldKeepCanonicalIngestionWhenDerivedRagPublicationFailsAfterPersistence() {
+        ApiCatalogRequest.ApiEndpointEntry endpoint = ApiCatalogRequest.ApiEndpointEntry.builder()
+                .path("/api/demo")
+                .method("GET")
+                .build();
+        ApiCatalogRequest request = ApiCatalogRequest.builder()
+                .endpoints(List.of(endpoint))
+                .build();
+
+        when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
+        when(repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                "GLOBAL", "default", "default", "v1", "/api/demo", "GET"))
+                .thenReturn(Optional.empty());
+        when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "GLOBAL", "default", "default", "v1"))
+                .thenAnswer(invocation -> List.of(savedMetadataFromRepositorySave()));
+        org.mockito.Mockito.doThrow(new IllegalStateException("vector down"))
+                .when(ragVectorStoreService)
+                .upsertDocuments(any());
+
+        service.ingestCatalog(request, null, null);
+
+        verify(repository).save(any(ApiMetadata.class));
+        verify(ragVectorStoreService).deleteDocumentsByRelease(
+                "GLOBAL",
+                "default",
+                "v1",
+                RagResourceTypes.API_METADATA);
+        verify(ragVectorStoreService).upsertDocuments(any());
+    }
+
+    @Test
+    void shouldReplayCanonicalApiMetadataIntoRagDuringManualReconciliation() {
+        ApiMetadata metadata = new ApiMetadata();
+        metadata.setTenantId("tenant-a");
+        metadata.setEnvironment("prod");
+        metadata.setServiceKey("default");
+        metadata.setReleaseId("release-1");
+        metadata.setReleaseVersion("2026.02");
+        metadata.setPath("/api/users");
+        metadata.setMethod("GET");
+        metadata.setSummary("List users");
+        metadata.setTags("users");
+        metadata.setRawJson("{\"path\":\"/api/users\",\"method\":\"GET\",\"summary\":\"List users\",\"tags\":[\"users\"]}");
+
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant-a", "prod", "default", "release-1"))
+                .thenReturn(List.of(metadata));
+        when(repository.countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant-a", "prod", "default", "release-1"))
+                .thenReturn(1L);
+        when(ragVectorStoreService.corpusReleaseStatus(
+                "tenant-a",
+                "prod",
+                "release-1",
+                RagResourceTypes.API_METADATA,
+                1L))
+                .thenReturn(new RagVectorStoreService.RagCorpusReleaseStatus(
+                        true,
+                        true,
+                        "tenant-a",
+                        "prod",
+                        "release-1",
+                        1,
+                        1,
+                        1,
+                        java.util.Map.of("summary", 1L),
+                        java.util.Map.of("allow", 1L),
+                        List.of(new RagVectorStoreService.SourceStatus(
+                                "GET:/api/users",
+                                RagResourceTypes.API_METADATA,
+                                1,
+                                List.of("summary"),
+                                List.of("2026.02"),
+                                "2026-07-11T01:00:00Z")),
+                        "2026-07-11T01:00:00Z",
+                        List.of()));
+
+        ApiMetadataRagReconcileResponse response =
+                service.reconcileRag("tenant-a", "prod", "default", "release-1");
+
+        assertThat(response.publishedDocumentCount()).isEqualTo(1);
+        assertThat(response.status().reconciled()).isTrue();
+        ArgumentCaptor<List<Document>> captor = ArgumentCaptor.forClass(List.class);
+        verify(ragVectorStoreService).deleteDocumentsByRelease(
+                "tenant-a",
+                "prod",
+                "release-1",
+                RagResourceTypes.API_METADATA);
+        verify(ragVectorStoreService).upsertDocuments(captor.capture());
+        assertThat(captor.getValue()).hasSize(1);
+        assertThat(captor.getValue().get(0).getId())
+                .startsWith("tenant-a/prod/get_api_users/release-1/api_metadata/");
+        assertThat(captor.getValue().get(0).getMetadata())
+                .containsEntry(RagMetadataKeys.SOURCE_ID, "GET:/api/users")
+                .containsEntry(RagMetadataKeys.CHUNK_KIND, "summary");
+    }
+
+    private ApiMetadata savedMetadataFromRepositorySave() {
+        ArgumentCaptor<ApiMetadata> captor = ArgumentCaptor.forClass(ApiMetadata.class);
+        verify(repository).save(captor.capture());
+        return captor.getValue();
     }
 }

@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -16,6 +17,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.dto.ApiCatalogRequest;
+import org.praxisplatform.config.dto.ApiMetadataRagReconcileResponse;
+import org.praxisplatform.config.dto.ApiMetadataRagStatusResponse;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.rag.RagDocumentIdentity;
 import org.praxisplatform.config.rag.RagMetadataKeys;
@@ -24,8 +27,11 @@ import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.ai.document.Document;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Ingesta o catalogo operacional de APIs na fonte canonica {@code api_metadata} e sincroniza a
@@ -49,6 +55,9 @@ public class ApiMetadataIngestionService {
     private final EmbeddingService embeddingService;
     private final RagVectorStoreService ragVectorStoreService;
     private static final Logger ingestLog = LoggerFactory.getLogger("api-metadata-ingest");
+
+    @Value("${praxis.api-metadata.rag-publication.enabled:true}")
+    private boolean apiMetadataRagPublicationEnabled = true;
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public void ingestCatalog(ApiCatalogRequest request, String tenantId, String environment) {
@@ -129,19 +138,6 @@ public class ApiMetadataIngestionService {
                         meta.getPath(),
                         embedding != null ? embedding.size() : 0);
 
-                Document ragDocument = toRagDocument(
-                        meta,
-                        embeddingSummary,
-                        tags,
-                        requestSchema,
-                        responseSchema,
-                        parameters,
-                        rawJson,
-                        resolvedTenant,
-                        resolvedEnv,
-                        resolvedReleaseId,
-                        requestVersion);
-                ragVectorStoreService.upsertDocuments(List.of(ragDocument));
             } catch (Exception e) {
                 String msg = "Error ingesting endpoint: " + ep.getMethod() + " " + ep.getPath();
                 log.error(msg, e);
@@ -149,6 +145,72 @@ public class ApiMetadataIngestionService {
                 throw new ConfigurationIngestionException(msg, e);
             }
         }
+        publishRagDocumentsAfterCommit(resolvedTenant, resolvedEnv, serviceKey, resolvedReleaseId);
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public ApiMetadataRagStatusResponse ragStatus(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId) {
+        String resolvedTenant = normalizeOrDefault(tenantId, DEFAULT_TENANT_ID);
+        String resolvedEnv = normalizeOrDefault(environment, DEFAULT_ENVIRONMENT);
+        String resolvedServiceKey = normalizeOrDefault(serviceKey, DEFAULT_SERVICE_KEY);
+        String resolvedReleaseId = normalizeOrDefault(releaseId, "v1");
+        long expectedDocumentCount = repository.countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                resolvedTenant,
+                resolvedEnv,
+                resolvedServiceKey,
+                resolvedReleaseId);
+        RagVectorStoreService.RagCorpusReleaseStatus status = ragVectorStoreService.corpusReleaseStatus(
+                resolvedTenant,
+                resolvedEnv,
+                resolvedReleaseId,
+                RagResourceTypes.API_METADATA,
+                expectedDocumentCount);
+        return ApiMetadataRagStatusResponse.from(
+                resolvedTenant,
+                resolvedEnv,
+                resolvedServiceKey,
+                resolvedReleaseId,
+                RagResourceTypes.API_METADATA,
+                apiMetadataRagPublicationEnabled,
+                ragVectorStoreService.isAvailable(),
+                status);
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public ApiMetadataRagReconcileResponse reconcileRag(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId) {
+        String resolvedTenant = normalizeOrDefault(tenantId, DEFAULT_TENANT_ID);
+        String resolvedEnv = normalizeOrDefault(environment, DEFAULT_ENVIRONMENT);
+        String resolvedServiceKey = normalizeOrDefault(serviceKey, DEFAULT_SERVICE_KEY);
+        String resolvedReleaseId = normalizeOrDefault(releaseId, "v1");
+        PublicationOutcome outcome = publishCanonicalRagDocuments(
+                resolvedTenant,
+                resolvedEnv,
+                resolvedServiceKey,
+                resolvedReleaseId);
+        ApiMetadataRagStatusResponse status = ragStatus(
+                resolvedTenant,
+                resolvedEnv,
+                resolvedServiceKey,
+                resolvedReleaseId);
+        return new ApiMetadataRagReconcileResponse(
+                "praxis.api-metadata-rag-reconcile/v0.1",
+                resolvedTenant,
+                resolvedEnv,
+                resolvedServiceKey,
+                resolvedReleaseId,
+                apiMetadataRagPublicationEnabled,
+                ragVectorStoreService.isAvailable(),
+                outcome.expectedDocumentCount(),
+                outcome.publishedDocumentCount(),
+                status);
     }
 
     // Helper to keep using existing logic for now, adapted for DTO
@@ -345,6 +407,141 @@ public class ApiMetadataIngestionService {
                 .max(Comparator.comparing(ApiMetadata::getId, Comparator.nullsFirst(Comparator.naturalOrder())));
     }
 
+    private void publishRagDocumentsAfterCommit(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId) {
+        if (!apiMetadataRagPublicationEnabled) {
+            log.debug(
+                    "API metadata RAG publication disabled for tenant={}, env={}, serviceKey={}, release={}",
+                    tenantId,
+                    environment,
+                    serviceKey,
+                    releaseId);
+            return;
+        }
+        Runnable task = () -> {
+            try {
+                PublicationOutcome outcome = publishCanonicalRagDocuments(
+                        tenantId,
+                        environment,
+                        serviceKey,
+                        releaseId);
+                log.info(
+                        "Published {} API metadata RAG document(s) for tenant={}, env={}, serviceKey={}, release={}",
+                        outcome.publishedDocumentCount(),
+                        tenantId,
+                        environment,
+                        serviceKey,
+                        releaseId);
+            } catch (RuntimeException ex) {
+                log.warn(
+                        "API metadata for tenant={}, env={}, serviceKey={}, release={} was persisted, but RAG publication failed: {}",
+                        tenantId,
+                        environment,
+                        serviceKey,
+                        releaseId,
+                        ex.getMessage());
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+        } else {
+            task.run();
+        }
+    }
+
+    private PublicationOutcome publishCanonicalRagDocuments(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId) {
+        if (!apiMetadataRagPublicationEnabled || !ragVectorStoreService.isAvailable()) {
+            long expected = repository.countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                    tenantId,
+                    environment,
+                    serviceKey,
+                    releaseId);
+            return new PublicationOutcome(expected, 0);
+        }
+        List<ApiMetadata> metadataRows = repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                tenantId,
+                environment,
+                serviceKey,
+                releaseId);
+        if (metadataRows == null) {
+            metadataRows = List.of();
+        }
+        List<Document> documents = metadataRows.stream()
+                .map(this::toRagDocument)
+                .toList();
+        ragVectorStoreService.deleteDocumentsByRelease(
+                tenantId,
+                environment,
+                releaseId,
+                RagResourceTypes.API_METADATA);
+        ragVectorStoreService.upsertDocuments(documents);
+        return new PublicationOutcome(metadataRows.size(), documents.size());
+    }
+
+    private Document toRagDocument(ApiMetadata meta) {
+        ApiCatalogRequest.ApiEndpointEntry endpoint = readRawEndpoint(meta.getRawJson());
+        String content = endpoint != null
+                ? buildSummary(
+                        meta.getPath(),
+                        meta.getMethod(),
+                        meta.getTags(),
+                        meta.getSummary(),
+                        meta.getDescription(),
+                        meta.getOperationId(),
+                        endpoint)
+                : buildStoredSummary(meta);
+        return toRagDocument(
+                meta,
+                content,
+                meta.getTags(),
+                meta.getRequestSchema(),
+                meta.getResponseSchema(),
+                meta.getParameters(),
+                meta.getRawJson(),
+                meta.getTenantId(),
+                meta.getEnvironment(),
+                meta.getReleaseId(),
+                meta.getReleaseVersion());
+    }
+
+    private ApiCatalogRequest.ApiEndpointEntry readRawEndpoint(String rawJson) {
+        String normalizedRawJson = normalize(rawJson);
+        if (normalizedRawJson == null) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(normalizedRawJson, ApiCatalogRequest.ApiEndpointEntry.class);
+        } catch (Exception ex) {
+            log.debug("Unable to reconstruct API endpoint DTO from raw_json; using stored metadata summary.", ex);
+            return null;
+        }
+    }
+
+    private String buildStoredSummary(ApiMetadata meta) {
+        StringJoiner joiner = new StringJoiner(" | ");
+        joiner.add(meta.getMethod() + " " + meta.getPath());
+        if (meta.getSummary() != null) joiner.add("Summary: " + meta.getSummary());
+        if (meta.getDescription() != null) joiner.add("Desc: " + meta.getDescription());
+        if (meta.getOperationId() != null) joiner.add("OpId: " + meta.getOperationId());
+        if (meta.getTags() != null && !meta.getTags().isBlank()) joiner.add("Tags: " + meta.getTags());
+        if (meta.getParameters() != null) joiner.add("Params: " + meta.getParameters());
+        if (meta.getRequestSchema() != null) joiner.add("Req: " + meta.getRequestSchema());
+        if (meta.getResponseSchema() != null) joiner.add("Res: " + meta.getResponseSchema());
+        return joiner.toString();
+    }
+
     private Document toRagDocument(
             ApiMetadata meta,
             String content,
@@ -377,6 +574,11 @@ public class ApiMetadataIngestionService {
         metadata.put(RagMetadataKeys.REQUEST_SCHEMA, requestSchema);
         metadata.put(RagMetadataKeys.RESPONSE_SCHEMA, responseSchema);
         metadata.put(RagMetadataKeys.PARAMETERS, parameters);
+        metadata.put(RagMetadataKeys.SOURCE_KIND, RagResourceTypes.API_METADATA);
+        metadata.put(RagMetadataKeys.SOURCE_ID, componentId);
+        metadata.put(RagMetadataKeys.CHUNK_KIND, "summary");
+        metadata.put(RagMetadataKeys.AI_VISIBILITY, "allow");
+        metadata.put(RagMetadataKeys.PUBLISHED_AT, Instant.now().toString());
         if (tenantId != null) {
             metadata.put(RagMetadataKeys.TENANT_ID, tenantId);
         }
@@ -432,5 +634,8 @@ public class ApiMetadataIngestionService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private record PublicationOutcome(long expectedDocumentCount, long publishedDocumentCount) {
     }
 }
