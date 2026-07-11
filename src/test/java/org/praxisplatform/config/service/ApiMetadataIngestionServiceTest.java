@@ -145,6 +145,7 @@ class ApiMetadataIngestionServiceTest {
         assertThat(document.getMetadata().get(RagMetadataKeys.TENANT_ID)).isEqualTo("tenant-a");
         assertThat(document.getMetadata().get(RagMetadataKeys.ENVIRONMENT)).isEqualTo("prod");
         assertThat(document.getMetadata().get(RagMetadataKeys.VERSION)).isEqualTo("2026.02");
+        assertThat(document.getMetadata().get(RagMetadataKeys.TAGS)).isEqualTo("users");
     }
 
     @Test

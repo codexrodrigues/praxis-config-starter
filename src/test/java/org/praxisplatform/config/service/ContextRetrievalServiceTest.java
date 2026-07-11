@@ -144,6 +144,86 @@ class ContextRetrievalServiceTest {
     }
 
     @Test
+    void shouldApplyTagFiltersWhenSearchingApiMetadataWithVectorStore() {
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.search(eq("query"), eq(8), any(Filter.Expression.class)))
+                .thenReturn(List.of(
+                        buildApiDocument("/api/payroll", "payroll,finance"),
+                        buildApiDocument("/api/users", "Users, HR"),
+                        buildApiDocument("/api/users-basic", "users")));
+
+        List<ApiSearchResult> results = contextRetrievalService.searchApiMetadata(
+                "query",
+                "get",
+                " users ; hr ",
+                2,
+                null,
+                "tenant-a",
+                "prod",
+                "release-2026-02");
+
+        ArgumentCaptor<Filter.Expression> filterCaptor = ArgumentCaptor.forClass(Filter.Expression.class);
+        verify(ragVectorStoreService).search(eq("query"), eq(8), filterCaptor.capture());
+        String filterExpression = String.valueOf(filterCaptor.getValue());
+
+        assertEquals(1, results.size());
+        assertEquals("/api/users", results.get(0).getPath());
+        assertEquals("Users, HR", results.get(0).getTags());
+        assertTrue(filterExpression.contains("tenantId"));
+        assertTrue(filterExpression.contains("tenant-a"));
+        assertTrue(filterExpression.contains("environment"));
+        assertTrue(filterExpression.contains("prod"));
+        assertTrue(filterExpression.contains("release-2026-02"));
+        assertTrue(filterExpression.contains("method"));
+        assertTrue(filterExpression.contains("GET"));
+        verifyNoInteractions(apiMetadataRepository);
+    }
+
+    @Test
+    void shouldReturnEmptyWhenVectorTagFilterHasNoMatchWithoutLegacyFallback() {
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.search(eq("query"), eq(5), any(Filter.Expression.class)))
+                .thenReturn(List.of(buildApiDocument("/api/payroll", "payroll,finance")));
+
+        List<ApiSearchResult> results = contextRetrievalService.searchApiMetadata(
+                "query",
+                "GET",
+                "users",
+                1,
+                null,
+                "tenant-a",
+                "prod",
+                "release-2026-02");
+
+        assertNotNull(results);
+        assertTrue(results.isEmpty());
+        verifyNoInteractions(apiMetadataRepository);
+    }
+
+    @Test
+    void shouldPassNormalizedTagsToStructuredRetrievalWhenVectorStoreIsUnavailable() {
+        when(ragVectorStoreService.isAvailable()).thenReturn(false);
+        when(embeddingService.embed(anyString(), any())).thenReturn(List.of(0.1f, 0.2f));
+
+        ApiMetadataProjection projectionMock = mock(ApiMetadataProjection.class);
+        when(projectionMock.getId()).thenReturn(1L);
+        when(projectionMock.getMethod()).thenReturn("GET");
+        when(projectionMock.getPath()).thenReturn("/api/users");
+        when(projectionMock.getTags()).thenReturn("users,hr");
+        when(projectionMock.getSimilarityScore()).thenReturn(0.95);
+
+        when(apiMetadataRepository.findByVectorSimilarity(anyString(), eq("GET"), eq("hr,users"), eq(2)))
+                .thenReturn(List.of(projectionMock));
+
+        List<ApiSearchResult> results = contextRetrievalService.searchApiMetadata("query", "GET", " HR ; Users ", 2);
+
+        assertEquals(1, results.size());
+        assertEquals("/api/users", results.get(0).getPath());
+        assertEquals("users,hr", results.get(0).getTags());
+        verify(apiMetadataRepository).findByVectorSimilarity(anyString(), eq("GET"), eq("hr,users"), eq(2));
+    }
+
+    @Test
     void shouldFallbackToDefaultReleaseWhenEnabled() {
         ReflectionTestUtils.setField(contextRetrievalService, "ragDefaultRelease", "release-default");
         ReflectionTestUtils.setField(contextRetrievalService, "ragReleaseFallbackToDefaultEnabled", true);
@@ -296,13 +376,21 @@ class ContextRetrievalServiceTest {
     }
 
     private Document buildApiDocument(String path) {
+        return buildApiDocument(path, null);
+    }
+
+    private Document buildApiDocument(String path, String tags) {
+        Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+        metadata.put(RagMetadataKeys.METHOD, "GET");
+        metadata.put(RagMetadataKeys.PATH, path);
+        metadata.put(RagMetadataKeys.SUMMARY, "summary");
+        if (tags != null) {
+            metadata.put(RagMetadataKeys.TAGS, tags);
+        }
         return Document.builder()
                 .id("api-doc:" + path)
                 .text("api metadata")
-                .metadata(Map.of(
-                        RagMetadataKeys.METHOD, "GET",
-                        RagMetadataKeys.PATH, path,
-                        RagMetadataKeys.SUMMARY, "summary"))
+                .metadata(metadata)
                 .build();
     }
 
