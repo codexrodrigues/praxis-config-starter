@@ -64,6 +64,7 @@ class DomainCatalogIngestionServiceTest {
                 .satisfies(release -> {
                     assertThat(release.getSchemaVersion()).isEqualTo("praxis.domain-catalog/v0.2");
                     assertThat(release.getServiceKey()).isEqualTo("praxis-api-quickstart");
+                    assertThat(release.getResourceKey()).isEqualTo("human-resources.folhas-pagamento");
                     assertThat(release.getTenantId()).isEqualTo("tenant-a");
                     assertThat(release.getEnvironment()).isEqualTo("dev");
                     assertThat(release.getRawPayload()).contains("Folha de pagamento");
@@ -1185,6 +1186,7 @@ class DomainCatalogIngestionServiceTest {
                 "generatedAt": "2026-04-21T10:30:00Z",
                 "sourceHash": "sha256:test"
               },
+              "resourceKey": "human-resources.folhas-pagamento",
               "contexts": [
                 {
                   "contextKey": "human-resources",

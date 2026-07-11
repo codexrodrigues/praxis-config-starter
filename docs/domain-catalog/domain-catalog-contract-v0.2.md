@@ -24,7 +24,8 @@ The top-level shape remains unchanged:
 {
   "schemaVersion": "praxis.domain-catalog/v0.2",
   "service": {},
-  "release": {},
+              "release": {},
+              "resourceKey": "human-resources.folhas-pagamento",
   "contexts": [],
   "nodes": [],
   "edges": [],
@@ -35,7 +36,12 @@ The top-level shape remains unchanged:
 }
 ```
 
-## Release Identity
+## Resource Scope And Release Identity
+
+`resourceKey` is the structured scope for a catalog published for one resource.
+The config store persists and queries it directly; consumers must not parse
+`release.releaseKey` to recover the resource. Catalogs emitted for a group may
+set `resourceKey` to `null`.
 
 `release.sourceHash` is the canonical SHA-256 fingerprint of the semantic
 catalog payload, excluding volatile publication metadata such as `generatedAt`.

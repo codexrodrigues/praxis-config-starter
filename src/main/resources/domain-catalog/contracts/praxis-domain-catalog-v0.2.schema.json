@@ -9,6 +9,7 @@
     "schemaVersion": { "const": "praxis.domain-catalog/v0.2" },
     "service": { "$ref": "#/$defs/service" },
     "release": { "$ref": "#/$defs/release" },
+    "resourceKey": { "type": ["string", "null"], "minLength": 1, "maxLength": 255 },
     "contexts": { "type": "array", "items": { "$ref": "#/$defs/context" } },
     "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
     "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
