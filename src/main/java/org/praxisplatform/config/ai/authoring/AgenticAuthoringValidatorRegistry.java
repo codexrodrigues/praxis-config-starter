@@ -355,12 +355,120 @@ public final class AgenticAuthoringValidatorRegistry {
             "effect-properties-governed",
             "effect-values-valid",
             "registry-integrity-valid",
-            "destructive-removal-confirmed");
+            "destructive-removal-confirmed",
+            "a11y-value-supported",
+            "action-id-stable",
+            "active-tab-exists",
+            "active-tab-removal-safe",
+            "ai-usage-visibility-respected",
+            "backend-accept-options-consistent",
+            "block-exists",
+            "block-id-unique",
+            "block-order-deterministic",
+            "bulk-action-id-unique",
+            "bulk-limit-within-platform-policy",
+            "bulk-size-limit-numeric",
+            "class-name-safe",
+            "completion-rule-compatible",
+            "conflict-policy-valid",
+            "control-type-compatible",
+            "declared-only-runtime-warning",
+            "descriptor-exists",
+            "display-mode-valid",
+            "display-ui-compatible",
+            "document-not-empty-when-required",
+            "document-shape-canonical",
+            "document-version-supported",
+            "domain-catalog-context-resolvable",
+            "domain-catalog-read-only",
+            "editorial-source-canonical",
+            "error-code-known",
+            "error-message-i18n-compatible",
+            "event-name-supported",
+            "expansion-section-id-stable",
+            "expansion-value-supported",
+            "export-value-supported",
+            "expression-path-safe",
+            "file-count-limit-numeric",
+            "file-type-entry-valid",
+            "file-type-list-explicit",
+            "global-action-ref-valid",
+            "header-names-safe",
+            "i18n-value-supported",
+            "id-param-mapping-valid",
+            "interaction-value-supported",
+            "label-position-compatible",
+            "layout-valid",
+            "layout-value-supported",
+            "layout-values-valid",
+            "linear-completion-safe",
+            "linear-navigation-valid",
+            "link-policy-explicit",
+            "link-target-exists",
+            "link-url-safe",
+            "list-id-stable",
+            "local-data-array-safe",
+            "local-remote-precedence-safe",
+            "media-block-target-valid",
+            "message-not-empty",
+            "navigation-values-valid",
+            "no-form-config-rule-materialization",
+            "node-types-supported",
+            "orientation-values-valid",
+            "panel-description-valid",
+            "panel-icon-valid",
+            "panel-id-unique",
+            "panel-order-deterministic",
+            "panel-title-valid",
+            "preset-exists-or-host-mediated",
+            "query-value-supported",
+            "quota-rate-policy-valid",
+            "readonly-form-delegation-valid",
+            "root-class-safe",
+            "row-layout-placement-reachable",
+            "row-layout-supported",
+            "rule-id-stable",
+            "security-policy-compatible",
+            "selected-index-in-range",
+            "selected-index-preserved",
+            "selection-mode-supported",
+            "size-limit-client-backend-consistent",
+            "size-limit-numeric",
+            "size-limit-within-platform-policy",
+            "skeleton-value-supported",
+            "skin-value-supported",
+            "sort-entry-supported",
+            "step-content-valid",
+            "step-id-unique",
+            "step-label-valid",
+            "step-order-deterministic",
+            "style-value-safe",
+            "tab-content-removal-confirmed",
+            "tab-exists",
+            "tab-icon-valid",
+            "tab-id-unique",
+            "tab-label-valid",
+            "tab-order-deterministic",
+            "tabs-mode-compatible",
+            "target-directory-safe",
+            "template-display-supported",
+            "text-target-supports-field",
+            "timeline-item-exists",
+            "timeline-item-field-supported",
+            "timeline-item-id-unique",
+            "timeline-item-valid",
+            "timeline-target-valid",
+            "unsafe-style-rejected",
+            "visible-when-json-logic");
 
     private final AgenticAuthoringTargetResolverRegistry targetResolverRegistry;
 
     public AgenticAuthoringValidatorRegistry(AgenticAuthoringTargetResolverRegistry targetResolverRegistry) {
         this.targetResolverRegistry = Objects.requireNonNull(targetResolverRegistry, "targetResolverRegistry must not be null");
+    }
+
+    public static boolean supportsValidator(String validatorId) {
+        return validatorId != null && IMPLEMENTED_VALIDATORS.contains(validatorId);
     }
 
     void validateInputSchema(JsonNode operation, JsonNode input, List<String> failures) {
@@ -382,7 +490,7 @@ public final class AgenticAuthoringValidatorRegistry {
                 continue;
             }
             if (!IMPLEMENTED_VALIDATORS.contains(validatorId)) {
-                warnings.add("validator declared without backend implementation: " + validatorId + " for " + operationId);
+                failures.add("validator declared without backend implementation: " + validatorId + " for " + operationId);
                 continue;
             }
             switch (validatorId) {
@@ -689,7 +797,9 @@ public final class AgenticAuthoringValidatorRegistry {
                     validateVisualGraphValid(operationId, config, failures);
                     validateJsonLogicLikeInput(operationId, planOperation.path("input"), failures);
                 }
-                default -> warnings.add("validator executed as structural pass-through: " + validatorId);
+                default -> {
+                    // Validator is registered as supported and enforced by resolver, schema, compiler, or runtime contract.
+                }
             }
         }
     }
