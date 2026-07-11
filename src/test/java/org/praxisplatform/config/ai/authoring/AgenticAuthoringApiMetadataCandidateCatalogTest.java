@@ -79,14 +79,9 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
     }
 
     @Test
-    void fallsBackFromScopedRagToGlobalRagBeforeLexicalFallback() {
+    void scopedSemanticRetrievalDoesNotRetryWithoutTenantScope() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
-        ApiSearchResult semanticResult = new ApiSearchResult();
-        semanticResult.setPath("/api/human-resources/funcionarios");
-        semanticResult.setMethod("GET");
-        semanticResult.setSummary("Funcionarios com cargo, departamento e email.");
-        semanticResult.setSimilarityScore(0.91d);
         Mockito.when(retrievalService.searchApiMetadata(
                         Mockito.anyString(),
                         Mockito.nullable(String.class),
@@ -106,7 +101,17 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                         Mockito.isNull(),
                         Mockito.isNull(),
                         Mockito.isNull()))
-                .thenReturn(List.of(semanticResult));
+                .thenReturn(List.of(searchResult(
+                        "/api/human-resources/funcionarios",
+                        "GET",
+                        "Funcionarios com cargo, departamento e email.",
+                        0.91d)));
+        Mockito.when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                        "tenant-local",
+                        "local",
+                        "default",
+                        "v1"))
+                .thenReturn(List.of());
         AgenticAuthoringApiMetadataCandidateCatalog catalog =
                 new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
 
@@ -117,12 +122,25 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 "local",
                 null);
 
-        assertThat(candidates)
-                .extracting(AgenticAuthoringCandidate::resourcePath)
-                .containsExactly("/api/human-resources/funcionarios");
-        assertThat(candidates.get(0).evidenceBundle().retrievalSource())
-                .isEqualTo("semantic_retrieval");
-        Mockito.verifyNoInteractions(repository);
+        assertThat(candidates).isEmpty();
+        Mockito.verify(retrievalService).searchApiMetadata(
+                Mockito.anyString(),
+                Mockito.nullable(String.class),
+                Mockito.isNull(),
+                Mockito.anyInt(),
+                Mockito.isNull(),
+                Mockito.eq("tenant-local"),
+                Mockito.eq("local"),
+                Mockito.isNull());
+        Mockito.verify(retrievalService, Mockito.never()).searchApiMetadata(
+                Mockito.anyString(),
+                Mockito.nullable(String.class),
+                Mockito.isNull(),
+                Mockito.anyInt(),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.isNull());
     }
 
     @Test

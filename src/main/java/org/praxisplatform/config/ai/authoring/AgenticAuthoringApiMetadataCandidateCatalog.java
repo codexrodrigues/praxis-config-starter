@@ -74,9 +74,6 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             return mergeCandidates(llmFocusedCandidates, List.of(), artifactKind, normalizedPrompt);
         }
         List<AgenticAuthoringCandidate> semanticCandidates = new SemanticCandidateRetriever().retrieve(context);
-        if (semanticCandidates.isEmpty() && hasScope(tenantId, environment)) {
-            semanticCandidates = new SemanticCandidateRetriever().retrieve(context.withGlobalScope());
-        }
         if (repository == null) {
             return semanticCandidates;
         }
@@ -1604,16 +1601,6 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                     tokens == null ? List.of() : List.copyOf(tokens));
         }
 
-        private RetrievalContext withGlobalScope() {
-            return new RetrievalContext(
-                    normalizedPrompt,
-                    artifactKind,
-                    expectedMethod,
-                    null,
-                    null,
-                    releaseId,
-                    tokens);
-        }
     }
 
     private enum ResourceSemanticRole {
