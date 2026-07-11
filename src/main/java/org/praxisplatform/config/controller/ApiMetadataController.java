@@ -3,11 +3,16 @@ package org.praxisplatform.config.controller;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.ApiCatalogRequest;
+import org.praxisplatform.config.dto.ApiMetadataRagReconcileResponse;
+import org.praxisplatform.config.dto.ApiMetadataRagStatusResponse;
 import org.praxisplatform.config.service.ApiMetadataIngestionService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -35,5 +40,32 @@ public class ApiMetadataController {
         ingestionService.ingestCatalog(request, tenantId, environment);
         return ResponseEntity.accepted().build();
     }
-}
 
+    @GetMapping("/rag/status")
+    public ResponseEntity<ApiMetadataRagStatusResponse> ragStatus(
+            @RequestParam(value = "serviceKey", required = false) String serviceKey,
+            @RequestParam(value = "releaseId", required = false) String releaseId,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity.ok(ingestionService.ragStatus(
+                tenantId,
+                environment,
+                serviceKey,
+                releaseId));
+    }
+
+    @PostMapping("/rag/reconcile")
+    public ResponseEntity<ApiMetadataRagReconcileResponse> reconcileRag(
+            @RequestParam(value = "serviceKey", required = false) String serviceKey,
+            @RequestParam(value = "releaseId", required = false) String releaseId,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment) {
+        return ResponseEntity
+                .status(HttpStatus.ACCEPTED)
+                .body(ingestionService.reconcileRag(
+                        tenantId,
+                        environment,
+                        serviceKey,
+                        releaseId));
+    }
+}

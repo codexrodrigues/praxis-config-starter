@@ -157,6 +157,27 @@ class RagVectorStoreServiceTest {
     }
 
     @Test
+    void shouldExecuteDeleteQueryOnDeleteDocumentsByRelease() {
+        when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
+        when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
+        when(jdbcTemplate.update(anyString(), any(Map.class))).thenReturn(4);
+
+        service.deleteDocumentsByRelease("tenant-x", "prod", "v2", RagResourceTypes.API_METADATA);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jdbcTemplate).update(sqlCaptor.capture(), paramsCaptor.capture());
+
+        assertThat(sqlCaptor.getValue()).contains("DELETE FROM vector_store");
+        assertThat(sqlCaptor.getValue()).contains("resourceType");
+        Map<String, Object> params = paramsCaptor.getValue();
+        assertThat(params.get("tenantId")).isEqualTo("tenant-x");
+        assertThat(params.get("environment")).isEqualTo("prod");
+        assertThat(params.get("releaseId")).isEqualTo("v2");
+        assertThat(params.get("resourceType")).isEqualTo(RagResourceTypes.API_METADATA);
+    }
+
+    @Test
     void shouldReturnReleaseStatusWithCountsBySourceChunkAndVisibility() {
         when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
         List<Map<String, Object>> rows = new ArrayList<>();

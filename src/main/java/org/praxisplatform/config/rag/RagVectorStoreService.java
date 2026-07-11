@@ -74,6 +74,44 @@ public class RagVectorStoreService {
         }
     }
 
+    public void deleteDocumentsByRelease(
+            String tenantId,
+            String environment,
+            String releaseId,
+            String resourceType) {
+        if (vectorStoreProvider.getIfAvailable() == null) {
+            return;
+        }
+        NamedParameterJdbcTemplate jdbcTemplate = jdbcTemplateProvider.getIfAvailable();
+        if (jdbcTemplate == null) {
+            log.warn("Skipping vector store release purge because configNamedParameterJdbcTemplate is unavailable.");
+            return;
+        }
+
+        String sql = """
+            DELETE FROM %s
+            WHERE COALESCE(metadata ->> 'tenantId', 'global') = :tenantId
+              AND COALESCE(metadata ->> 'environment', 'global') = :environment
+              AND COALESCE(metadata ->> 'releaseId', 'v1') = :releaseId
+              AND COALESCE(metadata ->> 'resourceType', metadata ->> 'docType', metadata ->> 'sourceKind') = :resourceType
+            """.formatted(tableName);
+
+        Map<String, Object> params = Map.of(
+            "tenantId", RagDocumentIdentity.normalizeToken(tenantId, "global"),
+            "environment", RagDocumentIdentity.normalizeToken(environment, "global"),
+            "releaseId", RagDocumentIdentity.normalizeToken(releaseId, "v1"),
+            "resourceType", RagDocumentIdentity.normalizeToken(resourceType, "unknown-kind")
+        );
+
+        try {
+            int deletedRows = jdbcTemplate.update(sql, params);
+            log.debug("Purged {} stale vector store documents for tenant={}, env={}, release={}, resourceType={}",
+                    deletedRows, tenantId, environment, releaseId, resourceType);
+        } catch (Exception ex) {
+            log.warn("Failed to purge release documents from vector store. This might be normal if the schema is not initialized yet.", ex);
+        }
+    }
+
     public boolean isAvailable() {
         return vectorStoreProvider.getIfAvailable() != null;
     }
