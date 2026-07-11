@@ -2054,6 +2054,69 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     }
 
     @Test
+    void scopedSearchDoesNotLeakCandidatesAssistantTextOrQuickRepliesFromAnotherTenant() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        ApiSearchResult foreignSemanticResult = new ApiSearchResult();
+        foreignSemanticResult.setPath("/api/tenant-b/payroll");
+        foreignSemanticResult.setMethod("GET");
+        foreignSemanticResult.setSummary("Tenant B payroll summary with salaries and departments.");
+        foreignSemanticResult.setSimilarityScore(0.94d);
+
+        when(retrievalService.searchApiMetadata(
+                Mockito.anyString(),
+                Mockito.nullable(String.class),
+                Mockito.isNull(),
+                Mockito.anyInt(),
+                Mockito.isNull(),
+                Mockito.eq("tenant-a"),
+                Mockito.eq("prod"),
+                Mockito.isNull()))
+                .thenReturn(List.of());
+        when(retrievalService.searchApiMetadata(
+                Mockito.anyString(),
+                Mockito.nullable(String.class),
+                Mockito.isNull(),
+                Mockito.anyInt(),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.isNull()))
+                .thenReturn(List.of(foreignSemanticResult));
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant-a", "prod", "default", "v1"))
+                .thenReturn(List.of());
+        AgenticAuthoringResourceDiscoveryService service =
+                new AgenticAuthoringResourceDiscoveryService(
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService),
+                        objectMapper);
+
+        AgenticAuthoringResourceCandidatesResult result = service.search(
+                new AgenticAuthoringResourceCandidatesRequest(
+                        "Quero uma tela de folha de pagamento com salarios por departamento.",
+                        null,
+                        "page",
+                        5),
+                new AiPrincipalContext("tenant-a", "user-a", "prod", true));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.candidates()).isEmpty();
+        assertThat(result.quickReplies()).isEmpty();
+        assertThat(result.assistantMessage())
+                .doesNotContain("payroll", "salaries", "tenant-b", "/api/tenant-b/payroll");
+        assertThat(result.warnings()).contains("resource-candidates-empty");
+        Mockito.verify(retrievalService, Mockito.never()).searchApiMetadata(
+                Mockito.anyString(),
+                Mockito.nullable(String.class),
+                Mockito.isNull(),
+                Mockito.anyInt(),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.isNull());
+    }
+
+    @Test
     void semanticRetrievalDoesNotInventAnalyticsProjectionForAnalyticalDashboardPrompts() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);

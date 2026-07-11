@@ -276,6 +276,8 @@ or release cannot overwrite another structured API corpus.
 The API RAG/vector document remains a derived retrieval projection over this structured source. RAG
 metadata carries the same tenant, environment and release identity for deterministic replay and
 cleanup, but it must not become the authority for schemas, endpoints or business resource semantics.
+Scoped API candidate retrieval fails closed when no tenant/environment result is available; it must
+not retry against an unscoped corpus that could include another tenant's API evidence.
 
 ## Key HTTP Surfaces
 
