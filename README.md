@@ -269,6 +269,20 @@ component type and environment are limited to 64 characters. Invalid identity in
 deterministic `400 Bad Request` response. `scope=user` still requires a nonblank `X-User-ID`; tenant
 scope ignores user identity for persistence.
 
+## UI Config Conditional Requests
+
+`/api/praxis/config/ui` publishes HTTP ETag semantics for cached reads and guarded writes. GET
+responses expose the current entity tag in the `ETag` header and response body. Clients may send
+`If-None-Match` with `*`, a quoted entity tag, a weak quoted entity tag, or a comma-separated list
+of quoted validators. When any validator weakly matches the current configuration ETag, the read
+returns `304 Not Modified` with the current `ETag`.
+
+PUT and DELETE accept `If-Match` with `*` or a comma-separated list of quoted entity tags. Wildcard
+requires that the targeted configuration already exists; missing targets still return `412
+Precondition Failed`. Strong validators must match the current ETag before the mutation proceeds;
+weak validators are syntactically accepted but do not satisfy `If-Match`. Malformed conditional
+headers, including unquoted raw tokens, return `400 Bad Request`.
+
 ## AI Registry Revision Semantics
 
 `ai_registry.version` and `ai_registry.etag` are internal freshness tokens for governed registry

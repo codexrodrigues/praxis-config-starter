@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.praxisplatform.config.domain.UiUserConfig;
+import org.praxisplatform.config.http.HttpEntityTagCondition;
 import org.praxisplatform.config.repository.UiUserConfigRepository;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -305,13 +306,9 @@ public class UserConfigService {
           "If-Match precondition failed: configuration not found");
     }
 
-    String expected = ifMatch.trim();
-    if ("*".equals(expected)) {
-      return;
-    }
-
+    HttpEntityTagCondition condition = HttpEntityTagCondition.parse(ifMatch);
     String current = String.valueOf(existing.get().getEtag());
-    if (!current.equals(expected)) {
+    if (!condition.matchesStrong(current)) {
       throw new PreconditionFailedException(
           "If-Match precondition failed: stale configuration version");
     }
