@@ -69,7 +69,9 @@ class ApiMetadataIngestionServiceTest {
                 .build();
 
         when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
-        when(repository.findByPathAndMethod("/api/demo", "GET")).thenReturn(Optional.empty());
+        when(repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                "GLOBAL", "default", "default", "v1", "/api/demo", "GET"))
+                .thenReturn(Optional.empty());
         when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.ingestCatalog(request, null, null);
@@ -104,11 +106,25 @@ class ApiMetadataIngestionServiceTest {
                 .build();
 
         when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
-        when(repository.findByPathAndMethod("/v1/users", "GET")).thenReturn(Optional.empty());
-        when(repository.findAllByOperationIdAndMethod("listUsers", "GET")).thenReturn(List.of());
+        when(repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                "tenant-a", "prod", "default", "release-2026-02", "/v1/users", "GET"))
+                .thenReturn(Optional.empty());
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndOperationIdAndMethod(
+                "tenant-a", "prod", "default", "release-2026-02", "listUsers", "GET"))
+                .thenReturn(List.of());
         when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.ingestCatalog(request, "tenant-a", "prod");
+
+        ArgumentCaptor<ApiMetadata> metadataCaptor = ArgumentCaptor.forClass(ApiMetadata.class);
+        verify(repository).save(metadataCaptor.capture());
+        ApiMetadata savedMetadata = metadataCaptor.getValue();
+        assertThat(savedMetadata.getTenantId()).isEqualTo("tenant-a");
+        assertThat(savedMetadata.getEnvironment()).isEqualTo("prod");
+        assertThat(savedMetadata.getServiceKey()).isEqualTo("default");
+        assertThat(savedMetadata.getReleaseId()).isEqualTo("release-2026-02");
+        assertThat(savedMetadata.getReleaseVersion()).isEqualTo("2026.02");
+        assertThat(savedMetadata.getGeneratedAt()).isEqualTo("2026-02-22T12:00:00Z");
 
         ArgumentCaptor<List<Document>> captor = ArgumentCaptor.forClass(List.class);
         verify(ragVectorStoreService).upsertDocuments(captor.capture());
@@ -134,6 +150,10 @@ class ApiMetadataIngestionServiceTest {
     @Test
     void shouldReconcileMovedEndpointByStableOperationIdentity() {
         ApiMetadata stale = new ApiMetadata();
+        stale.setTenantId("demo");
+        stale.setEnvironment("dev");
+        stale.setServiceKey("default");
+        stale.setReleaseId("v1");
         stale.setPath("/api/human-resources/missoes/filter");
         stale.setMethod("POST");
         stale.setOperationId("filterMissoes");
@@ -150,8 +170,12 @@ class ApiMetadataIngestionServiceTest {
                 .build();
 
         when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
-        when(repository.findByPathAndMethod("/api/operations/missoes/filter", "POST")).thenReturn(Optional.empty());
-        when(repository.findAllByOperationIdAndMethod("filterMissoes", "POST")).thenReturn(List.of(stale));
+        when(repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                "demo", "dev", "default", "v1", "/api/operations/missoes/filter", "POST"))
+                .thenReturn(Optional.empty());
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndOperationIdAndMethod(
+                "demo", "dev", "default", "v1", "filterMissoes", "POST"))
+                .thenReturn(List.of(stale));
         when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.ingestCatalog(request, "demo", "dev");
@@ -163,5 +187,48 @@ class ApiMetadataIngestionServiceTest {
         assertThat(saved.getPath()).isEqualTo("/api/operations/missoes/filter");
         assertThat(saved.getMethod()).isEqualTo("POST");
         assertThat(saved.getOperationId()).isEqualTo("filterMissoes");
+        assertThat(saved.getTenantId()).isEqualTo("demo");
+        assertThat(saved.getEnvironment()).isEqualTo("dev");
+    }
+
+    @Test
+    void shouldNotReconcileOperationIdentityAcrossTenantOrReleaseScope() {
+        ApiMetadata otherScope = new ApiMetadata();
+        otherScope.setTenantId("tenant-b");
+        otherScope.setEnvironment("prod");
+        otherScope.setServiceKey("default");
+        otherScope.setReleaseId("release-old");
+        otherScope.setPath("/api/legacy/users/filter");
+        otherScope.setMethod("POST");
+        otherScope.setOperationId("filterUsers");
+        ApiCatalogRequest.ApiEndpointEntry endpoint = ApiCatalogRequest.ApiEndpointEntry.builder()
+                .path("/api/current/users/filter")
+                .method("POST")
+                .summary("Filtrar usuarios")
+                .operationId("filterUsers")
+                .build();
+        ApiCatalogRequest request = ApiCatalogRequest.builder()
+                .releaseId("release-new")
+                .endpoints(List.of(endpoint))
+                .build();
+
+        when(embeddingService.embed(anyString())).thenReturn(List.of(0.3f, 0.4f));
+        when(repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                "tenant-a", "prod", "default", "release-new", "/api/current/users/filter", "POST"))
+                .thenReturn(Optional.empty());
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndOperationIdAndMethod(
+                "tenant-a", "prod", "default", "release-new", "filterUsers", "POST"))
+                .thenReturn(List.of());
+        when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.ingestCatalog(request, "tenant-a", "prod");
+
+        ArgumentCaptor<ApiMetadata> captor = ArgumentCaptor.forClass(ApiMetadata.class);
+        verify(repository).save(captor.capture());
+        ApiMetadata saved = captor.getValue();
+        assertThat(saved).isNotSameAs(otherScope);
+        assertThat(saved.getTenantId()).isEqualTo("tenant-a");
+        assertThat(saved.getReleaseId()).isEqualTo("release-new");
+        assertThat(saved.getPath()).isEqualTo("/api/current/users/filter");
     }
 }

@@ -266,6 +266,17 @@ These fields are not exposed as public HTTP conditional request semantics for
 `/api/praxis/config/ai-registry/**` in this release. HTTP ETag behavior remains owned by the
 surfaces that explicitly publish it, such as `ui_user_config`.
 
+## API Metadata Scope Semantics
+
+`api_metadata` is the canonical structured API grounding corpus persisted by the config starter.
+Its identity is scoped by tenant, environment, service key, release id, path and method. Ingestion
+reconciles moved endpoints by `operationId` only inside that same scope, so one tenant, environment
+or release cannot overwrite another structured API corpus.
+
+The API RAG/vector document remains a derived retrieval projection over this structured source. RAG
+metadata carries the same tenant, environment and release identity for deterministic replay and
+cleanup, but it must not become the authority for schemas, endpoints or business resource semantics.
+
 ## Key HTTP Surfaces
 
 | Surface | Purpose |

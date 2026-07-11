@@ -3,7 +3,6 @@ package org.praxisplatform.config.ai.authoring;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -521,10 +520,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 "human resources funcionarios empregados colaboradores",
                 "Funcionarios",
                 "Funcionarios com nome, email, cargo e departamento.");
-        Mockito.when(repository.findByPathAndMethod(
-                        "/api/human-resources/funcionarios/filter/cursor",
-                        "POST"))
-                .thenReturn(Optional.of(funcionarios));
+        Mockito.when(repository.findAll()).thenReturn(List.of(funcionarios));
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
         AgenticAuthoringApiMetadataCandidateCatalog catalog =
                 new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
@@ -543,10 +539,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 .contains("semantic-retrieval", "llm-resource-focus", "semantic-role:operational-resource");
         assertThat(candidates.get(0).evidenceBundle().retrievalSource())
                 .isEqualTo("semantic_retrieval");
-        Mockito.verify(repository).findByPathAndMethod(
-                "/api/human-resources/funcionarios/filter/cursor",
-                "POST");
-        Mockito.verify(repository, Mockito.never()).findAll();
+        Mockito.verify(repository).findAll();
         Mockito.verifyNoInteractions(retrievalService);
     }
 

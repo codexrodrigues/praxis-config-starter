@@ -12,6 +12,12 @@ CREATE TABLE IF NOT EXISTS api_metadata (
     id BIGSERIAL PRIMARY KEY,
     path VARCHAR(1024) NOT NULL,
     method VARCHAR(16) NOT NULL,
+    tenant_id VARCHAR(128) NOT NULL DEFAULT 'GLOBAL',
+    environment VARCHAR(128) NOT NULL DEFAULT 'default',
+    service_key VARCHAR(255) NOT NULL DEFAULT 'default',
+    release_id VARCHAR(255) NOT NULL DEFAULT 'v1',
+    release_version VARCHAR(255),
+    generated_at VARCHAR(255),
     tags TEXT,
     summary TEXT,
     description TEXT,
@@ -21,10 +27,15 @@ CREATE TABLE IF NOT EXISTS api_metadata (
     parameters TEXT,
     raw_json TEXT,
     embedding vector(768),
-    CONSTRAINT uk_api_metadata_path_method UNIQUE (path, method)
+    CONSTRAINT uk_api_metadata_scope_path_method UNIQUE (tenant_id, environment, service_key, release_id, path, method)
 );
 
 CREATE INDEX IF NOT EXISTS idx_api_metadata_path ON api_metadata(path);
+CREATE INDEX IF NOT EXISTS idx_api_metadata_scope
+    ON api_metadata (tenant_id, environment, service_key, release_id);
+CREATE INDEX IF NOT EXISTS idx_api_metadata_scope_operation
+    ON api_metadata (tenant_id, environment, service_key, release_id, operation_id, method)
+    WHERE operation_id IS NOT NULL;
 
 DO $$
 DECLARE
