@@ -62,6 +62,14 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThat(response.operationCount()).isEqualTo(1);
         assertThat(response.validationStatus()).isEqualTo("valid");
         assertThat(response.validationResult().path("patchHash").asText()).isNotBlank();
+        assertThat(readableValues(response.validationResult().path("proposedOperationTypes")))
+                .containsExactly("add_evidence");
+        assertThat(readableValues(response.validationResult().path("executableOperationTypes")))
+                .containsExactly("add_evidence", "revert_evidence");
+        assertThat(readableValues(response.validationResult().path("executablePatchOperationTypes")))
+                .containsExactly("add_evidence");
+        assertThat(readableValues(response.validationResult().path("nonExecutableOperationTypes")))
+                .isEmpty();
         assertThat(response.safeOperationSummary()).hasSize(1);
         assertThat(response.safeOperationSummary().get(0).operationType()).isEqualTo("add_evidence");
         assertThat(response.safeOperationSummary().get(0).targetConceptKeys())
@@ -72,6 +80,7 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThat(captor.getValue().getPatch()).contains("op-add-cpf-guidance-evidence");
         assertThat(captor.getValue().getValidationResult()).contains("\"validationStatus\":\"valid\"");
         assertThat(captor.getValue().getValidationResult()).contains("\"patchHash\"");
+        assertThat(captor.getValue().getValidationResult()).contains("\"executableOperationTypes\"");
     }
 
     @Test
@@ -169,6 +178,28 @@ class DomainKnowledgeChangeSetServiceTest {
     }
 
     @Test
+    void rejectsCreateRequestWithProposedButNonExecutableOperationBeforePersisting() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSetCreateRequest invalid = new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:employees:create-concept:v1",
+                "proposed",
+                "llm",
+                "openai:gpt-5.4",
+                "Create concept",
+                "Concept writes need a canonical applier before approval.",
+                List.of(operation(
+                        "op-create-concept",
+                        "create_concept",
+                        target(),
+                        payload("llm-proposal:create-concept:v1"))));
+
+        assertThatThrownBy(() -> service.create(invalid, TENANT, ENVIRONMENT))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("non_executable_operation_type");
+    }
+
+    @Test
     void listsByStatusWithinScope() {
         DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
         DomainKnowledgeChangeSetService service = service(repository);
@@ -223,6 +254,45 @@ class DomainKnowledgeChangeSetServiceTest {
         verify(repository).save(captor.capture());
         assertThat(captor.getValue().getValidationResult()).contains("\"validationStatus\":\"invalid\"");
         assertThat(captor.getValue().getValidationResult()).contains("destructive_operation_not_supported");
+    }
+
+    @Test
+    void validatePersistsOperationCapabilityDiagnosticsForNonExecutableOperations() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSet existing = persisted(validRequest());
+        existing.setPatch(write(objectMapper.valueToTree(List.of(new DomainKnowledgeChangeSetOperationRequest(
+                "op-create-concept",
+                "create_concept",
+                target(),
+                "Concept writes need a canonical applier before approval.",
+                List.of("domain-catalog:human-resources:v2026-04-30"),
+                0.8,
+                payload("llm-proposal:create-concept:v1"))))));
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(repository.save(any(DomainKnowledgeChangeSet.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var validation = service.validate(existing.getId(), TENANT, ENVIRONMENT);
+
+        assertThat(validation.valid()).isFalse();
+        assertThat(validation.issues())
+                .extracting(org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationIssue::code)
+                .contains("non_executable_operation_type");
+        assertThat(validation.proposedOperationTypes()).containsExactly("create_concept");
+        assertThat(validation.executableOperationTypes()).containsExactly("add_evidence", "revert_evidence");
+        assertThat(validation.executablePatchOperationTypes()).isEmpty();
+        assertThat(validation.nonExecutableOperationTypes()).containsExactly("create_concept");
+        ArgumentCaptor<DomainKnowledgeChangeSet> captor = ArgumentCaptor.forClass(DomainKnowledgeChangeSet.class);
+        verify(repository).save(captor.capture());
+        JsonNode validationResult = read(captor.getValue().getValidationResult());
+        assertThat(readableValues(validationResult.path("proposedOperationTypes")))
+                .containsExactly("create_concept");
+        assertThat(readableValues(validationResult.path("executableOperationTypes")))
+                .containsExactly("add_evidence", "revert_evidence");
+        assertThat(readableValues(validationResult.path("executablePatchOperationTypes")))
+                .isEmpty();
+        assertThat(readableValues(validationResult.path("nonExecutableOperationTypes")))
+                .containsExactly("create_concept");
     }
 
     @Test
@@ -284,6 +354,31 @@ class DomainKnowledgeChangeSetServiceTest {
                 ENVIRONMENT))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("must be valid before approval");
+    }
+
+    @Test
+    void rejectsApprovalWhenStoredValidationIsValidButPatchHasNoCanonicalApplier() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSet existing = persisted(validRequest());
+        existing.setPatch(write(objectMapper.valueToTree(List.of(new DomainKnowledgeChangeSetOperationRequest(
+                "op-create-concept",
+                "create_concept",
+                target(),
+                "Legacy valid validation must not approve a non-executable operation.",
+                List.of("domain-catalog:human-resources:v2026-04-30"),
+                0.8,
+                payload("llm-proposal:create-concept:v1"))))));
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.transitionStatus(
+                existing.getId(),
+                new DomainKnowledgeChangeSetStatusRequest("approved", "reviewer:alice", "Legacy proposal."),
+                TENANT,
+                ENVIRONMENT))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("without canonical appliers")
+                .hasMessageContaining("create_concept");
     }
 
     @Test
@@ -841,6 +936,21 @@ class DomainKnowledgeChangeSetServiceTest {
         } catch (Exception ex) {
             throw new IllegalStateException(ex);
         }
+    }
+
+    private JsonNode read(String raw) {
+        try {
+            return objectMapper.readTree(raw);
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    private List<String> readableValues(JsonNode array) {
+        return java.util.stream.StreamSupport.stream(array.spliterator(), false)
+                .filter(JsonNode::isTextual)
+                .map(JsonNode::asText)
+                .toList();
     }
 
     private String sha256(String value) {

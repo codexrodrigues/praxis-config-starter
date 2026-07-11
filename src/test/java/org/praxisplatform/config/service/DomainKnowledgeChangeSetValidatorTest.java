@@ -28,6 +28,10 @@ class DomainKnowledgeChangeSetValidatorTest {
         assertThat(report.errorCount()).isZero();
         assertThat(report.warningCount()).isZero();
         assertThat(report.issues()).isEmpty();
+        assertThat(report.proposedOperationTypes()).containsExactly("add_evidence");
+        assertThat(report.executableOperationTypes()).containsExactly("add_evidence", "revert_evidence");
+        assertThat(report.executablePatchOperationTypes()).containsExactly("add_evidence");
+        assertThat(report.nonExecutableOperationTypes()).isEmpty();
     }
 
     @Test
@@ -51,6 +55,28 @@ class DomainKnowledgeChangeSetValidatorTest {
                 .contains(
                         "unsupported_operation_type",
                         "destructive_operation_not_supported");
+    }
+
+    @Test
+    void rejectsProposedOperationWithoutCanonicalApplier() {
+        var request = new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:employees:create-concept:v1",
+                "proposed",
+                "llm",
+                "openai:gpt-5.4",
+                "Create concept",
+                "Concept writes must wait for an executable applier.",
+                List.of(operation("op-create-concept", "create_concept", target(), payload())));
+
+        var report = validator.validateCreateRequest(TENANT, ENVIRONMENT, request);
+
+        assertThat(report.valid()).isFalse();
+        assertThat(report.issues())
+                .extracting(DomainKnowledgeChangeSetValidationIssue::code)
+                .contains("non_executable_operation_type");
+        assertThat(report.proposedOperationTypes()).containsExactly("create_concept");
+        assertThat(report.executablePatchOperationTypes()).isEmpty();
+        assertThat(report.nonExecutableOperationTypes()).containsExactly("create_concept");
     }
 
     @Test

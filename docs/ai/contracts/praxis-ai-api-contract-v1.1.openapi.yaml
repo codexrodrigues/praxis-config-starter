@@ -4226,7 +4226,7 @@ components:
           type: object
           nullable: true
           additionalProperties: true
-          description: Resultado seguro de validacao com status, contagens, issues e hash do patch; nao contem payload bruto de evidencia.
+          description: Resultado seguro de validacao com status, contagens, issues, hash do patch e diagnostics de capability (`proposedOperationTypes`, `executableOperationTypes`, `executablePatchOperationTypes`, `nonExecutableOperationTypes`); nao contem payload bruto de evidencia.
         createdAt:
           type: string
           format: date-time
@@ -4257,6 +4257,7 @@ components:
 
     DomainKnowledgeChangeSetValidationResponse:
       type: object
+      description: Resultado seguro de validacao do change set, incluindo diagnostics de paridade entre operacoes propostas e operacoes executaveis pelo backend.
       properties:
         valid:
           type: boolean
@@ -4268,6 +4269,26 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DomainKnowledgeChangeSetValidationIssue'
+        proposedOperationTypes:
+          type: array
+          description: Tipos de operacao presentes na patch proposta.
+          items:
+            type: string
+        executableOperationTypes:
+          type: array
+          description: Tipos de operacao com applier canonico disponivel neste corte.
+          items:
+            type: string
+        executablePatchOperationTypes:
+          type: array
+          description: Intersecao entre operacoes propostas e operacoes executaveis.
+          items:
+            type: string
+        nonExecutableOperationTypes:
+          type: array
+          description: Operacoes propostas conhecidas pela semantica, mas sem applier canonico neste corte.
+          items:
+            type: string
       additionalProperties: false
 
     DomainKnowledgeChangeSetValidationIssue:
