@@ -374,6 +374,11 @@ not create a generic approval inbox, BPM engine or UI-local approval rule.
    `source_hash` proves the same canonical decision and payload, while
    collisions against another definition, incompatible target or missing
    fingerprint are rejected before inserting duplicate runtime projections.
+   For generic `policy_reference` definitions, predicted materializations must
+   come from an explicit semantic target such as
+   `definition.materializationTargets[]` authored by AI/tool grounding. The
+   backend must not infer `option_source` from resource names, summaries,
+   language-specific words, aliases or substring checks.
 9. Target-specific materializers create `domain_rule_materialization` rows and
    only then update `FormConfig`, backend validation, workflows or external
    policy engines.

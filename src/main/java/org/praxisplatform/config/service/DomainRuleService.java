@@ -812,7 +812,10 @@ public class DomainRuleService {
         String recommendedOperation = definition != null ? normalize(definition.path("recommendedOperation").asText(null)) : null;
         JsonNode params = parameters == null || parameters.isNull() ? null : parameters;
 
-        if (looksLikeOptionSourceTarget(resourceKey, ruleType, definition, params)) {
+        appendExplicitMaterializationTargets(targets, definition);
+
+        if (!containsMaterializationTarget(targets, "option_source", "resource-option-source")
+                && shouldDeriveOptionSourceTarget(ruleType, params)) {
             ObjectNode target = targets.addObject();
             target.put("targetLayer", "option_source");
             target.put("targetArtifactType", "resource-option-source");
@@ -820,7 +823,8 @@ public class DomainRuleService {
             target.put("operation", "selection_policy.review");
         }
 
-        if (isBackendValidationRuleType(ruleType)) {
+        if (!containsMaterializationTarget(targets, "backend_validation", "resource-validation")
+                && isBackendValidationRuleType(ruleType)) {
             ObjectNode target = targets.addObject();
             target.put("targetLayer", "backend_validation");
             target.put("targetArtifactType", "resource-validation");
@@ -828,7 +832,8 @@ public class DomainRuleService {
             target.put("operation", "validation_rule.review");
         }
 
-        if (isWorkflowActionRuleType(ruleType)) {
+        if (!containsMaterializationTarget(targets, "workflow_action", "resource-workflow-action")
+                && isWorkflowActionRuleType(ruleType)) {
             ObjectNode target = targets.addObject();
             target.put("targetLayer", "workflow_action");
             target.put("targetArtifactType", "resource-workflow-action");
@@ -836,7 +841,8 @@ public class DomainRuleService {
             target.put("operation", "workflow_action_policy.review");
         }
 
-        if (isApprovalPolicyRuleType(ruleType)) {
+        if (!containsMaterializationTarget(targets, "approval_policy", "resource-action-approval")
+                && isApprovalPolicyRuleType(ruleType)) {
             ObjectNode target = targets.addObject();
             target.put("targetLayer", "approval_policy");
             target.put("targetArtifactType", "resource-action-approval");
@@ -844,9 +850,10 @@ public class DomainRuleService {
             target.put("operation", "approval_policy.review");
         }
 
-        if ("visual_guidance".equals(ruleType)
+        if (!containsMaterializationTarget(targets, "form_config", "praxis-dynamic-form")
+                && ("visual_guidance".equals(ruleType)
                 || "form_rule".equals(ruleType)
-                || "rule.visualBlockGuidance.add".equals(recommendedOperation)) {
+                || "rule.visualBlockGuidance.add".equals(recommendedOperation))) {
             ObjectNode target = targets.addObject();
             target.put("targetLayer", "form_config");
             target.put("targetArtifactType", "praxis-dynamic-form");
@@ -864,10 +871,76 @@ public class DomainRuleService {
         return targets;
     }
 
-    private boolean looksLikeOptionSourceTarget(
-            String resourceKey,
+    private void appendExplicitMaterializationTargets(ArrayNode targets, JsonNode definition) {
+        if (definition == null || !definition.isObject()) {
+            return;
+        }
+        JsonNode explicitTargets = definition.path("materializationTargets");
+        if (!explicitTargets.isArray()) {
+            return;
+        }
+        explicitTargets.forEach(candidate -> {
+            if (!candidate.isObject()) {
+                return;
+            }
+            String targetLayer = normalize(candidate.path("targetLayer").asText(null));
+            String targetArtifactType = normalize(candidate.path("targetArtifactType").asText(null));
+            String targetArtifactKey = normalize(candidate.path("targetArtifactKey").asText(null));
+            if (!StringUtils.hasText(targetLayer)
+                    || !StringUtils.hasText(targetArtifactType)
+                    || !StringUtils.hasText(targetArtifactKey)) {
+                return;
+            }
+            if (containsMaterializationTarget(targets, targetLayer, targetArtifactType, targetArtifactKey)) {
+                return;
+            }
+            ObjectNode target = targets.addObject();
+            target.put("targetLayer", targetLayer);
+            target.put("targetArtifactType", targetArtifactType);
+            target.put("targetArtifactKey", targetArtifactKey);
+            String operation = normalize(candidate.path("operation").asText(null));
+            target.put("operation", StringUtils.hasText(operation)
+                    ? operation
+                    : defaultMaterializationOperation(targetLayer));
+        });
+    }
+
+    private boolean containsMaterializationTarget(
+            ArrayNode targets,
+            String targetLayer,
+            String targetArtifactType) {
+        return containsMaterializationTarget(targets, targetLayer, targetArtifactType, null);
+    }
+
+    private boolean containsMaterializationTarget(
+            ArrayNode targets,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey) {
+        for (JsonNode target : targets) {
+            if (targetLayer.equals(normalize(target.path("targetLayer").asText(null)))
+                    && targetArtifactType.equals(normalize(target.path("targetArtifactType").asText(null)))
+                    && (!StringUtils.hasText(targetArtifactKey)
+                    || targetArtifactKey.equals(normalize(target.path("targetArtifactKey").asText(null))))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String defaultMaterializationOperation(String targetLayer) {
+        return switch (targetLayer) {
+            case "option_source" -> "selection_policy.review";
+            case "backend_validation" -> "validation_rule.review";
+            case "workflow_action" -> "workflow_action_policy.review";
+            case "approval_policy" -> "approval_policy.review";
+            case "form_config" -> "rule.review";
+            default -> "governance.review";
+        };
+    }
+
+    private boolean shouldDeriveOptionSourceTarget(
             String ruleType,
-            JsonNode definition,
             JsonNode parameters) {
         boolean explicitlyTargetsOptionSource = false;
         if (parameters != null && parameters.isObject()) {
@@ -876,13 +949,7 @@ public class DomainRuleService {
                 explicitlyTargetsOptionSource = true;
             }
         }
-        String summary = definition != null ? normalize(definition.path("summary").asText(null)) : null;
-        if (explicitlyTargetsOptionSource || "selection_eligibility".equals(ruleType)) {
-            return true;
-        }
-        return "policy_reference".equals(ruleType)
-                && (resourceKey.contains("procurement.suppliers")
-                || (summary != null && (summary.contains("sele") || summary.contains("fornecedor") || summary.contains("supplier"))));
+        return explicitlyTargetsOptionSource || "selection_eligibility".equals(ruleType);
     }
 
     private String deriveOptionSourceKey(String resourceKey, JsonNode parameters) {
