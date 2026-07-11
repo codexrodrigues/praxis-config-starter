@@ -255,6 +255,20 @@ source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted t
 | `praxis.ai.authoring.consultative.api-catalog.api-metadata-cache-ttl-ms` | `60000` | TTL for `api_metadata` lookups used by the consultative catalog projection. Use `0` when validating metadata ingestion changes interactively. |
 | `praxis.api-metadata.rag-publication.enabled` | `true` | Enables after-commit publication of derived API metadata RAG documents. Disable only when the structured `api_metadata` corpus must persist without vector indexing. |
 
+## UI Config Identity Semantics
+
+`/api/praxis/config/ui` normalizes logical identity at the service boundary before lookup, upsert
+or delete. `tenantId`, `componentType` and `componentId` are trimmed and required; `X-User-ID`,
+`X-Env` and `X-Updated-By` are trimmed and blank values are treated as absent. A blank environment
+therefore targets the global environment scope (`environment IS NULL`) instead of creating a distinct
+empty-string scope.
+
+Identity values are validated against the `ui_user_config` schema before repository or PostgreSQL
+atomic-upsert paths run: tenant, user, updater and component id are limited to 255 characters;
+component type and environment are limited to 64 characters. Invalid identity input returns a
+deterministic `400 Bad Request` response. `scope=user` still requires a nonblank `X-User-ID`; tenant
+scope ignores user identity for persistence.
+
 ## AI Registry Revision Semantics
 
 `ai_registry.version` and `ai_registry.etag` are internal freshness tokens for governed registry
