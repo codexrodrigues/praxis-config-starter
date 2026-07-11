@@ -638,6 +638,119 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void groundsChartResourceStatsFieldsAndTargetsThroughValidationContext() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload("praxis-chart", chartPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "chartDocument": {
+                      "version": "0.1.0",
+                      "kind": "bar",
+                      "source": { "kind": "praxis.stats", "resource": "/api/sales/orders" },
+                      "dimensions": [{ "field": "month" }],
+                      "metrics": [{ "field": "revenue", "aggregation": "sum", "axis": "primary" }]
+                    }
+                  },
+                  "validationContext": {
+                    "apiMetadata": {
+                      "resources": [
+                        {
+                          "resourcePath": "/api/sales/orders",
+                          "statsCapabilities": {
+                            "operations": ["group-by"],
+                            "fields": [
+                              { "field": "month", "allowedAggregations": ["count"] },
+                              { "field": "revenue", "allowedAggregations": ["sum", "avg"] }
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    "availableTargets": [
+                      { "id": "orders-filter", "kind": "filter-widget", "supportedActions": ["filter-widget"] }
+                    ]
+                  },
+                  "plan": {
+                    "operations": [
+                      {
+                        "operationId": "data.resource.bind",
+                        "input": {
+                          "sourceKind": "praxis.stats",
+                          "resource": "/api/sales/orders",
+                          "operation": "group-by",
+                          "dimensions": [{ "field": "month" }],
+                          "metrics": [{ "field": "revenue" }]
+                        }
+                      },
+                      {
+                        "operationId": "series.add",
+                        "input": { "field": "revenue", "aggregation": "avg" }
+                      },
+                      {
+                        "operationId": "crossFilter.configure",
+                        "input": {
+                          "action": "filter-widget",
+                          "target": "orders-filter",
+                          "mapping": { "month": "month" }
+                        }
+                      }
+                    ]
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult result = service.validateEditPlan(
+                "praxis-chart",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.normalizedPlan().path("operations")).hasSize(3);
+    }
+
+    @Test
+    void rejectsChartAuthoringWhenValidationContextDoesNotExposeGovernedGrounding() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload("praxis-chart", chartPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {},
+                  "plan": {
+                    "operations": [
+                      {
+                        "operationId": "data.resource.bind",
+                        "input": {
+                          "sourceKind": "praxis.stats",
+                          "resource": "/api/sales/orders",
+                          "operation": "group-by",
+                          "dimensions": [{ "field": "month" }]
+                        }
+                      },
+                      {
+                        "operationId": "crossFilter.configure",
+                        "input": {
+                          "action": "filter-widget",
+                          "target": "orders-filter"
+                        }
+                      }
+                    ]
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult result = service.validateEditPlan(
+                "praxis-chart",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failures())
+                .contains(
+                        "validator remote-resource-in-api-metadata failed for data.resource.bind: required API metadata resource catalog is unavailable",
+                        "validator stats-operation-supported failed for data.resource.bind: required stats capabilities are unavailable for /api/sales/orders",
+                        "validator chart-fields-exist failed for data.resource.bind: required field catalog is unavailable",
+                        "validator event-target-governed failed for crossFilter.configure: required event target catalog is unavailable");
+    }
+
+    @Test
     void compilesSettingsPanelShellConfigurationFromClasspathRegistrySnapshot() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(
                 "praxis-settings-panel",
@@ -2220,6 +2333,123 @@ class AgenticAuthoringManifestServiceTest {
                         "validators": [
                           { "validatorId": "filter-fields-exist" },
                           { "validatorId": "editor-round-trip-preserve" }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """;
+    }
+
+    private String chartPayload() {
+        return """
+                {
+                  "componentDefinition": {
+                    "jsonSchema": {
+                      "authoringManifest": {
+                        "schemaVersion": "1.0.0",
+                        "componentId": "praxis-chart",
+                        "manifestVersion": "1.0.0",
+                        "editableTargets": [
+                          { "kind": "dataBinding", "resolver": "chart-config" },
+                          { "kind": "series", "resolver": "chart-config" },
+                          { "kind": "crossFilter", "resolver": "chart-config" }
+                        ],
+                        "operations": [
+                          {
+                            "operationId": "data.resource.bind",
+                            "target": {
+                              "kind": "dataBinding",
+                              "resolver": "chart-config",
+                              "ambiguityPolicy": "fail",
+                              "required": false
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "required": ["sourceKind", "resource", "operation"],
+                              "properties": {
+                                "sourceKind": { "enum": ["praxis.stats"] },
+                                "resource": { "type": "string" },
+                                "operation": { "type": "string" },
+                                "dimensions": { "type": "array" },
+                                "metrics": { "type": "array" }
+                              }
+                            },
+                            "effects": [
+                              { "kind": "merge-object", "path": "chartDocument.source" }
+                            ],
+                            "affectedPaths": ["chartDocument.source"],
+                            "preconditions": ["config-initialized"],
+                            "validators": [
+                              "remote-resource-in-api-metadata",
+                              "stats-operation-supported",
+                              "bound-fields-exist"
+                            ],
+                            "submissionImpact": "affects-remote-binding"
+                          },
+                          {
+                            "operationId": "series.add",
+                            "target": {
+                              "kind": "series",
+                              "resolver": "chart-config",
+                              "ambiguityPolicy": "fail",
+                              "required": false
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "required": ["field", "aggregation"],
+                              "properties": {
+                                "field": { "type": "string" },
+                                "aggregation": { "type": "string" }
+                              }
+                            },
+                            "effects": [
+                              { "kind": "merge-object", "path": "chartDocument.metrics" }
+                            ],
+                            "affectedPaths": ["chartDocument.metrics"],
+                            "preconditions": ["config-initialized"],
+                            "validators": ["series-field-exists", "series-field-aggregable"],
+                            "submissionImpact": "visual-only"
+                          },
+                          {
+                            "operationId": "crossFilter.configure",
+                            "target": {
+                              "kind": "crossFilter",
+                              "resolver": "chart-config",
+                              "ambiguityPolicy": "fail",
+                              "required": false
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "required": ["action", "target"],
+                              "properties": {
+                                "action": { "type": "string" },
+                                "target": { "type": "string" },
+                                "mapping": { "type": "object" }
+                              }
+                            },
+                            "effects": [
+                              { "kind": "merge-object", "path": "chartDocument.events" }
+                            ],
+                            "affectedPaths": ["chartDocument.events"],
+                            "preconditions": ["config-initialized"],
+                            "validators": [
+                              "event-target-governed",
+                              "event-action-supported",
+                              "event-mapping-fields-exist"
+                            ],
+                            "submissionImpact": "config-only"
+                          }
+                        ],
+                        "validators": [
+                          { "validatorId": "remote-resource-in-api-metadata" },
+                          { "validatorId": "stats-operation-supported" },
+                          { "validatorId": "bound-fields-exist" },
+                          { "validatorId": "series-field-exists" },
+                          { "validatorId": "series-field-aggregable" },
+                          { "validatorId": "event-target-governed" },
+                          { "validatorId": "event-action-supported" },
+                          { "validatorId": "event-mapping-fields-exist" }
                         ]
                       }
                     }

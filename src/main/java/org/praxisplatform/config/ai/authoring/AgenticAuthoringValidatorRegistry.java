@@ -634,15 +634,15 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "series-field-exists", "axis-field-exists", "bound-fields-exist",
                      "query-context-fields-exist", "event-mapping-fields-exist" ->
                         validateChartInputFieldsExist(operationId, planOperation, config, failures);
-                case "series-field-aggregable" -> validateChartAggregation(operationId, planOperation, failures);
+                case "series-field-aggregable" -> validateChartAggregation(operationId, planOperation, config, failures);
                 case "series-id-unique" -> validateChartSeriesUnique(operationId, planOperation, config, failures);
                 case "series-exists" -> validateChartSeriesExists(operationId, planOperation, config, failures);
                 case "destructive-series-removal-confirmed" -> validateChartSeriesRemovalConfirmed(operationId, planOperation, failures);
                 case "chart-keeps-required-metric" -> validateChartKeepsMetric(operationId, config, failures);
                 case "secondary-axis-combo-only" -> validateChartSecondaryAxisComboOnly(operationId, planOperation, config, failures);
                 case "cartesian-dimension-required" -> validateChartCartesianDimensionRequired(operationId, planOperation, config, failures);
-                case "remote-resource-in-api-metadata" -> validateChartRemoteResource(operationId, planOperation, failures);
-                case "stats-operation-supported" -> validateChartStatsOperation(operationId, planOperation, failures);
+                case "remote-resource-in-api-metadata" -> validateChartRemoteResource(operationId, planOperation, config, failures);
+                case "stats-operation-supported" -> validateChartStatsOperation(operationId, planOperation, config, failures);
                 case "query-context-structured", "query-context-safe-values",
                      "cross-filter-output-structured", "selection-output-structured" ->
                         validateChartStructuredInput(operationId, planOperation, failures);
@@ -2868,7 +2868,15 @@ public final class AgenticAuthoringValidatorRegistry {
             List<String> failures) {
         Set<String> known = chartKnownFields(config);
         for (String field : chartInputFields(planOperation.path("input"))) {
-            if (!field.isBlank() && !known.isEmpty() && !known.contains(field)) {
+            if (field.isBlank()) {
+                continue;
+            }
+            if (known.isEmpty()) {
+                failures.add("validator chart-fields-exist failed for " + operationId
+                        + ": required field catalog is unavailable");
+                return;
+            }
+            if (!known.contains(field)) {
                 failures.add("validator chart-fields-exist failed for " + operationId + ": unknown field " + field);
             }
         }
@@ -2885,9 +2893,26 @@ public final class AgenticAuthoringValidatorRegistry {
         }
     }
 
-    private void validateChartAggregation(String operationId, JsonNode planOperation, List<String> failures) {
+    private void validateChartAggregation(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String field = text(planOperation.path("input"), "field");
         String aggregation = text(planOperation.path("input"), "aggregation");
-        if (!aggregation.isBlank() && !Set.of("sum", "avg", "min", "max", "count", "distinct-count").contains(aggregation)) {
+        if (aggregation.isBlank()) {
+            return;
+        }
+        JsonNode fieldDescriptor = chartFieldDescriptor(config, field);
+        if (!field.isBlank() && fieldDescriptor.isMissingNode() && !chartKnownFields(config).isEmpty()) {
+            failures.add("validator series-field-aggregable failed for " + operationId
+                    + ": field is not available for stats aggregation " + field);
+        }
+        Set<String> allowed = chartAllowedAggregations(fieldDescriptor);
+        if (allowed.isEmpty()) {
+            allowed = Set.of("sum", "avg", "min", "max", "count", "distinct-count");
+        }
+        if (!allowed.contains(aggregation)) {
             failures.add("validator series-field-aggregable failed for " + operationId
                     + ": unsupported aggregation " + aggregation);
         }
@@ -2949,18 +2974,67 @@ public final class AgenticAuthoringValidatorRegistry {
         }
     }
 
-    private void validateChartRemoteResource(String operationId, JsonNode planOperation, List<String> failures) {
-        String resource = text(planOperation.path("input"), "resource");
-        if (!resource.isBlank() && (containsUnsafeAbsoluteUrl(planOperation.path("input").path("resource")) || !resource.startsWith("/"))) {
+    private void validateChartRemoteResource(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String resource = chartResource(planOperation, config);
+        JsonNode input = planOperation.path("input");
+        if (!resource.isBlank()
+                && (containsUnsafeAbsoluteUrl(input.path("resource"))
+                || containsUnsafeAbsoluteUrl(input.path("resourcePath"))
+                || containsUnsafeAbsoluteUrl(input.path("source"))
+                || !resource.startsWith("/"))) {
             failures.add("validator remote-resource-in-api-metadata failed for " + operationId
                     + ": resource must be a relative governed Praxis path");
+            return;
+        }
+        if (resource.isBlank()) {
+            failures.add("validator remote-resource-in-api-metadata failed for " + operationId
+                    + ": resource is required");
+            return;
+        }
+        if (!chartResourceCatalogAvailable(config)) {
+            failures.add("validator remote-resource-in-api-metadata failed for " + operationId
+                    + ": required API metadata resource catalog is unavailable");
+            return;
+        }
+        if (chartResourceDescriptor(config, resource).isMissingNode()) {
+            failures.add("validator remote-resource-in-api-metadata failed for " + operationId
+                    + ": resource is not published in API metadata " + resource);
         }
     }
 
-    private void validateChartStatsOperation(String operationId, JsonNode planOperation, List<String> failures) {
+    private void validateChartStatsOperation(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
         String sourceKind = text(planOperation.path("input"), "sourceKind");
         String operation = text(planOperation.path("input"), "operation");
-        if ("praxis.stats".equals(sourceKind) && !Set.of("group-by", "timeseries", "distribution").contains(operation)) {
+        if (!"praxis.stats".equals(sourceKind)) {
+            return;
+        }
+        if (operation.isBlank()) {
+            failures.add("validator stats-operation-supported failed for " + operationId
+                    + ": stats operation is required");
+            return;
+        }
+        if (!Set.of("group-by", "timeseries", "distribution").contains(operation)) {
+            failures.add("validator stats-operation-supported failed for " + operationId
+                    + ": unsupported stats operation " + operation);
+            return;
+        }
+        String resource = chartResource(planOperation, config);
+        JsonNode resourceDescriptor = chartResourceDescriptor(config, resource);
+        Set<String> supported = chartSupportedStatsOperations(config, resourceDescriptor);
+        if (supported.isEmpty()) {
+            failures.add("validator stats-operation-supported failed for " + operationId
+                    + ": required stats capabilities are unavailable for " + resource);
+            return;
+        }
+        if (!supported.contains(operation)) {
             failures.add("validator stats-operation-supported failed for " + operationId
                     + ": unsupported stats operation " + operation);
         }
@@ -2987,8 +3061,20 @@ public final class AgenticAuthoringValidatorRegistry {
             return;
         }
         JsonNode availableTargets = config.path("availableTargets");
-        if (availableTargets.isArray() && !fieldExists(availableTargets, target)) {
+        if (!availableTargets.isArray() || availableTargets.isEmpty()) {
+            failures.add("validator event-target-governed failed for " + operationId
+                    + ": required event target catalog is unavailable");
+            return;
+        }
+        JsonNode targetDescriptor = findTargetDescriptor(availableTargets, target);
+        if (targetDescriptor.isMissingNode()) {
             failures.add("validator event-target-governed failed for " + operationId + ": unknown event target " + target);
+            return;
+        }
+        String action = text(planOperation.path("input"), "action");
+        if (!action.isBlank() && !targetSupportsAction(targetDescriptor, action)) {
+            failures.add("validator event-target-governed failed for " + operationId
+                    + ": target " + target + " does not support action " + action);
         }
     }
 
@@ -3044,9 +3130,238 @@ public final class AgenticAuthoringValidatorRegistry {
         collectFieldNames(config.path("availableFields"), fields, "name", "field", "id");
         collectFieldNames(config.path("fieldMetadata"), fields, "name", "field", "id");
         collectFieldNames(config.path("columns"), fields, "field", "name", "id");
-        collectFieldNames(config.path("chartDocument").path("dimensions"), fields, "field", "name", "id");
-        collectFieldNames(config.path("chartDocument").path("metrics"), fields, "field", "name", "id");
+        collectFieldNames(config.path("statsCapabilities").path("fields"), fields, "name", "field", "id");
+        collectFieldNames(config.path("apiMetadata").path("fields"), fields, "name", "field", "id");
+        collectFieldsFromResources(config.path("apiMetadata").path("resources"), fields);
+        collectFieldsFromResources(config.path("resources"), fields);
         return fields;
+    }
+
+    private void collectFieldsFromResources(JsonNode resources, Set<String> fields) {
+        if (!resources.isArray()) {
+            return;
+        }
+        for (JsonNode resource : resources) {
+            collectFieldNames(resource.path("fields"), fields, "name", "field", "id");
+            collectFieldNames(resource.path("statsFields"), fields, "name", "field", "id");
+            collectFieldNames(resource.path("statsCapabilities").path("fields"), fields, "name", "field", "id");
+        }
+    }
+
+    private String chartResource(JsonNode planOperation, JsonNode config) {
+        JsonNode input = planOperation.path("input");
+        return firstNonBlank(
+                text(input, "resource"),
+                text(input.path("resource"), "path"),
+                text(input, "resourcePath"),
+                text(input.path("resourcePath"), "path"),
+                text(input.path("source"), "resource"),
+                text(input.path("source").path("resource"), "path"),
+                text(input.path("source"), "resourcePath"),
+                text(input.path("source").path("resourcePath"), "path"),
+                text(config.path("chartDocument").path("source"), "resource"),
+                text(config.path("chartDocument").path("source").path("resource"), "path"),
+                text(config.path("chartDocument").path("source"), "resourcePath"),
+                text(config.path("chartDocument").path("source").path("resourcePath"), "path"));
+    }
+
+    private boolean chartResourceCatalogAvailable(JsonNode config) {
+        return config.path("apiMetadata").path("resources").isArray()
+                || config.path("resources").isArray()
+                || config.path("resourceCatalog").path("resources").isArray();
+    }
+
+    private JsonNode chartResourceDescriptor(JsonNode config, String resourcePath) {
+        if (resourcePath == null || resourcePath.isBlank()) {
+            return MissingNode.getInstance();
+        }
+        for (JsonNode catalog : List.of(
+                config.path("apiMetadata").path("resources"),
+                config.path("resources"),
+                config.path("resourceCatalog").path("resources"))) {
+            JsonNode resource = findResourceDescriptor(catalog, resourcePath);
+            if (!resource.isMissingNode()) {
+                return resource;
+            }
+        }
+        JsonNode apiMetadata = config.path("apiMetadata");
+        if (matchesResource(apiMetadata, resourcePath)) {
+            return apiMetadata;
+        }
+        return MissingNode.getInstance();
+    }
+
+    private JsonNode findResourceDescriptor(JsonNode resources, String resourcePath) {
+        if (!resources.isArray()) {
+            return MissingNode.getInstance();
+        }
+        for (JsonNode resource : resources) {
+            if (matchesResource(resource, resourcePath)) {
+                return resource;
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private boolean matchesResource(JsonNode resource, String resourcePath) {
+        return resource != null
+                && !resource.isMissingNode()
+                && (resourcePath.equals(text(resource, "path"))
+                || resourcePath.equals(text(resource, "resourcePath"))
+                || resourcePath.equals(text(resource, "submitUrl"))
+                || resourcePath.equals(text(resource, "url")));
+    }
+
+    private Set<String> chartSupportedStatsOperations(JsonNode config, JsonNode resourceDescriptor) {
+        Set<String> operations = new HashSet<>();
+        collectTextValues(config.path("statsCapabilities").path("operations"), operations, "operation", "id", "name");
+        collectTextValues(config.path("statsOperations"), operations, "operation", "id", "name");
+        if (!resourceDescriptor.isMissingNode()) {
+            collectTextValues(resourceDescriptor.path("statsOperations"), operations, "operation", "id", "name");
+            collectTextValues(resourceDescriptor.path("statsCapabilities").path("operations"), operations, "operation", "id", "name");
+            collectTextValues(resourceDescriptor.path("capabilities").path("stats"), operations, "operation", "id", "name");
+            collectStatsOperationFlags(resourceDescriptor.path("statsCapabilities"), operations);
+            collectStatsOperationFlags(resourceDescriptor.path("capabilities"), operations);
+            collectStatsOperationFlags(resourceDescriptor.path("capabilities").path("stats"), operations);
+        }
+        collectStatsOperationFlags(config.path("statsCapabilities"), operations);
+        collectStatsOperationFlags(config.path("statsCapabilities").path("stats"), operations);
+        return operations;
+    }
+
+    private void collectStatsOperationFlags(JsonNode node, Set<String> operations) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.path("groupBy").asBoolean(false) || node.path("group-by").asBoolean(false)) {
+            operations.add("group-by");
+        }
+        if (node.path("timeseries").asBoolean(false) || node.path("timeSeries").asBoolean(false)) {
+            operations.add("timeseries");
+        }
+        if (node.path("distribution").asBoolean(false)) {
+            operations.add("distribution");
+        }
+    }
+
+    private JsonNode chartFieldDescriptor(JsonNode config, String field) {
+        if (field == null || field.isBlank()) {
+            return MissingNode.getInstance();
+        }
+        for (JsonNode catalog : List.of(
+                config.path("availableFields"),
+                config.path("fieldMetadata"),
+                config.path("statsCapabilities").path("fields"),
+                config.path("apiMetadata").path("fields"))) {
+            JsonNode descriptor = findFieldDescriptor(catalog, field);
+            if (!descriptor.isMissingNode()) {
+                return descriptor;
+            }
+        }
+        for (JsonNode resources : List.of(config.path("apiMetadata").path("resources"), config.path("resources"))) {
+            if (!resources.isArray()) {
+                continue;
+            }
+            for (JsonNode resource : resources) {
+                for (JsonNode catalog : List.of(
+                        resource.path("fields"),
+                        resource.path("statsFields"),
+                        resource.path("statsCapabilities").path("fields"))) {
+                    JsonNode descriptor = findFieldDescriptor(catalog, field);
+                    if (!descriptor.isMissingNode()) {
+                        return descriptor;
+                    }
+                }
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private JsonNode findFieldDescriptor(JsonNode fields, String field) {
+        if (!fields.isArray()) {
+            return MissingNode.getInstance();
+        }
+        for (JsonNode descriptor : fields) {
+            if (field.equals(text(descriptor, "field"))
+                    || field.equals(text(descriptor, "name"))
+                    || field.equals(text(descriptor, "id"))) {
+                return descriptor;
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private Set<String> chartAllowedAggregations(JsonNode fieldDescriptor) {
+        Set<String> aggregations = new HashSet<>();
+        collectTextValues(fieldDescriptor.path("aggregations"), aggregations, "aggregation", "id", "name");
+        collectTextValues(fieldDescriptor.path("allowedAggregations"), aggregations, "aggregation", "id", "name");
+        collectTextValues(fieldDescriptor.path("metrics"), aggregations, "aggregation", "id", "name");
+        collectTextValues(fieldDescriptor.path("allowedMetrics"), aggregations, "aggregation", "id", "name");
+        return aggregations;
+    }
+
+    private JsonNode findTargetDescriptor(JsonNode availableTargets, String target) {
+        if (!availableTargets.isArray()) {
+            return MissingNode.getInstance();
+        }
+        for (JsonNode descriptor : availableTargets) {
+            if (target.equals(text(descriptor, "id"))
+                    || target.equals(text(descriptor, "name"))
+                    || target.equals(text(descriptor, "field"))
+                    || target.equals(text(descriptor, "widgetKey"))) {
+                return descriptor;
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private boolean targetSupportsAction(JsonNode targetDescriptor, String action) {
+        Set<String> declaredActions = new HashSet<>();
+        collectTextValues(targetDescriptor.path("supportedActions"), declaredActions, "action", "id", "name");
+        collectTextValues(targetDescriptor.path("actions"), declaredActions, "action", "id", "name");
+        collectTextValues(targetDescriptor.path("capabilities"), declaredActions, "action", "id", "name");
+        if (!declaredActions.isEmpty()) {
+            return declaredActions.contains(action);
+        }
+        String kind = firstNonBlank(text(targetDescriptor, "kind"), text(targetDescriptor, "targetKind"), text(targetDescriptor, "type"));
+        if (kind.isBlank()) {
+            return true;
+        }
+        return switch (action) {
+            case "filter-widget" -> Set.of("filter-widget", "filter", "table").contains(kind);
+            case "open-detail" -> Set.of("detail", "detail-view", "crud", "drawer", "table").contains(kind);
+            case "navigate" -> Set.of("route", "page", "url", "navigation").contains(kind);
+            case "update-context" -> Set.of("context", "state", "store").contains(kind);
+            case "emit" -> Set.of("event", "event-bus", "output").contains(kind);
+            default -> false;
+        };
+    }
+
+    private void collectTextValues(JsonNode node, Set<String> values, String... objectKeys) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isTextual()) {
+            String value = node.asText("");
+            if (!value.isBlank()) {
+                values.add(value);
+            }
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                collectTextValues(item, values, objectKeys);
+            }
+            return;
+        }
+        if (node.isObject()) {
+            for (String key : objectKeys) {
+                String value = text(node, key);
+                if (!value.isBlank()) {
+                    values.add(value);
+                }
+            }
+        }
     }
 
     private void collectFieldNames(JsonNode array, Set<String> fields, String... keys) {
