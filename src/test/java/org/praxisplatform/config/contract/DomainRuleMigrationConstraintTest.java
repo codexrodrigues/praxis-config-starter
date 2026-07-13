@@ -44,4 +44,22 @@ class DomainRuleMigrationConstraintTest {
         assertThat(migration).contains("ck_domain_rule_event_safe_metadata_object");
         assertThat(migration).contains("idx_domain_rule_event_definition_time");
     }
+
+    @Test
+    void snapshotControlPlaneSeparatesImmutableContentFromMutableHead() throws IOException {
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/V30__create_domain_rule_snapshot_control_plane.sql"));
+
+        assertThat(migration).contains("CREATE TABLE IF NOT EXISTS domain_rule_snapshot");
+        assertThat(migration).contains("snapshot_payload JSONB NOT NULL");
+        assertThat(migration).contains("content_hash VARCHAR(64) NOT NULL");
+        assertThat(migration).contains("uq_domain_rule_snapshot_version");
+        assertThat(migration).contains("supersedes_snapshot_id UUID REFERENCES domain_rule_snapshot(id)");
+        assertThat(migration).contains("CREATE TABLE IF NOT EXISTS domain_rule_snapshot_head");
+        assertThat(migration).contains("head_etag UUID NOT NULL");
+        assertThat(migration).contains("activation_revision BIGINT NOT NULL");
+        assertThat(migration).contains("CREATE TABLE IF NOT EXISTS domain_rule_snapshot_event");
+        assertThat(migration).contains("'PUBLISHED', 'ROLLED_BACK'");
+        assertThat(migration).contains("uq_domain_rule_snapshot_head");
+    }
 }
