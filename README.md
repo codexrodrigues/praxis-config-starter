@@ -165,7 +165,7 @@ Add the dependency to the consuming Spring Boot host and use the latest version 
 
 Minimum runtime expectations:
 
-- Java 17+
+- Java 21+ (required by the canonical `praxis-rules-engine` snapshot contract)
 - Spring Boot 3.5+
 - PostgreSQL 14+
 - `pgvector` when vector search/RAG is enabled
@@ -330,7 +330,7 @@ discarded instead of falling back to a legacy or unscoped corpus.
 | `/api/praxis/config/ai-context/**` | Build AI context from component metadata, runtime state, templates, and schema hints. |
 | `/api/praxis/config/ai/patch` | Generate structured configuration patches from governed AI context. |
 | `/api/praxis/config/ai/authoring/**` | Validate, compile, preview, apply, stream, replay, and cancel agentic authoring turns. |
-| `/api/praxis/config/domain-rules/**` | Govern shared business rules and semantic decisions before publishing materializations. |
+| `/api/praxis/config/domain-rules/**` | Govern shared business rules and semantic decisions, including immutable RuleSet snapshots, conditional head publication and rollback-by-selection. |
 | `/api/praxis/config/domain-knowledge/**` | Govern domain knowledge change sets and evidence lifecycle. |
 | `GET /api/praxis/runtime/context` | Return a safe, host-neutral enterprise runtime context projection. Private auth and authorization internals remain host-owned. |
 | `PUT /api/praxis/runtime/context` | Request a host-authorized context switch. The response returns the effective context and safe propagation headers; the default provider never switches to a different tenant without a host-owned provider. |
@@ -345,6 +345,7 @@ Start with these repository documents:
 - [AI contract docs](docs/ai/contracts/README.md)
 - [Agentic authoring streaming](docs/ai/agentic-authoring-streaming.md)
 - [Memory and PII guidance](docs/ai/memory-and-pii.md)
+- [Rule snapshot control plane v1](docs/domain-rules/snapshot-control-plane-v1.md)
 - [Runtime enforcement release checklist](docs/ai/runtime-enforcement-consumer-release-checklist-2026-05-02.md)
 - [Domain catalog contract](docs/domain-catalog/domain-catalog-contract-v0.2.md)
 - [Release process](RELEASING.md)
