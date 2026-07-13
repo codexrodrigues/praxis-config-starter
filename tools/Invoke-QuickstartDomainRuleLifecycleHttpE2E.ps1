@@ -291,7 +291,9 @@ $intake = Invoke-JsonRequest `
         parameters = @{
             optionSourceKey = "supplier"
         }
-        governance = @{}
+        governance = @{
+            requiredApprovals = @("procurement-owner")
+        }
         createdByType = "llm"
         createdBy = "codex-http-smoke"
     }
@@ -324,7 +326,9 @@ $definitionBody = @{
     parameters = @{
         optionSourceKey = "supplier"
     }
-    governance = @{}
+    governance = @{
+        requiredApprovals = @("procurement-owner")
+    }
     createdByType = "llm"
     createdBy = "codex-http-smoke"
 }
