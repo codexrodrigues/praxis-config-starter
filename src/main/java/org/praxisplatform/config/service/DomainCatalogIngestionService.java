@@ -188,11 +188,17 @@ public class DomainCatalogIngestionService {
         String schemaVersion = requiredText(payload, "schemaVersion");
         String releaseKey = releaseKey(payload);
         String sourceHash = text(payload.path("release"), "sourceHash");
+        String resourceKey = text(payload, "resourceKey");
         Optional<DomainCatalogRelease> existingRelease = releaseRepository.findByReleaseKey(releaseKey);
         if (existingRelease
                 .filter(release -> sameCatalogRelease(release, schemaVersion, sourceHash, tenantId, environment))
                 .isPresent()) {
             DomainCatalogRelease release = existingRelease.get();
+            if (!StringUtils.hasText(release.getResourceKey()) && StringUtils.hasText(resourceKey)) {
+                release.setResourceKey(resourceKey);
+                releaseRepository.save(release);
+                log.info("Repaired missing resourceKey for domain catalog release {}", release.getReleaseKey());
+            }
             long existingItemCount = itemRepository.countByRelease(release);
             log.info(
                     "Skipped domain catalog release {} because sourceHash {} is already ingested",
@@ -213,7 +219,7 @@ public class DomainCatalogIngestionService {
         release.setServiceKey(text(payload.path("service"), "serviceKey"));
         release.setServiceName(text(payload.path("service"), "name"));
         release.setServiceVersion(text(payload.path("service"), "version"));
-        release.setResourceKey(text(payload, "resourceKey"));
+        release.setResourceKey(resourceKey);
         release.setGeneratedAt(parseInstant(text(payload.path("release"), "generatedAt")));
         release.setSourceHash(sourceHash);
         release.setTenantId(normalize(tenantId));

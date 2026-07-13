@@ -127,6 +127,7 @@ class DomainCatalogIngestionServiceTest {
                 .releaseKey("praxis-api-quickstart:test")
                 .schemaVersion("praxis.domain-catalog/v0.2")
                 .serviceKey("praxis-api-quickstart")
+                .resourceKey("human-resources.folhas-pagamento")
                 .sourceHash("sha256:test")
                 .tenantId("tenant-a")
                 .environment("dev")
@@ -139,6 +140,37 @@ class DomainCatalogIngestionServiceTest {
         assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:test");
         assertThat(response.itemCount()).isEqualTo(13);
         verify(releaseRepository, never()).save(any(DomainCatalogRelease.class));
+    }
+
+    @Test
+    void repairsMissingResourceKeyWhenAnIdempotentReleaseIsReingested() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+        DomainCatalogRelease existingRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-api-quickstart:test")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-api-quickstart")
+                .sourceHash("sha256:test")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .build();
+        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.of(existingRelease));
+        when(releaseRepository.save(existingRelease)).thenReturn(existingRelease);
+        when(itemRepository.countByRelease(existingRelease)).thenReturn(13L);
+
+        DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        assertThat(response.itemCount()).isEqualTo(13);
+        assertThat(existingRelease.getResourceKey()).isEqualTo("human-resources.folhas-pagamento");
+        verify(releaseRepository).save(existingRelease);
         verify(itemRepository, never()).deleteByRelease(any(DomainCatalogRelease.class));
         verify(itemRepository, never()).saveAll(any());
         verify(ragVectorStoreService, never()).upsertDocuments(any());
