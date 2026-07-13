@@ -2,6 +2,9 @@
 
 Este documento descreve o fluxo de CI e release no GitHub Actions para publicar no Maven Central com o menor atrito operacional.
 
+O build, os gates downstream e a publicação usam Java 21, baseline necessário
+para o contrato canônico de snapshots do `praxis-rules-engine`.
+
 ## O que esta automatizado
 - Build automatico em `push` para `main` (job `Build on main`).
 - Build de `smoke/unit` em `push` para `main` com perfil Maven `ci-smoke-unit`.

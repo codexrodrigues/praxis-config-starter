@@ -48,11 +48,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up Java 17 (Temurin)
+      - name: Set up Java 21 (Temurin)
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
           cache: maven
 
       - name: Build (verify)
@@ -243,11 +243,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Java 17 (Temurin) + Central server
+      - name: Set up Java 21 (Temurin) + Central server
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
           cache: maven
           server-id: central
           server-username: CENTRAL_TOKEN_USER
