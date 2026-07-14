@@ -102,6 +102,11 @@ Repeated ingestion of the same `releaseKey` and `sourceHash` is idempotent: the
 config store returns the existing item count without deleting/reinserting the
 catalog items or republishing RAG documents.
 
+The persisted identity is `(tenant, environment, releaseKey)`. The same
+content-addressed `releaseKey` can be ingested independently in another tenant
+or environment, while different content cannot replace that key inside the
+same scope.
+
 Save the returned `releaseKey`.
 
 ```bash
@@ -143,35 +148,45 @@ List all items for a release:
 
 ```bash
 curl -sS \
-  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/items?releaseKey=$DOMAIN_RELEASE_KEY"
+  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/items?releaseKey=$DOMAIN_RELEASE_KEY" \
+  -H "X-Tenant-ID: $TENANT_ID" \
+  -H "X-Env: $ENVIRONMENT"
 ```
 
 List only semantic nodes:
 
 ```bash
 curl -sS \
-  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/items?releaseKey=$DOMAIN_RELEASE_KEY&type=node"
+  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/items?releaseKey=$DOMAIN_RELEASE_KEY&type=node" \
+  -H "X-Tenant-ID: $TENANT_ID" \
+  -H "X-Env: $ENVIRONMENT"
 ```
 
 Search for payroll value fields:
 
 ```bash
 curl -sS \
-  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/items?releaseKey=$DOMAIN_RELEASE_KEY&type=node&q=valor"
+  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/items?releaseKey=$DOMAIN_RELEASE_KEY&type=node&q=valor" \
+  -H "X-Tenant-ID: $TENANT_ID" \
+  -H "X-Env: $ENVIRONMENT"
 ```
 
 Search for selectable suppliers:
 
 ```bash
 curl -sS \
-  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/items?releaseKey=$DOMAIN_RELEASE_KEY&type=node&q=ACTIVE"
+  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/items?releaseKey=$DOMAIN_RELEASE_KEY&type=node&q=ACTIVE" \
+  -H "X-Tenant-ID: $TENANT_ID" \
+  -H "X-Env: $ENVIRONMENT"
 ```
 
 Filter by context:
 
 ```bash
 curl -sS \
-  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/items?releaseKey=$DOMAIN_RELEASE_KEY&contextKey=human-resources"
+  "$CONFIG_BASE_URL/api/praxis/config/domain-catalog/items?releaseKey=$DOMAIN_RELEASE_KEY&contextKey=human-resources" \
+  -H "X-Tenant-ID: $TENANT_ID" \
+  -H "X-Env: $ENVIRONMENT"
 ```
 
 ## 6. Query Latest Runtime Context

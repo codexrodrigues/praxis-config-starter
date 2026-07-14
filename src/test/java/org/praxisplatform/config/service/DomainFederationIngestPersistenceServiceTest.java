@@ -80,6 +80,10 @@ class DomainFederationIngestPersistenceServiceTest {
             assertThat(source.getSourceKey()).isEqualTo("operations-source");
             assertThat(source.getEvidence()).isEqualTo("{}");
         });
+        verify(fixture.catalogReleaseRepository).findByReleaseKeyAndScope(
+                "domain-catalog:operations:v1",
+                "tenant-a",
+                "dev");
     }
 
     @Test
@@ -137,7 +141,8 @@ class DomainFederationIngestPersistenceServiceTest {
                 contextRepository,
                 relationshipRepository,
                 contractRepository,
-                resolutionRepository);
+                resolutionRepository,
+                catalogReleaseRepository);
     }
 
     private DomainFederationValidationRequest request() {
@@ -216,6 +221,7 @@ class DomainFederationIngestPersistenceServiceTest {
             DomainContextRepository contextRepository,
             DomainContextRelationshipRepository relationshipRepository,
             DomainContractRepository contractRepository,
-            DomainResolutionRepository resolutionRepository) {
+            DomainResolutionRepository resolutionRepository,
+            DomainCatalogReleaseRepository catalogReleaseRepository) {
     }
 }

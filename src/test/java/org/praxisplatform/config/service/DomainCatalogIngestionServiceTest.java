@@ -48,7 +48,8 @@ class DomainCatalogIngestionServiceTest {
                 validationService()
         );
 
-        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.empty());
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.empty());
         when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(ragVectorStoreService.isAvailable()).thenReturn(false);
@@ -132,7 +133,8 @@ class DomainCatalogIngestionServiceTest {
                 .tenantId("tenant-a")
                 .environment("dev")
                 .build();
-        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.of(existingRelease));
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.of(existingRelease));
         when(itemRepository.countByRelease(existingRelease)).thenReturn(13L);
 
         DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
@@ -140,6 +142,99 @@ class DomainCatalogIngestionServiceTest {
         assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:test");
         assertThat(response.itemCount()).isEqualTo(13);
         verify(releaseRepository, never()).save(any(DomainCatalogRelease.class));
+    }
+
+    @Test
+    void ingestsTheSameContentAddressedReleaseKeyIndependentlyAcrossScopes() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.empty());
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-b", "prod"))
+                .thenReturn(Optional.empty());
+        when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ragVectorStoreService.isAvailable()).thenReturn(false);
+
+        service.ingest(sampleCatalog(), "tenant-a", "dev");
+        service.ingest(sampleCatalog(), "tenant-b", "prod");
+
+        ArgumentCaptor<DomainCatalogRelease> releases = ArgumentCaptor.forClass(DomainCatalogRelease.class);
+        verify(releaseRepository, times(2)).save(releases.capture());
+        assertThat(releases.getAllValues())
+                .extracting(DomainCatalogRelease::getTenantId, DomainCatalogRelease::getEnvironment)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("tenant-a", "dev"),
+                        org.assertj.core.groups.Tuple.tuple("tenant-b", "prod"));
+    }
+
+    @Test
+    void rejectsDifferentImmutableContentForTheSameScopedReleaseKey() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+        DomainCatalogRelease existingRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-api-quickstart:test")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .sourceHash("sha256:different")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .rawPayload("{}")
+                .build();
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.of(existingRelease));
+
+        assertThatThrownBy(() -> service.ingest(sampleCatalog(), "tenant-a", "dev"))
+                .isInstanceOf(org.praxisplatform.config.exception.ConfigurationIngestionException.class)
+                .hasMessageContaining("different immutable content")
+                .hasMessageContaining("praxis-api-quickstart:test");
+        verify(releaseRepository, never()).save(any());
+        verify(itemRepository, never()).deleteByRelease(any());
+        verify(itemRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void searchesItemsOnlyInsideTheRequestedReleaseScope() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+        DomainCatalogRelease release = DomainCatalogRelease.builder()
+                .releaseKey("shared-release")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .build();
+        when(releaseRepository.findByReleaseKeyAndScope("shared-release", "tenant-a", "dev"))
+                .thenReturn(Optional.of(release));
+        when(itemRepository.search(eq(release), eq("node"), eq(null), eq(null), eq("salary"), any(Pageable.class)))
+                .thenReturn(List.of());
+
+        assertThat(service.search("shared-release", "tenant-a", "dev", "node", null, null, "salary", 5))
+                .isEmpty();
+
+        verify(releaseRepository).findByReleaseKeyAndScope("shared-release", "tenant-a", "dev");
+        verify(itemRepository).search(eq(release), eq("node"), eq(null), eq(null), eq("salary"), any(Pageable.class));
     }
 
     @Test
@@ -162,7 +257,8 @@ class DomainCatalogIngestionServiceTest {
                 .tenantId("tenant-a")
                 .environment("dev")
                 .build();
-        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.of(existingRelease));
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.of(existingRelease));
         when(releaseRepository.save(existingRelease)).thenReturn(existingRelease);
         when(itemRepository.countByRelease(existingRelease)).thenReturn(13L);
 
@@ -189,7 +285,8 @@ class DomainCatalogIngestionServiceTest {
                 validationService()
         );
 
-        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.empty());
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.empty());
         when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(ragVectorStoreService.isAvailable()).thenReturn(false);
@@ -231,7 +328,8 @@ class DomainCatalogIngestionServiceTest {
                 4
         );
 
-        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.empty());
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.empty());
         when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
@@ -387,7 +485,7 @@ class DomainCatalogIngestionServiceTest {
         when(releaseRepository.findLatest(eq("praxis-api-quickstart"), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(latestRelease));
         when(itemRepository.search(
-                eq("praxis-api-quickstart:latest"),
+                eq(latestRelease),
                 eq("node"),
                 eq("human-resources"),
                 eq("field"),
@@ -473,9 +571,9 @@ class DomainCatalogIngestionServiceTest {
 
         when(releaseRepository.findLatest(eq(null), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(hrLatest, financeLatest, hrOlder));
-        when(itemRepository.search(eq("hr:latest"), eq("node"), eq(null), eq("field"), eq("field"), any(Pageable.class)))
+        when(itemRepository.search(eq(hrLatest), eq("node"), eq(null), eq("field"), eq("field"), any(Pageable.class)))
                 .thenReturn(List.of(hrField));
-        when(itemRepository.search(eq("finance:latest"), eq("node"), eq(null), eq("field"), eq("field"), any(Pageable.class)))
+        when(itemRepository.search(eq(financeLatest), eq("node"), eq(null), eq("field"), eq("field"), any(Pageable.class)))
                 .thenReturn(List.of(financeField));
 
         var responses = service.searchLatest(
@@ -528,7 +626,7 @@ class DomainCatalogIngestionServiceTest {
         when(releaseRepository.findLatest(eq(null), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(hrLatest));
         when(itemRepository.search(
-                eq("hr:latest"),
+                eq(hrLatest),
                 eq("node"),
                 eq("human-resources"),
                 eq("policy_hint"),
@@ -618,9 +716,9 @@ class DomainCatalogIngestionServiceTest {
 
         when(releaseRepository.findLatest(eq(null), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(hrLatest, financeLatest));
-        when(itemRepository.search(eq("hr:latest"), eq("edge"), eq(null), eq(null), eq(null), any(Pageable.class)))
+        when(itemRepository.search(eq(hrLatest), eq("edge"), eq(null), eq(null), eq(null), any(Pageable.class)))
                 .thenReturn(List.of(crossServiceReference));
-        when(itemRepository.search(eq("finance:latest"), eq("edge"), eq(null), eq(null), eq(null), any(Pageable.class)))
+        when(itemRepository.search(eq(financeLatest), eq("edge"), eq(null), eq(null), eq(null), any(Pageable.class)))
                 .thenReturn(List.of(sameAsEdge));
 
         var responses = service.relationshipsLatest(
@@ -682,7 +780,7 @@ class DomainCatalogIngestionServiceTest {
 
         when(releaseRepository.findLatest(eq("hr-service"), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(hrLatest));
-        when(itemRepository.search(eq("hr:latest"), eq("edge"), eq(null), eq(null), eq("salary"), any(Pageable.class)))
+        when(itemRepository.search(eq(hrLatest), eq("edge"), eq(null), eq(null), eq("salary"), any(Pageable.class)))
                 .thenReturn(List.of(governedByEdge));
 
         var responses = service.relationshipsLatest(
@@ -740,7 +838,7 @@ class DomainCatalogIngestionServiceTest {
         when(releaseRepository.findLatest(eq("praxis-api-quickstart"), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(latestRelease));
         when(itemRepository.search(
-                eq("praxis-api-quickstart:latest"),
+                eq(latestRelease),
                 eq("node"),
                 eq("human-resources"),
                 eq("policy_hint"),
@@ -824,7 +922,7 @@ class DomainCatalogIngestionServiceTest {
         when(releaseRepository.findLatest(eq("praxis-service"), eq("human-resources.funcionarios"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(funcionariosRelease));
         when(itemRepository.search(
-                eq("praxis-service:human-resources.funcionarios:2026-04-22T11:01:23Z"),
+                eq(funcionariosRelease),
                 eq("governance"),
                 eq(null),
                 eq(null),
@@ -899,7 +997,7 @@ class DomainCatalogIngestionServiceTest {
         when(releaseRepository.findLatest(eq("praxis-service"), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(folhaRelease, funcionariosRelease, cargosRelease));
         when(itemRepository.search(
-                eq(folhaRelease.getReleaseKey()),
+                eq(folhaRelease),
                 eq("node"),
                 eq(null),
                 eq(null),
@@ -907,7 +1005,7 @@ class DomainCatalogIngestionServiceTest {
                 any(Pageable.class)))
                 .thenReturn(List.of(folhaNode));
         when(itemRepository.search(
-                eq(funcionariosRelease.getReleaseKey()),
+                eq(funcionariosRelease),
                 eq("node"),
                 eq(null),
                 eq(null),
@@ -915,7 +1013,7 @@ class DomainCatalogIngestionServiceTest {
                 any(Pageable.class)))
                 .thenReturn(List.of(funcionariosNode));
         when(itemRepository.search(
-                eq(cargosRelease.getReleaseKey()),
+                eq(cargosRelease),
                 eq("node"),
                 eq(null),
                 eq(null),
@@ -1011,7 +1109,7 @@ class DomainCatalogIngestionServiceTest {
         when(releaseRepository.findLatest(eq("praxis-api-quickstart"), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(latestRelease));
         when(itemRepository.search(
-                eq("praxis-api-quickstart:latest"),
+                eq(latestRelease),
                 eq("governance"),
                 eq("human-resources"),
                 eq(null),
@@ -1052,7 +1150,8 @@ class DomainCatalogIngestionServiceTest {
                 ragVectorStoreService,
                 validationService()
         );
-        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.empty());
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.empty());
         when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
@@ -1090,7 +1189,8 @@ class DomainCatalogIngestionServiceTest {
                 validationService(),
                 false
         );
-        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:test")).thenReturn(Optional.empty());
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.empty());
         when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
@@ -1158,7 +1258,8 @@ class DomainCatalogIngestionServiceTest {
                 ragVectorStoreService,
                 validationService()
         );
-        when(releaseRepository.findByReleaseKey("praxis-api-quickstart:v1")).thenReturn(Optional.empty());
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:v1", "tenant-a", "dev"))
+                .thenReturn(Optional.empty());
         when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(ragVectorStoreService.isAvailable()).thenReturn(false);

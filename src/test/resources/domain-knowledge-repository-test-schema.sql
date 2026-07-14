@@ -2,11 +2,12 @@ CREATE TYPE IF NOT EXISTS jsonb AS TEXT;
 
 CREATE TABLE domain_catalog_release (
   id UUID PRIMARY KEY,
-  release_key VARCHAR(255) NOT NULL UNIQUE,
+  release_key VARCHAR(255) NOT NULL,
   schema_version VARCHAR(64) NOT NULL,
   service_key VARCHAR(255),
   service_name VARCHAR(255),
   service_version VARCHAR(64),
+  resource_key VARCHAR(255),
   generated_at TIMESTAMP WITH TIME ZONE,
   source_hash VARCHAR(128),
   tenant_id VARCHAR(128),
@@ -14,6 +15,9 @@ CREATE TABLE domain_catalog_release (
   raw_payload jsonb NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
+
+CREATE UNIQUE INDEX uk_domain_catalog_release_scope_key
+  ON domain_catalog_release (tenant_id, environment, release_key);
 
 CREATE TABLE domain_knowledge_concept (
   id UUID PRIMARY KEY,

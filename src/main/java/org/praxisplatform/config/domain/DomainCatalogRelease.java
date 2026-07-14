@@ -27,7 +27,7 @@ public class DomainCatalogRelease {
   @Id
   private UUID id;
 
-  @Column(name = "release_key", nullable = false, unique = true, length = 255)
+  @Column(name = "release_key", nullable = false, length = 255)
   private String releaseKey;
 
   @Column(name = "schema_version", nullable = false, length = 64)

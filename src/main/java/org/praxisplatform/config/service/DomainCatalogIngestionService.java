@@ -189,9 +189,15 @@ public class DomainCatalogIngestionService {
         String releaseKey = releaseKey(payload);
         String sourceHash = text(payload.path("release"), "sourceHash");
         String resourceKey = text(payload, "resourceKey");
-        Optional<DomainCatalogRelease> existingRelease = releaseRepository.findByReleaseKey(releaseKey);
+        String resolvedTenantId = normalize(tenantId);
+        String resolvedEnvironment = normalize(environment);
+        String rawPayload = write(payload);
+        Optional<DomainCatalogRelease> existingRelease = releaseRepository.findByReleaseKeyAndScope(
+                releaseKey,
+                resolvedTenantId,
+                resolvedEnvironment);
         if (existingRelease
-                .filter(release -> sameCatalogRelease(release, schemaVersion, sourceHash, tenantId, environment))
+                .filter(release -> sameCatalogRelease(release, schemaVersion, sourceHash, rawPayload))
                 .isPresent()) {
             DomainCatalogRelease release = existingRelease.get();
             if (!StringUtils.hasText(release.getResourceKey()) && StringUtils.hasText(resourceKey)) {
@@ -212,8 +218,13 @@ public class DomainCatalogIngestionService {
             );
         }
 
-        DomainCatalogRelease release = existingRelease
-                .orElseGet(DomainCatalogRelease::new);
+        if (existingRelease.isPresent()) {
+            throw new ConfigurationIngestionException(
+                    "Domain catalog releaseKey already identifies different immutable content in the requested scope: "
+                            + releaseKey);
+        }
+
+        DomainCatalogRelease release = new DomainCatalogRelease();
         release.setReleaseKey(releaseKey);
         release.setSchemaVersion(schemaVersion);
         release.setServiceKey(text(payload.path("service"), "serviceKey"));
@@ -222,9 +233,9 @@ public class DomainCatalogIngestionService {
         release.setResourceKey(resourceKey);
         release.setGeneratedAt(parseInstant(text(payload.path("release"), "generatedAt")));
         release.setSourceHash(sourceHash);
-        release.setTenantId(normalize(tenantId));
-        release.setEnvironment(normalize(environment));
-        release.setRawPayload(write(payload));
+        release.setTenantId(resolvedTenantId);
+        release.setEnvironment(resolvedEnvironment);
+        release.setRawPayload(rawPayload);
         release = releaseRepository.save(release);
 
         itemRepository.deleteByRelease(release);
@@ -254,19 +265,19 @@ public class DomainCatalogIngestionService {
             DomainCatalogRelease release,
             String schemaVersion,
             String sourceHash,
-            String tenantId,
-            String environment) {
+            String rawPayload) {
         return release != null
-                && StringUtils.hasText(sourceHash)
                 && Objects.equals(release.getSchemaVersion(), schemaVersion)
-                && Objects.equals(release.getSourceHash(), sourceHash)
-                && Objects.equals(normalize(release.getTenantId()), normalize(tenantId))
-                && Objects.equals(normalize(release.getEnvironment()), normalize(environment));
+                && (StringUtils.hasText(sourceHash)
+                        ? Objects.equals(release.getSourceHash(), sourceHash)
+                        : sameJson(release.getRawPayload(), rawPayload));
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<DomainCatalogItemResponse> search(
             String releaseKey,
+            String tenantId,
+            String environment,
             String itemType,
             String contextKey,
             String nodeType,
@@ -275,9 +286,25 @@ public class DomainCatalogIngestionService {
         if (!StringUtils.hasText(releaseKey)) {
             throw new IllegalArgumentException("releaseKey is required");
         }
+        DomainCatalogRelease release = releaseRepository.findByReleaseKeyAndScope(
+                        releaseKey.trim(),
+                        normalize(tenantId),
+                        normalize(environment))
+                .orElseThrow(() -> new ConfigurationIngestionException(
+                        "Domain catalog release not found in the requested scope: " + releaseKey.trim()));
+        return search(release, itemType, contextKey, nodeType, query, limit);
+    }
+
+    private List<DomainCatalogItemResponse> search(
+            DomainCatalogRelease release,
+            String itemType,
+            String contextKey,
+            String nodeType,
+            String query,
+            int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
         return itemRepository.search(
-                        releaseKey,
+                        release,
                         normalize(itemType),
                         normalize(contextKey),
                         normalize(nodeType),
@@ -362,7 +389,13 @@ public class DomainCatalogIngestionService {
             if (remaining <= 0) {
                 break;
             }
-            responses.addAll(search(release.getReleaseKey(), itemType, contextKey, nodeType, query, remaining));
+            responses.addAll(search(
+                    release,
+                    itemType,
+                    contextKey,
+                    nodeType,
+                    query,
+                    remaining));
         }
         return responses.stream().limit(resolvedLimit).toList();
     }
@@ -399,7 +432,13 @@ public class DomainCatalogIngestionService {
             if (remaining <= 0) {
                 break;
             }
-            items.addAll(search(release.getReleaseKey(), itemType, contextKey, nodeType, query, remaining));
+            items.addAll(search(
+                    release,
+                    itemType,
+                    contextKey,
+                    nodeType,
+                    query,
+                    remaining));
         }
         boolean scopedSingleRelease = StringUtils.hasText(normalize(serviceKey)) && releases.size() == 1;
         return new DomainCatalogContextResponse(
@@ -445,7 +484,7 @@ public class DomainCatalogIngestionService {
                 break;
             }
             List<DomainCatalogItemResponse> releaseEdges = search(
-                    release.getReleaseKey(),
+                    release,
                     "edge",
                     null,
                     null,
@@ -1005,6 +1044,10 @@ public class DomainCatalogIngestionService {
         } catch (Exception ex) {
             throw new ConfigurationIngestionException("Failed to serialize domain catalog payload", ex);
         }
+    }
+
+    private boolean sameJson(String existingRawPayload, String candidateRawPayload) {
+        return Objects.equals(read(existingRawPayload), read(candidateRawPayload));
     }
 
     private JsonNode read(String raw) {

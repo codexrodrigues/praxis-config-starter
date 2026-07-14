@@ -21,7 +21,7 @@ public interface DomainCatalogItemRepository extends JpaRepository<DomainCatalog
 
     @Query("""
         select i from DomainCatalogItem i
-        where i.release.releaseKey = :releaseKey
+        where i.release = :release
           and (:itemType is null or :itemType = '' or i.itemType = :itemType)
           and (:contextKey is null or :contextKey = '' or i.contextKey = :contextKey)
           and (:nodeType is null or :nodeType = '' or i.nodeType = :nodeType)
@@ -29,7 +29,7 @@ public interface DomainCatalogItemRepository extends JpaRepository<DomainCatalog
         order by i.itemType asc, i.itemKey asc
     """)
     List<DomainCatalogItem> search(
-            @Param("releaseKey") String releaseKey,
+            @Param("release") DomainCatalogRelease release,
             @Param("itemType") String itemType,
             @Param("contextKey") String contextKey,
             @Param("nodeType") String nodeType,

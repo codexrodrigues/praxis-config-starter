@@ -44,12 +44,22 @@ public class DomainCatalogController {
     @GetMapping("/items")
     public ResponseEntity<List<DomainCatalogItemResponse>> items(
             @RequestParam String releaseKey,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment,
             @RequestParam(required = false) String type,
             @RequestParam(required = false) String contextKey,
             @RequestParam(required = false) String nodeType,
             @RequestParam(required = false) String q,
             @RequestParam(defaultValue = "50") int limit) {
-        return ResponseEntity.ok(domainCatalogIngestionService.search(releaseKey, type, contextKey, nodeType, q, limit));
+        return ResponseEntity.ok(domainCatalogIngestionService.search(
+                releaseKey,
+                tenantId,
+                environment,
+                type,
+                contextKey,
+                nodeType,
+                q,
+                limit));
     }
 
     @GetMapping("/items/latest")

@@ -148,7 +148,10 @@ public class DomainFederationIngestPersistenceService {
                         .technicalOwner(normalize(source.technicalOwner()))
                         .trustLevel(trim(source.trustLevel()))
                         .status(trim(source.status()))
-                        .latestRelease(resolveCatalogRelease(source.latestReleaseKey()))
+                        .latestRelease(resolveCatalogRelease(
+                                source.latestReleaseKey(),
+                                source.tenantId(),
+                                source.environment()))
                         .latestReleaseKey(normalize(source.latestReleaseKey()))
                         .evidence(writeOrDefault(source.evidence()))
                         .build())
@@ -239,11 +242,17 @@ public class DomainFederationIngestPersistenceService {
                 .toList();
     }
 
-    private DomainCatalogRelease resolveCatalogRelease(String releaseKey) {
+    private DomainCatalogRelease resolveCatalogRelease(
+            String releaseKey,
+            String tenantId,
+            String environment) {
         if (!StringUtils.hasText(releaseKey)) {
             return null;
         }
-        return catalogReleaseRepository.findByReleaseKey(releaseKey.trim()).orElse(null);
+        return catalogReleaseRepository.findByReleaseKeyAndScope(
+                releaseKey.trim(),
+                normalize(tenantId),
+                normalize(environment)).orElse(null);
     }
 
     private String releaseKey(DomainFederationValidationRequest request, String payloadHash, Instant createdAt) {
