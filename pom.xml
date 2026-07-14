@@ -47,7 +47,7 @@
         <spring-boot.repackage.skip>true</spring-boot.repackage.skip>
         <spring-ai.version>1.1.1</spring-ai.version>
         <lombok.version>1.18.30</lombok.version>
-        <praxis-rules-engine.version>0.1.0-beta.10</praxis-rules-engine.version>
+        <praxis-rules-engine.version>0.1.0-beta.11</praxis-rules-engine.version>
         <swagger-annotations.version>2.2.28</swagger-annotations.version>
     </properties>
 
