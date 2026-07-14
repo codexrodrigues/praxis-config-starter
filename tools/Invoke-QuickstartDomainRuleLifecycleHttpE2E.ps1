@@ -52,6 +52,27 @@ function Invoke-ExpectedFailure(
     throw "Expected request to fail with '$ExpectedMessage', but it succeeded: $Method $Uri"
 }
 
+function Set-DefinitionStatus(
+    [string] $BaseUrl,
+    [hashtable] $Headers,
+    [object] $Definition,
+    [string] $Status,
+    [string] $Check
+) {
+    return Invoke-JsonRequest `
+        -Method Patch `
+        -Uri "$BaseUrl/api/praxis/config/domain-rules/definitions/$($Definition.id)/status" `
+        -Headers $Headers `
+        -Body @{
+            status = $Status
+            decidedByType = "human"
+            decidedBy = "codex-http-smoke"
+            validationResult = @{
+                checks = @($Check)
+            }
+        }
+}
+
 function Assert-MaterializationOutcome(
     [object] $Publication,
     [string] $ExpectedResolution,
@@ -316,7 +337,7 @@ $resourceKey = "procurement.lifecycle-smoke-$unique"
 $definitionBody = @{
     ruleKey = $ruleKey
     ruleType = "selection_eligibility"
-    status = "approved"
+    status = "draft"
     contextKey = "procurement"
     resourceKey = $resourceKey
     serviceKey = "praxis-api-quickstart"
@@ -339,9 +360,16 @@ $definition = Invoke-JsonRequest `
     -Headers $headers `
     -Body $definitionBody
 
-if ($definition.status -ne "approved") {
-    throw "Expected created definition status=approved, got '$($definition.status)'."
+if ($definition.status -ne "draft") {
+    throw "Expected created definition status=draft, got '$($definition.status)'."
 }
+
+$definition = Set-DefinitionStatus `
+    -BaseUrl $base `
+    -Headers $headers `
+    -Definition $definition `
+    -Status "approved" `
+    -Check "http-lifecycle-review"
 
 $materializationBody = @{
     ruleDefinitionId = $definition.id
@@ -364,18 +392,12 @@ $appliedCreationBlocked = Invoke-ExpectedFailure `
     -Body $materializationBody `
     -ExpectedMessage "Rule materialization can only be applied when its definition is active"
 
-$definition = Invoke-JsonRequest `
-    -Method Patch `
-    -Uri "$base/api/praxis/config/domain-rules/definitions/$($definition.id)/status" `
+$definition = Set-DefinitionStatus `
+    -BaseUrl $base `
     -Headers $headers `
-    -Body @{
-        status = "active"
-        decidedByType = "human"
-        decidedBy = "codex-http-smoke"
-        validationResult = @{
-            checks = @("http-lifecycle-smoke")
-        }
-    }
+    -Definition $definition `
+    -Status "active" `
+    -Check "http-lifecycle-smoke"
 
 if ($definition.status -ne "active") {
     throw "Expected definition status=active, got '$($definition.status)'."
@@ -423,18 +445,18 @@ $activeDefinition = Invoke-JsonRequest `
     -Headers $headers `
     -Body $activeDefinitionBody
 
-$activeDefinition = Invoke-JsonRequest `
-    -Method Patch `
-    -Uri "$base/api/praxis/config/domain-rules/definitions/$($activeDefinition.id)/status" `
+$activeDefinition = Set-DefinitionStatus `
+    -BaseUrl $base `
     -Headers $headers `
-    -Body @{
-        status = "active"
-        decidedByType = "human"
-        decidedBy = "codex-http-smoke"
-        validationResult = @{
-            checks = @("http-lifecycle-smoke")
-        }
-    }
+    -Definition $activeDefinition `
+    -Status "approved" `
+    -Check "http-lifecycle-review"
+$activeDefinition = Set-DefinitionStatus `
+    -BaseUrl $base `
+    -Headers $headers `
+    -Definition $activeDefinition `
+    -Status "active" `
+    -Check "http-lifecycle-smoke"
 
 if ($activeDefinition.status -ne "active") {
     throw "Expected active definition status=active, got '$($activeDefinition.status)'."
@@ -612,7 +634,7 @@ $inactiveDefinition = Invoke-JsonRequest `
     -Body @{
         ruleKey = $inactiveRuleKey
         ruleType = "selection_eligibility"
-        status = "approved"
+        status = "draft"
         contextKey = "procurement"
         resourceKey = "procurement.semantic-hash-inactive-$unique"
         serviceKey = "praxis-api-quickstart"
@@ -642,7 +664,7 @@ $suspendedDefinition = Invoke-JsonRequest `
     -Body @{
         ruleKey = $suspendedRuleKey
         ruleType = "selection_eligibility"
-        status = "approved"
+        status = "draft"
         contextKey = "procurement"
         resourceKey = "procurement.semantic-hash-suspended-$unique"
         serviceKey = "praxis-api-quickstart"
@@ -664,6 +686,19 @@ $suspendedDefinition = Invoke-JsonRequest `
         createdByType = "llm"
         createdBy = "codex-http-smoke"
     }
+
+$inactiveDefinition = Set-DefinitionStatus `
+    -BaseUrl $base `
+    -Headers $headers `
+    -Definition $inactiveDefinition `
+    -Status "approved" `
+    -Check "http-lifecycle-semantic-hash-review"
+$suspendedDefinition = Set-DefinitionStatus `
+    -BaseUrl $base `
+    -Headers $headers `
+    -Definition $suspendedDefinition `
+    -Status "approved" `
+    -Check "http-lifecycle-semantic-hash-review"
 
 $inactivePublication = Invoke-JsonRequest `
     -Method Post `
