@@ -12,6 +12,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.dto.DomainCatalogReleaseResponse;
+import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
 
 @ExtendWith(MockitoExtension.class)
@@ -48,5 +49,40 @@ class DomainCatalogControllerTest {
                 "tenant-a",
                 "dev",
                 5);
+    }
+
+    @Test
+    void itemsForwardsTenantAndEnvironmentScope() {
+        List<DomainCatalogItemResponse> items = List.of();
+        when(domainCatalogIngestionService.search(
+                "release-a",
+                "tenant-a",
+                "dev",
+                "node",
+                "human-resources",
+                "field",
+                "salario",
+                10)).thenReturn(items);
+
+        var response = controller.items(
+                "release-a",
+                "tenant-a",
+                "dev",
+                "node",
+                "human-resources",
+                "field",
+                "salario",
+                10);
+
+        assertThat(response.getBody()).isSameAs(items);
+        verify(domainCatalogIngestionService).search(
+                "release-a",
+                "tenant-a",
+                "dev",
+                "node",
+                "human-resources",
+                "field",
+                "salario",
+                10);
     }
 }

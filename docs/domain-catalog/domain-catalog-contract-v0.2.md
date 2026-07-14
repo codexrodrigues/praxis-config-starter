@@ -54,6 +54,13 @@ tenant, environment and `sourceHash` as already ingested. In that case,
 `/api/praxis/config/domain-catalog/ingest` returns the existing release and item
 count without deleting/reinserting items or republishing RAG documents.
 
+`releaseKey` is content identity inside one exact tenant/environment scope, not
+a globally unique database key. Identical catalog content may therefore be
+ingested independently by multiple tenants or environments. A repeated
+`releaseKey` with different immutable content in the same scope is rejected as
+a conflict instead of replacing the persisted release. Reads by `releaseKey`
+must carry the same `X-Tenant-ID` and `X-Env` scope used for ingestion.
+
 RAG publication is a derived materialization, not the source of truth for the
 catalog. By default the starter schedules RAG publication after the catalog
 transaction commits (`praxis.domain-catalog.rag-publication.async-enabled=true`)
