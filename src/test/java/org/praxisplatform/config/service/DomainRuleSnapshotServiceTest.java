@@ -17,6 +17,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
 import org.praxisplatform.config.domain.DomainRuleSnapshot;
 import org.praxisplatform.config.domain.DomainRuleSnapshotHead;
@@ -98,6 +99,48 @@ class DomainRuleSnapshotServiceTest {
     assertThat(response.headEtag()).isNotEqualTo(response.snapshotContentHash());
     verify(snapshotRepository).save(any(DomainRuleSnapshot.class));
     verify(eventRepository).save(argThat(argThatEvent("PUBLISHED", 1L)));
+  }
+
+  @Test
+  void publishedJavaExecutorSurvivesPersistenceRoundTrip() {
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.empty());
+    when(snapshotRepository.findByTenantIdAndEnvironmentAndRuleSetKeyOrderByPublicationRevisionDesc(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(List.of());
+    when(definitionRepository.findAllById(List.of(firstId, secondId))).thenReturn(List.of(
+        approvedDefinition(firstId, "grant:eligibility", "approver-a"),
+        approvedDefinition(secondId, "grant:amount", "approver-b")));
+
+    service.publish(
+        new DomainRuleSnapshotPublicationRequest(
+            javaRuleSet(),
+            List.of(firstId, secondId),
+            "quickstart",
+            "quickstart/1.0",
+            "2026-07-13T20:00:00Z",
+            null,
+            "release-manager"),
+        "tenant-a",
+        "prod",
+        null,
+        "*");
+
+    ArgumentCaptor<DomainRuleSnapshot> snapshotCaptor = ArgumentCaptor.forClass(DomainRuleSnapshot.class);
+    ArgumentCaptor<DomainRuleSnapshotHead> headCaptor = ArgumentCaptor.forClass(DomainRuleSnapshotHead.class);
+    verify(snapshotRepository).save(snapshotCaptor.capture());
+    verify(headRepository).saveAndFlush(headCaptor.capture());
+    DomainRuleSnapshot stored = snapshotCaptor.getValue();
+    DomainRuleSnapshotHead head = headCaptor.getValue();
+    when(headRepository.findByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(head));
+    when(snapshotRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
+
+    var active = service.findActive("tenant-a", "prod", "extraordinary-grant").orElseThrow();
+
+    assertThat(stored.getSnapshotPayload()).contains("\"expression\":null");
+    assertThat(active.snapshot().ruleSet().bindings().getFirst().executor().expression()).isNull();
   }
 
   @Test
@@ -236,6 +279,21 @@ class DomainRuleSnapshotServiceTest {
             "eligibility", "eligibility", DecisionSource.PRODUCT, null,
             RuleExecutorRef.jsonLogic(expression), List.of(), 10, true,
             RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"))),
+        RuleRuntimeCompatibility.current(),
+        RuleFailPolicy.FAIL_CLOSED);
+  }
+
+  private RuleSetDefinition javaRuleSet() {
+    return new RuleSetDefinition(
+        new RuleSetRef("benefits", "extraordinary-grants", "extraordinary-grant", "evaluate", 1),
+        List.of("request"),
+        List.of(new DecisionSlot(
+            "calculation", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
+            OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT)),
+        List.of(new DecisionBinding(
+            "calculation", "calculation", DecisionSource.PRODUCT, null,
+            RuleExecutorRef.java("benefits:amount", "1.0.0"), List.of(), 10, true,
+            null, null, List.of("request.amount"))),
         RuleRuntimeCompatibility.current(),
         RuleFailPolicy.FAIL_CLOSED);
   }
