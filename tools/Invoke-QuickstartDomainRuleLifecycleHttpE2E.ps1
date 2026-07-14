@@ -57,7 +57,8 @@ function Set-DefinitionStatus(
     [hashtable] $Headers,
     [object] $Definition,
     [string] $Status,
-    [string] $Check
+    [string] $Check,
+    [string] $Actor = "procurement-owner"
 ) {
     return Invoke-JsonRequest `
         -Method Patch `
@@ -66,7 +67,7 @@ function Set-DefinitionStatus(
         -Body @{
             status = $Status
             decidedByType = "human"
-            decidedBy = "codex-http-smoke"
+            decidedBy = $Actor
             validationResult = @{
                 checks = @($Check)
             }
@@ -410,7 +411,7 @@ $definition = Invoke-JsonRequest `
     -Body @{
         status = "retired"
         decidedByType = "human"
-        decidedBy = "codex-http-smoke"
+        decidedBy = "procurement-owner"
         validationResult = @{
             checks = @("http-lifecycle-terminal-definition")
         }
@@ -427,7 +428,7 @@ $terminalDefinitionTransitionBlocked = Invoke-ExpectedFailure `
     -Body @{
         status = "active"
         decidedByType = "human"
-        decidedBy = "codex-http-smoke"
+        decidedBy = "procurement-owner"
         validationResult = @{
             checks = @("http-lifecycle-terminal-definition")
         }
@@ -493,7 +494,7 @@ $manualSelectedExistingPublication = Invoke-JsonRequest `
         ruleDefinitionId = $activeDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "codex-http-smoke"
+        publishedBy = "procurement-owner"
         publicationNotes = @{
             smoke = "domain-rule-selected-existing-diagnostics"
         }
@@ -539,7 +540,7 @@ $terminalMaterializationTransitionBlocked = Invoke-ExpectedFailure `
     -Body @{
         status = "applied"
         decidedByType = "human"
-        decidedBy = "codex-http-smoke"
+        decidedBy = "procurement-owner"
         validationResult = @{
             checks = @("http-lifecycle-terminal-materialization")
         }
@@ -555,7 +556,7 @@ $terminalPublishBlocked = Invoke-ExpectedFailure `
         materializationIds = @($failedMaterialization.id)
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "codex-http-smoke"
+        publishedBy = "procurement-owner"
         publicationNotes = @{
             smoke = "domain-rule-lifecycle"
         }
@@ -580,6 +581,7 @@ $reviewRequiredDefinition = Invoke-JsonRequest `
         parameters = @{}
         governance = @{
             ruleAuthoring = "review_required"
+            requiredApprovals = @("procurement-owner")
         }
         createdByType = "llm"
         createdBy = "codex-http-smoke"
@@ -593,7 +595,7 @@ $blockedPublication = Invoke-JsonRequest `
         ruleDefinitionId = $reviewRequiredDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "codex-http-smoke"
+        publishedBy = "procurement-owner"
         publicationNotes = @{
             smoke = "domain-rule-blocked-diagnostics"
         }
@@ -652,7 +654,9 @@ $inactiveDefinition = Invoke-JsonRequest `
                 @("INACTIVE", "BLOCKED")
             )
         }
-        governance = @{}
+        governance = @{
+            requiredApprovals = @("procurement-owner")
+        }
         createdByType = "llm"
         createdBy = "codex-http-smoke"
     }
@@ -682,7 +686,9 @@ $suspendedDefinition = Invoke-JsonRequest `
                 @("SUSPENDED")
             )
         }
-        governance = @{}
+        governance = @{
+            requiredApprovals = @("procurement-owner")
+        }
         createdByType = "llm"
         createdBy = "codex-http-smoke"
     }
@@ -708,7 +714,7 @@ $inactivePublication = Invoke-JsonRequest `
         ruleDefinitionId = $inactiveDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "codex-http-smoke"
+        publishedBy = "procurement-owner"
         publicationNotes = @{
             smoke = "domain-rule-semantic-source-hash"
         }
@@ -722,7 +728,7 @@ $suspendedPublication = Invoke-JsonRequest `
         ruleDefinitionId = $suspendedDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "codex-http-smoke"
+        publishedBy = "procurement-owner"
         publicationNotes = @{
             smoke = "domain-rule-semantic-source-hash"
         }
@@ -786,7 +792,7 @@ $inactiveRepublish = Invoke-JsonRequest `
         ruleDefinitionId = $inactiveDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "codex-http-smoke"
+        publishedBy = "procurement-owner"
         publicationNotes = @{
             smoke = "domain-rule-publication-diagnostics"
         }
