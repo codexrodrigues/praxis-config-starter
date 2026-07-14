@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       create_tag:
-        description: 'Create and push git tag from main (recommended).'
+        description: 'Create and push git tag from main. Must remain enabled for publication.'
         required: false
         default: true
         type: boolean
@@ -34,7 +34,7 @@ on:
         type: string
 
 concurrency:
-  group: ${{ startsWith(github.ref, 'refs/tags/v') && format('release-{0}', github.ref_name) || format('ci-{0}', github.ref) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('release-manual-{0}', github.run_id) || startsWith(github.ref, 'refs/tags/v') && format('release-{0}', github.ref_name) || format('ci-{0}', github.ref) }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
@@ -68,11 +68,28 @@ jobs:
       resolved_version: ${{ steps.compute_version.outputs.resolved_version }}
       resolved_tag: ${{ steps.compute_version.outputs.resolved_tag }}
     steps:
+      - name: Require release automation token
+        env:
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+        shell: bash
+        run: |
+          if [[ -z "${RELEASE_PAT:-}" ]]; then
+            echo "::error::RELEASE_PAT is required so the pushed tag triggers the publication workflow."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_PAT || github.token }}
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
 
       - name: Ensure main/master branch
         shell: bash
@@ -208,27 +225,41 @@ jobs:
             echo "- Tag: \`$TAG\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Create and push tag
+      - name: Commit release version and push tag atomically
         shell: bash
         run: |
           set -euo pipefail
+          VERSION="${{ steps.compute_version.outputs.resolved_version }}"
           TAG="${{ steps.compute_version.outputs.resolved_tag }}"
 
           git fetch --tags --force
           if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "::notice::Tag '$TAG' already exists. Nothing to push."
-            exit 0
+            echo "::error::Tag '$TAG' already exists. Release tags are immutable; choose another version."
+            exit 1
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          mvn -q versions:set -DnewVersion="$VERSION" -DgenerateBackupPoms=false
+          POM_VERSION="$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout)"
+          if [[ "$POM_VERSION" != "$VERSION" ]]; then
+            echo "::error::pom.xml version '$POM_VERSION' does not match release version '$VERSION'."
+            exit 1
+          fi
+
+          git add pom.xml
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: release $TAG"
+          fi
+
           git tag -a "$TAG" -m "Release $TAG"
-          git push origin "$TAG"
-          echo "Created and pushed tag '$TAG'."
+          git push --atomic origin "HEAD:${GITHUB_REF_NAME}" "$TAG"
+          echo "Persisted version '$VERSION' on '${GITHUB_REF_NAME}' and pushed tag '$TAG' atomically."
 
   release:
     name: Publish to Maven Central
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.create_tag == false)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -296,17 +327,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            V="${{ inputs.version }}"
-            V="${V#v}"
-            if [[ -z "${V:-}" ]]; then
-              echo "::error::Manual publish requires the version input when create_tag=false."
-              exit 1
-            fi
-          else
-            TAG="${GITHUB_REF_NAME}"
-            V="${TAG#v}"
-          fi
+          TAG="${GITHUB_REF_NAME}"
+          V="${TAG#v}"
           if [[ ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Invalid release version '$V'. Expected semver, e.g. 1.2.3 or 1.2.3-rc.1"
             exit 1
@@ -314,8 +336,16 @@ jobs:
           echo "resolved=${V}" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $V"
 
-      - name: Set module version
-        run: mvn -q versions:set -DnewVersion=${{ steps.ver.outputs.resolved }} -DgenerateBackupPoms=false
+      - name: Verify tagged module version
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${{ steps.ver.outputs.resolved }}"
+          POM_VERSION="$(mvn -q help:evaluate -Dexpression=project.version -DforceStdout)"
+          if [[ "$POM_VERSION" != "$TAG_VERSION" ]]; then
+            echo "::error::Tagged pom.xml version '$POM_VERSION' does not match tag version '$TAG_VERSION'."
+            exit 1
+          fi
 
       - name: Build and sign without tests (verify)
         run: |
