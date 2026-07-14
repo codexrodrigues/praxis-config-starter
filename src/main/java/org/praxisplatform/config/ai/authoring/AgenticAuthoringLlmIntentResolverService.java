@@ -584,6 +584,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Set requiresGovernedAuthoring=true for reusable governed business decisions, policies, compliance/access/eligibility/approval/privacy/enforcement rules, backend validations, option-source eligibility, approval gates, or shared rules that must go through shared-rule authoring.
                 When requiresGovernedAuthoring=true, do not classify the turn as a materializable dashboard, chart, table, form or page preview. Use operationKind "create" or "modify", artifactKind "unknown", changeKind "route_shared_rule_authoring", and leave visualizationDecision null.
                 Keep requiresGovernedAuthoring=false only for local visual formatting, masks, badges, labels, component configuration, layout, filters, columns, and consultative catalog questions.
+                Contrast the semantic scope before choosing an artifact:
+                - "Create a rule so blocked suppliers cannot be selected in purchases" is a reusable business constraint: requiresGovernedAuthoring=true, artifactKind "unknown", changeKind "route_shared_rule_authoring".
+                - "Show a blocked-supplier badge in this local table" is local presentation: requiresGovernedAuthoring=false and may materialize a table edit.
+                - "Which governed supplier data can I use in a dashboard?" is a consultative catalog question: requiresGovernedAuthoring=false, operationKind "explore", artifactKind "api_catalog".
+                Never reinterpret a requested business rule as a dashboard or page merely because the selected resource exposes fields that could be visualized.
                 If the requested source/component cannot be resolved with this compact evidence, set resolved=false and leave visualizationDecision null.
                 Keep assistantMessage short and natural in the user's language.
                 Always include quickReplies, clarificationQuestions, warnings, visualizationDecision and consultativeRetrievalPlan fields.
