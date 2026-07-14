@@ -50,6 +50,26 @@ class CiSmokeUnitConventionTest {
     }
 
     @Test
+    void shouldPersistReleaseVersionBeforeCreatingAnImmutableTag() throws IOException {
+        String workflow = Files.readString(resolveRepoFile(".github/workflows/release.yml"));
+
+        assertThat(workflow)
+                .contains("token: ${{ secrets.RELEASE_PAT }}")
+                .contains("mvn -q versions:set -DnewVersion=\"$VERSION\" -DgenerateBackupPoms=false")
+                .contains("git commit -m \"chore: release $TAG\"")
+                .contains("git tag -a \"$TAG\" -m \"Release $TAG\"")
+                .contains("git push --atomic origin \"HEAD:${GITHUB_REF_NAME}\" \"$TAG\"")
+                .contains("format('release-manual-{0}', github.run_id)")
+                .contains("if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')")
+                .contains("Tagged pom.xml version '$POM_VERSION' does not match tag version '$TAG_VERSION'.");
+        assertThat(workflow)
+                .doesNotContain("secrets.RELEASE_PAT || github.token")
+                .doesNotContain("Tag '$TAG' already exists. Nothing to push.")
+                .doesNotContain("github.event_name == 'workflow_dispatch' && inputs.create_tag == false")
+                .doesNotContain("Manual publish requires the version input when create_tag=false.");
+    }
+
+    @Test
     void shouldRequireClassificationTagForEveryJUnitTestClass() throws IOException {
         Path testsRoot = resolveRepoFile("src/test/java");
         Map<String, String> missingTags = new LinkedHashMap<>();

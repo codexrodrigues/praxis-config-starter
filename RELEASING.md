@@ -27,7 +27,7 @@ para o contrato canônico de snapshots do `praxis-rules-engine`.
 - `GPG_PRIVATE_KEY`
 - `GPG_PASSPHRASE`
 - `GPG_KEY_ID` (opcional)
-- `RELEASE_PAT` (opcional, recomendado quando `GITHUB_TOKEN` nao consegue criar/push de tags por regras de branch/protecao)
+- `RELEASE_PAT` (obrigatorio para o fluxo `create_tag=true`, com `contents:write`; pushes feitos com `GITHUB_TOKEN` nao disparam o workflow de publicacao por tag)
 - `PRAXIS_AI_OPENAI_API_KEY` (necessario para o gate manual `Agentic Authoring HTTP Smoke` com `provider=openai`)
 - `PRAXIS_AI_GEMINI_API_KEY` (necessario apenas quando o gate manual for executado com `provider=gemini`)
 
@@ -113,9 +113,14 @@ mvn -B verify
    - `bump` (`patch`, `minor`, `major`, `prerelease`) e `preid` (ex.: `rc`).
 5) Executar.
 
+`create_tag=false` nao publica artefatos. Publicacao sem tag e deliberadamente
+rejeitada para preservar rastreabilidade e reprodutibilidade.
+
 Resultado:
-- A workflow cria/push da tag `vX.Y.Z` (ou `vX.Y.Z-rc.N`).
+- A workflow atualiza o `pom.xml`, cria um commit `chore: release vX.Y.Z` e envia o commit e a tag de forma atomica.
+- A tag `vX.Y.Z` (ou `vX.Y.Z-rc.N`) aponta para uma arvore cujo `project.version` corresponde exatamente a versao publicada.
 - O push da tag dispara automaticamente o job de release/publicacao no Maven Central.
+- O job de publicacao confere que a versao declarada no `pom.xml` da tag e exatamente a versao da tag; divergencias falham antes de assinatura ou upload.
 
 ## Exemplos praticos
 - Proximo patch estavel:
@@ -136,7 +141,8 @@ mvn -B -P ci-smoke-unit -T 1C clean verify
 
 ## Troubleshooting
 - Falha para criar tag:
-  - Configure `RELEASE_PAT` com permissao de `contents:write`.
+  - Configure `RELEASE_PAT` com permissao de `contents:write`; o workflow nao usa `GITHUB_TOKEN` como fallback porque esse token nao encadeia o workflow acionado pelo push da tag.
+  - Confirme que a protecao de `main` permite ao titular do token persistir o commit de versao.
 - Falha em assinatura GPG:
   - Validar `GPG_PRIVATE_KEY` sem CRLF/BOM e `GPG_PASSPHRASE`.
 - Falha na publicacao:

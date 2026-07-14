@@ -78,7 +78,7 @@ Release e Gate de Authoring
 - Secrets do gate:
   - `PRAXIS_AI_OPENAI_API_KEY` para `provider=openai`;
   - `PRAXIS_AI_GEMINI_API_KEY` para `provider=gemini`;
-  - `RELEASE_PAT` quando o checkout do quickstart precisar de permissao adicional.
+- `RELEASE_PAT` para releases com `create_tag=true` e quando o checkout do quickstart precisar de permissao adicional. O token de release deve permitir `contents:write`, pois pushes feitos com `GITHUB_TOKEN` nao disparam o workflow subsequente de publicacao por tag.
 - Se o gate falhar em GitHub Actions, trate a causa real do log antes de publicar. Nao contorne o gate com publicacao manual.
 
 Comandos de Validacao Local
