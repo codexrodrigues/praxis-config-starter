@@ -10,6 +10,9 @@ RELEASE_GATE="${RELEASE_GATE:-false}"
 CASE_IDS="${CASE_IDS:-}"
 BASE_URL="${BASE_URL:-http://localhost:8088}"
 ORIGIN="${ORIGIN:-http://localhost:4003}"
+TENANT_ID="${TENANT_ID:-agentic-authoring-local-pre-intent}"
+USER_ID="${USER_ID:-codex-local}"
+ENVIRONMENT="${ENVIRONMENT:-local}"
 PROVIDER="${PROVIDER:-openai}"
 if [[ -z "${MODEL:-}" ]]; then
   if [[ "$PROVIDER" == "gemini" ]]; then
@@ -158,6 +161,9 @@ if [[ "$REUSE_EXISTING_ARTIFACTS" != "true" ]]; then
       ARTIFACTS_DIR="$case_dir" \
       BASE_URL="$BASE_URL" \
       ORIGIN="$ORIGIN" \
+      TENANT_ID="$TENANT_ID" \
+      USER_ID="$USER_ID" \
+      ENVIRONMENT="$ENVIRONMENT" \
       PROVIDER="$PROVIDER" \
       MODEL="$MODEL" \
       STREAM_TIMEOUT_SECONDS="$STREAM_TIMEOUT_SECONDS" \
@@ -165,6 +171,23 @@ if [[ "$REUSE_EXISTING_ARTIFACTS" != "true" ]]; then
     runner_exit="${PIPESTATUS[0]}"
     set -e
     printf '%s\n' "$runner_exit" > "$case_dir/runner-exit-code.txt"
+
+    persistence_apply="$(jq -r '.expected.persistence.apply // empty' "$case_dir/case.json")"
+    if [[ "$runner_exit" = "0" && "$persistence_apply" = "required" ]]; then
+      echo "--- transactional apply/readback/replay/cleanup proof ---"
+      set +e
+      ARTIFACTS_DIR="$case_dir" \
+        BASE_URL="$BASE_URL" \
+        ORIGIN="$ORIGIN" \
+        TENANT_ID="$TENANT_ID" \
+        USER_ID="$USER_ID" \
+        ENVIRONMENT="$ENVIRONMENT" \
+        "$SCRIPT_DIR/run-assistant-consistency-transaction-local.sh" \
+        2>&1 | tee "$case_dir/transaction.log"
+      transaction_exit="${PIPESTATUS[0]}"
+      set -e
+      printf '%s\n' "$transaction_exit" > "$case_dir/transaction-exit-code.txt"
+    fi
   done < <(jq -r '.runs[].directory' "$ARTIFACTS_DIR/execution-plan.json")
 else
   echo "Reusing existing artifacts; backend and provider calls were skipped."
@@ -242,11 +265,48 @@ for run in plan["runs"]:
     case_dir = base / run["directory"]
     case = json.loads((case_dir / "case.json").read_text(encoding="utf-8"))
     expected = case["expected"]
+    persistence_expected = expected.get("persistence")
     failures = []
     runner_exit_path = case_dir / "runner-exit-code.txt"
     runner_exit = int(runner_exit_path.read_text().strip()) if runner_exit_path.exists() else None
     if runner_exit not in (0, None):
         failures.append(f"single-turn runner exited with {runner_exit}")
+
+    transaction = None
+    if isinstance(persistence_expected, dict):
+        transaction_exit_path = case_dir / "transaction-exit-code.txt"
+        transaction_exit = (
+            int(transaction_exit_path.read_text().strip())
+            if transaction_exit_path.exists()
+            else None
+        )
+        transaction_summary_path = case_dir / "transaction-summary.json"
+        if transaction_exit != 0:
+            failures.append(f"transactional proof exited with {transaction_exit!r}")
+        if transaction_summary_path.exists():
+            transaction = json.loads(transaction_summary_path.read_text(encoding="utf-8"))
+            transaction_checks = {
+                "applied": True,
+                "exactReadback": True,
+                "conditionalReplayApplied": True,
+                "replayStateExact": True,
+                "widgetCountStable": True,
+                "staleRetryBlocked": True,
+                "cleanupDeleted": True,
+            }
+            for field, expected_value in transaction_checks.items():
+                if transaction.get(field) is not expected_value:
+                    failures.append(
+                        f"transaction {field} {transaction.get(field)!r} expected {expected_value!r}"
+                    )
+            initial_version = transaction.get("initialVersion")
+            replay_version = transaction.get("replayVersion")
+            if not isinstance(initial_version, int) or replay_version != initial_version + 1:
+                failures.append(
+                    f"transaction versions {initial_version!r}->{replay_version!r} do not prove conditional replay"
+                )
+        else:
+            failures.append("transaction summary absent")
 
     events_path = case_dir / "turn.events.jsonl"
     events = []
@@ -256,13 +316,23 @@ for run in plan["runs"]:
                 events.append(json.loads(line))
     if not events:
         failures.append("no SSE events captured")
-        rows.append({**run, "passed": False, "failures": failures})
+        rows.append({
+            **run,
+            "persistenceExpected": isinstance(persistence_expected, dict),
+            "passed": False,
+            "failures": failures,
+        })
         continue
 
     terminal = next((event for event in events if event.get("type") in {"result", "error", "cancelled"}), None)
     if terminal is None:
         failures.append("no terminal event")
-        rows.append({**run, "passed": False, "failures": failures})
+        rows.append({
+            **run,
+            "persistenceExpected": isinstance(persistence_expected, dict),
+            "passed": False,
+            "failures": failures,
+        })
         continue
 
     terminal_payload = event_payload(terminal)
@@ -363,6 +433,7 @@ for run in plan["runs"]:
 
     rows.append({
         **run,
+        "persistenceExpected": isinstance(persistence_expected, dict),
         "locale": case["locale"],
         "userPrompt": case["userPrompt"],
         "passed": not failures,
@@ -379,6 +450,7 @@ for run in plan["runs"]:
             "quickReplyCount": len(quick_replies),
             "assistantMessage": message,
             "groundedResourcePaths": grounded_paths,
+            "persistence": transaction,
         },
         "timingSeconds": {
             "firstFeedback": first_feedback_seconds,
@@ -401,6 +473,15 @@ extended_accuracy = (
 )
 durations = [row.get("timingSeconds", {}).get("terminal") for row in rows]
 durations = [value for value in durations if isinstance(value, (int, float))]
+transaction_rows = [
+    row for row in rows
+    if row.get("persistenceExpected") is True
+]
+transaction_passed = sum(
+    1 for row in transaction_rows
+    if isinstance(row.get("actual", {}).get("persistence"), dict)
+    and not any(failure.startswith("transaction") for failure in row["failures"])
+)
 
 gate_failures = []
 if must_pass_accuracy < 1.0:
@@ -427,6 +508,8 @@ report = {
         "mustPassAccuracy": must_pass_accuracy,
         "extendedAccuracy": extended_accuracy,
         "medianTerminalSeconds": statistics.median(durations) if durations else None,
+        "transactionRunCount": len(transaction_rows),
+        "transactionPassed": transaction_passed,
         "gatePassed": not gate_failures,
         "gateFailures": gate_failures,
     },
@@ -444,16 +527,26 @@ lines = [
     f"- Must-pass accuracy: `{must_pass_accuracy:.1%}`",
     f"- Gate: `{'PASS' if not gate_failures else 'FAIL'}`",
     "",
-    "| Run | Case | Family | Result | Terminal | Seconds |",
-    "| --- | --- | --- | --- | --- | ---: |",
+    "| Run | Case | Family | Result | Terminal | Transaction | Seconds |",
+    "| --- | --- | --- | --- | --- | --- | ---: |",
 ]
 for row in rows:
     timing = row.get("timingSeconds", {}).get("terminal")
     timing_text = "" if timing is None else f"{timing:.3f}"
     actual = row.get("actual", {})
+    if row.get("persistenceExpected") is True:
+        transaction_text = (
+            "PASS"
+            if isinstance(actual.get("persistence"), dict)
+            and not any(failure.startswith("transaction") for failure in row["failures"])
+            else "FAIL"
+        )
+    else:
+        transaction_text = "—"
     lines.append(
         f"| {row['repetition']} | {row['caseId']} | {row['family']} | "
-        f"{'PASS' if row['passed'] else 'FAIL'} | {actual.get('terminalType', '')} | {timing_text} |"
+        f"{'PASS' if row['passed'] else 'FAIL'} | {actual.get('terminalType', '')} | "
+        f"{transaction_text} | {timing_text} |"
     )
 if gate_failures:
     lines.extend(["", "## Gate failures", ""] + [f"- {failure}" for failure in gate_failures])

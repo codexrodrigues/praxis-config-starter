@@ -65,7 +65,8 @@
         "intent": { "$ref": "#/$defs/intent" },
         "terminal": { "$ref": "#/$defs/terminal" },
         "assistantMessage": { "$ref": "#/$defs/assistantMessage" },
-        "safety": { "$ref": "#/$defs/safety" }
+        "safety": { "$ref": "#/$defs/safety" },
+        "persistence": { "$ref": "#/$defs/persistence" }
       }
     },
     "intent": {
@@ -103,6 +104,18 @@
         "preview": { "enum": ["required", "forbidden", "optional"] },
         "minimumQuickReplies": { "type": "integer", "minimum": 0 },
         "forbiddenPhases": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apply", "readback", "conditionalReplay", "staleRetry", "cleanup"],
+      "properties": {
+        "apply": { "const": "required" },
+        "readback": { "const": "exact-page" },
+        "conditionalReplay": { "const": "same-state" },
+        "staleRetry": { "const": "precondition-failed" },
+        "cleanup": { "const": "required" }
       }
     },
     "assistantMessage": {

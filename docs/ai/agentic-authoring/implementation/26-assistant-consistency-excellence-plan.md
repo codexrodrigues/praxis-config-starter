@@ -67,6 +67,24 @@ discovery de recurso sem criar um contrato paralelo:
 - o corpus interno passou a aceitar `expected.intent.submitUrls`, porque
   recurso correto com operacao incorreta e um falso positivo, nao sucesso.
 
+O terceiro slice P0 fechou a prova transacional da vertical de formulario sem
+criar endpoint, DTO ou persistencia paralela:
+
+- o mesmo resultado terminal do turno alimenta
+  `POST /api/praxis/config/ai/authoring/page-apply` com a decisao semantica e a
+  materializacao compilada que passaram no preview;
+- o gate exige readback exato pela fronteira canonica
+  `/api/praxis/config/ui`, incluindo payload, quantidade de widgets, versao e
+  `ETag`;
+- um replay condicional com o `ETag` corrente deve preservar exatamente o
+  estado materializado e a quantidade de widgets, avancando a versao e girando
+  o `ETag`;
+- uma nova tentativa com o `ETag` anterior deve falhar com `412` sem mudar o
+  estado;
+- o cleanup usa o ultimo `ETag`, exige `204` e confirma `404` no readback final;
+- essa propriedade e convergencia de estado sob replay condicional, nao
+  idempotencia da operacao HTTP: o replay valido incrementa a versao.
+
 Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
 
 - `platform-what-can-i-do-pt`: 3/3 execucoes consecutivas corretas, sem preview,
@@ -85,6 +103,13 @@ Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
   e tabela usaram `/filter/cursor` para consulta;
 - o gate da vertical aplicou o limite de 45 s e passou com mediana terminal de
   28,444 s; formularios ficaram entre 35,0 s e 36,388 s.
+- depois da extensao transacional, a jornada de formulario passou novamente
+  3/3 no gate de release com OpenAI e Neon reais: recurso e submit exatos em
+  `/api/human-resources/funcionarios`, versao `1 -> 2`, um widget antes e depois
+  do replay, tres rejeicoes de `ETag` obsoleto e tres cleanups confirmados;
+- a mediana terminal dessa certificacao foi 35,804 s, com primeira mensagem de
+  progresso imediata e todas as execucoes abaixo do limite de authoring de 45 s;
+  a etapa transacional levou de 2 s a 3 s por repeticao.
 
 O baseline funcional da orientacao melhorou, mas seu SLO de latencia ainda nao:
 a mediana observada nas tres execucoes da pergunta basica foi aproximadamente
@@ -98,6 +123,9 @@ ainda deve ser otimizada antes de usar P95 de 12 s como gate global.
 - Classificacao do plano: `arquitetural`.
 - Classificacao do segundo slice: `transversal`, com comportamento interno de
   AI authoring e prova operacional; nenhum endpoint, DTO ou tipo publico novo.
+- Classificacao do terceiro slice: `transversal`, restrito ao contrato interno
+  de avaliacao e ao runner operacional; reutiliza apply, configuracao, ETag e
+  delete publicos sem alterar suas superficies.
 - Fonte canonica de orchestration e configuracao: `praxis-config-starter`.
 - Runtime e UX canonicos: `@praxisui/ai` em `praxis-ui-angular`.
 - Primeiros consumidores: Page Builder, Table e Dynamic Form.
@@ -119,7 +147,7 @@ um bot especial para o Page Builder.
 | --- | --- | --- | --- |
 | Responder "o que posso fazer aqui?" | `ja-suportado-mal-nomeado-ou-mal-materializado` | O prompt canonico classifica orientacao de plataforma, o context bundle publica `platformGuide`, componentes authoraveis e capabilities | Tornar a projecao obrigatoria em todo host e certificar a resposta ponta a ponta |
 | Sugerir o proximo passo | `ja-suportado-so-ux` | `@praxisui/ai` possui `PraxisAssistantOpportunityCatalog`, `PraxisAssistantRecommendedIntent` e empty state; Table ja deriva recomendacoes | Derivar recomendacoes do contexto canonico em todos os hosts, sem listas locais concorrentes |
-| Criar formulario/tela de funcionarios | `suportado-parcialmente` | A vertical de preview passou 9/9 com recurso e operacao canonicos | Acrescentar apply/readback, variacoes linguisticas, refinamento e recuperacao na mesma jornada |
+| Criar formulario/tela de funcionarios | `suportado-parcialmente` | Preview passou 9/9 e a vertical completa de formulario passou apply/readback/replay/cleanup 3/3 com recurso e operacao canonicos | Acrescentar variacoes linguisticas, refinamento, cancelamento e recuperacao na mesma jornada |
 | Criar tabela, grafico e filtros | `suportado-parcialmente` | Manifests, handlers e validadores existem, mas a cobertura de hosts e o caminho de turno nao sao uniformes | Convergir os consumidores para o mesmo turn engine e os mesmos gates |
 | Continuidade e estados terminais | `suportado-parcialmente` | SSE, replay, heartbeat, registry e shell existem | Definir state machine observavel, timeout, retry seguro e zero sessoes presas |
 | Intencao semantica consistente | `suportado-parcialmente` | A LLM ja produz decisao tipada e o keyword fallback legado fica desabilitado por padrao | Remover heuristicas textuais residuais da decisao primaria e limitar matching a grounding pos-intencao |
@@ -521,10 +549,11 @@ deve explicar indisponibilidade; nao pode simular sucesso.
 
 ## Artefatos derivados
 
-O segundo slice atualizou o schema, corpus e runner internos de consistencia.
-Nao houve mudanca de endpoint, DTO, OpenAPI ou public API; por isso bindings,
-landing page e corpus HTTP nao precisam de sincronizacao neste corte. Quando os
-proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
+O terceiro slice atualizou o schema, corpus e runner internos de consistencia e
+adicionou o executor transacional local. Nao houve mudanca de endpoint, DTO,
+OpenAPI ou public API; por isso bindings, landing page e corpus HTTP nao precisam
+de sincronizacao neste corte. Quando os proximos slices alterarem contratos
+publicos, revisar no mesmo ciclo:
 
 - `docs/ai/contracts/**` e OpenAPI do Config Starter;
 - bindings e public APIs de `@praxisui/ai`;
@@ -534,15 +563,15 @@ proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
 
 ## Proximo slice recomendado
 
-`P0.1 + P0.3` possuem primeiro corte e o grounding de preview de `P0.4` passou
-na vertical 3x. O proximo slice recomendado e fechar consistencia transacional
-e o gate P0 integral, nesta ordem:
+`P0.1 + P0.3` possuem primeiro corte, o grounding de preview de `P0.4` passou
+na vertical 3x e a mesma jornada agora passou apply/readback/replay/cleanup 3x.
+O proximo slice recomendado e fechar o gate P0 integral, nesta ordem:
 
-1. estender a jornada de formulario de preview para apply, readback e cleanup,
-   provando que o POST canonico persiste a composicao esperada sem duplicar
-   efeitos;
-2. executar os seis `must-pass` tres vezes consecutivas no mesmo gate, incluindo
+1. executar os seis `must-pass` tres vezes consecutivas no mesmo gate, incluindo
    as tres perguntas consultivas e as tres jornadas de criacao;
+2. tornar falha bloqueante qualquer divergencia de terminal, recurso, operacao,
+   preview ou prova transacional e publicar o resultado comparavel por
+   provider/modelo;
 3. adicionar variacoes de linguagem, erros humanos, refinamento e recuperacao
    ao perfil `extended`, mantendo o baseline `must-pass` bloqueante;
 4. otimizar a rota consultiva para evitar planning/discovery de recursos e

@@ -193,6 +193,13 @@
           "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
           "forbidUnlistedResourcePaths": true,
           "mutationRequiresPreview": true
+        },
+        "persistence": {
+          "apply": "required",
+          "readback": "exact-page",
+          "conditionalReplay": "same-state",
+          "staleRetry": "precondition-failed",
+          "cleanup": "required"
         }
       }
     },

@@ -99,6 +99,13 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
         assertThat(submitUrls.isArray()).isTrue();
         assertThat(submitUrls.size()).isEqualTo(1);
         assertThat(submitUrls.get(0).asText()).isEqualTo("/api/human-resources/funcionarios");
+
+        JsonNode persistence = employeeForm.path("expected").path("persistence");
+        assertThat(persistence.path("apply").asText()).isEqualTo("required");
+        assertThat(persistence.path("readback").asText()).isEqualTo("exact-page");
+        assertThat(persistence.path("conditionalReplay").asText()).isEqualTo("same-state");
+        assertThat(persistence.path("staleRetry").asText()).isEqualTo("precondition-failed");
+        assertThat(persistence.path("cleanup").asText()).isEqualTo("required");
     }
 
     private JsonNode corpus() throws Exception {
