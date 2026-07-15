@@ -18,6 +18,7 @@ import org.praxisplatform.config.service.ContextRetrievalService;
 public class AgenticAuthoringApiMetadataCandidateCatalog {
 
     private static final int CANDIDATE_LIMIT = 16;
+    private static final int PRIMARY_ENTITY_PROJECTION_ALIGNMENT_TOLERANCE = 6;
     private static final double MIN_STRONG_SEMANTIC_SCORE = 0.52d;
     private static final int MIN_GENERIC_OPERATIONAL_SEMANTIC_CANDIDATES = 6;
     private static final String SEMANTIC_ROLE_OPERATIONAL_RESOURCE = "semantic-role:operational-resource";
@@ -372,10 +373,30 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                     this::preferredCandidateForSameResource);
         }
         SemanticResourceNeed resourceNeed = semanticResourceNeed(normalizedPrompt, artifactKind);
+        List<AgenticAuthoringCandidate> subjectScopedCandidates = candidatesByResource.values().stream().toList();
+        if (resourceNeed == SemanticResourceNeed.ANALYTICS
+                && hasLlmAuthoredResourceFocus(normalize(valueOrEmpty(normalizedPrompt)))) {
+            int bestPrimaryEntityAlignment = subjectScopedCandidates.stream()
+                    .mapToInt(candidate -> primaryBusinessEntityAlignmentScore(normalizedPrompt, candidate))
+                    .max()
+                    .orElse(0);
+            if (bestPrimaryEntityAlignment > 0) {
+                int minimumAlignment = Math.max(
+                        1,
+                        bestPrimaryEntityAlignment - PRIMARY_ENTITY_PROJECTION_ALIGNMENT_TOLERANCE);
+                subjectScopedCandidates = subjectScopedCandidates.stream()
+                        .filter(candidate -> primaryBusinessEntityAlignmentScore(normalizedPrompt, candidate)
+                                >= minimumAlignment)
+                        .toList();
+            }
+        }
         Comparator<AgenticAuthoringCandidate> ranking = "api_catalog".equals(artifactKind)
                 ? Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed()
+                : resourceNeed == SemanticResourceNeed.ANALYTICS
+                && !hasLlmAuthoredResourceFocus(normalize(valueOrEmpty(normalizedPrompt)))
+                ? CandidateRankingPolicy.byEvidenceStrengthScoreThenRoleFit(resourceNeed)
                 : CandidateRankingPolicy.byEvidenceStrengthRoleFitThenScore(resourceNeed);
-        return candidatesByResource.values().stream()
+        return subjectScopedCandidates.stream()
                 .sorted(ranking)
                 .limit(CANDIDATE_LIMIT)
                 .toList();
@@ -395,6 +416,51 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             return replacementCreate ? replacement : existing;
         }
         return replacement.score() > existing.score() ? replacement : existing;
+    }
+
+    private int primaryBusinessEntityAlignmentScore(
+            String normalizedPrompt,
+            AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return 0;
+        }
+        String primaryBusinessEntity = semanticQuerySection(
+                normalize(valueOrEmpty(normalizedPrompt)),
+                "primary business entity:",
+                "supporting concepts:");
+        List<String> subjectTokens = meaningfulTokens(primaryBusinessEntity);
+        if (subjectTokens.isEmpty()) {
+            return 0;
+        }
+        List<String> semanticText = new ArrayList<>();
+        semanticText.add(valueOrEmpty(candidate.resourcePath()));
+        semanticText.add(valueOrEmpty(candidate.submitUrl()));
+        semanticText.add(valueOrEmpty(candidate.reason()));
+        if (candidate.evidenceBundle() != null && candidate.evidenceBundle().evidence() != null) {
+            candidate.evidenceBundle().evidence().forEach(evidence -> {
+                semanticText.add(valueOrEmpty(evidence.ref()));
+                semanticText.add(valueOrEmpty(evidence.summary()));
+            });
+        }
+        String candidateText = normalize(String.join(" ", semanticText));
+        String terminalSegment = normalizePath(valueOrEmpty(candidate.resourcePath()))
+                .replaceAll("/+$", "")
+                .replaceAll("^.*/", "");
+        String normalizedTerminal = normalize(terminalSegment.replaceAll("[^a-z0-9]+", " ")).trim();
+        int score = 0;
+        for (String token : subjectTokens) {
+            if (matchesToken(candidateText, token)) {
+                score += 2;
+            }
+            if (matchesToken(normalizedTerminal, token)) {
+                score += 3;
+            }
+        }
+        String normalizedSubject = normalize(String.join(" ", subjectTokens)).trim();
+        if (!normalizedSubject.isBlank() && normalizedSubject.equals(normalizedTerminal)) {
+            score += 6;
+        }
+        return score;
     }
 
     private int evidenceStrength(AgenticAuthoringCandidate candidate) {
@@ -626,6 +692,15 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                             (AgenticAuthoringCandidate candidate) -> semanticRoleFit(candidate, resourceNeed)).reversed())
                     .thenComparing(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed());
         }
+
+        static Comparator<AgenticAuthoringCandidate> byEvidenceStrengthScoreThenRoleFit(SemanticResourceNeed resourceNeed) {
+            return Comparator.<AgenticAuthoringCandidate>comparingInt(
+                            AgenticAuthoringApiMetadataCandidateCatalog::staticEvidenceStrength)
+                    .reversed()
+                    .thenComparing(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed())
+                    .thenComparing(Comparator.comparingDouble(
+                            (AgenticAuthoringCandidate candidate) -> semanticRoleFit(candidate, resourceNeed)).reversed());
+        }
     }
 
     private static boolean hasStaticEvidence(AgenticAuthoringCandidate candidate, String evidence) {
@@ -697,7 +772,11 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 valueOrEmpty(result.getParameters()));
         String normalizedEvidenceText = normalize(evidenceText);
         ResourceSemanticRole semanticRole = semanticRole(resourcePath, submitUrl, normalizedEvidenceText, "");
-        score += semanticRoleScoreAdjustment(semanticRole, semanticResourceNeed(normalizedPrompt, artifactKind));
+        SemanticResourceNeed resourceNeed = semanticResourceNeed(normalizedPrompt, artifactKind);
+        if (resourceNeed != SemanticResourceNeed.ANALYTICS
+                || hasLlmAuthoredResourceFocus(normalize(valueOrEmpty(normalizedPrompt)))) {
+            score += semanticRoleScoreAdjustment(semanticRole, resourceNeed);
+        }
         score += derivedProjectionScoreAdjustment(resourcePath, submitUrl, normalizedPrompt, artifactKind);
         score = Math.max(0.45d, Math.min(0.99d, score));
         List<String> evidence = new ArrayList<>(List.of(

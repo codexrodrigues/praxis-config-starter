@@ -3,6 +3,7 @@ package org.praxisplatform.config.ai.authoring;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.text.Normalizer;
 import java.util.ArrayList;
@@ -82,6 +83,11 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         if ("chart".equals(artifactKind) && visualizationDecision == null) {
             return Optional.empty();
         }
+        Optional<AgenticAuthoringUiCompositionPlanResult> governedAnalyticsFailure =
+                governedAnalyticsFailure(request);
+        if (governedAnalyticsFailure.isPresent()) {
+            return governedAnalyticsFailure;
+        }
         boolean chartOnly = isChartOnlyRequest(request, visualizationDecision);
         boolean dashboardMaterialization = shouldMaterializeDashboard(request, artifactKind, visualizationDecision);
         ObjectNode plan = expansionRequested ? expansionPlan(candidate) : tabsRequested ? tabsPlan(request, candidate, visualizationDecision) : chartOnly ? singleChartPlan(request, candidate, visualizationDecision) : switch (artifactKind) {
@@ -100,6 +106,50 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 List.of(),
                 List.of("ui-composition-plan-provider:generic-resource-" + providerArtifactKind),
                 plan,
+                emptyCompiledFormPatch()));
+    }
+
+    private Optional<AgenticAuthoringUiCompositionPlanResult> governedAnalyticsFailure(
+            AgenticAuthoringPlanRequest request) {
+        JsonNode grounding = governedAnalyticsContext(request);
+        if (!"comparison".equals(grounding.path("requestedOperation").asText(""))) {
+            return Optional.empty();
+        }
+        String status = grounding.path("status").asText("missing");
+        if ("verified".equals(status) && grounding.path("projection").isObject()) {
+            JsonNode projection = grounding.path("projection");
+            boolean crossFilterEnabled = projection.path("interactions").path("crossFilter").asBoolean(false);
+            String keyFilterField = projection.path("bindings")
+                    .path("primaryDimension")
+                    .path("keyFilterField")
+                    .asText("")
+                    .trim();
+            if (!crossFilterEnabled || !keyFilterField.isBlank()) {
+                JsonNode recordOpen = projection.path("interactions").path("recordOpen");
+                if (!recordOpen.isObject()
+                        || grounding.path("recordOpenResolution").path("schemaVerified").asBoolean(false)) {
+                    return Optional.empty();
+                }
+                status = "record-open-resolution-required";
+            } else {
+                status = "key-filter-binding-required";
+            }
+        }
+        String failure = "governed-analytics-comparison-" + slug(valueOrDefault(status, "unavailable"));
+        if (Set.of(
+                "operation-unavailable",
+                "nominal-operation-unavailable",
+                "record-open-surface-unavailable").contains(status)) {
+            String availabilityReason = slug(grounding.path("availabilityReason").asText(""));
+            if (!availabilityReason.isBlank()) {
+                failure += "-" + availabilityReason;
+            }
+        }
+        return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                false,
+                List.of(failure),
+                List.of("ui-composition-plan-provider:governed-analytics-fail-closed"),
+                objectMapper.createObjectNode(),
                 emptyCompiledFormPatch()));
     }
 
@@ -259,7 +309,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             addSummary(widgets, candidate, widgetKey(candidate, "summary"));
         }
         if (includeKpis) {
-            addKpis(widgets, candidate, widgetKey(candidate, "kpis"), renderableDimensions);
+            addKpis(widgets, candidate, widgetKey(candidate, "kpis"));
         }
         if (includeFilters(visualizationDecision) || forceDashboardFilters) {
             addFilter(widgets, candidate, widgetKey(candidate, "filter"), renderableDimensions);
@@ -281,7 +331,13 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         if (surfaceOpenModal && chartDashboard) {
             addSurfaceOpenDrilldownBinding(plan, candidate, renderableDimensions);
         } else if (includeDetailTable(visualizationDecision)) {
-            addList(widgets, candidate, widgetKey(candidate, "list"), "insight-list", renderableDimensions);
+            addList(
+                    widgets,
+                    candidate,
+                    widgetKey(candidate, "list"),
+                    "insight-list",
+                    renderableDimensions,
+                    governedRecordOpen(request));
             addTable(widgets, candidate, widgetKey(candidate, "table"), "detail");
         }
         if (!surfaceOpenModal || !chartDashboard) {
@@ -312,6 +368,93 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 forceDashboardFilters,
                 includeKpis);
         return plan;
+    }
+
+    boolean reflowPrunedDashboard(
+            AgenticAuthoringPlanRequest request,
+            ObjectNode plan) {
+        if (request == null
+                || plan == null
+                || !"generic-ui-composition-plan-provider".equals(plan.path("plannerId").asText(""))
+                || !Set.of("resource-dashboard", "chart-surface-drilldown")
+                        .contains(plan.path("layoutPreset").asText(""))) {
+            return false;
+        }
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        AgenticAuthoringCandidate candidate = selectedCandidate(intent);
+        AgenticAuthoringSemanticDecision semanticDecision = intent == null ? null : intent.semanticDecision();
+        AgenticAuthoringVisualizationDecision visualizationDecision =
+                semanticDecision != null && semanticDecision.visualizationDecision() != null
+                        ? semanticDecision.visualizationDecision()
+                        : intent == null ? null : intent.visualizationDecision();
+        if (candidate == null) {
+            return false;
+        }
+
+        Set<String> presentChartKeys = new LinkedHashSet<>();
+        JsonNode widgets = plan.path("widgets");
+        if (widgets.isArray()) {
+            for (JsonNode widget : widgets) {
+                if ("praxis-chart".equals(widget.path("componentId").asText(""))) {
+                    String key = widget.path("key").asText("");
+                    if (!key.isBlank()) {
+                        presentChartKeys.add(key);
+                    }
+                }
+            }
+        }
+        List<DashboardDimension> plannedDimensions = dashboardDimensions(
+                visualizationDecision,
+                candidate,
+                request).stream()
+                .filter(this::isResolvedDimension)
+                .toList();
+        List<DashboardDimension> survivingDimensions = plannedDimensions.stream()
+                .filter(dimension -> presentChartKeys.contains(
+                        widgetKey(candidate, "chart-" + dimension.field())))
+                .toList();
+        if (survivingDimensions.size() == plannedDimensions.size()
+                || survivingDimensions.size() != presentChartKeys.size()) {
+            return false;
+        }
+
+        boolean surfaceOpenModal = isSurfaceOpenModalDrilldown(request);
+        boolean chartDashboard = isChartDashboardRequest(request, visualizationDecision);
+        boolean forceDashboardFilters = chartDashboard && !survivingDimensions.isEmpty();
+        boolean includeKpis = !surfaceOpenModal && includeKpis(visualizationDecision);
+        addDashboardPresetMetadata(
+                plan,
+                candidate,
+                survivingDimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceDashboardFilters,
+                includeKpis);
+        addDashboardCanvas(
+                plan,
+                candidate,
+                survivingDimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceDashboardFilters,
+                includeKpis);
+        addDashboardGrouping(
+                plan,
+                candidate,
+                survivingDimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceDashboardFilters,
+                includeKpis);
+        addDashboardDeviceLayouts(
+                plan,
+                candidate,
+                survivingDimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceDashboardFilters,
+                includeKpis);
+        return true;
     }
 
     private void addDashboardPresetMetadata(
@@ -652,6 +795,16 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             String key,
             String role,
             List<DashboardDimension> dimensions) {
+        addList(widgets, candidate, key, role, dimensions, MissingNode.getInstance());
+    }
+
+    private void addList(
+            ArrayNode widgets,
+            AgenticAuthoringCandidate candidate,
+            String key,
+            String role,
+            List<DashboardDimension> dimensions,
+            JsonNode recordOpen) {
         ObjectNode widget = widgets.addObject();
         widget.put("key", key);
         widget.put("componentId", "praxis-list");
@@ -670,10 +823,10 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         dataSource.putObject("query");
         ObjectNode layout = config.putObject("layout");
         layout.put("variant", "cards");
-        layout.put("density", "insight-list".equals(role) ? "compact" : "comfortable");
+        layout.put("density", "comfortable");
         layout.put("itemSpacing", "default");
-        layout.put("lines", "insight-list".equals(role) ? 2 : 3);
-        layout.put("pageSize", "insight-list".equals(role) ? 4 : 6);
+        layout.put("lines", 3);
+        layout.put("pageSize", 6);
         ObjectNode templating = config.putObject("templating");
         DashboardDimension primary = dimensions == null || dimensions.isEmpty() ? null : dimensions.get(0);
         String primaryField = primary == null ? "id" : canonicalFieldName(primary.field());
@@ -704,7 +857,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         detailsAction.put("label", "Ver detalhes");
         detailsAction.put("icon", "open_in_new");
         detailsAction.put("placement", "trailing");
-        configureOpenDetailsAction(detailsAction, candidate, key);
+        configureOpenDetailsAction(detailsAction, candidate, key, recordOpen);
     }
 
     private void addTabs(
@@ -787,7 +940,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode actions = panels.addObject();
         actions.put("id", "actions");
         actions.put("title", "Acoes");
-        actions.put("description", "Formulario governado para revisar ou executar operacoes disponiveis.");
+        actions.put("description", "Formulário governado para revisar ou executar operações disponíveis.");
         actions.put("icon", "dynamic_form");
         addNestedDetail(actions.putArray("widgets"), candidate, widgetKey(candidate, "expansion-actions"));
     }
@@ -890,6 +1043,10 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             AgenticAuthoringCandidate candidate,
             String key,
             DashboardDimension dimension) {
+        if (isGovernedComparisonDimension(dimension)) {
+            populateComparisonChartConfig(config, candidate, key, dimension);
+            return;
+        }
         config.put("id", key);
         config.put("type", dimension.chartType());
         config.put("orientation", dimension.orientation());
@@ -965,6 +1122,215 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         crossFilter.putObject("mapping").put(dimension.field(), canonicalFieldName(dimension.field()));
     }
 
+    private void populateComparisonChartConfig(
+            ObjectNode config,
+            AgenticAuthoringCandidate candidate,
+            String key,
+            DashboardDimension dimension) {
+        JsonNode projection = dimension.analyticsProjection();
+        JsonNode source = projection.path("source");
+        JsonNode bindings = projection.path("bindings");
+        JsonNode period = bindings.path("comparisonPeriod");
+        List<JsonNode> metrics = analyticsMetrics(projection);
+        String resourcePath = source.path("resource").asText(businessResourcePath(candidate.resourcePath()));
+        String projectionId = valueOrDefault(projection.path("id").asText(""), key);
+
+        config.put("id", key);
+        config.put("type", dimension.chartType());
+        config.put("orientation", dimension.orientation());
+        config.put("title", dimension.title() + " - " + titleFromResourcePath(resourcePath));
+        config.put("subtitle", "Periodo atual e anterior por " + dimension.label());
+        config.set("analyticsProjection", projection.deepCopy());
+        config.putObject("semanticAxis")
+                .put("concept", dimension.concept())
+                .put("field", dimension.field())
+                .put("label", dimension.label())
+                .put("provenance", dimension.provenance())
+                .put("schemaVerified", false)
+                .put("schemaProbeStatus", "pending");
+        config.putObject("sizing").put("mode", "fill-container").put("minHeight", 260);
+        ObjectNode axes = config.putObject("axes");
+        axes.putObject("x")
+                .put("field", dimension.field())
+                .put("label", dimension.label())
+                .put("type", "category");
+        ObjectNode yAxis = axes.putObject("y").put("type", "value");
+        if (metrics.size() == 1) {
+            yAxis.put("label", valueOrDefault(metrics.get(0).path("label").asText(""), dimension.metricLabel()));
+        }
+
+        ArrayNode series = config.putArray("series");
+        for (JsonNode metric : metrics) {
+            String metricField = metric.path("field").asText("");
+            String aggregation = canonicalAnalyticsAggregation(metric.path("aggregation").asText("count"));
+            String metricLabel = valueOrDefault(metric.path("label").asText(""), titleFromResourcePath(metricField));
+            for (String comparisonPeriod : List.of("current", "previous")) {
+                String outputField = comparisonMetricOutputField(metricField, comparisonPeriod);
+                ObjectNode nextSeries = series.addObject();
+                nextSeries.put("id", projectionId + "." + metricField + "." + comparisonPeriod);
+                nextSeries.put("name", metricLabel + ("current".equals(comparisonPeriod)
+                        ? " (Atual)"
+                        : " (Anterior)"));
+                nextSeries.put("type", dimension.chartType());
+                nextSeries.put("categoryField", dimension.field());
+                nextSeries.putObject("metric")
+                        .put("field", outputField)
+                        .put("aggregation", aggregation)
+                        .put("label", metricLabel);
+            }
+        }
+
+        ObjectNode dataSource = config.putObject("dataSource");
+        dataSource.put("kind", "remote");
+        dataSource.put("resourcePath", resourcePath);
+        ObjectNode query = dataSource.putObject("query");
+        query.put("sourceKind", "praxis.stats");
+        query.put("statsOperation", "comparison");
+        query.put("statsPath", statsPath(resourcePath, "comparison"));
+        query.putArray("dimensions").add(dimension.field());
+        ArrayNode displayMetrics = query.putArray("metrics");
+        for (JsonNode metric : metrics) {
+            String metricField = metric.path("field").asText("");
+            String aggregation = canonicalAnalyticsAggregation(metric.path("aggregation").asText("count"));
+            for (String comparisonPeriod : List.of("current", "previous")) {
+                String outputField = comparisonMetricOutputField(metricField, comparisonPeriod);
+                displayMetrics.addObject()
+                        .put("field", outputField)
+                        .put("aggregation", aggregation)
+                        .put("alias", outputField);
+            }
+        }
+        copyAnalyticsSortAndLimitToQuery(projection, query);
+
+        ObjectNode statsRequest = query.putObject("statsRequest");
+        statsRequest.putObject("filter");
+        statsRequest.put("field", dimension.field());
+        statsRequest.put("periodField", period.path("field").asText(""));
+        ArrayNode executionMetrics = statsRequest.putArray("metrics");
+        for (JsonNode metric : metrics) {
+            String metricField = metric.path("field").asText("");
+            String aggregation = canonicalAnalyticsAggregation(metric.path("aggregation").asText("count"));
+            String operation = aggregation.toUpperCase(Locale.ROOT).replace('-', '_');
+            ObjectNode executionMetric = executionMetrics.addObject();
+            executionMetric.put("operation", operation);
+            if (!"COUNT".equals(operation)) {
+                executionMetric.put("field", metricField);
+            }
+            executionMetric.put("alias", metricField);
+        }
+        ObjectNode requestPeriod = statsRequest.putObject("period");
+        requestPeriod.put("preset", period.path("preset").asText(""));
+        requestPeriod.put("timezone", period.path("timezone").asText(""));
+        requestPeriod.put("mode", period.path("mode").asText(""));
+        copyAnalyticsSortAndLimitToStatsRequest(projection, dimension.field(), metrics, statsRequest);
+
+        JsonNode projectionInteractions = projection.path("interactions");
+        boolean hasRecordOpen = projectionInteractions.path("recordOpen").isObject();
+        boolean drillDown = !hasRecordOpen && projectionInteractions.path("drillDown").asBoolean(false);
+        boolean pointSelection = projectionInteractions.path("pointSelection").asBoolean(false);
+        boolean crossFilterEnabled = projectionInteractions.path("crossFilter").asBoolean(false);
+        ObjectNode interactions = config.putObject("interactions");
+        interactions.put("pointClick", drillDown || pointSelection);
+        interactions.put("drillDown", drillDown);
+        interactions.put("selection", pointSelection);
+        interactions.put("crossFilter", crossFilterEnabled);
+        if (crossFilterEnabled) {
+            ObjectNode crossFilter = interactions.putObject("eventActions").putObject("crossFilter");
+            crossFilter.put("action", "filter-widget");
+            crossFilter.putObject("mapping").put("key", dimension.filterField());
+        }
+    }
+
+    private List<JsonNode> analyticsMetrics(JsonNode projection) {
+        List<JsonNode> metrics = new ArrayList<>();
+        for (String binding : List.of("primaryMetrics", "secondaryMetrics")) {
+            JsonNode candidates = projection.path("bindings").path(binding);
+            if (candidates.isArray()) {
+                candidates.forEach(metrics::add);
+            }
+        }
+        return List.copyOf(metrics);
+    }
+
+    private void copyAnalyticsSortAndLimitToQuery(JsonNode projection, ObjectNode query) {
+        JsonNode defaults = projection.path("defaults");
+        if (defaults.path("limit").canConvertToInt() && defaults.path("limit").asInt() > 0) {
+            query.put("limit", defaults.path("limit").asInt());
+        }
+        JsonNode sort = defaults.path("sort");
+        if (!sort.isArray() || sort.isEmpty()) {
+            return;
+        }
+        ArrayNode querySort = query.putArray("sort");
+        for (JsonNode item : sort) {
+            String field = item.path("field").asText("");
+            String direction = item.path("direction").asText("");
+            if (!field.isBlank() && Set.of("asc", "desc").contains(direction)) {
+                querySort.add(field + ":" + direction);
+            }
+        }
+        if (querySort.isEmpty()) {
+            query.remove("sort");
+        }
+    }
+
+    private void copyAnalyticsSortAndLimitToStatsRequest(
+            JsonNode projection,
+            String dimensionField,
+            List<JsonNode> metrics,
+            ObjectNode statsRequest) {
+        JsonNode defaults = projection.path("defaults");
+        if (defaults.path("limit").canConvertToInt() && defaults.path("limit").asInt() > 0) {
+            statsRequest.put("limit", defaults.path("limit").asInt());
+        }
+        JsonNode sort = defaults.path("sort");
+        if (!sort.isArray() || sort.isEmpty()) {
+            return;
+        }
+        JsonNode firstSort = sort.get(0);
+        String field = firstSort.path("field").asText("");
+        String direction = firstSort.path("direction").asText("");
+        if (!Set.of("asc", "desc").contains(direction)) {
+            return;
+        }
+        if (normalize(field).equals(normalize(dimensionField))) {
+            statsRequest.put("orderBy", "asc".equals(direction) ? "KEY_ASC" : "KEY_DESC");
+            return;
+        }
+        boolean metricSort = metrics.stream()
+                .anyMatch(metric -> normalize(metric.path("field").asText("")).equals(normalize(field)));
+        if (metricSort) {
+            statsRequest.put("orderBy", "asc".equals(direction) ? "VALUE_ASC" : "VALUE_DESC");
+        }
+    }
+
+    private String comparisonMetricOutputField(String metricField, String period) {
+        return "__praxisComparison_" + metricField + "_" + period;
+    }
+
+    private String canonicalAnalyticsAggregation(String aggregation) {
+        return valueOrDefault(aggregation, "count")
+                .toLowerCase(Locale.ROOT)
+                .replace('_', '-');
+    }
+
+    private boolean isGovernedComparisonDimension(DashboardDimension dimension) {
+        return dimension != null
+                && dimension.analyticsProjection() != null
+                && dimension.analyticsProjection().isObject()
+                && "comparison".equals(dimension.analyticsProjection().path("source").path("operation").asText(""));
+    }
+
+    private boolean allowsChartInteraction(DashboardDimension dimension, String interaction) {
+        if (!isGovernedComparisonDimension(dimension)) {
+            return true;
+        }
+        return dimension.analyticsProjection()
+                .path("interactions")
+                .path(interaction)
+                .asBoolean(false);
+    }
+
     private String metricOutputField(DashboardDimension dimension) {
         if (dimension != null && !dimension.metricField().isBlank()) {
             return dimension.metricField();
@@ -975,13 +1341,14 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     private void addKpis(
             ArrayNode widgets,
             AgenticAuthoringCandidate candidate,
-            String key,
-            List<DashboardDimension> dimensions) {
+            String key) {
         ObjectNode widget = widgets.addObject();
         widget.put("key", key);
         widget.put("componentId", "praxis-rich-content");
         widget.put("role", "kpi-band");
-        ObjectNode document = richContentDocument(widget.putObject("inputs"));
+        widget.putArray("bindingOrder").add("document").add("context");
+        ObjectNode inputs = widget.putObject("inputs");
+        ObjectNode document = richContentDocument(inputs);
         ObjectNode statGroup = document.putArray("nodes").addObject();
         statGroup.put("type", "statGroup");
         statGroup.put("id", key + "-stats");
@@ -992,23 +1359,35 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode total = items.addObject();
         total.put("id", key + "-total");
         total.put("label", "Total filtrado");
-        total.put("value", "-");
         total.put("valueExpr", "${table.totalItems}");
-        total.put("caption", "Sincronizado com os filtros");
-        total.put("captionExpr", "${table.caption}");
+        total.put("format", "integer");
+        total.put("captionExpr", "${table.totalCaption}");
         total.put("icon", "monitoring");
         total.put("tone", "info");
-        for (DashboardDimension dimension : dimensions.stream().filter(this::isResolvedDimension).limit(2).toList()) {
-            ObjectNode kpi = items.addObject();
-            kpi.put("id", key + "-" + dimension.field());
-            kpi.put("label", dimension.label());
-            kpi.put("value", "-");
-            kpi.put("caption", metricCaption(dimension) + " no recorte atual");
-            kpi.put("icon", "query_stats");
-            kpi.put("tone", "neutral");
-            kpi.put("dimensionField", dimension.field());
-            kpi.put("schemaVerified", false);
-        }
+        ObjectNode loaded = items.addObject();
+        loaded.put("id", key + "-loaded");
+        loaded.put("label", "Itens na página");
+        loaded.put("valueExpr", "${table.loadedItemsCount}");
+        loaded.put("format", "integer");
+        loaded.put("captionExpr", "${table.loadedItemsCaption}");
+        loaded.put("icon", "view_list");
+        loaded.put("tone", "neutral");
+        ObjectNode status = items.addObject();
+        status.put("id", key + "-status");
+        status.put("label", "Status da consulta");
+        status.put("valueExpr", "${table.status}");
+        status.put("captionExpr", "${table.statusCaption}");
+        status.put("icon", "sync");
+        status.put("tone", "neutral");
+
+        ObjectNode context = inputs.putObject("context");
+        ObjectNode table = context.putObject("table");
+        table.put("totalItems", 0);
+        table.put("loadedItemsCount", 0);
+        table.put("status", "Carregando");
+        table.put("totalCaption", "Total retornado pela consulta filtrada");
+        table.put("loadedItemsCaption", "Itens carregados nesta página");
+        table.put("statusCaption", "Atualizado pelo runtime da tabela");
     }
 
     private void addFilter(
@@ -1093,7 +1472,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             addFilterQueryContextBindings(bindings, filterKey, listKey);
         }
         if (includeKpis && includeDetailTable) {
-            addTableKpiContextBinding(bindings, tableKey, widgetKey(candidate, "kpis"));
+            addTableKpiContextBindings(bindings, tableKey, widgetKey(candidate, "kpis"));
         }
         for (DashboardDimension dimension : dimensions) {
             String chartKey = widgetKey(candidate, "chart-" + dimension.field());
@@ -1102,43 +1481,52 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             }
 
             if (includeDetailTable) {
-                ObjectNode modalBinding = bindings.addObject();
-                modalBinding.put("id", chartKey + ".pointClick->surface.open");
-                modalBinding.put("intent", "command-dispatch");
-                addComponentPortEndpoint(modalBinding.putObject("from"), chartKey, "pointClick", "output");
-                ObjectNode to = modalBinding.putObject("to");
-                to.put("kind", "global-action");
-                to.put("actionId", "surface.open");
-                to.set("payload", surfaceOpenListPayload(candidate, dimension, dimensions));
-                ObjectNode policy = modalBinding.putObject("policy");
-                policy.put("distinct", true);
-                policy.put("distinctBy", chartPointRawValuePath());
-                policy.put("debounceMs", 250);
+                if (allowsChartInteraction(dimension, "drillDown")) {
+                    ObjectNode modalBinding = bindings.addObject();
+                    modalBinding.put("id", chartKey + ".pointClick->surface.open");
+                    modalBinding.put("intent", "command-dispatch");
+                    addComponentPortEndpoint(modalBinding.putObject("from"), chartKey, "pointClick", "output");
+                    ObjectNode to = modalBinding.putObject("to");
+                    to.put("kind", "global-action");
+                    to.put("actionId", "surface.open");
+                    to.set("payload", surfaceOpenListPayload(candidate, dimension, dimensions));
+                    ObjectNode policy = modalBinding.putObject("policy");
+                    policy.put("distinct", true);
+                    policy.put("distinctBy", chartPointRawValuePath(dimension));
+                    policy.put("debounceMs", 250);
+                }
 
-                addChartPointQueryContextBinding(bindings, chartKey, tableKey, dimension);
-                addChartPointQueryContextBinding(bindings, chartKey, listKey, dimension);
+                if (allowsChartInteraction(dimension, "drillDown")
+                        || allowsChartInteraction(dimension, "pointSelection")) {
+                    addChartPointQueryContextBinding(bindings, chartKey, tableKey, dimension);
+                    addChartPointQueryContextBinding(bindings, chartKey, listKey, dimension);
+                }
 
-                ObjectNode crossFilterBinding = bindings.addObject();
-                crossFilterBinding.put("id", chartKey + ".crossFilter->" + tableKey + ".queryContext");
-                addComponentPortEndpoint(crossFilterBinding.putObject("from"), chartKey, "crossFilter", "output");
-                addComponentPortEndpoint(crossFilterBinding.putObject("to"), tableKey, "queryContext", "input");
-                addChartQueryContextPolicy(crossFilterBinding, dimension);
-                ObjectNode crossFilterTransform = crossFilterBinding.putObject("transform");
-                crossFilterTransform.put("kind", "template");
-                crossFilterTransform.put("id", chartKey + "-cross-filter-query-context");
-                ObjectNode template = crossFilterTransform.putObject("template");
-                template.put("filters", "${payload.filters}");
+                if (allowsChartInteraction(dimension, "crossFilter")) {
+                    ObjectNode crossFilterBinding = bindings.addObject();
+                    crossFilterBinding.put("id", chartKey + ".crossFilter->" + tableKey + ".queryContext");
+                    crossFilterBinding.put("intent", "data-projection");
+                    addComponentPortEndpoint(crossFilterBinding.putObject("from"), chartKey, "crossFilter", "output");
+                    addComponentPortEndpoint(crossFilterBinding.putObject("to"), tableKey, "queryContext", "input");
+                    addChartQueryContextPolicy(crossFilterBinding, dimension);
+                    ObjectNode crossFilterTransform = crossFilterBinding.putObject("transform");
+                    crossFilterTransform.put("kind", "template");
+                    crossFilterTransform.put("id", chartKey + "-cross-filter-query-context");
+                    ObjectNode template = crossFilterTransform.putObject("template");
+                    putCrossFilterQueryContext(template, dimension);
 
-                ObjectNode listDrilldownBinding = bindings.addObject();
-                listDrilldownBinding.put("id", chartKey + ".crossFilter->" + listKey + ".queryContext");
-                addComponentPortEndpoint(listDrilldownBinding.putObject("from"), chartKey, "crossFilter", "output");
-                addComponentPortEndpoint(listDrilldownBinding.putObject("to"), listKey, "queryContext", "input");
-                addChartQueryContextPolicy(listDrilldownBinding, dimension);
-                ObjectNode listTransform = listDrilldownBinding.putObject("transform");
-                listTransform.put("kind", "template");
-                listTransform.put("id", chartKey + "-cross-filter-list-query-context");
-                ObjectNode listTemplate = listTransform.putObject("template");
-                listTemplate.put("filters", "${payload.filters}");
+                    ObjectNode listDrilldownBinding = bindings.addObject();
+                    listDrilldownBinding.put("id", chartKey + ".crossFilter->" + listKey + ".queryContext");
+                    listDrilldownBinding.put("intent", "data-projection");
+                    addComponentPortEndpoint(listDrilldownBinding.putObject("from"), chartKey, "crossFilter", "output");
+                    addComponentPortEndpoint(listDrilldownBinding.putObject("to"), listKey, "queryContext", "input");
+                    addChartQueryContextPolicy(listDrilldownBinding, dimension);
+                    ObjectNode listTransform = listDrilldownBinding.putObject("transform");
+                    listTransform.put("kind", "template");
+                    listTransform.put("id", chartKey + "-cross-filter-list-query-context");
+                    ObjectNode listTemplate = listTransform.putObject("template");
+                    putCrossFilterQueryContext(listTemplate, dimension);
+                }
             }
         }
     }
@@ -1150,55 +1538,86 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             DashboardDimension dimension) {
         ObjectNode binding = bindings.addObject();
         binding.put("id", chartKey + ".pointClick->" + targetKey + ".queryContext");
+        binding.put("intent", "data-projection");
         addComponentPortEndpoint(binding.putObject("from"), chartKey, "pointClick", "output");
         addComponentPortEndpoint(binding.putObject("to"), targetKey, "queryContext", "input");
         ObjectNode policy = binding.putObject("policy");
         policy.put("distinct", true);
-        policy.put("distinctBy", chartPointRawValuePath());
+        policy.put("distinctBy", chartPointRawValuePath(dimension));
         policy.put("debounceMs", 250);
         ObjectNode transform = binding.putObject("transform");
         transform.put("kind", "template");
         transform.put("id", chartKey + "-point-query-context");
         ObjectNode template = transform.putObject("template");
         ObjectNode filters = template.putObject("filters");
-        filters.put(canonicalFieldName(dimension.field()), "${" + chartPointRawValuePath() + "}");
+        filters.put(dimension.filterField(), "${" + chartPointRawValuePath(dimension) + "}");
     }
 
     private void addChartQueryContextPolicy(ObjectNode binding, DashboardDimension dimension) {
         ObjectNode policy = binding.putObject("policy");
         policy.put("distinct", true);
-        policy.put("distinctBy", "payload.filters." + canonicalFieldName(dimension.field()));
+        policy.put("distinctBy", "payload.filters." + dimension.filterField());
         policy.put("debounceMs", 250);
+    }
+
+    private void putCrossFilterQueryContext(ObjectNode template, DashboardDimension dimension) {
+        if (!isGovernedComparisonDimension(dimension)) {
+            template.put("filters", "${payload.filters}");
+            return;
+        }
+        ObjectNode filters = template.putObject("filters");
+        filters.put(dimension.filterField(), "${payload.filters." + dimension.filterField() + "}");
     }
 
     private void addFilterQueryContextBindings(ArrayNode bindings, String filterKey, String targetKey) {
         for (String eventPort : List.of("change", "requestSearch")) {
             ObjectNode binding = bindings.addObject();
             binding.put("id", filterKey + "." + eventPort + "->" + targetKey + ".queryContext");
+            binding.put("intent", "data-projection");
             addComponentPortEndpoint(binding.putObject("from"), filterKey, eventPort, "output");
             addComponentPortEndpoint(binding.putObject("to"), targetKey, "queryContext", "input");
             ObjectNode transform = binding.putObject("transform");
             transform.put("kind", "template");
+            transform.put("id", filterKey + "-" + eventPort + "-" + targetKey + "-query-context");
             ObjectNode template = transform.putObject("template");
             template.put("filters", "${payload}");
         }
     }
 
-    private void addTableKpiContextBinding(ArrayNode bindings, String tableKey, String kpiKey) {
-        ObjectNode binding = bindings.addObject();
-        binding.put("id", tableKey + ".loadingStateChange->" + kpiKey + ".context");
-        addComponentPortEndpoint(binding.putObject("from"), tableKey, "loadingStateChange", "output");
-        addComponentPortEndpoint(binding.putObject("to"), kpiKey, "context", "input");
-        ObjectNode transform = binding.putObject("transform");
+    private void addTableKpiContextBindings(ArrayNode bindings, String tableKey, String kpiKey) {
+        String statePath = "dashboardKpis." + tableKey;
+        String writeId = tableKey + ".loadingStateChange->" + statePath;
+        ObjectNode writeBinding = bindings.addObject();
+        writeBinding.put("id", writeId);
+        writeBinding.put("intent", "state-write");
+        addComponentPortEndpoint(writeBinding.putObject("from"), tableKey, "loadingStateChange", "output");
+        ObjectNode stateTarget = writeBinding.putObject("to");
+        stateTarget.put("kind", "state");
+        stateTarget.put("path", statePath);
+        stateTarget.put("layer", "transient");
+        ObjectNode transform = writeBinding.putObject("transform");
         transform.put("kind", "template");
         transform.put("id", tableKey + "-loading-state-kpi-context");
         ObjectNode template = transform.putObject("template");
         ObjectNode table = template.putObject("table");
         table.put("totalItems", "${payload.context.totalItems}");
         table.put("loadedItemsCount", "${payload.context.loadedItemsCount}");
-        table.put("caption", "${payload.context.loadedItemsCount} itens carregados nesta pagina");
         table.put("status", "${payload.status}");
+        table.put("totalCaption", "Total retornado pela consulta filtrada");
+        table.put("loadedItemsCaption", "${payload.context.loadedItemsCount} itens carregados nesta página");
+        table.put("statusCaption", "${payload.message}");
         table.put("resourcePath", "${payload.context.resourcePath}");
+        writeBinding.putObject("policy").put("distinct", true);
+
+        ObjectNode readBinding = bindings.addObject();
+        readBinding.put("id", statePath + "->" + kpiKey + ".context");
+        readBinding.put("intent", "state-read");
+        ObjectNode stateSource = readBinding.putObject("from");
+        stateSource.put("kind", "state");
+        stateSource.put("path", statePath);
+        stateSource.put("layer", "transient");
+        addComponentPortEndpoint(readBinding.putObject("to"), kpiKey, "context", "input");
+        readBinding.putObject("policy").put("missingValuePolicy", "skip");
     }
 
     private void addSurfaceOpenDrilldownComposition(
@@ -1215,6 +1634,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             AgenticAuthoringCandidate candidate,
             List<DashboardDimension> dimensions) {
         DashboardDimension dimension = dimensions.isEmpty() ? unresolvedDashboardDimension() : dimensions.get(0);
+        if (!allowsChartInteraction(dimension, "drillDown")) {
+            return;
+        }
         String chartKey = widgetKey(candidate, "chart-" + dimension.field());
         ArrayNode bindings = plan.withArray("bindings");
         ObjectNode binding = bindings.addObject();
@@ -1231,7 +1653,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         to.set("payload", surfaceOpenTablePayload(candidate, dimension));
         ObjectNode policy = binding.putObject("policy");
         policy.put("distinct", true);
-        policy.put("distinctBy", chartPointRawValuePath());
+        policy.put("distinctBy", chartPointRawValuePath(dimension));
         policy.put("debounceMs", 250);
     }
 
@@ -1240,6 +1662,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             String chartKey,
             AgenticAuthoringCandidate candidate,
             DashboardDimension dimension) {
+        if (!allowsChartInteraction(dimension, "drillDown")) {
+            return;
+        }
         ObjectNode composition = plan.putObject("composition");
         ArrayNode links = composition.putArray("links");
         ObjectNode link = links.addObject();
@@ -1258,7 +1683,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         toRef.set("payload", surfaceOpenTablePayload(candidate, dimension));
         ObjectNode policy = link.putObject("policy");
         policy.put("distinct", true);
-        policy.put("distinctBy", chartPointRawValuePath());
+        policy.put("distinctBy", chartPointRawValuePath(dimension));
         policy.put("debounceMs", 250);
     }
 
@@ -1271,7 +1696,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         payload.put("presentation", "modal");
         payload.put("title", "Detalhes por " + dimension.label());
         payload.put("icon", "table_view");
-        payload.put("subtitle", "Registros filtrados pela categoria selecionada no grafico.");
+        payload.put("subtitle", "Registros filtrados pela categoria selecionada no gráfico.");
         ObjectNode size = payload.putObject("size");
         size.put("width", "920px");
         size.put("maxWidth", "94vw");
@@ -1295,8 +1720,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         addSurfaceOpenTableColumns(config.putArray("columns"), dimension);
         ArrayNode bindings = payload.putArray("bindings");
         ObjectNode binding = bindings.addObject();
-        binding.put("from", chartPointRawValuePath());
-        binding.put("to", "widget.inputs.queryContext.filters." + canonicalFieldName(dimension.field()));
+        binding.put("from", chartPointRawValuePath(dimension));
+        binding.put("to", "widget.inputs.queryContext.filters." + dimension.filterField());
         return payload;
     }
 
@@ -1310,7 +1735,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         payload.put("presentation", "modal");
         payload.put("title", "Explorar " + dimension.label());
         payload.put("icon", "view_agenda");
-        payload.put("subtitle", "Lista filtrada pela categoria selecionada no grafico.");
+        payload.put("subtitle", "Lista filtrada pela categoria selecionada no gráfico.");
         ObjectNode size = payload.putObject("size");
         size.put("width", "860px");
         size.put("maxWidth", "94vw");
@@ -1359,7 +1784,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         templating.put("statusPosition", "top-right");
         ObjectNode emptyState = templating.putObject("emptyState");
         emptyState.put("type", "text");
-        emptyState.put("text", "Nenhum registro encontrado para esta selecao.");
+        emptyState.put("text", "Nenhum registro encontrado para esta seleção.");
         ObjectNode selection = config.putObject("selection");
         selection.put("mode", "single");
         ArrayNode itemActions = config.putArray("actions");
@@ -1371,25 +1796,40 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         configureOpenDetailsAction(detailsAction, candidate, key);
         ArrayNode bindings = payload.putArray("bindings");
         ObjectNode binding = bindings.addObject();
-        binding.put("from", chartPointRawValuePath());
-        binding.put("to", "widget.inputs.queryContext.filters." + canonicalFieldName(dimension.field()));
+        binding.put("from", chartPointRawValuePath(dimension));
+        binding.put("to", "widget.inputs.queryContext.filters." + dimension.filterField());
         ObjectNode queryBinding = bindings.addObject();
-        queryBinding.put("from", chartPointRawValuePath());
-        queryBinding.put("to", "widget.inputs.config.dataSource.query." + canonicalFieldName(dimension.field()));
+        queryBinding.put("from", chartPointRawValuePath(dimension));
+        queryBinding.put("to", "widget.inputs.config.dataSource.query." + dimension.filterField());
         return payload;
     }
 
-    private String chartPointRawValuePath() {
-        return "payload.category";
+    private String chartPointRawValuePath(DashboardDimension dimension) {
+        return isGovernedComparisonDimension(dimension) && !dimension.filterField().isBlank()
+                ? "payload.data.key"
+                : "payload.category";
     }
 
     private void configureOpenDetailsAction(
             ObjectNode action,
             AgenticAuthoringCandidate candidate,
             String sourceKey) {
+        configureOpenDetailsAction(action, candidate, sourceKey, MissingNode.getInstance());
+    }
+
+    private void configureOpenDetailsAction(
+            ObjectNode action,
+            AgenticAuthoringCandidate candidate,
+            String sourceKey,
+            JsonNode recordOpen) {
         action.put("kind", "icon");
         action.put("showLoading", true);
         action.put("emitLocal", false);
+        if (recordOpen != null && recordOpen.isObject()) {
+            action.put("action", "surface.open");
+            action.set("recordOpen", recordOpen.deepCopy());
+            return;
+        }
         ObjectNode globalAction = action.putObject("globalAction");
         globalAction.put("actionId", "surface.open");
         globalAction.set("payload", surfaceOpenFormPayload(candidate, sourceKey));
@@ -1404,7 +1844,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         payload.put("presentation", "modal");
         payload.put("title", "Detalhes do registro");
         payload.put("icon", "badge");
-        payload.put("subtitle", "Formulario rico em modo leitura para o item selecionado.");
+        payload.put("subtitle", "Formulário rico em modo leitura para o item selecionado.");
         ObjectNode size = payload.putObject("size");
         size.put("width", "760px");
         size.put("maxWidth", "94vw");
@@ -1460,9 +1900,6 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         items.addObject()
                 .put("type", "text")
                 .put("expr", "${item.description ?? item.descricao ?? item.category ?? item.categoria ?? item.type ?? item.tipo ?? item.group ?? item.grupo ?? item.segment ?? item.segmento}");
-        items.addObject()
-                .put("type", "text")
-                .put("expr", "${item.email ?? item.contact ?? item.contato ?? item.phone ?? item.telefone}");
     }
 
     private String recordMetaExpression() {
@@ -1627,7 +2064,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             ObjectNode analysis = grouping.addObject();
             analysis.put("kind", "section");
             analysis.put("id", widgetKey(candidate, "analysis-group"));
-            analysis.put("label", "Analise");
+            analysis.put("label", "Análise");
             analysis.put("layout", dimensions.size() == 1 ? "stack" : "grid");
             ArrayNode chartKeys = analysis.putArray("widgetKeys");
             for (DashboardDimension dimension : dimensions) {
@@ -1791,7 +2228,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode card = document.putArray("nodes").addObject();
         card.put("type", "card");
         card.put("title", resourceTitle(candidate));
-        card.put("subtitle", "Visao executiva");
+        card.put("subtitle", "Visão executiva");
         card.put("variant", "filled");
         card.put("tone", "info");
         card.put("size", "sm");
@@ -1804,8 +2241,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ArrayNode content = card.putArray("content");
         ObjectNode body = content.addObject();
         body.put("type", "text");
-        body.put("text", "Visao inicial baseada em " + resourceTitle(candidate)
-                + ". Use os filtros para refinar indicadores, graficos, lista e tabela. Selecione pontos do grafico para abrir uma exploracao contextual em modal e sincronizar os detalhes.");
+        body.put("text", "Visão inicial baseada em " + resourceTitle(candidate)
+                + ". Use os filtros para refinar indicadores, gráficos, lista e tabela. Selecione pontos do gráfico para abrir uma exploração contextual em modal e sincronizar os detalhes.");
     }
 
     private void addProfileSummary(ArrayNode widgets, AgenticAuthoringCandidate candidate, String key) {
@@ -2261,6 +2698,11 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             AgenticAuthoringVisualizationDecision visualizationDecision,
             AgenticAuthoringCandidate candidate,
             AgenticAuthoringPlanRequest request) {
+        Optional<DashboardDimension> governedComparison =
+                governedComparisonDimension(visualizationDecision, request);
+        if (governedComparison.isPresent()) {
+            return List.of(governedComparison.get());
+        }
         List<DashboardDimension> dimensions = new ArrayList<>();
         List<FieldCandidate> fieldCandidates = dashboardFieldCandidates(candidate,
                 request == null ? null : request.contextHints());
@@ -2290,6 +2732,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                         valueOrDefault(axis.label(), titleFromResourcePath(field)),
                         fieldCandidates);
                 metricField = canonicalFieldName(metricField);
+                if ("count".equals(normalize(metricAggregation))) {
+                    metricField = "";
+                }
                 dimensions.add(new DashboardDimension(
                         safe(axis.concept()),
                         field,
@@ -2325,6 +2770,69 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                         dashboardDimensionPriority(left, fieldCandidates)))
                 .limit(3)
                 .toList();
+    }
+
+    private Optional<DashboardDimension> governedComparisonDimension(
+            AgenticAuthoringVisualizationDecision visualizationDecision,
+            AgenticAuthoringPlanRequest request) {
+        JsonNode grounding = governedAnalyticsContext(request);
+        JsonNode projection = grounding.path("projection");
+        if (!"verified".equals(grounding.path("status").asText(""))
+                || !"comparison".equals(grounding.path("requestedOperation").asText(""))
+                || !projection.isObject()) {
+            return Optional.empty();
+        }
+        JsonNode dimension = projection.path("bindings").path("primaryDimension");
+        JsonNode metrics = projection.path("bindings").path("primaryMetrics");
+        String rawField = dimension.path("field").asText("");
+        if (rawField.isBlank() || !metrics.isArray() || metrics.isEmpty()) {
+            return Optional.empty();
+        }
+        String field = canonicalFieldName(rawField);
+        boolean crossFilterEnabled = projection.path("interactions").path("crossFilter").asBoolean(false);
+        String keyFilterField = dimension.path("keyFilterField").asText("").trim();
+        if (crossFilterEnabled && keyFilterField.isBlank()) {
+            return Optional.empty();
+        }
+        String filterField = crossFilterEnabled ? keyFilterField : field;
+        String label = valueOrDefault(dimension.path("label").asText(""), titleFromResourcePath(field));
+        JsonNode firstMetric = metrics.get(0);
+        String rawMetricField = firstMetric.path("field").asText("");
+        if (rawMetricField.isBlank()) {
+            return Optional.empty();
+        }
+        String metricField = canonicalFieldName(rawMetricField);
+        String metricAggregation = canonicalAnalyticsAggregation(firstMetric.path("aggregation").asText("count"));
+        String metricLabel = valueOrDefault(firstMetric.path("label").asText(""), titleFromResourcePath(metricField));
+        AgenticAuthoringVisualizationAxisDecision visualAxis = visualizationAxisForField(
+                visualizationDecision,
+                field);
+        String projectionId = projection.path("id").asText("comparison");
+        return Optional.of(new DashboardDimension(
+                valueOrDefault(visualAxis == null ? "" : visualAxis.concept(), "comparison-" + field),
+                field,
+                filterField,
+                label,
+                "Comparativo por " + label,
+                valueOrDefault(visualAxis == null ? "" : visualAxis.chartType(), "bar"),
+                valueOrDefault(visualAxis == null ? "" : visualAxis.orientation(), "vertical"),
+                metricAggregation,
+                metricField,
+                metricLabel,
+                "x-ui.analytics.projection:" + projectionId,
+                projection.deepCopy()));
+    }
+
+    private AgenticAuthoringVisualizationAxisDecision visualizationAxisForField(
+            AgenticAuthoringVisualizationDecision visualizationDecision,
+            String field) {
+        if (visualizationDecision == null || visualizationDecision.axes() == null) {
+            return null;
+        }
+        return visualizationDecision.axes().stream()
+                .filter(axis -> axis != null && normalize(axis.field()).equals(normalize(field)))
+                .findFirst()
+                .orElse(null);
     }
 
     private int dashboardDimensionPriority(DashboardDimension dimension, List<FieldCandidate> fieldCandidates) {
@@ -3032,6 +3540,17 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     }
 
     private String statsOperation(String resourcePath, DashboardDimension dimension) {
+        if (dimension != null
+                && dimension.analyticsProjection() != null
+                && dimension.analyticsProjection().isObject()) {
+            String governedOperation = dimension.analyticsProjection()
+                    .path("source")
+                    .path("operation")
+                    .asText("");
+            if (!governedOperation.isBlank()) {
+                return governedOperation;
+            }
+        }
         String normalizedPath = safe(resourcePath).toLowerCase(Locale.ROOT);
         if (normalizedPath.endsWith("/stats/timeseries")
                 || "temporal".equalsIgnoreCase(safe(dimension == null ? "" : dimension.orientation()))) {
@@ -3046,6 +3565,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 "/stats/group-by",
                 "/stats/timeseries",
                 "/stats/distribution",
+                "/stats/comparison",
                 "/filter/cursor",
                 "/filter",
                 "/all")) {
@@ -3089,7 +3609,25 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         String normalized = safe(value);
         return normalized.contains("/stats/group-by")
                 || normalized.contains("/stats/timeseries")
-                || normalized.contains("/stats/distribution");
+                || normalized.contains("/stats/distribution")
+                || normalized.contains("/stats/comparison");
+    }
+
+    private JsonNode governedAnalyticsContext(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
+            return objectMapper.createObjectNode();
+        }
+        return request.contextHints().path("governedAnalytics");
+    }
+
+    private JsonNode governedRecordOpen(AgenticAuthoringPlanRequest request) {
+        JsonNode grounding = governedAnalyticsContext(request);
+        if (!"verified".equals(grounding.path("status").asText(""))
+                || !grounding.path("recordOpenResolution").path("schemaVerified").asBoolean(false)) {
+            return MissingNode.getInstance();
+        }
+        JsonNode recordOpen = grounding.path("projection").path("interactions").path("recordOpen");
+        return recordOpen.isObject() ? recordOpen : MissingNode.getInstance();
     }
 
     private String slug(String value) {
@@ -3169,7 +3707,35 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             String metricAggregation,
             String metricField,
             String metricLabel,
-            String provenance) {
+            String provenance,
+            JsonNode analyticsProjection) {
+
+        private DashboardDimension(
+                String concept,
+                String field,
+                String filterField,
+                String label,
+                String title,
+                String chartType,
+                String orientation,
+                String metricAggregation,
+                String metricField,
+                String metricLabel,
+                String provenance) {
+            this(
+                    concept,
+                    field,
+                    filterField,
+                    label,
+                    title,
+                    chartType,
+                    orientation,
+                    metricAggregation,
+                    metricField,
+                    metricLabel,
+                    provenance,
+                    null);
+        }
     }
 
     private record FieldCandidate(

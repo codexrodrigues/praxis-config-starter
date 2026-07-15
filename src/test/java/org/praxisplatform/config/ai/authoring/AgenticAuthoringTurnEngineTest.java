@@ -21,6 +21,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Tag;
@@ -146,6 +148,91 @@ class AgenticAuthoringTurnEngineTest {
                 .contains("Criar gráfico")
                 .contains("praxis-agentic-authoring-semantic-decision.v1")
                 .contains("consultative-api-catalog-projection");
+    }
+
+    @Test
+    void continuesWithBuiltInCapabilitiesWhenPreloadMissesItsDeadline() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        CountDownLatch capabilitiesStarted = new CountDownLatch(1);
+        CountDownLatch releaseCapabilities = new CountDownLatch(1);
+        AgenticAuthoringComponentCapabilitiesService blockingCapabilitiesService =
+                new AgenticAuthoringComponentCapabilitiesService() {
+                    @Override
+                    public AgenticAuthoringComponentCapabilitiesResult listCapabilities() {
+                        capabilitiesStarted.countDown();
+                        try {
+                            releaseCapabilities.await(5, TimeUnit.SECONDS);
+                        } catch (InterruptedException ex) {
+                            Thread.currentThread().interrupt();
+                        }
+                        return super.listCapabilities();
+                    }
+                };
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(advisoryCatalogIntent());
+        when(consultativeAnswerService.answer(
+                any(AgenticAuthoringTurnStreamRequest.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(Optional.of(new AgenticAuthoringConsultativeAnswer(
+                        "domain_api",
+                        "answer_api_catalog_question",
+                        "Resposta consultiva baseada nos catalogos disponiveis.",
+                        null,
+                        List.of("built-in-capabilities-fallback"))));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                null,
+                null,
+                null,
+                blockingCapabilitiesService,
+                consultativeAnswerService,
+                null,
+                25L);
+
+        long startedAtNanos = System.nanoTime();
+        AgenticAuthoringTurnOutcome outcome;
+        try {
+            outcome = engine.execute(
+                    request("Quais APIs estao disponiveis para este painel?"),
+                    principalContext,
+                    sink);
+        } finally {
+            releaseCapabilities.countDown();
+        }
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
+
+        org.assertj.core.api.Assertions.assertThat(capabilitiesStarted.await(1, TimeUnit.SECONDS)).isTrue();
+        org.assertj.core.api.Assertions.assertThat(elapsedMs).isLessThan(1_000L);
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    if (!"component.capabilities".equals(node.path("phase").asText())) {
+                        throw new AssertionError("Not the component capabilities diagnostic event.");
+                    }
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("catalogCount").asInt())
+                            .isEqualTo(4);
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("timedOut").asBoolean())
+                            .isTrue();
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("fallbackBuiltIn").asBoolean())
+                            .isTrue();
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("fallbackSynchronousLoad").asBoolean())
+                            .isFalse();
+                });
+        verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
+        verify(previewService, never()).preview(any(), any(), any(), any());
     }
 
     @Test
@@ -9380,6 +9467,104 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void retriesConflictingFastPageIntentAndPreviewsReconciledDashboard() throws Exception {
+        AiPrincipalContext principal = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        ApiMetadataRepository repository = funcionarioRepository();
+        AgenticAuthoringPreIntentToolPlanningService planner = coordinatedDashboardPlanner();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(funcionarioPageAccordionIntent(), funcionarioDashboardIntent());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine(repository, null, null, planner).execute(
+                requestWithContextHintsOnEmptyPage(
+                        "Monte uma experiência analítica coordenada de funcionários por cargo e departamento.",
+                        domainDiscoveryContext()),
+                principal,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .containsSubsequence("intent.resolve.reconcile", "intent.resolve.reconciled", "preview.plan")
+                .doesNotContain("intent.resolve.reconciliation_required");
+
+        ArgumentCaptor<AgenticAuthoringIntentResolutionRequest> requests =
+                ArgumentCaptor.forClass(AgenticAuthoringIntentResolutionRequest.class);
+        verify(intentResolverService, org.mockito.Mockito.times(2))
+                .resolve(requests.capture(), eq("tenant"), eq("user"), eq("local"));
+        JsonNode reconciliation = requests.getAllValues().get(1).contextHints().path("semanticReconciliation");
+        org.assertj.core.api.Assertions.assertThat(reconciliation.path("forceFullIntentResolution").asBoolean()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(reconciliation.path("source").asText())
+                .isEqualTo("backend-pre-intent-tool-plan");
+        org.assertj.core.api.Assertions.assertThat(reconciliation.path("plannedArtifactKind").asText())
+                .isEqualTo("dashboard");
+        org.assertj.core.api.Assertions.assertThat(reconciliation.path("observedArtifactKind").asText())
+                .isEqualTo("page");
+        org.assertj.core.api.Assertions.assertThat(reconciliation.path("plannedResourceSearchFocus")
+                        .path("desiredSurface").asText())
+                .contains("filtros", "indicadores", "gráficos", "tabela");
+
+        ArgumentCaptor<AgenticAuthoringPlanRequest> previewRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
+        verify(previewService).preview(previewRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        org.assertj.core.api.Assertions.assertThat(previewRequest.getValue().intentResolution().artifactKind())
+                .isEqualTo("dashboard");
+        org.assertj.core.api.Assertions.assertThat(previewRequest.getValue().intentResolution().warnings())
+                .contains("llm-pre-intent-artifact-conflict-reconciled");
+    }
+
+    @Test
+    void blocksPreviewAndClarifiesWhenArtifactConflictPersistsAfterSingleRetry() throws Exception {
+        AiPrincipalContext principal = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringIntentResolutionResult pageAccordion = funcionarioPageAccordionIntent();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(pageAccordion, pageAccordion);
+
+        AgenticAuthoringTurnOutcome outcome = engine(
+                funcionarioRepository(),
+                null,
+                null,
+                coordinatedDashboardPlanner()).execute(
+                        requestWithContextHintsOnEmptyPage(
+                                "Monte uma experiência analítica coordenada de funcionários por cargo e departamento.",
+                                domainDiscoveryContext()),
+                        principal,
+                        sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(outcome.state().routeClass()).isEqualTo("needs_clarification");
+        verify(intentResolverService, org.mockito.Mockito.times(2))
+                .resolve(any(), eq("tenant"), eq("user"), eq("local"));
+        verify(previewService, never()).preview(any(), any(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .containsSubsequence("intent.resolve.reconcile", "intent.resolve.reconciliation_required")
+                .doesNotContain("preview.plan", "preview.compile");
+
+        JsonNode result = firstPayloadOfType(sink, "result");
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(result.path("intentResolution").path("valid").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(result.path("intentResolution").path("gate").path("status").asText())
+                .isEqualTo("clarification_required");
+        org.assertj.core.api.Assertions.assertThat(result.path("intentResolution").path("failureCodes").toString())
+                .contains("semantic-artifact-conflict", "semantic-intent-confirmation-required");
+        org.assertj.core.api.Assertions.assertThat(result.path("intentResolution")
+                        .path("clarificationQuestions").toString())
+                .contains("painel analítico coordenado", "página de conteúdo");
+    }
+
+    @Test
     void groundsProviderFailureClarificationInPreIntentResourceDiscoveryCandidates() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
@@ -11446,6 +11631,119 @@ class AgenticAuthoringTurnEngineTest {
                         "keyword-fallback-fail-safe-applied"),
                 List.of(),
                 objectMapper.createObjectNode());
+    }
+
+    private ApiMetadataRepository funcionarioRepository() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
+                "/api/human-resources/funcionarios",
+                "GET",
+                "funcionarios,colaboradores,recursos humanos,pessoas,cargo,departamento",
+                "Funcionários",
+                "Cadastro e perfil de funcionários por cargo e departamento",
+                "listFuncionarios",
+                null,
+                "{\"type\":\"object\"}",
+                "[]",
+                "{}",
+                null)));
+        return repository;
+    }
+
+    private AgenticAuthoringPreIntentToolPlanningService coordinatedDashboardPlanner() {
+        return (request, principal) -> AgenticAuthoringPreIntentToolPlanningResult.planned(
+                new AgenticAuthoringPreIntentToolPlan(
+                        "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                        "O pedido requer uma composição analítica coordenada sobre funcionários.",
+                        List.of(new AgenticAuthoringToolCall(
+                                AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                                "pre_intent_resource_discovery",
+                                new AgenticAuthoringResourceCandidatesRequest(
+                                        "funcionários por cargo e departamento",
+                                        request.userPrompt(),
+                                        "dashboard",
+                                        6,
+                                        new AgenticAuthoringResourceSearchFocus(
+                                                "funcionários",
+                                                List.of("cargo", "departamento", "indicadores", "detalhes"),
+                                                "dashboard com filtros, indicadores, gráficos e tabela detalhada",
+                                                "",
+                                                "composição analítica coordenada"))))));
+    }
+
+    private AgenticAuthoringIntentResolutionResult funcionarioPageAccordionIntent() {
+        return funcionarioIntent(
+                "page",
+                "create_accordion",
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "grouped_employee_content",
+                        "accordion_layout",
+                        "praxis-expansion",
+                        List.of(),
+                        true,
+                        true,
+                        List.of("praxis-chart"),
+                        false,
+                        false,
+                        "llm"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult funcionarioDashboardIntent() {
+        return funcionarioIntent(
+                "dashboard",
+                "create_dashboard",
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "coordinated_employee_analytics",
+                        "dashboard_grid",
+                        "praxis-chart",
+                        List.of(),
+                        true,
+                        true,
+                        List.of(),
+                        true,
+                        true,
+                        "llm"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult funcionarioIntent(
+            String artifactKind,
+            String changeKind,
+            AgenticAuthoringVisualizationDecision visualizationDecision) {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "get",
+                "/schemas/filtered?path=/api/human-resources/funcionarios&operation=get&schemaType=response",
+                "/api/human-resources/funcionarios",
+                "GET",
+                0.95,
+                "resource discovered by LLM-authored pre-intent tool plan",
+                List.of("api-metadata", "tool-search-api-resources"));
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                artifactKind,
+                changeKind,
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
+                null,
+                "Preview ready.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                visualizationDecision);
     }
 
     private AgenticAuthoringIntentResolutionResult validIntentWithToolCandidate() {

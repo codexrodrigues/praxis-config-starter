@@ -135,10 +135,10 @@ public class AgenticAuthoringManifestService {
         if (validationContext == null || validationContext.isNull() || validationContext.isMissingNode()) {
             return config;
         }
-        ObjectNode merged = config != null && config.isObject()
-                ? config.deepCopy()
+        ObjectNode merged = validationContext.isObject()
+                ? validationContext.deepCopy()
                 : objectMapper.createObjectNode();
-        mergeObject(merged, validationContext);
+        mergeObject(merged, config);
         merged.set("validationContext", validationContext);
         return merged;
     }

@@ -24,6 +24,7 @@ public class AgenticAuthoringIntentResolverService {
     private static final String DEFAULT_TARGET_COMPONENT = "praxis-dynamic-page-builder";
     private static final int MAX_ASSISTANT_MESSAGE_CHARS = 700;
     private static final double DOMAIN_DISCOVERY_SCOPED_SCORE_TOLERANCE = 0.02d;
+    private static final int PRIMARY_ENTITY_PROJECTION_ALIGNMENT_TOLERANCE = 6;
     private static final String SEMANTIC_ROLE_OPERATIONAL_RESOURCE = "semantic-role:operational-resource";
     private static final String SEMANTIC_ROLE_ANALYTICS_PROJECTION = "semantic-role:analytics-projection";
     private static final String SEMANTIC_ROLE_PROFILE_PROJECTION = "semantic-role:profile-projection";
@@ -636,7 +637,7 @@ public class AgenticAuthoringIntentResolverService {
                 : selectContextHintCandidate(preLlmGovernedResourceChoiceCandidate, candidates, selectedCandidate);
         selectedCandidate = explicitLocalUiComposition || primaryLlmIntentProviderFailure
                 ? null
-                : selectLlmCandidate(llmIntent, candidates, selectedCandidate, artifactKind, prompt);
+                : selectLlmCandidate(request, llmIntent, candidates, selectedCandidate, artifactKind, prompt);
         boolean llmResourceSelectionOverriddenByPromptAlignment = !explicitLocalUiComposition
                 && !primaryLlmIntentProviderFailure
                 && llmResourceSelectionOverriddenByPromptAlignment(
@@ -648,6 +649,7 @@ public class AgenticAuthoringIntentResolverService {
         boolean llmResourceSelectionOverriddenByGovernedRanking = !explicitLocalUiComposition
                 && !primaryLlmIntentProviderFailure
                 && llmResourceSelectionOverriddenByGovernedRanking(
+                        request,
                         llmIntent,
                         candidates,
                         selectedCandidate,
@@ -995,7 +997,12 @@ public class AgenticAuthoringIntentResolverService {
             }
         }
         AgenticAuthoringCandidate dedicatedProjectionCandidate =
-                strongerDedicatedProjectionCandidateForSemanticNeed(prompt, artifactKind, selectedCandidate, candidates);
+                strongerDedicatedProjectionCandidateForGovernedNeed(
+                        request,
+                        prompt,
+                        artifactKind,
+                        selectedCandidate,
+                        candidates);
         if (!explicitLocalUiComposition
                 && !primaryLlmIntentProviderFailure
                 && dedicatedProjectionCandidate != null
@@ -2558,8 +2565,7 @@ public class AgenticAuthoringIntentResolverService {
                 || candidates == null
                 || candidates.isEmpty()
                 || !hasLlmAuthoredMaterializableResourceFocus(request)
-                || semanticResourceNeed(prompt, artifactKind) != SemanticResourceNeed.GENERIC_OPERATIONAL
-                || resourceSearchFocusNeed(resourceDiscoverySearchFocus(request), artifactKind)
+                || governedResourceDiscoveryNeed(request, prompt, artifactKind)
                 != SemanticResourceNeed.GENERIC_OPERATIONAL) {
             return null;
         }
@@ -2615,10 +2621,8 @@ public class AgenticAuthoringIntentResolverService {
                 && !hasEvidence(focusedCandidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE)) {
             return false;
         }
-        SemanticResourceNeed promptNeed = semanticResourceNeed(prompt, artifactKind);
-        SemanticResourceNeed focusNeed = resourceSearchFocusNeed(resourceDiscoverySearchFocus(request), artifactKind);
-        if (promptNeed != SemanticResourceNeed.GENERIC_OPERATIONAL
-                || focusNeed != SemanticResourceNeed.GENERIC_OPERATIONAL) {
+        if (governedResourceDiscoveryNeed(request, prompt, artifactKind)
+                != SemanticResourceNeed.GENERIC_OPERATIONAL) {
             return false;
         }
         if (sameCandidate(
@@ -2661,8 +2665,7 @@ public class AgenticAuthoringIntentResolverService {
                 || candidates == null
                 || candidates.isEmpty()
                 || !hasLlmAuthoredMaterializableResourceFocus(request)
-                || semanticResourceNeed(prompt, artifactKind) != SemanticResourceNeed.GENERIC_OPERATIONAL
-                || resourceSearchFocusNeed(resourceDiscoverySearchFocus(request), artifactKind)
+                || governedResourceDiscoveryNeed(request, prompt, artifactKind)
                 != SemanticResourceNeed.GENERIC_OPERATIONAL) {
             return null;
         }
@@ -2769,11 +2772,7 @@ public class AgenticAuthoringIntentResolverService {
                 || "chart".equals(valueOrDefault(artifactKind, ""))) {
             return false;
         }
-        SemanticResourceNeed promptNeed = semanticResourceNeed(prompt, artifactKind);
-        SemanticResourceNeed focusNeed = resourceSearchFocusNeed(resourceDiscoverySearchFocus(request), artifactKind);
-        SemanticResourceNeed effectiveNeed = promptNeed == SemanticResourceNeed.GENERIC_OPERATIONAL
-                ? focusNeed
-                : promptNeed;
+        SemanticResourceNeed effectiveNeed = governedResourceDiscoveryNeed(request, prompt, artifactKind);
         String expectedRole = switch (effectiveNeed) {
             case PROFILE -> SEMANTIC_ROLE_PROFILE_PROJECTION;
             case ANALYTICS -> SEMANTIC_ROLE_ANALYTICS_PROJECTION;
@@ -3569,6 +3568,7 @@ public class AgenticAuthoringIntentResolverService {
     }
 
     private AgenticAuthoringCandidate selectLlmCandidate(
+            AgenticAuthoringIntentResolutionRequest request,
             AgenticAuthoringLlmIntentResolution llmIntent,
             List<AgenticAuthoringCandidate> candidates,
             AgenticAuthoringCandidate fallback,
@@ -3588,7 +3588,12 @@ public class AgenticAuthoringIntentResolverService {
             return strongerGovernedCandidate;
         }
         AgenticAuthoringCandidate dedicatedProjectionCandidate =
-                strongerDedicatedProjectionCandidateForSemanticNeed(prompt, artifactKind, llmCandidate, candidates);
+                strongerDedicatedProjectionCandidateForGovernedNeed(
+                        request,
+                        prompt,
+                        artifactKind,
+                        llmCandidate,
+                        candidates);
         if (dedicatedProjectionCandidate != null) {
             return dedicatedProjectionCandidate;
         }
@@ -3698,6 +3703,7 @@ public class AgenticAuthoringIntentResolverService {
     }
 
     private boolean llmResourceSelectionOverriddenByGovernedRanking(
+            AgenticAuthoringIntentResolutionRequest request,
             AgenticAuthoringLlmIntentResolution llmIntent,
             List<AgenticAuthoringCandidate> candidates,
             AgenticAuthoringCandidate selectedCandidate,
@@ -3727,7 +3733,12 @@ public class AgenticAuthoringIntentResolverService {
             return true;
         }
         AgenticAuthoringCandidate dedicatedProjectionCandidate =
-                strongerDedicatedProjectionCandidateForSemanticNeed(prompt, artifactKind, llmCandidate, candidates);
+                strongerDedicatedProjectionCandidateForGovernedNeed(
+                        request,
+                        prompt,
+                        artifactKind,
+                        llmCandidate,
+                        candidates);
         return dedicatedProjectionCandidate != null && sameCandidate(dedicatedProjectionCandidate, selectedCandidate);
     }
 
@@ -3861,7 +3872,8 @@ public class AgenticAuthoringIntentResolverService {
             return null;
         }
         String materializableArtifactKind = materializableResourceDiscoveryArtifactKind(request, artifactKind);
-        if (semanticResourceNeed(prompt, materializableArtifactKind) != SemanticResourceNeed.GENERIC_OPERATIONAL) {
+        if (governedResourceDiscoveryNeed(request, prompt, materializableArtifactKind)
+                != SemanticResourceNeed.GENERIC_OPERATIONAL) {
             return null;
         }
         AgenticAuthoringCandidate focusedCandidate = resourceDiscoveryFocusedCandidate(
@@ -3911,7 +3923,8 @@ public class AgenticAuthoringIntentResolverService {
                 || candidates.isEmpty()
                 || !hasMaterializableResourceDiscoveryContext(request)
                 || !hasBusinessDataAuthoringSignal(request, prompt)
-                || semanticResourceNeed(prompt, artifactKind) != SemanticResourceNeed.GENERIC_OPERATIONAL
+                || governedResourceDiscoveryNeed(request, prompt, artifactKind)
+                != SemanticResourceNeed.GENERIC_OPERATIONAL
                 || isDomainDiscoveryScopedCandidate(request, selectedCandidate)
                 || hasEvidence(selectedCandidate, "explicit-resource-path")
                 || hasEvidence(selectedCandidate, "quick-reply-context")
@@ -3942,6 +3955,18 @@ public class AgenticAuthoringIntentResolverService {
             String artifactKind,
             AgenticAuthoringCandidate selectedCandidate,
             List<AgenticAuthoringCandidate> candidates) {
+        return strongerDedicatedProjectionCandidateForSemanticNeed(
+                semanticResourceNeed(prompt, artifactKind),
+                prompt,
+                selectedCandidate,
+                candidates);
+    }
+
+    private AgenticAuthoringCandidate strongerDedicatedProjectionCandidateForSemanticNeed(
+            SemanticResourceNeed semanticNeed,
+            String prompt,
+            AgenticAuthoringCandidate selectedCandidate,
+            List<AgenticAuthoringCandidate> candidates) {
         if (selectedCandidate == null
                 || candidates == null
                 || candidates.isEmpty()
@@ -3950,8 +3975,7 @@ public class AgenticAuthoringIntentResolverService {
                 || hasEvidence(selectedCandidate, "current-page-target-resource")) {
             return null;
         }
-        SemanticResourceNeed promptNeed = semanticResourceNeed(prompt, artifactKind);
-        String expectedRole = switch (promptNeed) {
+        String expectedRole = switch (semanticNeed) {
             case PROFILE -> SEMANTIC_ROLE_PROFILE_PROJECTION;
             case ANALYTICS -> SEMANTIC_ROLE_ANALYTICS_PROJECTION;
             default -> "";
@@ -3983,6 +4007,32 @@ public class AgenticAuthoringIntentResolverService {
                         .comparingDouble(AgenticAuthoringCandidate::score)
                         .thenComparingInt(candidate -> directPromptCandidateAlignmentScore(prompt, candidate)))
                 .orElse(null);
+    }
+
+    private AgenticAuthoringCandidate strongerDedicatedProjectionCandidateForGovernedNeed(
+            AgenticAuthoringIntentResolutionRequest request,
+            String prompt,
+            String artifactKind,
+            AgenticAuthoringCandidate selectedCandidate,
+            List<AgenticAuthoringCandidate> candidates) {
+        SemanticResourceNeed governedNeed = governedResourceDiscoveryNeed(request, prompt, artifactKind);
+        if (governedNeed == SemanticResourceNeed.GENERIC_OPERATIONAL) {
+            return null;
+        }
+        AgenticAuthoringCandidate candidate = strongerDedicatedProjectionCandidateForSemanticNeed(
+                governedNeed,
+                prompt,
+                selectedCandidate,
+                candidates);
+        if (candidate == null
+                || governedNeed != SemanticResourceNeed.ANALYTICS
+                || isWithinPrimaryEntityProjectionScope(
+                resourceDiscoverySearchFocus(request),
+                candidate,
+                candidates)) {
+            return candidate;
+        }
+        return null;
     }
 
     private boolean shouldRequireReviewForLowerRankedLlmSelection(
@@ -4146,19 +4196,22 @@ public class AgenticAuthoringIntentResolverService {
         if (focus == null || focus.isEmpty() || candidates == null || candidates.isEmpty()) {
             return null;
         }
+        SemanticResourceNeed governedNeed = governedResourceDiscoveryNeed(request, prompt, artifactKind);
         List<CandidatePromptAlignment> alignments = candidates.stream()
                 .filter(Objects::nonNull)
                 .filter(candidate -> hasResourceDiscoveryCandidate(request, candidate)
                         || hasEvidence(candidate, "tool-search-api-resources"))
                 .filter(this::hasTrustedSelectionEvidence)
                 .filter(candidate -> !isWeakLexicalCandidate(candidate))
+                .filter(candidate -> governedNeed != SemanticResourceNeed.ANALYTICS
+                        || isWithinPrimaryEntityProjectionScope(focus, candidate, candidates))
                 .map(candidate -> new CandidatePromptAlignment(
                         candidate,
                         resourceSearchFocusAlignmentScore(focus, candidate)
                                 + (isDomainDiscoveryScopedCandidate(request, candidate) ? 4 : 0)))
                 .filter(alignment -> alignment.score() >= 5)
                 .toList();
-        if (semanticResourceNeed(prompt, artifactKind) == SemanticResourceNeed.GENERIC_OPERATIONAL) {
+        if (governedNeed == SemanticResourceNeed.GENERIC_OPERATIONAL) {
             List<CandidatePromptAlignment> operationalAlignments = alignments.stream()
                     .filter(alignment -> hasEvidence(alignment.candidate(), SEMANTIC_ROLE_OPERATIONAL_RESOURCE))
                     .filter(alignment -> !isDerivedProjectionCandidate(alignment.candidate()))
@@ -4234,12 +4287,7 @@ public class AgenticAuthoringIntentResolverService {
             String artifactKind,
             AgenticAuthoringCandidate selectedCandidate,
             List<AgenticAuthoringCandidate> candidates) {
-        SemanticResourceNeed focusedNeed = resourceSearchFocusNeed(
-                resourceDiscoverySearchFocus(request),
-                artifactKind);
-        if (focusedNeed == SemanticResourceNeed.GENERIC_OPERATIONAL) {
-            focusedNeed = semanticResourceNeed(prompt, artifactKind);
-        }
+        SemanticResourceNeed focusedNeed = governedResourceDiscoveryNeed(request, prompt, artifactKind);
         SemanticResourceNeed effectiveFocusedNeed = focusedNeed;
         if (focusedNeed == SemanticResourceNeed.GENERIC_OPERATIONAL
                 || candidates == null
@@ -4255,6 +4303,11 @@ public class AgenticAuthoringIntentResolverService {
                 .filter(candidate -> effectiveFocusedNeed == SemanticResourceNeed.PROFILE
                         ? hasEvidence(candidate, SEMANTIC_ROLE_PROFILE_PROJECTION)
                         : hasEvidence(candidate, SEMANTIC_ROLE_ANALYTICS_PROJECTION))
+                .filter(candidate -> effectiveFocusedNeed != SemanticResourceNeed.ANALYTICS
+                        || isWithinPrimaryEntityProjectionScope(
+                        resourceDiscoverySearchFocus(request),
+                        candidate,
+                        candidates))
                 .map(candidate -> new CandidatePromptAlignment(
                         candidate,
                         resourceSearchFocusAlignmentScore(resourceDiscoverySearchFocus(request), candidate)))
@@ -4363,11 +4416,7 @@ public class AgenticAuthoringIntentResolverService {
                 || sameCandidate(selectedCandidate, focusedCandidate)) {
             return false;
         }
-        SemanticResourceNeed promptNeed = semanticResourceNeed(prompt, artifactKind);
-        SemanticResourceNeed focusNeed = resourceSearchFocusNeed(resourceDiscoverySearchFocus(request), artifactKind);
-        SemanticResourceNeed effectiveNeed = promptNeed == SemanticResourceNeed.GENERIC_OPERATIONAL
-                ? focusNeed
-                : promptNeed;
+        SemanticResourceNeed effectiveNeed = governedResourceDiscoveryNeed(request, prompt, artifactKind);
         if (effectiveNeed == SemanticResourceNeed.PROFILE) {
             if (isDedicatedProjectionCandidate(selectedCandidate, SEMANTIC_ROLE_PROFILE_PROJECTION)
                     && isMixedOperationalProjectionCandidate(focusedCandidate, SEMANTIC_ROLE_PROFILE_PROJECTION)) {
@@ -4395,11 +4444,7 @@ public class AgenticAuthoringIntentResolverService {
         if (candidate == null) {
             return false;
         }
-        SemanticResourceNeed promptNeed = semanticResourceNeed(prompt, artifactKind);
-        SemanticResourceNeed focusNeed = resourceSearchFocusNeed(resourceDiscoverySearchFocus(request), artifactKind);
-        SemanticResourceNeed effectiveNeed = promptNeed == SemanticResourceNeed.GENERIC_OPERATIONAL
-                ? focusNeed
-                : promptNeed;
+        SemanticResourceNeed effectiveNeed = governedResourceDiscoveryNeed(request, prompt, artifactKind);
         return effectiveNeed == SemanticResourceNeed.PROFILE
                 && hasEvidence(candidate, SEMANTIC_ROLE_PROFILE_PROJECTION)
                 || effectiveNeed == SemanticResourceNeed.ANALYTICS
@@ -4429,6 +4474,20 @@ public class AgenticAuthoringIntentResolverService {
         return focusedNeed == SemanticResourceNeed.PROFILE || focusedNeed == SemanticResourceNeed.ANALYTICS;
     }
 
+    private SemanticResourceNeed governedResourceDiscoveryNeed(
+            AgenticAuthoringIntentResolutionRequest request,
+            String prompt,
+            String artifactKind) {
+        AgenticAuthoringResourceSearchFocus focus = resourceDiscoverySearchFocus(request);
+        if (focus != null && !focus.isEmpty()) {
+            // The structured focus was authored by the LLM before candidate retrieval. It decides
+            // the source role; local text matching only grounds and ranks candidates inside that
+            // semantic decision. The raw prompt is a fallback only when no governed focus exists.
+            return resourceSearchFocusNeed(focus, artifactKind);
+        }
+        return semanticResourceNeed(prompt, artifactKind);
+    }
+
     private AgenticAuthoringResourceSearchFocus resourceDiscoverySearchFocus(
             AgenticAuthoringIntentResolutionRequest request) {
         JsonNode focus = request == null || request.contextHints() == null
@@ -4454,7 +4513,7 @@ public class AgenticAuthoringIntentResolverService {
                 jsonText(focus, "rationale"));
     }
 
-    private int resourceSearchFocusAlignmentScore(
+    private int primaryBusinessEntityAlignmentScore(
             AgenticAuthoringResourceSearchFocus focus,
             AgenticAuthoringCandidate candidate) {
         if (focus == null || focus.isEmpty() || candidate == null) {
@@ -4462,6 +4521,35 @@ public class AgenticAuthoringIntentResolverService {
         }
         int score = directPromptCandidateAlignmentScore(focus.primaryBusinessEntity(), candidate) * 2;
         score += terminalResourceSegmentAlignmentScore(focus.primaryBusinessEntity(), candidate) * 3;
+        return score;
+    }
+
+    private boolean isWithinPrimaryEntityProjectionScope(
+            AgenticAuthoringResourceSearchFocus focus,
+            AgenticAuthoringCandidate candidate,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (focus == null || focus.isEmpty() || candidate == null || candidates == null || candidates.isEmpty()) {
+            return true;
+        }
+        int bestAlignment = candidates.stream()
+                .filter(Objects::nonNull)
+                .mapToInt(value -> primaryBusinessEntityAlignmentScore(focus, value))
+                .max()
+                .orElse(0);
+        if (bestAlignment <= 0) {
+            return true;
+        }
+        int minimumAlignment = Math.max(1, bestAlignment - PRIMARY_ENTITY_PROJECTION_ALIGNMENT_TOLERANCE);
+        return primaryBusinessEntityAlignmentScore(focus, candidate) >= minimumAlignment;
+    }
+
+    private int resourceSearchFocusAlignmentScore(
+            AgenticAuthoringResourceSearchFocus focus,
+            AgenticAuthoringCandidate candidate) {
+        if (focus == null || focus.isEmpty() || candidate == null) {
+            return 0;
+        }
+        int score = primaryBusinessEntityAlignmentScore(focus, candidate);
         for (String concept : focus.supportingConcepts()) {
             score += directPromptCandidateAlignmentScore(concept, candidate);
         }
@@ -4541,9 +4629,18 @@ public class AgenticAuthoringIntentResolverService {
         if (isOperationalTrackingFocus(focusText)) {
             return SemanticResourceNeed.GENERIC_OPERATIONAL;
         }
-        SemanticResourceNeed surfaceNeed = semanticResourceNeed(
-                String.join(" ", desiredSurface, valueOrDefault(focus.rationale(), "")),
-                artifactKind);
+        // desiredSurface is LLM-authored semantic evidence. Generic supporting concepts
+        // such as charts or metrics may refine an overview, but must not silently replace
+        // its primary operational entity with a related analytical projection.
+        if (isOperationalOverviewSurface(desiredSurface)) {
+            return SemanticResourceNeed.GENERIC_OPERATIONAL;
+        }
+        SemanticResourceNeed surfaceNeed = semanticResourceNeed(desiredSurface, artifactKind);
+        if (surfaceNeed == SemanticResourceNeed.GENERIC_OPERATIONAL) {
+            surfaceNeed = semanticResourceNeed(
+                    String.join(" ", desiredSurface, valueOrDefault(focus.rationale(), "")),
+                    artifactKind);
+        }
         if (surfaceNeed != SemanticResourceNeed.GENERIC_OPERATIONAL) {
             return surfaceNeed;
         }
@@ -4566,10 +4663,22 @@ public class AgenticAuthoringIntentResolverService {
                 "soma", "somatorio", "somatória", "media", "média", "aggregate", "aggregated", "average")) {
             return SemanticResourceNeed.ANALYTICS;
         }
-        if (containsAny(desiredSurface, "acompanhar", "acompanhamento", "overview", "visao geral", "visão geral")) {
-            return SemanticResourceNeed.GENERIC_OPERATIONAL;
-        }
         return SemanticResourceNeed.GENERIC_OPERATIONAL;
+    }
+
+    private boolean isOperationalOverviewSurface(String desiredSurface) {
+        String normalized = normalize(desiredSurface);
+        if (containsAny(normalized, "perfil", "profile", "ficha", "individual")) {
+            return false;
+        }
+        boolean collectionDashboard360 = containsAny(normalized,
+                "dashboard 360", "painel 360", "360 dashboard", "360 panel")
+                && containsAny(normalized,
+                "filtro", "filtros", "filter", "filters",
+                "tabela", "table", "lista", "list", "colecao", "collection",
+                "detalhe", "detalhes", "detail", "details");
+        return collectionDashboard360 || containsAny(normalized,
+                "acompanhar", "acompanhamento", "overview", "visao geral", "visão geral");
     }
 
     private boolean isOperationalTrackingFocus(String focusText) {
@@ -5088,17 +5197,36 @@ public class AgenticAuthoringIntentResolverService {
                 && !schemaUrl.contains("/stats/");
     }
 
-    private String semanticRawPrompt(AgenticAuthoringIntentResolutionRequest request, String rawPrompt) {
+    String semanticRawPrompt(AgenticAuthoringIntentResolutionRequest request, String rawPrompt) {
         List<AgenticAuthoringConversationMessage> messages =
                 request == null || request.conversationMessages() == null
                         ? List.of()
                         : request.conversationMessages();
-        String userConversation = messages.stream()
+        List<String> userMessages = new ArrayList<>(messages.stream()
                 .filter(message -> message != null && "user".equalsIgnoreCase(valueOrDefault(message.role(), "")))
                 .map(AgenticAuthoringConversationMessage::text)
                 .filter(Objects::nonNull)
-                .collect(Collectors.joining(" "));
+                .map(String::trim)
+                .filter(message -> !message.isBlank())
+                .toList());
+        String currentPrompt = valueOrDefault(rawPrompt, "");
+        if (!userMessages.isEmpty()
+                && sameTransportPrompt(userMessages.get(userMessages.size() - 1), currentPrompt)) {
+            // Transport deduplication only: this never classifies or routes the user's intent.
+            userMessages.remove(userMessages.size() - 1);
+        }
+        String userConversation = String.join(" ", userMessages);
         return String.join(" ", valueOrDefault(rawPrompt, ""), userConversation).trim();
+    }
+
+    private boolean sameTransportPrompt(String left, String right) {
+        String compactLeft = compactTransportPrompt(left);
+        String compactRight = compactTransportPrompt(right);
+        return !compactLeft.isBlank() && compactLeft.equalsIgnoreCase(compactRight);
+    }
+
+    private String compactTransportPrompt(String value) {
+        return value == null ? "" : value.trim().replaceAll("\\s+", " ");
     }
 
     private boolean isWriteCandidate(AgenticAuthoringCandidate candidate) {

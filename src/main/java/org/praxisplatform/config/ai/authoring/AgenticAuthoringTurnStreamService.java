@@ -62,6 +62,7 @@ public class AgenticAuthoringTurnStreamService {
     private static final int WORKER_MAX_POOL_SIZE = 16;
     private static final int WORKER_QUEUE_CAPACITY = 500;
     private static final int SCHEDULER_POOL_SIZE = 2;
+    private static final long TERMINAL_TOMBSTONE_SECONDS = 60L;
     private static final String REQUEST_FINGERPRINT_SCHEMA_VERSION =
             "praxis-agentic-authoring-turn-request-fingerprint.v1";
     private static final String IDEMPOTENCY_CONFLICT_REASON =
@@ -89,6 +90,7 @@ public class AgenticAuthoringTurnStreamService {
     private final Map<UUID, ScheduledFuture<?>> heartbeatTasks = new ConcurrentHashMap<>();
     private final Map<UUID, ScheduledFuture<?>> processingTimeoutTasks = new ConcurrentHashMap<>();
     private final Map<UUID, ScheduledFuture<?>> processingProgressTasks = new ConcurrentHashMap<>();
+    private final Map<UUID, ScheduledFuture<?>> terminalCleanupTasks = new ConcurrentHashMap<>();
     private final Map<UUID, Future<?>> processingTasks = new ConcurrentHashMap<>();
     private final Map<UUID, Instant> streamStartedAtByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicBoolean> terminalByStream = new ConcurrentHashMap<>();
@@ -512,7 +514,7 @@ public class AgenticAuthoringTurnStreamService {
         emittersByStream.getOrDefault(streamId, Set.of()).forEach(emitter -> send(emitter, event));
         if (turnEventService.isTerminalType(type)) {
             markObservationTerminal(streamId, threadId, turnId, type, payload);
-            complete(streamId);
+            completeStreamResources(streamId);
         }
         return new StreamAppendResult(event, true);
     }
@@ -555,7 +557,7 @@ public class AgenticAuthoringTurnStreamService {
             } catch (Exception ex) {
                 log.warn("[AgenticAuthoringTurnStreamService] Failed to append timeout event: {}", ex.getMessage());
             } finally {
-                complete(streamId);
+                completeStreamResources(streamId);
             }
         }, timeoutSeconds, TimeUnit.SECONDS);
         processingTimeoutTasks.put(streamId, task);
@@ -880,6 +882,12 @@ public class AgenticAuthoringTurnStreamService {
     }
 
     private void complete(UUID streamId) {
+        cancelProcessing(streamId, false);
+        completeStreamResources(streamId);
+        clearTerminalState(streamId);
+    }
+
+    private void completeStreamResources(UUID streamId) {
         ScheduledFuture<?> processingTimeoutTask = processingTimeoutTasks.remove(streamId);
         if (processingTimeoutTask != null) {
             processingTimeoutTask.cancel(false);
@@ -887,10 +895,6 @@ public class AgenticAuthoringTurnStreamService {
         ScheduledFuture<?> processingProgressTask = processingProgressTasks.remove(streamId);
         if (processingProgressTask != null) {
             processingProgressTask.cancel(false);
-        }
-        Future<?> processingTask = processingTasks.remove(streamId);
-        if (processingTask != null && !processingTask.isDone()) {
-            processingTask.cancel(false);
         }
         stopHeartbeat(streamId);
         ScheduledFuture<?> replayTask = replayTasks.remove(streamId);
@@ -903,9 +907,35 @@ public class AgenticAuthoringTurnStreamService {
         }
         replayCursorByStream.remove(streamId);
         streamStartedAtByStream.remove(streamId);
+        releaseCapacityPermit(streamId);
+        scheduleTerminalStateCleanup(streamId);
+    }
+
+    private void scheduleTerminalStateCleanup(UUID streamId) {
+        if (streamId == null || !terminalByStream.containsKey(streamId)) {
+            return;
+        }
+        if (scheduler.isShutdown()) {
+            clearTerminalState(streamId);
+            return;
+        }
+        try {
+            terminalCleanupTasks.computeIfAbsent(streamId, ignored -> scheduler.schedule(
+                    () -> clearTerminalState(streamId),
+                    TERMINAL_TOMBSTONE_SECONDS,
+                    TimeUnit.SECONDS));
+        } catch (RejectedExecutionException ex) {
+            clearTerminalState(streamId);
+        }
+    }
+
+    private void clearTerminalState(UUID streamId) {
+        ScheduledFuture<?> cleanupTask = terminalCleanupTasks.remove(streamId);
+        if (cleanupTask != null) {
+            cleanupTask.cancel(false);
+        }
         terminalByStream.remove(streamId);
         latestEventByStream.remove(streamId);
-        releaseCapacityPermit(streamId);
     }
 
     private void cancelProcessing(UUID streamId, boolean mayInterruptIfRunning) {
@@ -1070,6 +1100,8 @@ public class AgenticAuthoringTurnStreamService {
     void shutdown() {
         heartbeatTasks.values().forEach(task -> task.cancel(true));
         heartbeatTasks.clear();
+        terminalCleanupTasks.values().forEach(task -> task.cancel(true));
+        terminalCleanupTasks.clear();
         executor.shutdownNow();
         scheduler.shutdownNow();
     }

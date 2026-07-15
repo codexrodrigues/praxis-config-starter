@@ -2,7 +2,17 @@ package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -26,6 +36,9 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private static final int MAX_TRIGGER_TERMS = 18;
     private static final int MAX_OPERATION_CAPABILITIES = 16;
     private static final long DEFAULT_CACHE_TTL_MS = 300_000L;
+    private static final long DEFAULT_REGISTRY_LOAD_TIMEOUT_MS = 5_000L;
+    private static final int REGISTRY_LOAD_QUEUE_CAPACITY = 1;
+    private static final AtomicInteger REGISTRY_LOADER_SEQUENCE = new AtomicInteger();
 
     private final AgenticAuthoringFormCapabilityCatalog formCatalog = AgenticAuthoringFormCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringTableCapabilityCatalog tableCatalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;
@@ -34,6 +47,8 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private final AiRegistryRepository aiRegistryRepository;
     private final ObjectMapper objectMapper;
     private final long cacheTtlMs;
+    private final long registryLoadTimeoutMs;
+    private final ThreadPoolExecutor registryLoadExecutor;
     private volatile CachedCapabilities cachedCapabilities;
 
     public AgenticAuthoringComponentCapabilitiesService() {
@@ -50,9 +65,23 @@ public class AgenticAuthoringComponentCapabilitiesService {
             AiRegistryRepository aiRegistryRepository,
             ObjectMapper objectMapper,
             long cacheTtlMs) {
+        this(
+                aiRegistryRepository,
+                objectMapper,
+                cacheTtlMs,
+                DEFAULT_REGISTRY_LOAD_TIMEOUT_MS);
+    }
+
+    AgenticAuthoringComponentCapabilitiesService(
+            AiRegistryRepository aiRegistryRepository,
+            ObjectMapper objectMapper,
+            long cacheTtlMs,
+            long registryLoadTimeoutMs) {
         this.aiRegistryRepository = aiRegistryRepository;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
         this.cacheTtlMs = Math.max(0L, cacheTtlMs);
+        this.registryLoadTimeoutMs = Math.max(1L, registryLoadTimeoutMs);
+        this.registryLoadExecutor = aiRegistryRepository == null ? null : createRegistryLoadExecutor();
     }
 
     public AgenticAuthoringComponentCapabilitiesResult listCapabilities() {
@@ -81,13 +110,20 @@ public class AgenticAuthoringComponentCapabilitiesService {
         cachedCapabilities = null;
     }
 
+    AgenticAuthoringComponentCapabilitiesResult listBuiltInCapabilities() {
+        return new AgenticAuthoringComponentCapabilitiesResult(
+                RESULT_VERSION,
+                List.of(
+                        toCatalog(formCatalog.componentId(), formCatalog.version(), formCatalog.capabilities()),
+                        toCatalog(tableCatalog.componentId(), tableCatalog.version(), tableCatalog.capabilities()),
+                        toCatalog(chartCatalog.componentId(), chartCatalog.version(), chartCatalog.capabilities()),
+                        toCatalog(filterCatalog.componentId(), filterCatalog.version(), filterCatalog.capabilities())));
+    }
+
     private AgenticAuthoringComponentCapabilitiesResult buildCapabilities() {
         Map<String, AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> catalogs =
                 new LinkedHashMap<>();
-        putCatalog(catalogs, toCatalog(formCatalog.componentId(), formCatalog.version(), formCatalog.capabilities()));
-        putCatalog(catalogs, toCatalog(tableCatalog.componentId(), tableCatalog.version(), tableCatalog.capabilities()));
-        putCatalog(catalogs, toCatalog(chartCatalog.componentId(), chartCatalog.version(), chartCatalog.capabilities()));
-        putCatalog(catalogs, toCatalog(filterCatalog.componentId(), filterCatalog.version(), filterCatalog.capabilities()));
+        listBuiltInCapabilities().catalogs().forEach(catalog -> putCatalog(catalogs, catalog));
         registryCatalogs().forEach(catalog -> putCatalog(catalogs, catalog));
         return new AgenticAuthoringComponentCapabilitiesResult(
                 RESULT_VERSION,
@@ -125,23 +161,73 @@ public class AgenticAuthoringComponentCapabilitiesService {
     }
 
     private List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> registryCatalogs() {
-        if (aiRegistryRepository == null) {
+        if (aiRegistryRepository == null || registryLoadExecutor == null) {
             return List.of();
         }
+        Future<List<AiRegistry>> registryLoad;
         try {
-            return aiRegistryRepository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+            registryLoad = registryLoadExecutor.submit(() ->
+                    aiRegistryRepository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
                             REGISTRY_TYPE_COMPONENT_DEF,
                             COMPONENT_DEF_COMPONENT_TYPE,
                             Scope.SYSTEM,
-                            SYSTEM_SCOPE_KEY)
-                    .stream()
+                            SYSTEM_SCOPE_KEY));
+        } catch (RejectedExecutionException ex) {
+            log.warn("Governed component capability loading is saturated; using built-in authoring catalogs only.");
+            return List.of();
+        }
+        try {
+            List<AiRegistry> registries = registryLoad.get(registryLoadTimeoutMs, TimeUnit.MILLISECONDS);
+            return (registries == null ? List.<AiRegistry>of() : registries).stream()
                     .map(this::toRegistryCatalog)
                     .filter(Objects::nonNull)
                     .toList();
-        } catch (RuntimeException ex) {
-            log.warn("Failed to load governed component capabilities from ai_registry; using built-in authoring catalogs only.", ex);
+        } catch (TimeoutException ex) {
+            registryLoad.cancel(true);
+            registryLoadExecutor.purge();
+            log.warn(
+                    "Governed component capability loading exceeded {} ms; using built-in authoring catalogs only.",
+                    registryLoadTimeoutMs);
+            return List.of();
+        } catch (InterruptedException ex) {
+            registryLoad.cancel(true);
+            registryLoadExecutor.purge();
+            Thread.currentThread().interrupt();
+            log.warn("Governed component capability loading was interrupted; using built-in authoring catalogs only.");
+            return List.of();
+        } catch (ExecutionException | RuntimeException ex) {
+            log.warn(
+                    "Failed to load governed component capabilities from ai_registry; using built-in authoring catalogs only.",
+                    ex.getCause() == null ? ex : ex.getCause());
             return List.of();
         }
+    }
+
+    @PreDestroy
+    void shutdown() {
+        if (registryLoadExecutor != null) {
+            registryLoadExecutor.shutdownNow();
+        }
+    }
+
+    private ThreadPoolExecutor createRegistryLoadExecutor() {
+        ThreadFactory threadFactory = runnable -> {
+            Thread thread = new Thread(
+                    runnable,
+                    "agentic-component-capabilities-registry-" + REGISTRY_LOADER_SEQUENCE.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        };
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                1,
+                1,
+                30L,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(REGISTRY_LOAD_QUEUE_CAPACITY),
+                threadFactory,
+                new ThreadPoolExecutor.AbortPolicy());
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
     }
 
     private AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog toRegistryCatalog(AiRegistry registry) {

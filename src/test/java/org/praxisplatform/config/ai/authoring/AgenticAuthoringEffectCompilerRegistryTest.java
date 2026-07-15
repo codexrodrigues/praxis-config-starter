@@ -2293,6 +2293,51 @@ class AgenticAuthoringEffectCompilerRegistryTest {
     }
 
     @Test
+    void shouldCompilePointClickThroughTheCanonicalStructuredEventHandler() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "bar",
+                    "source": { "kind": "derived" },
+                    "dimensions": [{ "field": "department" }],
+                    "metrics": [{ "field": "headcount", "aggregation": "count" }]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        assertThat(registry.supportsDomainPatchHandler("chart-event-point-click-configure")).isTrue();
+
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operationWithHandler(
+                        "pointClick.configure",
+                        "pointClick",
+                        "x-ui-chart-events-point-click",
+                        false,
+                        "compile-domain-patch",
+                        "chart-event-point-click-configure",
+                        "chartDocument.events.pointClick"),
+                plan("{}", "{ \"event\": \"pointClick\", \"action\": \"filter-widget\", \"target\": \"employees-filter\", \"mapping\": { \"department\": \"department\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        JsonNode patchOperation = patchOperations.get(0);
+        assertThat(patchOperation.path("op").asText()).isEqualTo("configure-chart-point-click-event");
+        assertThat(patchOperation.path("path").asText()).isEqualTo("chartDocument.events.pointClick");
+        assertThat(patchOperation.path("value").has("event")).isFalse();
+        assertThat(patchOperation.path("value").path("action").asText()).isEqualTo("filter-widget");
+        assertThat(proposedConfig.path("chartDocument").path("events").path("pointClick"))
+                .isEqualTo(patchOperation.path("value"));
+    }
+
+    @Test
     void shouldRejectChartDomainCompilerWritesOutsideAffectedPaths() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {

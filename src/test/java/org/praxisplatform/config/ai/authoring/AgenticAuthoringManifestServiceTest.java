@@ -670,7 +670,8 @@ class AgenticAuthoringManifestServiceTest {
                       {
                         "id": "orders-filter",
                         "kind": "filter-widget",
-                        "supportedActions": ["filter-widget"],
+                        "actions": ["filter-widget"],
+                        "events": ["crossFilter"],
                         "inputFields": [{ "field": "month" }]
                       }
                     ]
@@ -753,6 +754,98 @@ class AgenticAuthoringManifestServiceTest {
                         "validator stats-operation-supported failed for data.resource.bind: required stats capabilities are unavailable for /api/sales/orders",
                         "validator chart-fields-exist failed for data.resource.bind: required field catalog is unavailable",
                         "validator event-target-governed failed for crossFilter.configure: required event target catalog is unavailable");
+    }
+
+    @Test
+    void compilesPointClickKeepsConfigAuthoritativeAndRejectsUnsupportedStatsFilterExpression() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-chart",
+                chartPayload());
+        JsonNode pointClickRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "chartDocument": {
+                      "version": "0.1.0",
+                      "kind": "bar",
+                      "source": { "kind": "praxis.stats", "resource": "/api/hr/employees" },
+                      "dimensions": [{ "field": "department" }],
+                      "metrics": [{ "field": "headcount", "aggregation": "count" }]
+                    }
+                  },
+                  "validationContext": {
+                    "availableTargets": [
+                      {
+                        "id": "employees-filter",
+                        "kind": "widget",
+                        "actions": ["filter-widget"],
+                        "events": ["pointClick"]
+                      }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "pointClick.configure",
+                    "input": {
+                      "action": "filter-widget",
+                      "target": "employees-filter"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult compiled = service.compilePatch(
+                "praxis-chart",
+                objectMapper.treeToValue(pointClickRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(compiled.compiled()).isTrue();
+        assertThat(compiled.failures()).isEmpty();
+        assertThat(compiled.warnings()).isEmpty();
+        JsonNode pointClick = compiled.patch()
+                .path("proposedConfig")
+                .path("chartDocument")
+                .path("events")
+                .path("pointClick");
+        assertThat(pointClick.path("action").asText()).isEqualTo("filter-widget");
+        assertThat(pointClick.path("target").asText()).isEqualTo("employees-filter");
+        assertThat(compiled.patch().path("proposedConfig").has("availableTargets")).isFalse();
+        assertThat(compiled.patch().path("proposedConfig").has("validationContext")).isFalse();
+
+        JsonNode queryContextRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "chartDocument": {
+                      "version": "0.1.0",
+                      "kind": "bar",
+                      "source": { "kind": "praxis.stats", "resource": "/api/hr/employees" },
+                      "dimensions": [{ "field": "department" }],
+                      "metrics": [{ "field": "headcount", "aggregation": "count" }]
+                    }
+                  },
+                  "validationContext": {
+                    "chartDocument": {
+                      "source": { "kind": "derived" }
+                    }
+                  },
+                  "plan": {
+                    "operationId": "queryContext.set",
+                    "input": {
+                      "filterExpression": {
+                        "kind": "condition",
+                        "field": "status",
+                        "operator": "eq",
+                        "value": "ACTIVE"
+                      }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult rejected = service.validateEditPlan(
+                "praxis-chart",
+                objectMapper.treeToValue(queryContextRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(rejected.valid()).isFalse();
+        assertThat(rejected.failures())
+                .contains("validator query-context-filter-expression-stats-unsupported failed for queryContext.set: praxis.stats does not support queryContext.filterExpression");
     }
 
     @Test
@@ -2336,6 +2429,8 @@ class AgenticAuthoringManifestServiceTest {
                         "editableTargets": [
                           { "kind": "dataBinding", "resolver": "chart-config" },
                           { "kind": "series", "resolver": "chart-config" },
+                          { "kind": "queryContext", "resolver": "praxis-chart-query-context" },
+                          { "kind": "pointClick", "resolver": "x-ui-chart-events-point-click" },
                           { "kind": "crossFilter", "resolver": "chart-config" }
                         ],
                         "operations": [
@@ -2395,6 +2490,70 @@ class AgenticAuthoringManifestServiceTest {
                             "submissionImpact": "visual-only"
                           },
                           {
+                            "operationId": "queryContext.set",
+                            "target": {
+                              "kind": "queryContext",
+                              "resolver": "praxis-chart-query-context",
+                              "ambiguityPolicy": "fail",
+                              "required": false
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "properties": {
+                                "filters": { "type": "object" },
+                                "filterExpression": { "type": "object" },
+                                "sort": { "type": "array", "items": { "type": "string" } },
+                                "limit": { "type": "number" },
+                                "page": { "type": "object" },
+                                "meta": { "type": "object" }
+                              }
+                            },
+                            "effects": [
+                              { "kind": "set-value", "path": "queryContext" }
+                            ],
+                            "affectedPaths": ["queryContext"],
+                            "preconditions": ["config-initialized"],
+                            "validators": [
+                              "query-context-structured",
+                              "query-context-filter-expression-stats-unsupported",
+                              "query-context-fields-exist",
+                              "query-context-safe-values",
+                              "editor-runtime-round-trip"
+                            ],
+                            "submissionImpact": "affects-schema-backed-data"
+                          },
+                          {
+                            "operationId": "pointClick.configure",
+                            "target": {
+                              "kind": "pointClick",
+                              "resolver": "x-ui-chart-events-point-click",
+                              "ambiguityPolicy": "fail",
+                              "required": false
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "required": ["action"],
+                              "properties": {
+                                "action": { "enum": ["filter-widget", "open-detail", "navigate", "update-context", "emit"] },
+                                "target": { "type": "string" },
+                                "mapping": { "type": "object", "additionalProperties": { "type": "string" } }
+                              }
+                            },
+                            "effects": [
+                              { "kind": "compile-domain-patch", "handler": "chart-event-point-click-configure" }
+                            ],
+                            "affectedPaths": ["chartDocument.events.pointClick"],
+                            "preconditions": ["config-initialized"],
+                            "validators": [
+                              "point-click-action-structured",
+                              "event-target-governed",
+                              "event-mapping-fields-exist",
+                              "event-action-supported",
+                              "editor-runtime-round-trip"
+                            ],
+                            "submissionImpact": "affects-schema-backed-data"
+                          },
+                          {
                             "operationId": "crossFilter.configure",
                             "target": {
                               "kind": "crossFilter",
@@ -2430,9 +2589,15 @@ class AgenticAuthoringManifestServiceTest {
                           { "validatorId": "bound-fields-exist" },
                           { "validatorId": "series-field-exists" },
                           { "validatorId": "series-field-aggregable" },
+                          { "validatorId": "query-context-structured" },
+                          { "validatorId": "query-context-filter-expression-stats-unsupported" },
+                          { "validatorId": "query-context-fields-exist" },
+                          { "validatorId": "query-context-safe-values" },
+                          { "validatorId": "point-click-action-structured" },
                           { "validatorId": "event-target-governed" },
                           { "validatorId": "event-action-supported" },
-                          { "validatorId": "event-mapping-fields-exist" }
+                          { "validatorId": "event-mapping-fields-exist" },
+                          { "validatorId": "editor-runtime-round-trip" }
                         ]
                       }
                     }

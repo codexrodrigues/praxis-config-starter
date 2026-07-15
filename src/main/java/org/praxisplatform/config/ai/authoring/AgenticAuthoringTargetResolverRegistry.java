@@ -75,6 +75,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "x-ui-chart-dimension-or-metric-axis",
             "x-ui-chart-source-and-field-catalog",
             "praxis-chart-query-context",
+            "x-ui-chart-events-point-click",
             "x-ui-chart-events-cross-filter",
             "x-ui-chart-events-drill-down",
             "x-ui-chart-events-selection-change",

@@ -76,14 +76,23 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("without keyword routing")
                 .contains("vague, misspelled, colloquial, multilingual")
                 .contains("use it as semantic context for retrievalQuery")
+                .contains("primaryBusinessEntity is the canonical")
+                .contains("collection-oriented dashboard")
+                .contains("depends on multiple coordinated analytical")
+                .contains("where analytics are not the dominant requested outcome")
+                .contains("individual or single-record profile")
+                .contains("payroll, is itself requested")
                 .contains("domainDiscovery")
                 .contains("human-resources.funcionarios");
         assertThat(promptCaptor.getValue()).doesNotContain("\n  \"");
         assertThat(schemaCaptor.getValue().jsonSchema())
                 .contains("shouldRetrieveGovernedResources")
-                .contains("retrievalQuery");
+                .contains("retrievalQuery")
+                .contains("Canonical business subject explicitly requested by the user")
+                .contains("Dimensions, fields, filters, groupings")
+                .contains("collection dashboard with filters, charts, and a detail table");
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(7);
-        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(320);
+        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(640);
     }
 
     @Test
@@ -352,6 +361,88 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         assertThat(payload.retrievalQuery())
                 .contains("primary business entity: pessoas da empresa")
                 .contains("semantic query: funcionarios colaboradores recursos humanos pessoas da empresa");
+        verify(providerManagementService, times(2)).generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
+    void retriesInvalidStructuredOutputInsteadOfTreatingItAsNoToolDecision() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(null)
+                .thenReturn(objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "shouldRetrieveGovernedResources": true,
+                  "artifactKind": "dashboard",
+                  "retrievalQuery": "funcionarios por cargo e departamento",
+                  "resourceSearchFocus": {
+                    "primaryBusinessEntity": "funcionarios",
+                    "supportingConcepts": ["cargo", "departamento"],
+                    "desiredSurface": "dashboard de colecao",
+                    "uncertainty": "",
+                    "rationale": "O pedido governa funcionarios, não uma projecao analitica relacionada."
+                  },
+                  "reason": "O dashboard depende da fonte governada de funcionarios."
+                }
+                """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        7,
+                        2,
+                        0L);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("quero um painel 360 dos funcionarios por cargo e departamento"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.skipReason()).isBlank();
+        verify(providerManagementService, times(2)).generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
+    void failsClosedWhenStructuredPlanningOutputRemainsInvalid() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(null);
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        7,
+                        2,
+                        0L);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("quero um painel 360 dos funcionarios"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isFalse();
+        assertThat(result.skipReason()).isEqualTo("provider-error");
+        assertThat(result.errorCode()).isEqualTo("IllegalStateException");
         verify(providerManagementService, times(2)).generateJson(
                 any(),
                 any(),

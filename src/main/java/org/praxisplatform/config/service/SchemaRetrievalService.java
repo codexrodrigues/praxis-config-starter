@@ -42,6 +42,15 @@ public class SchemaRetrievalService {
     }
 
     public SchemaFetchResult fetchSchemaResult(AiSchemaContext context, String requestBaseUrl) {
+        return fetchSchemaResult(context, requestBaseUrl, null, null, null);
+    }
+
+    public SchemaFetchResult fetchSchemaResult(
+            AiSchemaContext context,
+            String requestBaseUrl,
+            String tenantId,
+            String userId,
+            String environment) {
         if (context == null || context.getPath() == null
                 || context.getOperation() == null || context.getSchemaType() == null) {
             return failure(
@@ -66,12 +75,14 @@ public class SchemaRetrievalService {
             HttpClient client = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofMillis(Math.max(1000, timeoutMs)))
                     .build();
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest.Builder request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .timeout(Duration.ofMillis(Math.max(1000, timeoutMs)))
-                    .GET()
-                    .build();
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                    .GET();
+            addHeader(request, "X-Tenant-ID", tenantId);
+            addHeader(request, "X-User-ID", userId);
+            addHeader(request, "X-Env", environment);
+            HttpResponse<String> response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 400) {
                 return failure(
                         classifyStatus(response.statusCode()),
@@ -145,6 +156,12 @@ public class SchemaRetrievalService {
 
     private String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private void addHeader(HttpRequest.Builder request, String name, String value) {
+        if (value != null && !value.isBlank()) {
+            request.header(name, value.trim());
+        }
     }
 
     private SchemaFetchResult.Status classifyStatus(int statusCode) {

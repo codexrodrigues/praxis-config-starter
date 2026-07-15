@@ -270,6 +270,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         if (request == null
                 || request.pendingClarification() != null
                 || request.activeSemanticDecision() != null
+                || forceFullIntentResolution(request)
                 || hasConversationHistoryBeyondCurrentPrompt(request, effectivePrompt)) {
             return false;
         }
@@ -502,6 +503,20 @@ public class AgenticAuthoringLlmIntentResolverService {
         if (authoringScopePolicy != null) {
             context.set("authoringScopePolicy", authoringScopePolicy);
         }
+        JsonNode resourceDiscovery = request.contextHints() == null
+                ? null
+                : request.contextHints().path("resourceDiscovery");
+        if (resourceDiscovery != null && resourceDiscovery.isObject()) {
+            ObjectNode semanticRetrievalIntent = context.putObject("semanticRetrievalIntent");
+            semanticRetrievalIntent.put(
+                    "artifactKind",
+                    valueOrDefault(resourceDiscovery.path("artifactKind").asText(""), ""));
+            if (resourceDiscovery.path("resourceSearchFocus").isObject()) {
+                semanticRetrievalIntent.set(
+                        "resourceSearchFocus",
+                        resourceDiscovery.path("resourceSearchFocus").deepCopy());
+            }
+        }
         if (target != null) {
             ObjectNode targetNode = context.putObject("target");
             targetNode.put("widgetKey", valueOrDefault(target.widgetKey(), ""));
@@ -571,10 +586,14 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Return only one JSON object matching the supplied schema.
 
                 Decide from the user's meaning, not from backend keywords.
+                Treat semanticRetrievalIntent as prior AI-authored semantic evidence; reconcile it rather than silently replacing a concrete artifact with an unrelated container.
                 Select selectedResourcePath only from candidateResources.
                 When exactly one candidateResource is supplied and it matches the requested source, copy its resourcePath into selectedResourcePath.
                 Select visualizationDecision.primaryComponent only from authorableComponents.
                 For a single requested chart, use artifactKind "chart", operationKind "create", layoutKind "single_chart", primaryComponent "praxis-chart", includeSummary=false, includeDetailTable=false, includeFilters=false, includeKpis=false, and excludedComponentIds for rejected components.
+                For an analytical composition whose meaning depends on multiple coordinated analytical regions, such as filters, KPIs, multiple charts and a detail/list/table surface, use artifactKind "dashboard" rather than a generic page.
+                Preserve the explicitly requested analytical regions in visualizationDecision; do not downgrade a coordinated dashboard to page or accordion merely because a page can host those regions.
+                Use artifactKind "page" for general layout or content composition where analytics are not the dominant requested outcome.
                 If the user asks which governed data can be used to create a table, form, chart, dashboard, page or other component, classify the turn as a consultative catalog answer: operationKind "explore" or "explain", artifactKind "api_catalog", changeKind "answer_api_catalog_question". Do not select a weak resource or ask for a materialization confirmation before answering the catalog question.
                 If authoringScopePolicy is present and the semantic user intent is a loose instruction, assistant meta request, greeting, or unrelated ask that does not request an authorable UI/business decision, answer as an informational chat reply using the policy outOfScopeResponseType; do not create a component preview, edit plan, or governed authoring route.
                 For a requested page organized as accordion/acordeon/expansion panels, use artifactKind "page", operationKind "create", layoutKind "accordion_layout" or "single_column_expansion_page", primaryComponent "praxis-expansion", and no chart axes unless the user asks for a chart.
@@ -596,6 +615,13 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Compact context:
                 %s
                 """.formatted(context.toPrettyString());
+    }
+
+    private boolean forceFullIntentResolution(AgenticAuthoringIntentResolutionRequest request) {
+        return request != null
+                && request.contextHints() != null
+                && request.contextHints().path("semanticReconciliation")
+                        .path("forceFullIntentResolution").asBoolean(false);
     }
 
     private boolean hasEvidence(AgenticAuthoringCandidate candidate, String evidence) {

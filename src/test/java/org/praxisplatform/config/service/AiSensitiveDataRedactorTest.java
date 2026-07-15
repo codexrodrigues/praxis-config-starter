@@ -49,7 +49,22 @@ class AiSensitiveDataRedactorTest {
         contextHints.put("resourcePath", "/api/human-resources/vw-ranking-reputacao");
         contextHints.put("submitUrl", "/api/human-resources/vw-ranking-reputacao/filter/cursor");
         contextHints.put("operation", "post");
+        contextHints.put("source", "component-capability-catalog");
+        contextHints.put("kind", "contextual-preview-action");
+        contextHints.put("operationKind", "modify");
+        contextHints.put("artifactKind", "chart");
+        contextHints.put("changeKind", "enable_chart_drilldown");
+        contextHints.put("capabilityId", "praxis-chart.drilldown.enable@0.1.0");
+        contextHints.put("targetComponentId", "praxis-chart");
+        contextHints.put("selectedComponentId", "praxis-chart");
+        contextHints.put("targetWidgetKey", "department-chart");
+        contextHints.put("selectedWidgetKey", "department-chart");
+        contextHints.put("surfacePresentation", "modal");
+        contextHints.put("surfaceActionId", "surface.open");
+        contextHints.put("surfaceWidgetId", "praxis-table");
         contextHints.put("token", "secret-token");
+        contextHints.putObject("previewPage").putArray("widgets").addObject().put("key", "secret-widget");
+        contextHints.putObject("targetWidgetSnapshot").put("key", "department-chart");
 
         var sanitized = redactor.sanitizeEventPayload(payload);
 
@@ -61,7 +76,51 @@ class AiSensitiveDataRedactorTest {
         assertThat(sanitizedHints.path("submitUrl").asText())
                 .isEqualTo("/api/human-resources/vw-ranking-reputacao/filter/cursor");
         assertThat(sanitizedHints.path("operation").asText()).isEqualTo("post");
+        assertThat(sanitizedHints.path("source").asText()).isEqualTo("component-capability-catalog");
+        assertThat(sanitizedHints.path("kind").asText()).isEqualTo("contextual-preview-action");
+        assertThat(sanitizedHints.path("operationKind").asText()).isEqualTo("modify");
+        assertThat(sanitizedHints.path("artifactKind").asText()).isEqualTo("chart");
+        assertThat(sanitizedHints.path("changeKind").asText()).isEqualTo("enable_chart_drilldown");
+        assertThat(sanitizedHints.path("capabilityId").asText())
+                .isEqualTo("praxis-chart.drilldown.enable@0.1.0");
+        assertThat(sanitizedHints.path("targetComponentId").asText()).isEqualTo("praxis-chart");
+        assertThat(sanitizedHints.path("selectedComponentId").asText()).isEqualTo("praxis-chart");
+        assertThat(sanitizedHints.path("targetWidgetKey").asText()).isEqualTo("department-chart");
+        assertThat(sanitizedHints.path("selectedWidgetKey").asText()).isEqualTo("department-chart");
+        assertThat(sanitizedHints.path("surfacePresentation").asText()).isEqualTo("modal");
+        assertThat(sanitizedHints.path("surfaceActionId").asText()).isEqualTo("surface.open");
+        assertThat(sanitizedHints.path("surfaceWidgetId").asText()).isEqualTo("praxis-table");
         assertThat(sanitizedHints.path("token").asText()).isEqualTo("[REDACTED]");
+        assertThat(sanitizedHints.path("previewPage").asText()).isEqualTo("[REDACTED]");
+        assertThat(sanitizedHints.path("targetWidgetSnapshot").asText()).isEqualTo("[REDACTED]");
+    }
+
+    @Test
+    void shouldEnforceTypeLengthGrammarAndSecretRedactionForQuickReplyHints() {
+        ObjectNode payload = objectMapper.createObjectNode();
+        ObjectNode contextHints = payload.putArray("quickReplies").addObject().putObject("contextHints");
+        contextHints.put("submitUrl", "/api/people?token=do-not-persist");
+        contextHints.put("retrievalQuery", "Encontrar alice@example.com no catálogo");
+        contextHints.put("capabilityId", "Bearer abc.def.ghi");
+        contextHints.put("source", "a".repeat(1025));
+        contextHints.putObject("targetComponentId").put("id", "praxis-chart");
+        contextHints.put("requiresActiveSemanticDecision", true);
+        contextHints.putArray("surfaceRef").add("runtime-surface:people");
+
+        JsonNode sanitizedHints = redactor.sanitizeEventPayload(payload)
+                .path("quickReplies")
+                .path(0)
+                .path("contextHints");
+
+        assertThat(sanitizedHints.path("submitUrl").asText())
+                .isEqualTo("/api/people?token=[REDACTED]");
+        assertThat(sanitizedHints.path("retrievalQuery").asText())
+                .isEqualTo("Encontrar [REDACTED] no catálogo");
+        assertThat(sanitizedHints.path("capabilityId").asText()).isEqualTo("[REDACTED]");
+        assertThat(sanitizedHints.path("source").asText()).isEqualTo("[REDACTED]");
+        assertThat(sanitizedHints.path("targetComponentId").asText()).isEqualTo("[REDACTED]");
+        assertThat(sanitizedHints.path("requiresActiveSemanticDecision").asBoolean()).isTrue();
+        assertThat(sanitizedHints.path("surfaceRef").asText()).isEqualTo("[REDACTED]");
     }
 
     @Test

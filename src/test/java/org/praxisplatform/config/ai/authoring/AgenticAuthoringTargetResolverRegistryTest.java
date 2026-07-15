@@ -103,6 +103,24 @@ class AgenticAuthoringTargetResolverRegistryTest {
     }
 
     @Test
+    void shouldTreatPointClickAuthoringResolverAsCanonicalOptionalChartRoot() throws Exception {
+        AgenticAuthoringResolvedTarget result = registry.resolve(
+                "praxis-chart",
+                operation(
+                        "pointClick.configure",
+                        "pointClick",
+                        "x-ui-chart-events-point-click",
+                        "fail",
+                        false),
+                objectMapper.readTree("\"pointClick\""),
+                objectMapper.readTree("{ \"chartDocument\": { \"events\": {} } }"));
+
+        assertThat(result.status()).isEqualTo("not-required");
+        assertThat(result.kind()).isEqualTo("pointClick");
+        assertThat(result.resolver()).isEqualTo("x-ui-chart-events-point-click");
+    }
+
+    @Test
     void shouldResolveExpansionPanelByIdOrTitle() throws Exception {
         AgenticAuthoringResolvedTarget result = registry.resolve(
                 "praxis-expansion",

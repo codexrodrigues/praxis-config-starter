@@ -12,8 +12,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +32,7 @@ public class AgenticAuthoringTurnEngine {
 
     private static final int MAX_TOOL_CALLS_PER_TURN = 1;
     private static final int MAX_REPAIR_ATTEMPTS_PER_PHASE = 1;
+    private static final long DEFAULT_COMPONENT_CAPABILITIES_PRELOAD_TIMEOUT_MS = 7_000L;
 
     private final AgenticAuthoringIntentResolverService intentResolverService;
     private final AgenticAuthoringPreviewService previewService;
@@ -41,6 +45,7 @@ public class AgenticAuthoringTurnEngine {
     private final AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService;
     private final AgenticAuthoringConsultativeAnswerService consultativeAnswerService;
     private final AgenticAuthoringPreIntentToolPlanningService preIntentToolPlanningService;
+    private final long componentCapabilitiesPreloadTimeoutMs;
     private final AgenticAuthoringRuntimeComponentGroundingService runtimeComponentGroundingService;
     private final AgenticAuthoringTurnRouteClassifier routeClassifier = new AgenticAuthoringTurnRouteClassifier();
 
@@ -185,6 +190,34 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
             AgenticAuthoringConsultativeAnswerService consultativeAnswerService,
             AgenticAuthoringPreIntentToolPlanningService preIntentToolPlanningService) {
+        this(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                currentPageAnalyzer,
+                toolRegistry,
+                projectKnowledgeService,
+                orchestrator,
+                schemaRetrievalService,
+                componentCapabilitiesService,
+                consultativeAnswerService,
+                preIntentToolPlanningService,
+                DEFAULT_COMPONENT_CAPABILITIES_PRELOAD_TIMEOUT_MS);
+    }
+
+    AgenticAuthoringTurnEngine(
+            AgenticAuthoringIntentResolverService intentResolverService,
+            AgenticAuthoringPreviewService previewService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer,
+            AgenticAuthoringToolRegistry toolRegistry,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            AgenticAuthoringOrchestrator orchestrator,
+            SchemaRetrievalService schemaRetrievalService,
+            AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
+            AgenticAuthoringConsultativeAnswerService consultativeAnswerService,
+            AgenticAuthoringPreIntentToolPlanningService preIntentToolPlanningService,
+            long componentCapabilitiesPreloadTimeoutMs) {
         this.intentResolverService = intentResolverService;
         this.previewService = previewService;
         this.objectMapper = objectMapper;
@@ -196,6 +229,7 @@ public class AgenticAuthoringTurnEngine {
         this.componentCapabilitiesService = componentCapabilitiesService;
         this.consultativeAnswerService = consultativeAnswerService;
         this.preIntentToolPlanningService = preIntentToolPlanningService;
+        this.componentCapabilitiesPreloadTimeoutMs = Math.max(1L, componentCapabilitiesPreloadTimeoutMs);
         this.runtimeComponentGroundingService = new AgenticAuthoringRuntimeComponentGroundingService(objectMapper);
     }
 
@@ -273,6 +307,15 @@ public class AgenticAuthoringTurnEngine {
                     principalContext.tenantId(),
                     principalContext.userId(),
                     principalContext.environment());
+            ArtifactReconciliationOutcome artifactReconciliation = reconcilePlannedArtifact(
+                    request,
+                    principalContext,
+                    eventSink,
+                    plannedResourceDiscovery,
+                    intentResolution,
+                    false);
+            intentResolution = artifactReconciliation.intentResolution();
+            boolean artifactReconciliationAttempted = artifactReconciliation.attempted();
             if (eventSink.terminalReached()) {
                 return AgenticAuthoringTurnOutcome.noop(state);
             }
@@ -327,11 +370,22 @@ public class AgenticAuthoringTurnEngine {
                         Map.of(
                                 "tool", resourceDiscoveryResult.tool(),
                                 "candidateCount", resourceDiscovery.candidates().size())));
+                AgenticAuthoringTurnStreamRequest refinedIntentRequest =
+                        withResourceDiscoveryContext(request, resourceDiscovery);
                 intentResolution = intentResolverService.resolve(
-                        toIntentRequest(withResourceDiscoveryContext(request, resourceDiscovery)),
+                        toIntentRequest(refinedIntentRequest),
                         principalContext.tenantId(),
                         principalContext.userId(),
                         principalContext.environment());
+                artifactReconciliation = reconcilePlannedArtifact(
+                        refinedIntentRequest,
+                        principalContext,
+                        eventSink,
+                        plannedResourceDiscovery,
+                        intentResolution,
+                        artifactReconciliationAttempted);
+                intentResolution = artifactReconciliation.intentResolution();
+                artifactReconciliationAttempted = artifactReconciliation.attempted();
                 route = routeClassifier.classify(request, intentResolution, state);
                 state = state.withRouteClass(route.routeClass());
                 emitIntentResolved(eventSink, intentResolution, route);
@@ -475,6 +529,8 @@ public class AgenticAuthoringTurnEngine {
             return terminalResult.appendedType("error")
                     ? AgenticAuthoringTurnOutcome.expired(state)
                     : AgenticAuthoringTurnOutcome.noop(state);
+        } finally {
+            cancelPreloadedComponentCapabilities(componentCapabilitiesFuture);
         }
     }
 
@@ -1581,6 +1637,8 @@ public class AgenticAuthoringTurnEngine {
                         "preloaded", componentCapabilitiesLoad.preloaded(),
                         "preloadCompletedBeforeAwait", componentCapabilitiesLoad.completedBeforeAwait(),
                         "fallbackSynchronousLoad", componentCapabilitiesLoad.fallbackSynchronousLoad(),
+                        "timedOut", componentCapabilitiesLoad.timedOut(),
+                        "fallbackBuiltIn", componentCapabilitiesLoad.fallbackBuiltIn(),
                         "awaitElapsedMs", componentCapabilitiesLoad.awaitElapsedMs(),
                         "preloadAgeMs", componentCapabilitiesLoad.preloadAgeMs(),
                         "source", componentCapabilitiesService == null ? "built-in" : "service")));
@@ -1624,35 +1682,98 @@ public class AgenticAuthoringTurnEngine {
             PreloadedComponentCapabilities preloadedCapabilities) {
         long awaitStartedAtNanos = System.nanoTime();
         if (preloadedCapabilities == null) {
-            AgenticAuthoringComponentCapabilitiesResult result = loadServerComponentCapabilities();
+            AgenticAuthoringComponentCapabilitiesResult result;
+            boolean fallbackBuiltIn = false;
+            try {
+                result = loadServerComponentCapabilities();
+            } catch (RuntimeException ex) {
+                log.warn("Component capabilities failed before preload; using built-in catalogs.", ex);
+                result = loadBuiltInComponentCapabilities();
+                fallbackBuiltIn = true;
+            }
+            if (result == null) {
+                result = loadBuiltInComponentCapabilities();
+                fallbackBuiltIn = true;
+            }
             return new ComponentCapabilitiesLoadResult(
                     result,
                     false,
                     false,
                     false,
+                    false,
+                    fallbackBuiltIn,
                     elapsedMs(awaitStartedAtNanos),
                     0L);
         }
         boolean completedBeforeAwait = preloadedCapabilities.future().isDone();
         try {
-            AgenticAuthoringComponentCapabilitiesResult result = preloadedCapabilities.future().join();
+            long preloadAgeMs = elapsedMs(preloadedCapabilities.startedAtNanos());
+            long remainingTimeoutMs = componentCapabilitiesPreloadTimeoutMs - preloadAgeMs;
+            AgenticAuthoringComponentCapabilitiesResult result;
+            if (completedBeforeAwait) {
+                result = preloadedCapabilities.future().get();
+            } else if (remainingTimeoutMs > 0L) {
+                result = preloadedCapabilities.future().get(remainingTimeoutMs, TimeUnit.MILLISECONDS);
+            } else {
+                throw new TimeoutException("Component capability preload deadline elapsed.");
+            }
+            boolean fallbackBuiltIn = result == null;
+            if (fallbackBuiltIn) {
+                result = loadBuiltInComponentCapabilities();
+            }
             return new ComponentCapabilitiesLoadResult(
                     result,
                     true,
                     completedBeforeAwait,
                     false,
+                    false,
+                    fallbackBuiltIn,
                     elapsedMs(awaitStartedAtNanos),
                     elapsedMs(preloadedCapabilities.startedAtNanos()));
-        } catch (CompletionException ex) {
-            log.debug("Preloaded component capabilities failed; loading synchronously.", ex);
-            AgenticAuthoringComponentCapabilitiesResult result = loadServerComponentCapabilities();
+        } catch (TimeoutException ex) {
+            preloadedCapabilities.future().cancel(true);
+            log.warn(
+                    "Component capability preload exceeded {} ms; continuing with built-in catalogs.",
+                    componentCapabilitiesPreloadTimeoutMs);
             return new ComponentCapabilitiesLoadResult(
-                    result,
+                    loadBuiltInComponentCapabilities(),
                     true,
                     completedBeforeAwait,
+                    false,
+                    true,
                     true,
                     elapsedMs(awaitStartedAtNanos),
                     elapsedMs(preloadedCapabilities.startedAtNanos()));
+        } catch (InterruptedException ex) {
+            preloadedCapabilities.future().cancel(true);
+            Thread.currentThread().interrupt();
+            log.warn("Component capability preload was interrupted; continuing with built-in catalogs.");
+            return new ComponentCapabilitiesLoadResult(
+                    loadBuiltInComponentCapabilities(),
+                    true,
+                    completedBeforeAwait,
+                    false,
+                    false,
+                    true,
+                    elapsedMs(awaitStartedAtNanos),
+                    elapsedMs(preloadedCapabilities.startedAtNanos()));
+        } catch (ExecutionException | CancellationException ex) {
+            log.warn("Component capability preload failed; continuing with built-in catalogs.", ex);
+            return new ComponentCapabilitiesLoadResult(
+                    loadBuiltInComponentCapabilities(),
+                    true,
+                    completedBeforeAwait,
+                    false,
+                    false,
+                    true,
+                    elapsedMs(awaitStartedAtNanos),
+                    elapsedMs(preloadedCapabilities.startedAtNanos()));
+        }
+    }
+
+    private void cancelPreloadedComponentCapabilities(PreloadedComponentCapabilities preloadedCapabilities) {
+        if (preloadedCapabilities != null && !preloadedCapabilities.future().isDone()) {
+            preloadedCapabilities.future().cancel(true);
         }
     }
 
@@ -1670,6 +1791,8 @@ public class AgenticAuthoringTurnEngine {
             boolean preloaded,
             boolean completedBeforeAwait,
             boolean fallbackSynchronousLoad,
+            boolean timedOut,
+            boolean fallbackBuiltIn,
             long awaitElapsedMs,
             long preloadAgeMs) {
     }
@@ -1678,6 +1801,15 @@ public class AgenticAuthoringTurnEngine {
         return componentCapabilitiesService == null
                 ? new AgenticAuthoringComponentCapabilitiesService().listCapabilities()
                 : componentCapabilitiesService.listCapabilities();
+    }
+
+    private AgenticAuthoringComponentCapabilitiesResult loadBuiltInComponentCapabilities() {
+        AgenticAuthoringComponentCapabilitiesResult result = componentCapabilitiesService == null
+                ? null
+                : componentCapabilitiesService.listBuiltInCapabilities();
+        return result == null
+                ? new AgenticAuthoringComponentCapabilitiesService().listBuiltInCapabilities()
+                : result;
     }
 
     private AgenticAuthoringTurnStreamRequest withGroundedRuntimeComponentContext(
@@ -1812,6 +1944,229 @@ public class AgenticAuthoringTurnEngine {
             }
         }
         return resourceDiscovery;
+    }
+
+    private ArtifactReconciliationOutcome reconcilePlannedArtifact(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringResourceCandidatesResult plannedResourceDiscovery,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            boolean reconciliationAlreadyAttempted) {
+        if (isCompatibleWithPlannedArtifact(plannedResourceDiscovery, intentResolution)) {
+            return new ArtifactReconciliationOutcome(intentResolution, reconciliationAlreadyAttempted);
+        }
+        if (reconciliationAlreadyAttempted) {
+            return new ArtifactReconciliationOutcome(
+                    blockPersistentArtifactConflict(intentResolution),
+                    true);
+        }
+
+        emitStatus(
+                eventSink,
+                "intent.resolve.reconcile",
+                "Estou reconciliando duas interpretações semânticas antes de materializar a tela.");
+        eventSink.append("thought.step", thoughtStepPayload(
+                "intent.resolve.reconcile",
+                "O planejamento e a resolução escolheram artefatos incompatíveis; vou revisar a decisão uma vez.",
+                "Reconciling conflicting AI-authored artifact decisions.",
+                Map.of(
+                        "plannedArtifactKind", safeText(plannedResourceDiscovery.artifactKind()),
+                        "observedArtifactKind", safeText(intentResolution.artifactKind()))));
+
+        AgenticAuthoringTurnStreamRequest reconciliationRequest = withSemanticReconciliationContext(
+                request,
+                plannedResourceDiscovery,
+                intentResolution);
+        AgenticAuthoringIntentResolutionResult reconciled = intentResolverService.resolve(
+                toIntentRequest(reconciliationRequest),
+                principalContext.tenantId(),
+                principalContext.userId(),
+                principalContext.environment());
+        if (isCompatibleWithPlannedArtifact(plannedResourceDiscovery, reconciled)) {
+            eventSink.append("thought.step", thoughtStepPayload(
+                    "intent.resolve.reconciled",
+                    "A revisão semântica confirmou uma estrutura compatível com o planejamento governado.",
+                    "Artifact decision reconciled.",
+                    Map.of(
+                            "plannedArtifactKind", safeText(plannedResourceDiscovery.artifactKind()),
+                            "resolvedArtifactKind", safeText(reconciled.artifactKind()))));
+            return new ArtifactReconciliationOutcome(
+                    withIntentResolutionWarning(
+                            reconciled,
+                            "llm-pre-intent-artifact-conflict-reconciled"),
+                    true);
+        }
+        eventSink.append("thought.step", thoughtStepPayload(
+                "intent.resolve.reconciliation_required",
+                "A revisão manteve decisões incompatíveis; a materialização foi bloqueada para confirmação.",
+                "Persistent artifact conflict requires clarification.",
+                Map.of(
+                        "plannedArtifactKind", safeText(plannedResourceDiscovery.artifactKind()),
+                        "resolvedArtifactKind", safeText(reconciled == null ? null : reconciled.artifactKind()))));
+        return new ArtifactReconciliationOutcome(blockPersistentArtifactConflict(reconciled), true);
+    }
+
+    private boolean isCompatibleWithPlannedArtifact(
+            AgenticAuthoringResourceCandidatesResult plannedResourceDiscovery,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (plannedResourceDiscovery == null
+                || !plannedResourceDiscovery.valid()
+                || plannedResourceDiscovery.resourceSearchFocus() == null
+                || plannedResourceDiscovery.resourceSearchFocus().isEmpty()
+                || plannedResourceDiscovery.candidates() == null
+                || plannedResourceDiscovery.candidates().isEmpty()
+                || intentResolution == null
+                || !intentResolution.valid()) {
+            return true;
+        }
+        String plannedArtifactKind = safeText(plannedResourceDiscovery.artifactKind()).toLowerCase(Locale.ROOT);
+        if ("page".equals(plannedArtifactKind)
+                || !Set.of("dashboard", "chart", "table", "form", "api_catalog")
+                        .contains(plannedArtifactKind)) {
+            return true;
+        }
+        if (!plannedArtifactKind.equals(safeText(intentResolution.artifactKind()).toLowerCase(Locale.ROOT))) {
+            return false;
+        }
+        AgenticAuthoringVisualizationDecision decision = intentResolution.visualizationDecision();
+        if (decision == null || !Set.of("dashboard", "chart").contains(plannedArtifactKind)) {
+            return true;
+        }
+        String primaryComponent = safeText(decision.primaryComponent()).toLowerCase(Locale.ROOT);
+        String layoutKind = safeText(decision.layoutKind()).toLowerCase(Locale.ROOT);
+        return !Set.of("praxis-expansion", "praxis-tabs").contains(primaryComponent)
+                && !Set.of("accordion_layout", "single_column_expansion_page", "tabs_layout")
+                        .contains(layoutKind)
+                && !decision.excludedComponentIds().contains("praxis-chart");
+    }
+
+    private AgenticAuthoringTurnStreamRequest withSemanticReconciliationContext(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringResourceCandidatesResult plannedResourceDiscovery,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        ObjectNode reconciliation = contextHints.putObject("semanticReconciliation");
+        reconciliation.put("schemaVersion", "praxis-agentic-authoring-semantic-reconciliation.v1");
+        reconciliation.put("source", "backend-pre-intent-tool-plan");
+        reconciliation.put("forceFullIntentResolution", true);
+        reconciliation.put("plannedArtifactKind", safeText(plannedResourceDiscovery.artifactKind()));
+        reconciliation.set(
+                "plannedResourceSearchFocus",
+                resourceSearchFocusNode(plannedResourceDiscovery.resourceSearchFocus()));
+        reconciliation.put(
+                "observedArtifactKind",
+                safeText(intentResolution == null ? null : intentResolution.artifactKind()));
+        if (intentResolution != null && intentResolution.visualizationDecision() != null) {
+            reconciliation.set(
+                    "observedVisualizationDecision",
+                    objectMapper.valueToTree(intentResolution.visualizationDecision()));
+        }
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                contextHints,
+                request.componentCapabilities(),
+                request.activeSemanticDecision(),
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
+    }
+
+    private AgenticAuthoringIntentResolutionResult withIntentResolutionWarning(
+            AgenticAuthoringIntentResolutionResult resolution,
+            String warning) {
+        if (resolution == null) {
+            return null;
+        }
+        LinkedHashSet<String> warnings = new LinkedHashSet<>(
+                resolution.warnings() == null ? List.of() : resolution.warnings());
+        warnings.add(warning);
+        return new AgenticAuthoringIntentResolutionResult(
+                resolution.valid(),
+                resolution.operationKind(),
+                resolution.artifactKind(),
+                resolution.changeKind(),
+                resolution.authoringProfile(),
+                resolution.targetApp(),
+                resolution.targetComponentId(),
+                resolution.target(),
+                resolution.selectedCandidate(),
+                resolution.candidates(),
+                resolution.gate(),
+                resolution.effectivePrompt(),
+                resolution.assistantMessage(),
+                resolution.assistantContent(),
+                resolution.apiCatalogAnswer(),
+                resolution.quickReplies(),
+                resolution.pendingClarification(),
+                resolution.clarificationQuestions(),
+                List.copyOf(warnings),
+                resolution.failureCodes(),
+                resolution.currentPageSummary(),
+                resolution.llmDiagnostics(),
+                resolution.visualizationDecision(),
+                resolution.semanticDecision());
+    }
+
+    private AgenticAuthoringIntentResolutionResult blockPersistentArtifactConflict(
+            AgenticAuthoringIntentResolutionResult resolution) {
+        LinkedHashSet<String> warnings = new LinkedHashSet<>(resolution == null || resolution.warnings() == null
+                ? List.of()
+                : resolution.warnings());
+        warnings.add("llm-intent-artifact-conflicts-with-pre-intent-plan");
+        warnings.add("llm-intent-resolution-failed-closed");
+        LinkedHashSet<String> failureCodes = new LinkedHashSet<>(
+                resolution == null || resolution.failureCodes() == null
+                        ? List.of()
+                        : resolution.failureCodes());
+        failureCodes.add("semantic-artifact-conflict");
+        failureCodes.add("semantic-intent-confirmation-required");
+        List<String> questions = List.of(
+                "Você quer um painel analítico coordenado ou uma página de conteúdo organizada em seções?");
+        AgenticAuthoringGateResult gate = new AgenticAuthoringGateResult(
+                "pre-intent-artifact-invariance@0.1.0",
+                "clarification_required",
+                List.copyOf(failureCodes));
+        return new AgenticAuthoringIntentResolutionResult(
+                false,
+                "unknown",
+                "unknown",
+                "semantic_artifact_conflict",
+                "semantic-reconciliation-required",
+                resolution == null ? "" : resolution.targetApp(),
+                resolution == null ? "" : resolution.targetComponentId(),
+                resolution == null ? null : resolution.target(),
+                resolution == null ? null : resolution.selectedCandidate(),
+                resolution == null ? List.of() : resolution.candidates(),
+                gate,
+                resolution == null ? "" : resolution.effectivePrompt(),
+                "Encontrei duas interpretações incompatíveis para a estrutura da tela e bloqueei a prévia antes de materializar.",
+                null,
+                null,
+                List.of(),
+                null,
+                questions,
+                List.copyOf(warnings),
+                List.copyOf(failureCodes),
+                resolution == null ? objectMapper.createObjectNode() : resolution.currentPageSummary(),
+                resolution == null ? objectMapper.createObjectNode() : resolution.llmDiagnostics(),
+                null,
+                null);
     }
 
     private void emitPreIntentToolPlanSkipped(
@@ -4433,6 +4788,11 @@ public class AgenticAuthoringTurnEngine {
         COMPLETE,
         EXPIRE,
         NONE
+    }
+
+    private record ArtifactReconciliationOutcome(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            boolean attempted) {
     }
 
     private record AgenticAuthoringTurnRoute(String routeClass, boolean allowsPreview) {
