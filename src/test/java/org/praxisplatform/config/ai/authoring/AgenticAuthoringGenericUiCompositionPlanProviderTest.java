@@ -2013,7 +2013,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .path("mapping").path("key").asText()).isEqualTo("departamentoIdsIn");
         assertThat(plan.path("bindings").toString())
                 .contains("crossFilter->vw-analytics-afastamentos-table.queryContext")
-                .contains("pointClick->surface.open");
+                .doesNotContain("pointClick->surface.open");
         JsonNode chartToTable = findBinding(
                 plan.path("bindings"),
                 "vw-analytics-afastamentos-chart-departamento.crossFilter->vw-analytics-afastamentos-table.queryContext");
@@ -2022,16 +2022,16 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(chartToTable.path("transform").path("template").path("filters")
                 .path("departamentoIdsIn").asText())
                 .isEqualTo("${payload.filters.departamentoIdsIn}");
-        JsonNode chartToSurface = findBinding(
-                plan.path("bindings"),
-                "vw-analytics-afastamentos-chart-departamento.pointClick->surface.open");
-        assertThat(chartToSurface.path("policy").path("distinctBy").asText())
-                .isEqualTo("payload.data.key");
-        assertThat(chartToSurface.path("to").path("payload").path("bindings").path(0)
-                .path("from").asText()).isEqualTo("payload.data.key");
-        assertThat(chartToSurface.path("to").path("payload").path("bindings").path(0)
-                .path("to").asText())
-                .isEqualTo("widget.inputs.queryContext.filters.departamentoIdsIn");
+        JsonNode list = findWidget(plan, "praxis-list", "insight-list");
+        JsonNode recordOpenAction = list.path("inputs").path("config").path("actions").path(0);
+        assertThat(recordOpenAction.path("action").asText()).isEqualTo("surface.open");
+        assertThat(recordOpenAction.path("recordOpen").path("sourceIdentityField").asText())
+                .isEqualTo("funcionarioId");
+        assertThat(recordOpenAction.path("recordOpen").path("target").path("resourceKey").asText())
+                .isEqualTo("human-resources.funcionarios");
+        assertThat(recordOpenAction.path("recordOpen").path("target").path("surfaceId").asText())
+                .isEqualTo("hero-profile");
+        assertThat(recordOpenAction.has("globalAction")).isFalse();
         assertThat(config.path("analyticsProjection").toString())
                 .doesNotContain("nomeCompleto")
                 .doesNotContain("diagnostico")
@@ -2090,6 +2090,33 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
     }
 
+    @Test
+    void failsClosedWhenRecordOpenWasNotResolvedAgainstTheSurfaceCatalog() {
+        ObjectNode contextHints = governedComparisonContext("verified");
+        ((ObjectNode) contextHints.path("governedAnalytics")).remove("recordOpenResolution");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Materialize a leitura analitica resolvida para este recurso.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                objectMapper.createObjectNode(),
+                dashboardIntent(
+                        "/api/human-resources/vw-analytics-afastamentos",
+                        List.of(axis("department", "departamento", "Departamento", "bar", "vertical"))),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints)).orElseThrow();
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes())
+                .containsExactly("governed-analytics-comparison-record-open-resolution-required");
+        assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
+    }
+
     private ObjectNode governedComparisonContext(String status) {
         ObjectNode contextHints = objectMapper.createObjectNode();
         ObjectNode governed = contextHints.putObject("governedAnalytics");
@@ -2130,10 +2157,22 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         ObjectNode defaults = projection.putObject("defaults");
         defaults.put("limit", 12);
         defaults.putArray("sort").addObject().put("field", "diasAfastado").put("direction", "desc");
-        projection.putObject("interactions")
-                .put("drillDown", true)
-                .put("pointSelection", true)
-                .put("crossFilter", true);
+        ObjectNode interactions = projection.putObject("interactions");
+        interactions.put("pointSelection", false);
+        interactions.put("crossFilter", true);
+        interactions.putObject("recordOpen")
+                .put("sourceIdentityField", "funcionarioId")
+                .putObject("target")
+                .put("resourceKey", "human-resources.funcionarios")
+                .put("surfaceId", "hero-profile");
+        governed.putObject("recordOpenResolution")
+                .put("sourceIdentityField", "funcionarioId")
+                .put("targetResourceKey", "human-resources.funcionarios")
+                .put("targetResourcePath", "/api/human-resources/funcionarios")
+                .put("targetSurfaceId", "hero-profile")
+                .put("targetSurfaceScope", "ITEM")
+                .put("availability", "resource-context-required")
+                .put("schemaVerified", true);
         ObjectNode policyRef = projection.putObject("governance").putArray("policyRefs").addObject();
         policyRef.put("policyId", "absence-criticality-policy");
         policyRef.put("policyVersion", "2026-07");

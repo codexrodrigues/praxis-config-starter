@@ -21,6 +21,8 @@ import java.util.Set;
 import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.service.ResourceCapabilitiesFetchResult;
 import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
+import org.praxisplatform.config.service.ResourceSurfaceCatalogFetchResult;
+import org.praxisplatform.config.service.ResourceSurfaceCatalogRetrievalService;
 import org.praxisplatform.config.service.SchemaFetchResult;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 
@@ -47,6 +49,7 @@ public class AgenticAuthoringPreviewService {
     private final AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer;
     private final SchemaRetrievalService schemaRetrievalService;
     private final ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService;
+    private final ResourceSurfaceCatalogRetrievalService resourceSurfaceCatalogRetrievalService;
 
     public AgenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
@@ -103,6 +106,26 @@ public class AgenticAuthoringPreviewService {
             AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer,
             SchemaRetrievalService schemaRetrievalService,
             ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService) {
+        this(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                uiCompositionPlanProviders,
+                messageSynthesizer,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService,
+                null);
+    }
+
+    public AgenticAuthoringPreviewService(
+            AgenticAuthoringPlanService planService,
+            AgenticAuthoringPatchCompilerService patchCompilerService,
+            ObjectMapper objectMapper,
+            List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders,
+            AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer,
+            SchemaRetrievalService schemaRetrievalService,
+            ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService,
+            ResourceSurfaceCatalogRetrievalService resourceSurfaceCatalogRetrievalService) {
         this.planService = Objects.requireNonNull(planService, "planService must not be null");
         this.patchCompilerService = Objects.requireNonNull(patchCompilerService, "patchCompilerService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
@@ -113,6 +136,7 @@ public class AgenticAuthoringPreviewService {
         this.messageSynthesizer = messageSynthesizer;
         this.schemaRetrievalService = schemaRetrievalService;
         this.resourceCapabilitiesRetrievalService = resourceCapabilitiesRetrievalService;
+        this.resourceSurfaceCatalogRetrievalService = resourceSurfaceCatalogRetrievalService;
     }
 
     public AgenticAuthoringPreviewResult preview(
@@ -297,6 +321,8 @@ public class AgenticAuthoringPreviewService {
         PreviewSchemaFetchCache schemaFetchCache = new PreviewSchemaFetchCache(schemaRetrievalService);
         PreviewResourceCapabilitiesFetchCache capabilitiesFetchCache =
                 new PreviewResourceCapabilitiesFetchCache(resourceCapabilitiesRetrievalService);
+        PreviewResourceSurfaceCatalogFetchCache surfaceCatalogFetchCache =
+                new PreviewResourceSurfaceCatalogFetchCache(resourceSurfaceCatalogRetrievalService);
         request = withGovernedAnalyticsContext(
                 request,
                 schemaBaseUrl,
@@ -304,7 +330,8 @@ public class AgenticAuthoringPreviewService {
                 userId,
                 environment,
                 schemaFetchCache,
-                capabilitiesFetchCache);
+                capabilitiesFetchCache,
+                surfaceCatalogFetchCache);
         if (!governedAnalyticsGroundingBlocksMaterialization(request)) {
             request = withSchemaFieldContext(request, schemaBaseUrl, schemaFetchCache);
         }
@@ -490,7 +517,8 @@ public class AgenticAuthoringPreviewService {
             String userId,
             String environment,
             PreviewSchemaFetchCache schemaFetchCache,
-            PreviewResourceCapabilitiesFetchCache capabilitiesFetchCache) {
+            PreviewResourceCapabilitiesFetchCache capabilitiesFetchCache,
+            PreviewResourceSurfaceCatalogFetchCache surfaceCatalogFetchCache) {
         String requestedOperation = requestedGovernedAnalyticsOperation(request);
         if (request == null || requestedOperation.isBlank()) {
             return request;
@@ -582,7 +610,35 @@ public class AgenticAuthoringPreviewService {
             return copyWithContextHints(request, contextHints);
         }
         ObjectNode sanitizedProjection = projection.get();
-        if (sanitizedProjection.path("interactions").path("crossFilter").asBoolean(false)) {
+        JsonNode projectionInteractions = sanitizedProjection.path("interactions");
+        boolean crossFilterEnabled = projectionInteractions.path("crossFilter").asBoolean(false);
+        JsonNode recordOpen = projectionInteractions.path("recordOpen");
+        if (crossFilterEnabled || recordOpen.isObject()) {
+            JsonNode nominalCapability = capabilityRoot(capabilitiesResult.getCapabilities())
+                    .path("operations")
+                    .path("filter");
+            if (!nominalCapability.isObject() || !nominalCapability.path("supported").asBoolean(false)) {
+                grounding.put("status", "nominal-operation-unsupported");
+                return copyWithContextHints(request, contextHints);
+            }
+            JsonNode nominalAvailability = nominalCapability.path("availability");
+            if (!nominalAvailability.isObject()
+                    || !nominalAvailability.has("allowed")
+                    || !nominalAvailability.path("allowed").isBoolean()) {
+                grounding.put("status", "nominal-operation-availability-unverified");
+                return copyWithContextHints(request, contextHints);
+            }
+            ObjectNode publishedNominalAvailability = grounding.putObject("nominalOperationAvailability");
+            publishedNominalAvailability.put("operationId", nominalCapability.path("id").asText("filter"));
+            publishedNominalAvailability.put("allowed", nominalAvailability.path("allowed").asBoolean());
+            putText(publishedNominalAvailability, "reason", nominalAvailability.path("reason").asText(""));
+            if (!nominalAvailability.path("allowed").asBoolean()) {
+                grounding.put("status", "nominal-operation-unavailable");
+                putText(grounding, "availabilityReason", nominalAvailability.path("reason").asText(""));
+                return copyWithContextHints(request, contextHints);
+            }
+        }
+        if (crossFilterEnabled) {
             String keyFilterField = sanitizedProjection.path("bindings")
                     .path("primaryDimension")
                     .path("keyFilterField")
@@ -625,6 +681,94 @@ public class AgenticAuthoringPreviewService {
                     || "array".equals(normalize(targetField.type())));
             putText(keyFilterBinding, "itemType", targetField.itemType());
             keyFilterBinding.put("schemaVerified", true);
+        }
+        if (recordOpen.isObject()) {
+            String sourceIdentityField = recordOpen.path("sourceIdentityField").asText("").trim();
+            String targetResourceKey = recordOpen.path("target").path("resourceKey").asText("").trim();
+            String targetSurfaceId = recordOpen.path("target").path("surfaceId").asText("").trim();
+            if (sourceIdentityField.isBlank() || targetResourceKey.isBlank() || targetSurfaceId.isBlank()) {
+                grounding.put("status", "record-open-invalid");
+                return copyWithContextHints(request, contextHints);
+            }
+
+            AiSchemaContext nominalResponseSchemaContext = AiSchemaContext.builder()
+                    .path(resourcePath + "/filter")
+                    .operation("post")
+                    .schemaType("response")
+                    .build();
+            SchemaFetchResult nominalResponseSchema = schemaFetchCache.fetchPrincipalAware(
+                    nominalResponseSchemaContext,
+                    schemaBaseUrl,
+                    tenantId,
+                    userId,
+                    environment);
+            if (nominalResponseSchema == null || !nominalResponseSchema.isSuccess()) {
+                grounding.put("status", "record-open-source-schema-" + schemaFetchStatus(nominalResponseSchema));
+                return copyWithContextHints(request, contextHints);
+            }
+            Map<String, SchemaFieldDescriptor> nominalFields = schemaFields(nominalResponseSchema.getSchema());
+            SchemaFieldDescriptor sourceField = nominalFields.get(normalize(sourceIdentityField));
+            if (sourceField == null || !sourceIdentityField.equals(sourceField.name())) {
+                grounding.put("status", "record-open-source-field-missing");
+                return copyWithContextHints(request, contextHints);
+            }
+            if (!supportsRecordIdentity(sourceField)) {
+                grounding.put("status", "record-open-source-field-incompatible");
+                return copyWithContextHints(request, contextHints);
+            }
+            sources.add("schemas.filtered:filter-response");
+
+            ResourceSurfaceCatalogFetchResult surfaceCatalogResult = surfaceCatalogFetchCache == null
+                    ? null
+                    : surfaceCatalogFetchCache.fetch(
+                            targetResourceKey,
+                            schemaBaseUrl,
+                            tenantId,
+                            userId,
+                            environment);
+            if (surfaceCatalogResult == null || !surfaceCatalogResult.isSuccess()) {
+                grounding.put("status", "record-open-surface-catalog-" + surfaceFetchStatus(surfaceCatalogResult));
+                return copyWithContextHints(request, contextHints);
+            }
+            JsonNode surfaceCatalog = surfaceCatalogResult.getCatalog();
+            JsonNode targetSurface = findSurface(surfaceCatalog.path("surfaces"), targetSurfaceId);
+            if (!targetSurface.isObject()
+                    || !targetResourceKey.equals(targetSurface.path("resourceKey").asText(""))) {
+                grounding.put("status", "record-open-surface-missing");
+                return copyWithContextHints(request, contextHints);
+            }
+            if (!"ITEM".equals(targetSurface.path("scope").asText(""))) {
+                grounding.put("status", "record-open-surface-scope-incompatible");
+                return copyWithContextHints(request, contextHints);
+            }
+            JsonNode surfaceAvailability = targetSurface.path("availability");
+            if (!surfaceAvailability.isObject()
+                    || !surfaceAvailability.has("allowed")
+                    || !surfaceAvailability.path("allowed").isBoolean()) {
+                grounding.put("status", "record-open-surface-availability-unverified");
+                return copyWithContextHints(request, contextHints);
+            }
+            boolean surfaceAllowed = surfaceAvailability.path("allowed").asBoolean(false);
+            String surfaceAvailabilityReason = surfaceAvailability.path("reason").asText("").trim();
+            if (!surfaceAllowed && !"resource-context-required".equals(surfaceAvailabilityReason)) {
+                grounding.put("status", "record-open-surface-unavailable");
+                putText(grounding, "availabilityReason", surfaceAvailabilityReason);
+                return copyWithContextHints(request, contextHints);
+            }
+
+            sources.add("schemas.surfaces:target-resource");
+            ObjectNode resolution = grounding.putObject("recordOpenResolution");
+            resolution.put("sourceIdentityField", sourceIdentityField);
+            resolution.put("sourceFieldType", sourceField.type());
+            resolution.put("targetResourceKey", targetResourceKey);
+            resolution.put("targetResourcePath", surfaceCatalog.path("resourcePath").asText(""));
+            resolution.put("targetSurfaceId", targetSurfaceId);
+            resolution.put("targetSurfaceKind", targetSurface.path("kind").asText(""));
+            resolution.put("targetSurfaceScope", targetSurface.path("scope").asText(""));
+            resolution.put("targetOperationId", targetSurface.path("operationId").asText(""));
+            resolution.put("availability", surfaceAllowed ? "allowed" : surfaceAvailabilityReason);
+            resolution.put("schemaVerified", true);
+            resolution.put("catalogEndpointUrl", value(surfaceCatalogResult.getEndpointUrl()));
         }
         grounding.put("status", "verified");
         grounding.put("capabilityEndpointUrl", value(capabilitiesResult.getEndpointUrl()));
@@ -912,6 +1056,14 @@ public class AgenticAuthoringPreviewService {
                 copy.put(field, interactions.path(field).asBoolean());
             }
         }
+        JsonNode recordOpen = interactions.path("recordOpen");
+        if (recordOpen.isObject()) {
+            ObjectNode recordOpenCopy = copy.putObject("recordOpen");
+            putText(recordOpenCopy, "sourceIdentityField", recordOpen.path("sourceIdentityField").asText(""));
+            ObjectNode targetCopy = recordOpenCopy.putObject("target");
+            putText(targetCopy, "resourceKey", recordOpen.path("target").path("resourceKey").asText(""));
+            putText(targetCopy, "surfaceId", recordOpen.path("target").path("surfaceId").asText(""));
+        }
     }
 
     private void copyTextFields(JsonNode source, ObjectNode target, String... fields) {
@@ -927,6 +1079,12 @@ public class AgenticAuthoringPreviewService {
     }
 
     private String fetchStatus(ResourceCapabilitiesFetchResult result) {
+        return result == null || result.getStatus() == null
+                ? "unavailable"
+                : result.getStatus().name().toLowerCase(Locale.ROOT);
+    }
+
+    private String surfaceFetchStatus(ResourceSurfaceCatalogFetchResult result) {
         return result == null || result.getStatus() == null
                 ? "unavailable"
                 : result.getStatus().name().toLowerCase(Locale.ROOT);
@@ -1645,6 +1803,25 @@ public class AgenticAuthoringPreviewService {
         boolean multiple = field.multiple() || "array".equals(normalize(field.type()));
         String valueType = normalize(multiple ? field.itemType() : field.type());
         return Set.of("string", "integer", "number", "boolean").contains(valueType);
+    }
+
+    private boolean supportsRecordIdentity(SchemaFieldDescriptor field) {
+        if (field == null || field.multiple() || "array".equals(normalize(field.type()))) {
+            return false;
+        }
+        return Set.of("string", "integer", "number").contains(normalize(field.type()));
+    }
+
+    private JsonNode findSurface(JsonNode surfaces, String surfaceId) {
+        if (!surfaces.isArray() || surfaceId == null || surfaceId.isBlank()) {
+            return MissingNode.getInstance();
+        }
+        for (JsonNode surface : surfaces) {
+            if (surfaceId.equals(surface.path("id").asText(""))) {
+                return surface;
+            }
+        }
+        return MissingNode.getInstance();
     }
 
     private Set<String> governedCrossFilterTargetFields(
@@ -5355,6 +5532,45 @@ public class AgenticAuthoringPreviewService {
             }
             ResourceCapabilitiesFetchResult result = retrievalService.fetchCapabilitiesResult(
                     resourcePath,
+                    requestBaseUrl,
+                    tenantId,
+                    userId,
+                    environment);
+            fetches.put(key, result);
+            return result;
+        }
+    }
+
+    private final class PreviewResourceSurfaceCatalogFetchCache {
+
+        private final ResourceSurfaceCatalogRetrievalService retrievalService;
+        private final Map<String, ResourceSurfaceCatalogFetchResult> fetches = new LinkedHashMap<>();
+
+        private PreviewResourceSurfaceCatalogFetchCache(ResourceSurfaceCatalogRetrievalService retrievalService) {
+            this.retrievalService = retrievalService;
+        }
+
+        private ResourceSurfaceCatalogFetchResult fetch(
+                String resourceKey,
+                String requestBaseUrl,
+                String tenantId,
+                String userId,
+                String environment) {
+            if (retrievalService == null || resourceKey == null || resourceKey.isBlank()) {
+                return null;
+            }
+            String key = String.join(
+                    "|",
+                    value(requestBaseUrl),
+                    value(resourceKey),
+                    value(tenantId),
+                    value(userId),
+                    value(environment));
+            if (fetches.containsKey(key)) {
+                return fetches.get(key);
+            }
+            ResourceSurfaceCatalogFetchResult result = retrievalService.fetchCatalogResult(
+                    resourceKey,
                     requestBaseUrl,
                     tenantId,
                     userId,

@@ -53,6 +53,7 @@ import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
 import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
+import org.praxisplatform.config.service.ResourceSurfaceCatalogRetrievalService;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
@@ -395,6 +396,18 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public ResourceSurfaceCatalogRetrievalService resourceSurfaceCatalogRetrievalService(
+            ObjectMapper objectMapper,
+            @Value("${praxis.ai.capabilities.base-url:}") String metadataBaseUrl,
+            @Value("${praxis.ai.capabilities.timeout-ms:15000}") long metadataTimeoutMs) {
+        return new ResourceSurfaceCatalogRetrievalService(
+                objectMapper,
+                metadataBaseUrl,
+                metadataTimeoutMs);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     @ConditionalOnBean({AgenticAuthoringPlanService.class, AgenticAuthoringPatchCompilerService.class})
     public AgenticAuthoringPreviewService agenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
@@ -403,7 +416,8 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectProvider<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders,
             ObjectProvider<AgenticAuthoringPreviewMessageSynthesizerService> messageSynthesizer,
             ObjectProvider<SchemaRetrievalService> schemaRetrievalService,
-            ObjectProvider<ResourceCapabilitiesRetrievalService> resourceCapabilitiesRetrievalService) {
+            ObjectProvider<ResourceCapabilitiesRetrievalService> resourceCapabilitiesRetrievalService,
+            ObjectProvider<ResourceSurfaceCatalogRetrievalService> resourceSurfaceCatalogRetrievalService) {
         return new AgenticAuthoringPreviewService(
                 planService,
                 patchCompilerService,
@@ -411,7 +425,8 @@ public class AgenticAuthoringAutoConfiguration {
                 uiCompositionPlanProviders.orderedStream().toList(),
                 messageSynthesizer.getIfAvailable(),
                 schemaRetrievalService.getIfAvailable(),
-                resourceCapabilitiesRetrievalService.getIfAvailable());
+                resourceCapabilitiesRetrievalService.getIfAvailable(),
+                resourceSurfaceCatalogRetrievalService.getIfAvailable());
     }
 
     @Bean

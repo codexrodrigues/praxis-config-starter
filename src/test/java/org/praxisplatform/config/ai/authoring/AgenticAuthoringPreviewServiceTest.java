@@ -19,6 +19,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.service.ResourceCapabilitiesFetchResult;
 import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
+import org.praxisplatform.config.service.ResourceSurfaceCatalogFetchResult;
+import org.praxisplatform.config.service.ResourceSurfaceCatalogRetrievalService;
 import org.praxisplatform.config.service.SchemaFetchResult;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 import org.junit.jupiter.api.Tag;
@@ -45,6 +47,9 @@ class AgenticAuthoringPreviewServiceTest {
 
     @Mock
     private ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService;
+
+    @Mock
+    private ResourceSurfaceCatalogRetrievalService resourceSurfaceCatalogRetrievalService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -1382,8 +1387,9 @@ class AgenticAuthoringPreviewServiceTest {
                     }
                     assertThat(context.getPath())
                             .isEqualTo("/api/human-resources/vw-analytics-afastamentos/filter");
-                    assertThat(context.getSchemaType()).isEqualTo("request");
-                    return SchemaFetchResult.success(filterSchema, "http://localhost/schemas/filtered");
+                    return SchemaFetchResult.success(
+                            "request".equals(context.getSchemaType()) ? filterSchema : responseSchema,
+                            "http://localhost/schemas/filtered");
                 });
         when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
                 eq("/api/human-resources/vw-analytics-afastamentos"),
@@ -1394,6 +1400,15 @@ class AgenticAuthoringPreviewServiceTest {
                 .thenReturn(ResourceCapabilitiesFetchResult.success(
                         comparisonStatsCapabilities(),
                         "http://localhost/api/human-resources/vw-analytics-afastamentos/capabilities"));
+        when(resourceSurfaceCatalogRetrievalService.fetchCatalogResult(
+                eq("human-resources.funcionarios"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceSurfaceCatalogFetchResult.success(
+                        employeeSurfaceCatalog("resource-context-required"),
+                        "http://localhost/schemas/surfaces?resource=human-resources.funcionarios"));
 
         AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
                 planService,
@@ -1402,7 +1417,8 @@ class AgenticAuthoringPreviewServiceTest {
                 List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
                 null,
                 schemaRetrievalService,
-                resourceCapabilitiesRetrievalService)
+                resourceCapabilitiesRetrievalService,
+                resourceSurfaceCatalogRetrievalService)
                 .preview(request, "tenant", "user", "local", "http://localhost");
 
         assertThat(result.valid()).isTrue();
@@ -1430,6 +1446,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(principalAwareSchemaContexts).extracting(AiSchemaContext::getPath)
                 .containsExactlyInAnyOrder(
                         "/api/human-resources/vw-analytics-afastamentos/stats/comparison",
+                        "/api/human-resources/vw-analytics-afastamentos/filter",
                         "/api/human-resources/vw-analytics-afastamentos/filter");
         String chartKey = chart.path("key").asText();
         JsonNode table = result.uiCompositionPlan().path("widgets").findParents("componentId").stream()
@@ -1444,21 +1461,28 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(chartToTable.path("transform").path("template").path("filters")
                 .path("departamentoIdsIn").toString())
                 .isEqualTo("[\"${payload.filters.departamentoIdsIn}\"]");
-        JsonNode chartToSurface = findBinding(
-                result.uiCompositionPlan().path("bindings"),
-                chartKey + ".pointClick->surface.open");
-        assertThat(chartToSurface.path("policy").path("distinctBy").asText())
-                .isEqualTo("payload.data.key");
-        assertThat(chartToSurface.path("to").path("payload").path("bindings").path(0)
-                .path("mode").asText()).isEqualTo("template");
-        assertThat(chartToSurface.path("to").path("payload").path("bindings").path(0)
-                .path("value").toString()).isEqualTo("[\"${payload.data.key}\"]");
+        assertThat(result.uiCompositionPlan().path("bindings").toString())
+                .doesNotContain("pointClick->surface.open");
+        JsonNode list = result.uiCompositionPlan().path("widgets").findParents("componentId").stream()
+                .filter(widget -> "praxis-list".equals(widget.path("componentId").asText()))
+                .findFirst()
+                .orElseThrow();
+        JsonNode recordOpenAction = list.path("inputs").path("config").path("actions").path(0);
+        assertThat(recordOpenAction.path("action").asText()).isEqualTo("surface.open");
+        assertThat(recordOpenAction.path("recordOpen").path("sourceIdentityField").asText())
+                .isEqualTo("funcionarioId");
+        assertThat(recordOpenAction.path("recordOpen").path("target").path("resourceKey").asText())
+                .isEqualTo("human-resources.funcionarios");
+        assertThat(recordOpenAction.path("recordOpen").path("target").path("surfaceId").asText())
+                .isEqualTo("hero-profile");
+        assertThat(recordOpenAction.has("globalAction")).isFalse();
         assertThat(result.warnings()).contains(
                 "semantic-axis-stats-capability-verified",
                 "semantic-chart-interactions-grounded");
         assertThat(result.uiCompositionPlan().toString())
                 .doesNotContain("sampleRows")
                 .doesNotContain("rawRows")
+                .doesNotContain("${item.id}")
                 .doesNotContain("threshold");
     }
 
@@ -1501,6 +1525,179 @@ class AgenticAuthoringPreviewServiceTest {
                 .containsExactly("governed-analytics-comparison-operation-unavailable-missing-authority");
         assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
         verifyNoInteractions(schemaRetrievalService);
+    }
+
+    @Test
+    void previewRejectsComparisonWhenCurrentPrincipalCannotReadNominalRows() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Materialize a leitura analitica autorizada para este recurso.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                comparisonDashboardIntent());
+        ObjectNode capabilities = comparisonStatsCapabilities();
+        ObjectNode nominalAvailability = (ObjectNode) capabilities.path("operations")
+                .path("filter").path("availability");
+        nominalAvailability.put("allowed", false);
+        nominalAvailability.put("reason", "missing-authority");
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                eq("/api/human-resources/vw-analytics-afastamentos"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        capabilities,
+                        "http://localhost/api/human-resources/vw-analytics-afastamentos/capabilities"));
+        when(schemaRetrievalService.fetchSchemaResult(
+                any(AiSchemaContext.class),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(SchemaFetchResult.success(
+                        comparisonAnalyticsSchema(),
+                        "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService,
+                resourceSurfaceCatalogRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes())
+                .containsExactly("governed-analytics-comparison-nominal-operation-unavailable-missing-authority");
+        assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
+        verifyNoInteractions(resourceSurfaceCatalogRetrievalService);
+    }
+
+    @Test
+    void previewRejectsRecordOpenWhenNominalIdentityFieldIsNotPublished() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Materialize a leitura analitica autorizada para este recurso.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                comparisonDashboardIntent());
+        ObjectNode nominalResponseSchema = comparisonResourceSchema();
+        ((ObjectNode) nominalResponseSchema.path("properties")).remove("funcionarioId");
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                eq("/api/human-resources/vw-analytics-afastamentos"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        comparisonStatsCapabilities(),
+                        "http://localhost/api/human-resources/vw-analytics-afastamentos/capabilities"));
+        when(schemaRetrievalService.fetchSchemaResult(
+                any(AiSchemaContext.class),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    if (context.getPath().endsWith("/stats/comparison")) {
+                        return SchemaFetchResult.success(
+                                comparisonAnalyticsSchema(),
+                                "http://localhost/schemas/filtered");
+                    }
+                    return SchemaFetchResult.success(
+                            "request".equals(context.getSchemaType())
+                                    ? comparisonFilterSchema()
+                                    : nominalResponseSchema,
+                            "http://localhost/schemas/filtered");
+                });
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService,
+                resourceSurfaceCatalogRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes())
+                .containsExactly("governed-analytics-comparison-record-open-source-field-missing");
+        assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
+        verifyNoInteractions(resourceSurfaceCatalogRetrievalService);
+    }
+
+    @Test
+    void previewRejectsRecordOpenWhenTargetSurfaceIsUnavailableToThePrincipal() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Materialize a leitura analitica autorizada para este recurso.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                comparisonDashboardIntent());
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                eq("/api/human-resources/vw-analytics-afastamentos"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        comparisonStatsCapabilities(),
+                        "http://localhost/api/human-resources/vw-analytics-afastamentos/capabilities"));
+        when(schemaRetrievalService.fetchSchemaResult(
+                any(AiSchemaContext.class),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    if (context.getPath().endsWith("/stats/comparison")) {
+                        return SchemaFetchResult.success(
+                                comparisonAnalyticsSchema(),
+                                "http://localhost/schemas/filtered");
+                    }
+                    return SchemaFetchResult.success(
+                            "request".equals(context.getSchemaType())
+                                    ? comparisonFilterSchema()
+                                    : comparisonResourceSchema(),
+                            "http://localhost/schemas/filtered");
+                });
+        when(resourceSurfaceCatalogRetrievalService.fetchCatalogResult(
+                eq("human-resources.funcionarios"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceSurfaceCatalogFetchResult.success(
+                        employeeSurfaceCatalog("missing-authority"),
+                        "http://localhost/schemas/surfaces?resource=human-resources.funcionarios"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService,
+                resourceSurfaceCatalogRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes())
+                .containsExactly("governed-analytics-comparison-record-open-surface-unavailable-missing-authority");
+        assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
     }
 
     @Test
@@ -4063,6 +4260,12 @@ class AgenticAuthoringPreviewServiceTest {
         ObjectNode availability = comparisonOperation.putObject("availability");
         availability.put("allowed", true);
         availability.putObject("metadata").put("accessClass", "aggregate");
+        ObjectNode filterOperation = capabilities.path("operations") instanceof ObjectNode operations
+                ? operations.putObject("filter")
+                : capabilities.putObject("operations").putObject("filter");
+        filterOperation.put("id", "filter");
+        filterOperation.put("supported", true);
+        filterOperation.putObject("availability").put("allowed", true);
         ArrayNode fields = capabilities.putObject("stats").putArray("fields");
         fields.addObject()
                 .put("field", "departamento")
@@ -4150,10 +4353,14 @@ class AgenticAuthoringPreviewServiceTest {
         defaults.put("limit", 12);
         defaults.putArray("sort").addObject().put("field", "diasAfastado").put("direction", "desc");
         projection.putObject("presentationHints").putArray("preferredFamilies").add("chart");
-        projection.putObject("interactions")
-                .put("drillDown", true)
-                .put("pointSelection", true)
-                .put("crossFilter", true);
+        ObjectNode interactions = projection.putObject("interactions");
+        interactions.put("pointSelection", false);
+        interactions.put("crossFilter", true);
+        interactions.putObject("recordOpen")
+                .put("sourceIdentityField", "funcionarioId")
+                .putObject("target")
+                .put("resourceKey", "human-resources.funcionarios")
+                .put("surfaceId", "hero-profile");
         ObjectNode policyRef = projection.putObject("governance").putArray("policyRefs").addObject();
         policyRef.put("policyId", "absence-criticality-policy");
         policyRef.put("policyVersion", "2026-07");
@@ -4163,6 +4370,25 @@ class AgenticAuthoringPreviewServiceTest {
                 .put("policyIdField", "criticalityPolicyId")
                 .put("policyVersionField", "criticalityPolicyVersion");
         return schema;
+    }
+
+    private ObjectNode employeeSurfaceCatalog(String availabilityReason) {
+        ObjectNode catalog = objectMapper.createObjectNode();
+        catalog.put("resourceKey", "human-resources.funcionarios");
+        catalog.put("resourcePath", "/api/human-resources/funcionarios");
+        catalog.put("group", "human-resources");
+        ObjectNode surface = catalog.putArray("surfaces").addObject();
+        surface.put("id", "hero-profile");
+        surface.put("resourceKey", "human-resources.funcionarios");
+        surface.put("kind", "READ_PROJECTION");
+        surface.put("scope", "ITEM");
+        surface.put("operationId", "getFuncionarioHeroProfile");
+        ObjectNode availability = surface.putObject("availability");
+        availability.put("allowed", availabilityReason == null);
+        if (availabilityReason != null) {
+            availability.put("reason", availabilityReason);
+        }
+        return catalog;
     }
 
     private ObjectNode unresolvedAxisDashboardPlan() {

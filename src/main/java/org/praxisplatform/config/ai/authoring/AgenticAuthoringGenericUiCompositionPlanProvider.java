@@ -3,6 +3,7 @@ package org.praxisplatform.config.ai.authoring;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.text.Normalizer;
 import java.util.ArrayList;
@@ -124,12 +125,21 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                     .asText("")
                     .trim();
             if (!crossFilterEnabled || !keyFilterField.isBlank()) {
-                return Optional.empty();
+                JsonNode recordOpen = projection.path("interactions").path("recordOpen");
+                if (!recordOpen.isObject()
+                        || grounding.path("recordOpenResolution").path("schemaVerified").asBoolean(false)) {
+                    return Optional.empty();
+                }
+                status = "record-open-resolution-required";
+            } else {
+                status = "key-filter-binding-required";
             }
-            status = "key-filter-binding-required";
         }
         String failure = "governed-analytics-comparison-" + slug(valueOrDefault(status, "unavailable"));
-        if ("operation-unavailable".equals(status)) {
+        if (Set.of(
+                "operation-unavailable",
+                "nominal-operation-unavailable",
+                "record-open-surface-unavailable").contains(status)) {
             String availabilityReason = slug(grounding.path("availabilityReason").asText(""));
             if (!availabilityReason.isBlank()) {
                 failure += "-" + availabilityReason;
@@ -321,7 +331,13 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         if (surfaceOpenModal && chartDashboard) {
             addSurfaceOpenDrilldownBinding(plan, candidate, renderableDimensions);
         } else if (includeDetailTable(visualizationDecision)) {
-            addList(widgets, candidate, widgetKey(candidate, "list"), "insight-list", renderableDimensions);
+            addList(
+                    widgets,
+                    candidate,
+                    widgetKey(candidate, "list"),
+                    "insight-list",
+                    renderableDimensions,
+                    governedRecordOpen(request));
             addTable(widgets, candidate, widgetKey(candidate, "table"), "detail");
         }
         if (!surfaceOpenModal || !chartDashboard) {
@@ -779,6 +795,16 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             String key,
             String role,
             List<DashboardDimension> dimensions) {
+        addList(widgets, candidate, key, role, dimensions, MissingNode.getInstance());
+    }
+
+    private void addList(
+            ArrayNode widgets,
+            AgenticAuthoringCandidate candidate,
+            String key,
+            String role,
+            List<DashboardDimension> dimensions,
+            JsonNode recordOpen) {
         ObjectNode widget = widgets.addObject();
         widget.put("key", key);
         widget.put("componentId", "praxis-list");
@@ -831,7 +857,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         detailsAction.put("label", "Ver detalhes");
         detailsAction.put("icon", "open_in_new");
         detailsAction.put("placement", "trailing");
-        configureOpenDetailsAction(detailsAction, candidate, key);
+        configureOpenDetailsAction(detailsAction, candidate, key, recordOpen);
     }
 
     private void addTabs(
@@ -1199,7 +1225,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         copyAnalyticsSortAndLimitToStatsRequest(projection, dimension.field(), metrics, statsRequest);
 
         JsonNode projectionInteractions = projection.path("interactions");
-        boolean drillDown = projectionInteractions.path("drillDown").asBoolean(false);
+        boolean hasRecordOpen = projectionInteractions.path("recordOpen").isObject();
+        boolean drillDown = !hasRecordOpen && projectionInteractions.path("drillDown").asBoolean(false);
         boolean pointSelection = projectionInteractions.path("pointSelection").asBoolean(false);
         boolean crossFilterEnabled = projectionInteractions.path("crossFilter").asBoolean(false);
         ObjectNode interactions = config.putObject("interactions");
@@ -1787,9 +1814,22 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             ObjectNode action,
             AgenticAuthoringCandidate candidate,
             String sourceKey) {
+        configureOpenDetailsAction(action, candidate, sourceKey, MissingNode.getInstance());
+    }
+
+    private void configureOpenDetailsAction(
+            ObjectNode action,
+            AgenticAuthoringCandidate candidate,
+            String sourceKey,
+            JsonNode recordOpen) {
         action.put("kind", "icon");
         action.put("showLoading", true);
         action.put("emitLocal", false);
+        if (recordOpen != null && recordOpen.isObject()) {
+            action.put("action", "surface.open");
+            action.set("recordOpen", recordOpen.deepCopy());
+            return;
+        }
         ObjectNode globalAction = action.putObject("globalAction");
         globalAction.put("actionId", "surface.open");
         globalAction.set("payload", surfaceOpenFormPayload(candidate, sourceKey));
@@ -3578,6 +3618,16 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             return objectMapper.createObjectNode();
         }
         return request.contextHints().path("governedAnalytics");
+    }
+
+    private JsonNode governedRecordOpen(AgenticAuthoringPlanRequest request) {
+        JsonNode grounding = governedAnalyticsContext(request);
+        if (!"verified".equals(grounding.path("status").asText(""))
+                || !grounding.path("recordOpenResolution").path("schemaVerified").asBoolean(false)) {
+            return MissingNode.getInstance();
+        }
+        JsonNode recordOpen = grounding.path("projection").path("interactions").path("recordOpen");
+        return recordOpen.isObject() ? recordOpen : MissingNode.getInstance();
     }
 
     private String slug(String value) {
