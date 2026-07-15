@@ -305,7 +305,9 @@ public class AgenticAuthoringPreviewService {
                 environment,
                 schemaFetchCache,
                 capabilitiesFetchCache);
-        request = withSchemaFieldContext(request, schemaBaseUrl, schemaFetchCache);
+        if (!governedAnalyticsGroundingBlocksMaterialization(request)) {
+            request = withSchemaFieldContext(request, schemaBaseUrl, schemaFetchCache);
+        }
         for (AgenticAuthoringUiCompositionPlanProvider provider : uiCompositionPlanProviders) {
             Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(request);
             if (result.isEmpty()) {
@@ -316,6 +318,16 @@ public class AgenticAuthoringPreviewService {
                     planResult.failureCodes() == null ? List.of() : planResult.failureCodes());
             List<String> warnings = new ArrayList<>(
                     planResult.warnings() == null ? List.of() : planResult.warnings());
+            if (!planResult.valid()) {
+                return Optional.of(invalidUiCompositionPlanPreview(
+                        request,
+                        planResult,
+                        failureCodes,
+                        warnings,
+                        tenantId,
+                        userId,
+                        environment));
+            }
             boolean technicallyValid = planResult.valid();
             boolean semanticallyValid = planResult.valid();
             JsonNode uiCompositionPlan = normalizeCountMetricBindings(
@@ -415,6 +427,62 @@ public class AgenticAuthoringPreviewService {
         return Optional.empty();
     }
 
+    private boolean governedAnalyticsGroundingBlocksMaterialization(AgenticAuthoringPlanRequest request) {
+        JsonNode grounding = request == null || request.contextHints() == null
+                ? MissingNode.getInstance()
+                : request.contextHints().path("governedAnalytics");
+        return "comparison".equals(grounding.path("requestedOperation").asText(""))
+                && !"verified".equals(grounding.path("status").asText(""));
+    }
+
+    private AgenticAuthoringPreviewResult invalidUiCompositionPlanPreview(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringUiCompositionPlanResult planResult,
+            List<String> failureCodes,
+            List<String> warnings,
+            String tenantId,
+            String userId,
+            String environment) {
+        addWarningOnce(warnings, "ui-composition-plan-post-processing-skipped-invalid-provider-result");
+        JsonNode uiCompositionPlan = planResult.uiCompositionPlan() == null
+                ? MissingNode.getInstance()
+                : planResult.uiCompositionPlan();
+        JsonNode compiledFormPatch = planResult.compiledFormPatch() == null
+                ? MissingNode.getInstance()
+                : planResult.compiledFormPatch();
+        String fallbackMessage = deterministicPreviewAssistantMessage(
+                request,
+                request == null ? null : request.intentResolution(),
+                uiCompositionPlan,
+                false,
+                List.copyOf(failureCodes));
+        return new AgenticAuthoringPreviewResult(
+                false,
+                List.copyOf(failureCodes),
+                List.copyOf(warnings),
+                MissingNode.getInstance(),
+                compiledFormPatch,
+                diagnostics(
+                        request,
+                        request == null ? null : request.intentResolution(),
+                        List.copyOf(failureCodes),
+                        List.copyOf(warnings),
+                        uiCompositionPlan,
+                        compiledFormPatch),
+                uiCompositionPlan,
+                previewAssistantMessage(
+                        request,
+                        request == null ? null : request.intentResolution(),
+                        uiCompositionPlan,
+                        false,
+                        List.copyOf(failureCodes),
+                        List.copyOf(warnings),
+                        fallbackMessage,
+                        tenantId,
+                        userId,
+                        environment));
+    }
+
     private AgenticAuthoringPlanRequest withGovernedAnalyticsContext(
             AgenticAuthoringPlanRequest request,
             String schemaBaseUrl,
@@ -458,9 +526,28 @@ public class AgenticAuthoringPreviewService {
             grounding.put("status", "capabilities-" + fetchStatus(capabilitiesResult));
             return copyWithContextHints(request, contextHints);
         }
-        grounding.put("capabilityVerified", true);
-        if (!supportsCanonicalStatsOperation(capabilitiesResult.getCapabilities(), requestedOperation)) {
+        JsonNode operationCapability = canonicalStatsOperationCapability(
+                capabilitiesResult.getCapabilities(),
+                requestedOperation);
+        if (!operationCapability.isObject() || !operationCapability.path("supported").asBoolean(false)) {
             grounding.put("status", "operation-unsupported");
+            return copyWithContextHints(request, contextHints);
+        }
+        grounding.put("capabilityVerified", true);
+        grounding.put("operationId", operationCapability.path("id").asText(
+                canonicalStatsOperationId(requestedOperation)));
+        JsonNode availability = operationCapability.path("availability");
+        if (!availability.isObject() || !availability.has("allowed") || !availability.path("allowed").isBoolean()) {
+            grounding.put("status", "operation-availability-unverified");
+            return copyWithContextHints(request, contextHints);
+        }
+        ObjectNode operationAvailability = grounding.putObject("operationAvailability");
+        operationAvailability.put("allowed", availability.path("allowed").asBoolean());
+        putText(operationAvailability, "reason", availability.path("reason").asText(""));
+        putText(operationAvailability, "accessClass", availability.path("metadata").path("accessClass").asText(""));
+        if (!availability.path("allowed").asBoolean()) {
+            grounding.put("status", "operation-unavailable");
+            putText(grounding, "availabilityReason", availability.path("reason").asText(""));
             return copyWithContextHints(request, contextHints);
         }
 
@@ -486,13 +573,63 @@ public class AgenticAuthoringPreviewService {
                 resourcePath,
                 requestedOperation);
         if (projection.isEmpty()) {
-            grounding.put("status", "projection-ineligible");
+            grounding.put("status", missingKeyFilterBinding(
+                    schemaResult.getSchema(),
+                    resourcePath,
+                    requestedOperation)
+                            ? "key-filter-binding-required"
+                            : "projection-ineligible");
             return copyWithContextHints(request, contextHints);
+        }
+        ObjectNode sanitizedProjection = projection.get();
+        if (sanitizedProjection.path("interactions").path("crossFilter").asBoolean(false)) {
+            String keyFilterField = sanitizedProjection.path("bindings")
+                    .path("primaryDimension")
+                    .path("keyFilterField")
+                    .asText("")
+                    .trim();
+            if (keyFilterField.isBlank()) {
+                grounding.put("status", "key-filter-binding-required");
+                return copyWithContextHints(request, contextHints);
+            }
+            AiSchemaContext filterSchemaContext = AiSchemaContext.builder()
+                    .path(resourcePath + "/filter")
+                    .operation("post")
+                    .schemaType("request")
+                    .build();
+            SchemaFetchResult filterSchemaResult = schemaFetchCache.fetchPrincipalAware(
+                    filterSchemaContext,
+                    schemaBaseUrl,
+                    tenantId,
+                    userId,
+                    environment);
+            if (filterSchemaResult == null || !filterSchemaResult.isSuccess()) {
+                grounding.put("status", "key-filter-schema-" + schemaFetchStatus(filterSchemaResult));
+                return copyWithContextHints(request, contextHints);
+            }
+            Map<String, SchemaFieldDescriptor> filterFields = schemaFields(filterSchemaResult.getSchema());
+            SchemaFieldDescriptor targetField = filterFields.get(normalize(keyFilterField));
+            if (targetField == null || !keyFilterField.equals(targetField.name())) {
+                grounding.put("status", "key-filter-field-missing");
+                return copyWithContextHints(request, contextHints);
+            }
+            if (!supportsBucketKey(targetField)) {
+                grounding.put("status", "key-filter-field-incompatible");
+                return copyWithContextHints(request, contextHints);
+            }
+            sources.add("schemas.filtered:filter-request");
+            ObjectNode keyFilterBinding = grounding.putObject("keyFilterBinding");
+            keyFilterBinding.put("field", targetField.name());
+            keyFilterBinding.put("type", targetField.type());
+            keyFilterBinding.put("multiple", targetField.multiple()
+                    || "array".equals(normalize(targetField.type())));
+            putText(keyFilterBinding, "itemType", targetField.itemType());
+            keyFilterBinding.put("schemaVerified", true);
         }
         grounding.put("status", "verified");
         grounding.put("capabilityEndpointUrl", value(capabilitiesResult.getEndpointUrl()));
         grounding.put("schemaEndpointUrl", value(schemaResult.getEndpointUrl()));
-        grounding.set("projection", projection.get());
+        grounding.set("projection", sanitizedProjection);
         return copyWithContextHints(request, contextHints);
     }
 
@@ -545,17 +682,51 @@ public class AgenticAuthoringPreviewService {
         return value.endsWith("/stats/" + operation);
     }
 
-    private boolean supportsCanonicalStatsOperation(JsonNode capabilities, String operation) {
+    private JsonNode canonicalStatsOperationCapability(JsonNode capabilities, String operation) {
         JsonNode root = capabilityRoot(capabilities);
+        String operationId = canonicalStatsOperationId(operation);
+        return operationId.isBlank() ? MissingNode.getInstance() : root.path("operations").path(operationId);
+    }
+
+    private String canonicalStatsOperationId(String operation) {
         return switch (operation) {
-            case "comparison" -> root.path("canonicalOperations").path("statsComparison").asBoolean(false);
-            default -> false;
+            case "comparison" -> "statsComparison";
+            default -> "";
         };
+    }
+
+    private boolean isCanonicalStatsOperationAvailableForPrincipal(JsonNode capabilities, String operation) {
+        JsonNode operationCapability = canonicalStatsOperationCapability(capabilities, operation);
+        JsonNode availability = operationCapability.path("availability");
+        return operationCapability.path("supported").asBoolean(false)
+                && availability.isObject()
+                && availability.path("allowed").isBoolean()
+                && availability.path("allowed").asBoolean(false);
     }
 
     private JsonNode capabilityRoot(JsonNode capabilities) {
         JsonNode root = capabilities == null ? MissingNode.getInstance() : capabilities;
         return root.path("data").isObject() ? root.path("data") : root;
+    }
+
+    private boolean missingKeyFilterBinding(JsonNode schema, String resourcePath, String operation) {
+        JsonNode projections = schema == null
+                ? MissingNode.getInstance()
+                : schema.path("x-ui").path("analytics").path("projections");
+        if (!projections.isArray()) {
+            return false;
+        }
+        for (JsonNode projection : projections) {
+            JsonNode source = projection.path("source");
+            if (operation.equals(source.path("operation").asText(""))
+                    && sameResourcePath(resourcePath, source.path("resource").asText(""))
+                    && projection.path("interactions").path("crossFilter").asBoolean(false)
+                    && projection.path("bindings").path("primaryDimension")
+                            .path("keyFilterField").asText("").isBlank()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Optional<ObjectNode> governedAnalyticsProjection(
@@ -663,7 +834,7 @@ public class AgenticAuthoringPreviewService {
         if ("comparisonPeriod".equals(fieldName)) {
             copyTextFields(binding, copy, "field", "timezone", "preset", "mode");
         } else {
-            copyTextFields(binding, copy, "field", "role", "label");
+            copyTextFields(binding, copy, "field", "role", "label", "keyFilterField");
         }
     }
 
@@ -1201,8 +1372,10 @@ public class AgenticAuthoringPreviewService {
                 }
                 String operation = valueOrDefault(query.path("statsOperation").asText(""), "group-by");
                 if ("comparison".equals(normalize(operation))
-                        && !supportsCanonicalStatsOperation(result.getCapabilities(), "comparison")) {
-                    markStatsAxisUnsupported(objectNode, semanticAxis, "unsupported-operation");
+                        && !isCanonicalStatsOperationAvailableForPrincipal(
+                                result.getCapabilities(),
+                                "comparison")) {
+                    markStatsAxisUnsupported(objectNode, semanticAxis, "operation-unavailable");
                     continue;
                 }
                 Optional<StatsCapabilityFieldDescriptor> dimension = resolveStatsDimensionCapability(
@@ -1356,10 +1529,13 @@ public class AgenticAuthoringPreviewService {
     private Optional<ChartInteractionProjection> chartInteractionProjection(
             ObjectNode chart,
             Map<String, SchemaFieldDescriptor> filterFields) {
-        ObjectNode semanticAxis = chart.path("inputs").path("config").path("semanticAxis") instanceof ObjectNode axis
+        ObjectNode config = chart.path("inputs").path("config") instanceof ObjectNode chartConfig
+                ? chartConfig
+                : null;
+        ObjectNode semanticAxis = config != null && config.path("semanticAxis") instanceof ObjectNode axis
                 ? axis
                 : null;
-        if (semanticAxis == null || !semanticAxis.path("schemaVerified").asBoolean(false)) {
+        if (config == null || semanticAxis == null || !semanticAxis.path("schemaVerified").asBoolean(false)) {
             return Optional.empty();
         }
         String displayField = semanticAxis.path("field").asText("").trim();
@@ -1369,8 +1545,16 @@ public class AgenticAuthoringPreviewService {
         boolean keyAndLabelDistinct = semanticAxis.path("statsEvidence")
                 .path("keyAndLabelDistinct")
                 .asBoolean(false);
-        boolean timeseries = "timeseries".equalsIgnoreCase(chart.path("inputs").path("config")
+        boolean timeseries = "timeseries".equalsIgnoreCase(config
                 .path("dataSource").path("query").path("statsOperation").asText(""));
+        boolean governedKeyFilterRequired = config.path("analyticsProjection")
+                .path("interactions").path("crossFilter").asBoolean(false);
+        String governedKeyFilterField = config.path("analyticsProjection")
+                .path("bindings").path("primaryDimension").path("keyFilterField")
+                .asText("").trim();
+        if (governedKeyFilterRequired && governedKeyFilterField.isBlank()) {
+            return Optional.empty();
+        }
         LinkedHashSet<String> axisFields = new LinkedHashSet<>();
         addNonBlank(axisFields, displayField);
         addNonBlank(axisFields, semanticAxis.path("requestedField").asText(""));
@@ -1385,11 +1569,16 @@ public class AgenticAuthoringPreviewService {
         if (explicitTargets.size() > 1) {
             return Optional.empty();
         }
-        String explicitTarget = explicitTargets.stream().findFirst().orElse("");
+        String explicitTarget = governedKeyFilterField.isBlank()
+                ? explicitTargets.stream().findFirst().orElse("")
+                : governedKeyFilterField;
         SchemaFieldDescriptor target = explicitTarget.isBlank()
                 ? null
                 : filterFields.get(normalize(explicitTarget));
-        if (!explicitTarget.isBlank() && target == null) {
+        if (!explicitTarget.isBlank()
+                && (target == null
+                || !explicitTarget.equals(target.name())
+                || (!governedKeyFilterField.isBlank() && !supportsBucketKey(target)))) {
             return Optional.empty();
         }
         SchemaFieldDescriptor probe = chartInteractionFilterProbe(semanticAxis);
@@ -1433,10 +1622,10 @@ public class AgenticAuthoringPreviewService {
                         : ChartInteractionValueShape.SCALAR;
         String sourceField = valueShape == ChartInteractionValueShape.TEMPORAL_RANGE
                 ? "start"
-                : keyAndLabelDistinct ? "key" : displayField;
+                : !governedKeyFilterField.isBlank() || keyAndLabelDistinct ? "key" : displayField;
         String pointValuePath = valueShape == ChartInteractionValueShape.TEMPORAL_RANGE
                 ? "payload.data.start"
-                : keyAndLabelDistinct
+                : !governedKeyFilterField.isBlank() || keyAndLabelDistinct
                 ? "payload.data.key"
                 : "payload.data." + displayField;
         return Optional.of(new ChartInteractionProjection(
@@ -1447,6 +1636,15 @@ public class AgenticAuthoringPreviewService {
                 pointValuePath,
                 Set.copyOf(axisFields),
                 governedCrossFilterTargetFields(chart, filterFields, axisFields)));
+    }
+
+    private boolean supportsBucketKey(SchemaFieldDescriptor field) {
+        if (field == null) {
+            return false;
+        }
+        boolean multiple = field.multiple() || "array".equals(normalize(field.type()));
+        String valueType = normalize(multiple ? field.itemType() : field.type());
+        return Set.of("string", "integer", "number", "boolean").contains(valueType);
     }
 
     private Set<String> governedCrossFilterTargetFields(
@@ -1510,6 +1708,7 @@ public class AgenticAuthoringPreviewService {
         return new SchemaFieldDescriptor(
                 field,
                 label,
+                "",
                 "",
                 "",
                 "",
@@ -3432,6 +3631,7 @@ public class AgenticAuthoringPreviewService {
                 "",
                 "",
                 "",
+                "",
                 false,
                 "",
                 false,
@@ -4221,6 +4421,7 @@ public class AgenticAuthoringPreviewService {
                 label,
                 description,
                 property.path("type").asText(""),
+                property.path("items").path("type").asText(""),
                 property.path("format").asText(""),
                 property.path("enum").isArray() && !property.path("enum").isEmpty(),
                 xUi.path("controlType").asText(""),
@@ -5168,6 +5369,7 @@ public class AgenticAuthoringPreviewService {
             String label,
             String description,
             String type,
+            String itemType,
             String format,
             boolean hasEnum,
             String controlType,

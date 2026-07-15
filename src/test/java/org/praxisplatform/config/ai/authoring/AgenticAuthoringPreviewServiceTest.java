@@ -1364,12 +1364,8 @@ class AgenticAuthoringPreviewServiceTest {
         ObjectNode filterSchema = comparisonFilterSchema();
         ObjectNode comparisonSchema = comparisonAnalyticsSchema();
         when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), eq("http://localhost")))
-                .thenAnswer(invocation -> {
-                    AiSchemaContext context = invocation.getArgument(0);
-                    return SchemaFetchResult.success(
-                            "request".equals(context.getSchemaType()) ? filterSchema : responseSchema,
-                            "http://localhost/schemas/filtered");
-                });
+                .thenReturn(SchemaFetchResult.success(responseSchema, "http://localhost/schemas/filtered"));
+        List<AiSchemaContext> principalAwareSchemaContexts = new ArrayList<>();
         when(schemaRetrievalService.fetchSchemaResult(
                 any(AiSchemaContext.class),
                 eq("http://localhost"),
@@ -1378,11 +1374,16 @@ class AgenticAuthoringPreviewServiceTest {
                 eq("local")))
                 .thenAnswer(invocation -> {
                     AiSchemaContext context = invocation.getArgument(0);
-                    assertThat(context.getPath())
-                            .isEqualTo("/api/human-resources/vw-analytics-afastamentos/stats/comparison");
+                    principalAwareSchemaContexts.add(context);
                     assertThat(context.getOperation()).isEqualTo("post");
-                    assertThat(context.getSchemaType()).isEqualTo("response");
-                    return SchemaFetchResult.success(comparisonSchema, "http://localhost/schemas/filtered");
+                    if (context.getPath().endsWith("/stats/comparison")) {
+                        assertThat(context.getSchemaType()).isEqualTo("response");
+                        return SchemaFetchResult.success(comparisonSchema, "http://localhost/schemas/filtered");
+                    }
+                    assertThat(context.getPath())
+                            .isEqualTo("/api/human-resources/vw-analytics-afastamentos/filter");
+                    assertThat(context.getSchemaType()).isEqualTo("request");
+                    return SchemaFetchResult.success(filterSchema, "http://localhost/schemas/filtered");
                 });
         when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
                 eq("/api/human-resources/vw-analytics-afastamentos"),
@@ -1421,9 +1422,37 @@ class AgenticAuthoringPreviewServiceTest {
                 .path("policyId").asText()).isEqualTo("absence-criticality-policy");
         assertThat(config.path("analyticsProjection").path("governance").path("policyRefs").path(0)
                 .path("policyVersion").asText()).isEqualTo("2026-07");
+        assertThat(config.path("analyticsProjection").path("bindings").path("primaryDimension")
+                .path("keyFilterField").asText()).isEqualTo("departamentoIdsIn");
         assertThat(config.path("semanticAxis").path("statsVerified").asBoolean()).isTrue();
         assertThat(config.path("interactions").path("eventActions").path("crossFilter")
                 .path("mapping").toString()).isEqualTo("{\"key\":\"departamentoIdsIn\"}");
+        assertThat(principalAwareSchemaContexts).extracting(AiSchemaContext::getPath)
+                .containsExactlyInAnyOrder(
+                        "/api/human-resources/vw-analytics-afastamentos/stats/comparison",
+                        "/api/human-resources/vw-analytics-afastamentos/filter");
+        String chartKey = chart.path("key").asText();
+        JsonNode table = result.uiCompositionPlan().path("widgets").findParents("componentId").stream()
+                .filter(widget -> "praxis-table".equals(widget.path("componentId").asText()))
+                .findFirst()
+                .orElseThrow();
+        JsonNode chartToTable = findBinding(
+                result.uiCompositionPlan().path("bindings"),
+                chartKey + ".crossFilter->" + table.path("key").asText() + ".queryContext");
+        assertThat(chartToTable.path("policy").path("distinctBy").asText())
+                .isEqualTo("payload.filters.departamentoIdsIn");
+        assertThat(chartToTable.path("transform").path("template").path("filters")
+                .path("departamentoIdsIn").toString())
+                .isEqualTo("[\"${payload.filters.departamentoIdsIn}\"]");
+        JsonNode chartToSurface = findBinding(
+                result.uiCompositionPlan().path("bindings"),
+                chartKey + ".pointClick->surface.open");
+        assertThat(chartToSurface.path("policy").path("distinctBy").asText())
+                .isEqualTo("payload.data.key");
+        assertThat(chartToSurface.path("to").path("payload").path("bindings").path(0)
+                .path("mode").asText()).isEqualTo("template");
+        assertThat(chartToSurface.path("to").path("payload").path("bindings").path(0)
+                .path("value").toString()).isEqualTo("[\"${payload.data.key}\"]");
         assertThat(result.warnings()).contains(
                 "semantic-axis-stats-capability-verified",
                 "semantic-chart-interactions-grounded");
@@ -1431,6 +1460,144 @@ class AgenticAuthoringPreviewServiceTest {
                 .doesNotContain("sampleRows")
                 .doesNotContain("rawRows")
                 .doesNotContain("threshold");
+    }
+
+    @Test
+    void previewRejectsComparisonWhenCurrentPrincipalCannotUseTheOperation() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Materialize a leitura analitica autorizada para este recurso.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                comparisonDashboardIntent());
+        ObjectNode capabilities = comparisonStatsCapabilities();
+        ObjectNode availability = (ObjectNode) capabilities.path("operations")
+                .path("statsComparison").path("availability");
+        availability.put("allowed", false);
+        availability.put("reason", "missing-authority");
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                eq("/api/human-resources/vw-analytics-afastamentos"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        capabilities,
+                        "http://localhost/api/human-resources/vw-analytics-afastamentos/capabilities"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes())
+                .containsExactly("governed-analytics-comparison-operation-unavailable-missing-authority");
+        assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
+        verifyNoInteractions(schemaRetrievalService);
+    }
+
+    @Test
+    void previewRejectsCrossFilterProjectionWithoutCanonicalBucketKeyBinding() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Materialize a leitura analitica autorizada para este recurso.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                comparisonDashboardIntent());
+        ObjectNode comparisonSchema = comparisonAnalyticsSchema();
+        ((ObjectNode) comparisonSchema.path("x-ui").path("analytics").path("projections").path(0)
+                .path("bindings").path("primaryDimension")).remove("keyFilterField");
+        when(schemaRetrievalService.fetchSchemaResult(
+                any(AiSchemaContext.class),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenAnswer(invocation -> SchemaFetchResult.success(
+                        comparisonSchema,
+                        "http://localhost/schemas/filtered"));
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                eq("/api/human-resources/vw-analytics-afastamentos"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        comparisonStatsCapabilities(),
+                        "http://localhost/api/human-resources/vw-analytics-afastamentos/capabilities"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes())
+                .containsExactly("governed-analytics-comparison-key-filter-binding-required");
+        assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
+    }
+
+    @Test
+    void previewRejectsBucketKeyBindingThatCannotRepresentTheCanonicalKey() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Materialize a leitura analitica autorizada para este recurso.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                comparisonDashboardIntent());
+        ObjectNode filterSchema = comparisonFilterSchema();
+        ((ObjectNode) filterSchema.path("properties").path("departamentoIdsIn").path("items"))
+                .put("type", "object");
+        when(schemaRetrievalService.fetchSchemaResult(
+                any(AiSchemaContext.class),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    return SchemaFetchResult.success(
+                            context.getPath().endsWith("/filter") ? filterSchema : comparisonAnalyticsSchema(),
+                            "http://localhost/schemas/filtered");
+                });
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                eq("/api/human-resources/vw-analytics-afastamentos"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        comparisonStatsCapabilities(),
+                        "http://localhost/api/human-resources/vw-analytics-afastamentos/capabilities"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes())
+                .containsExactly("governed-analytics-comparison-key-filter-field-incompatible");
+        assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
     }
 
     @Test
@@ -3887,7 +4054,15 @@ class AgenticAuthoringPreviewServiceTest {
 
     private ObjectNode comparisonStatsCapabilities() {
         ObjectNode capabilities = objectMapper.createObjectNode();
-        capabilities.putObject("canonicalOperations").put("statsComparison", true);
+        ObjectNode comparisonOperation = capabilities.putObject("operations").putObject("statsComparison");
+        comparisonOperation.put("id", "statsComparison");
+        comparisonOperation.put("supported", true);
+        comparisonOperation.put("scope", "COLLECTION");
+        comparisonOperation.put("preferredMethod", "POST");
+        comparisonOperation.put("preferredRel", "stats-comparison");
+        ObjectNode availability = comparisonOperation.putObject("availability");
+        availability.put("allowed", true);
+        availability.putObject("metadata").put("accessClass", "aggregate");
         ArrayNode fields = capabilities.putObject("stats").putArray("fields");
         fields.addObject()
                 .put("field", "departamento")
@@ -3929,6 +4104,7 @@ class AgenticAuthoringPreviewServiceTest {
         ObjectNode properties = schema.putObject("properties");
         ObjectNode department = properties.putObject("departamentoIdsIn");
         department.put("type", "array");
+        department.putObject("items").put("type", "integer");
         department.putObject("x-ui")
                 .put("label", "Departamento")
                 .put("controlType", "async-select")
@@ -3953,7 +4129,8 @@ class AgenticAuthoringPreviewServiceTest {
         bindings.putObject("primaryDimension")
                 .put("field", "departamento")
                 .put("role", "category")
-                .put("label", "Departamento");
+                .put("label", "Departamento")
+                .put("keyFilterField", "departamentoIdsIn");
         bindings.putArray("primaryMetrics")
                 .addObject()
                 .put("field", "funcionarioId")

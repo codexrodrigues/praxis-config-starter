@@ -116,9 +116,25 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         }
         String status = grounding.path("status").asText("missing");
         if ("verified".equals(status) && grounding.path("projection").isObject()) {
-            return Optional.empty();
+            JsonNode projection = grounding.path("projection");
+            boolean crossFilterEnabled = projection.path("interactions").path("crossFilter").asBoolean(false);
+            String keyFilterField = projection.path("bindings")
+                    .path("primaryDimension")
+                    .path("keyFilterField")
+                    .asText("")
+                    .trim();
+            if (!crossFilterEnabled || !keyFilterField.isBlank()) {
+                return Optional.empty();
+            }
+            status = "key-filter-binding-required";
         }
         String failure = "governed-analytics-comparison-" + slug(valueOrDefault(status, "unavailable"));
+        if ("operation-unavailable".equals(status)) {
+            String availabilityReason = slug(grounding.path("availabilityReason").asText(""));
+            if (!availabilityReason.isBlank()) {
+                failure += "-" + availabilityReason;
+            }
+        }
         return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
                 false,
                 List.of(failure),
@@ -1194,7 +1210,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         if (crossFilterEnabled) {
             ObjectNode crossFilter = interactions.putObject("eventActions").putObject("crossFilter");
             crossFilter.put("action", "filter-widget");
-            crossFilter.putObject("mapping").put(dimension.field(), canonicalFieldName(dimension.field()));
+            crossFilter.putObject("mapping").put("key", dimension.filterField());
         }
     }
 
@@ -1449,7 +1465,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                     to.set("payload", surfaceOpenListPayload(candidate, dimension, dimensions));
                     ObjectNode policy = modalBinding.putObject("policy");
                     policy.put("distinct", true);
-                    policy.put("distinctBy", chartPointRawValuePath());
+                    policy.put("distinctBy", chartPointRawValuePath(dimension));
                     policy.put("debounceMs", 250);
                 }
 
@@ -1470,7 +1486,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                     crossFilterTransform.put("kind", "template");
                     crossFilterTransform.put("id", chartKey + "-cross-filter-query-context");
                     ObjectNode template = crossFilterTransform.putObject("template");
-                    template.put("filters", "${payload.filters}");
+                    putCrossFilterQueryContext(template, dimension);
 
                     ObjectNode listDrilldownBinding = bindings.addObject();
                     listDrilldownBinding.put("id", chartKey + ".crossFilter->" + listKey + ".queryContext");
@@ -1482,7 +1498,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                     listTransform.put("kind", "template");
                     listTransform.put("id", chartKey + "-cross-filter-list-query-context");
                     ObjectNode listTemplate = listTransform.putObject("template");
-                    listTemplate.put("filters", "${payload.filters}");
+                    putCrossFilterQueryContext(listTemplate, dimension);
                 }
             }
         }
@@ -1500,21 +1516,30 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         addComponentPortEndpoint(binding.putObject("to"), targetKey, "queryContext", "input");
         ObjectNode policy = binding.putObject("policy");
         policy.put("distinct", true);
-        policy.put("distinctBy", chartPointRawValuePath());
+        policy.put("distinctBy", chartPointRawValuePath(dimension));
         policy.put("debounceMs", 250);
         ObjectNode transform = binding.putObject("transform");
         transform.put("kind", "template");
         transform.put("id", chartKey + "-point-query-context");
         ObjectNode template = transform.putObject("template");
         ObjectNode filters = template.putObject("filters");
-        filters.put(canonicalFieldName(dimension.field()), "${" + chartPointRawValuePath() + "}");
+        filters.put(dimension.filterField(), "${" + chartPointRawValuePath(dimension) + "}");
     }
 
     private void addChartQueryContextPolicy(ObjectNode binding, DashboardDimension dimension) {
         ObjectNode policy = binding.putObject("policy");
         policy.put("distinct", true);
-        policy.put("distinctBy", "payload.filters." + canonicalFieldName(dimension.field()));
+        policy.put("distinctBy", "payload.filters." + dimension.filterField());
         policy.put("debounceMs", 250);
+    }
+
+    private void putCrossFilterQueryContext(ObjectNode template, DashboardDimension dimension) {
+        if (!isGovernedComparisonDimension(dimension)) {
+            template.put("filters", "${payload.filters}");
+            return;
+        }
+        ObjectNode filters = template.putObject("filters");
+        filters.put(dimension.filterField(), "${payload.filters." + dimension.filterField() + "}");
     }
 
     private void addFilterQueryContextBindings(ArrayNode bindings, String filterKey, String targetKey) {
@@ -1601,7 +1626,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         to.set("payload", surfaceOpenTablePayload(candidate, dimension));
         ObjectNode policy = binding.putObject("policy");
         policy.put("distinct", true);
-        policy.put("distinctBy", chartPointRawValuePath());
+        policy.put("distinctBy", chartPointRawValuePath(dimension));
         policy.put("debounceMs", 250);
     }
 
@@ -1631,7 +1656,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         toRef.set("payload", surfaceOpenTablePayload(candidate, dimension));
         ObjectNode policy = link.putObject("policy");
         policy.put("distinct", true);
-        policy.put("distinctBy", chartPointRawValuePath());
+        policy.put("distinctBy", chartPointRawValuePath(dimension));
         policy.put("debounceMs", 250);
     }
 
@@ -1668,8 +1693,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         addSurfaceOpenTableColumns(config.putArray("columns"), dimension);
         ArrayNode bindings = payload.putArray("bindings");
         ObjectNode binding = bindings.addObject();
-        binding.put("from", chartPointRawValuePath());
-        binding.put("to", "widget.inputs.queryContext.filters." + canonicalFieldName(dimension.field()));
+        binding.put("from", chartPointRawValuePath(dimension));
+        binding.put("to", "widget.inputs.queryContext.filters." + dimension.filterField());
         return payload;
     }
 
@@ -1744,16 +1769,18 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         configureOpenDetailsAction(detailsAction, candidate, key);
         ArrayNode bindings = payload.putArray("bindings");
         ObjectNode binding = bindings.addObject();
-        binding.put("from", chartPointRawValuePath());
-        binding.put("to", "widget.inputs.queryContext.filters." + canonicalFieldName(dimension.field()));
+        binding.put("from", chartPointRawValuePath(dimension));
+        binding.put("to", "widget.inputs.queryContext.filters." + dimension.filterField());
         ObjectNode queryBinding = bindings.addObject();
-        queryBinding.put("from", chartPointRawValuePath());
-        queryBinding.put("to", "widget.inputs.config.dataSource.query." + canonicalFieldName(dimension.field()));
+        queryBinding.put("from", chartPointRawValuePath(dimension));
+        queryBinding.put("to", "widget.inputs.config.dataSource.query." + dimension.filterField());
         return payload;
     }
 
-    private String chartPointRawValuePath() {
-        return "payload.category";
+    private String chartPointRawValuePath(DashboardDimension dimension) {
+        return isGovernedComparisonDimension(dimension) && !dimension.filterField().isBlank()
+                ? "payload.data.key"
+                : "payload.category";
     }
 
     private void configureOpenDetailsAction(
@@ -2722,6 +2749,12 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             return Optional.empty();
         }
         String field = canonicalFieldName(rawField);
+        boolean crossFilterEnabled = projection.path("interactions").path("crossFilter").asBoolean(false);
+        String keyFilterField = dimension.path("keyFilterField").asText("").trim();
+        if (crossFilterEnabled && keyFilterField.isBlank()) {
+            return Optional.empty();
+        }
+        String filterField = crossFilterEnabled ? keyFilterField : field;
         String label = valueOrDefault(dimension.path("label").asText(""), titleFromResourcePath(field));
         JsonNode firstMetric = metrics.get(0);
         String rawMetricField = firstMetric.path("field").asText("");
@@ -2738,7 +2771,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         return Optional.of(new DashboardDimension(
                 valueOrDefault(visualAxis == null ? "" : visualAxis.concept(), "comparison-" + field),
                 field,
-                field,
+                filterField,
                 label,
                 "Comparativo por " + label,
                 valueOrDefault(visualAxis == null ? "" : visualAxis.chartType(), "bar"),

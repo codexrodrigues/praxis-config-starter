@@ -2009,9 +2009,29 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(statsRequest.path("orderBy").asText()).isEqualTo("VALUE_DESC");
         assertThat(config.path("series")).hasSize(4);
         assertThat(config.path("interactions").path("crossFilter").asBoolean()).isTrue();
+        assertThat(config.path("interactions").path("eventActions").path("crossFilter")
+                .path("mapping").path("key").asText()).isEqualTo("departamentoIdsIn");
         assertThat(plan.path("bindings").toString())
                 .contains("crossFilter->vw-analytics-afastamentos-table.queryContext")
                 .contains("pointClick->surface.open");
+        JsonNode chartToTable = findBinding(
+                plan.path("bindings"),
+                "vw-analytics-afastamentos-chart-departamento.crossFilter->vw-analytics-afastamentos-table.queryContext");
+        assertThat(chartToTable.path("policy").path("distinctBy").asText())
+                .isEqualTo("payload.filters.departamentoIdsIn");
+        assertThat(chartToTable.path("transform").path("template").path("filters")
+                .path("departamentoIdsIn").asText())
+                .isEqualTo("${payload.filters.departamentoIdsIn}");
+        JsonNode chartToSurface = findBinding(
+                plan.path("bindings"),
+                "vw-analytics-afastamentos-chart-departamento.pointClick->surface.open");
+        assertThat(chartToSurface.path("policy").path("distinctBy").asText())
+                .isEqualTo("payload.data.key");
+        assertThat(chartToSurface.path("to").path("payload").path("bindings").path(0)
+                .path("from").asText()).isEqualTo("payload.data.key");
+        assertThat(chartToSurface.path("to").path("payload").path("bindings").path(0)
+                .path("to").asText())
+                .isEqualTo("widget.inputs.queryContext.filters.departamentoIdsIn");
         assertThat(config.path("analyticsProjection").toString())
                 .doesNotContain("nomeCompleto")
                 .doesNotContain("diagnostico")
@@ -2042,6 +2062,34 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
     }
 
+    @Test
+    void failsClosedWhenGovernedComparisonCrossFilterHasNoCanonicalKeyBinding() {
+        ObjectNode contextHints = governedComparisonContext("verified");
+        ((ObjectNode) contextHints.path("governedAnalytics").path("projection")
+                .path("bindings").path("primaryDimension")).remove("keyFilterField");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Materialize a leitura analitica resolvida para este recurso.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                objectMapper.createObjectNode(),
+                dashboardIntent(
+                        "/api/human-resources/vw-analytics-afastamentos",
+                        List.of(axis("department", "departamento", "Departamento", "bar", "vertical"))),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints)).orElseThrow();
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes())
+                .containsExactly("governed-analytics-comparison-key-filter-binding-required");
+        assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
+    }
+
     private ObjectNode governedComparisonContext(String status) {
         ObjectNode contextHints = objectMapper.createObjectNode();
         ObjectNode governed = contextHints.putObject("governedAnalytics");
@@ -2062,7 +2110,8 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         bindings.putObject("primaryDimension")
                 .put("field", "departamento")
                 .put("role", "category")
-                .put("label", "Departamento");
+                .put("label", "Departamento")
+                .put("keyFilterField", "departamentoIdsIn");
         bindings.putArray("primaryMetrics")
                 .addObject()
                 .put("field", "funcionarioId")
