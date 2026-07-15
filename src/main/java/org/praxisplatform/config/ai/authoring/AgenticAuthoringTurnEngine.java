@@ -1682,22 +1682,28 @@ public class AgenticAuthoringTurnEngine {
 
     private AgenticAuthoringTurnStreamRequest withGroundedRuntimeComponentContext(
             AgenticAuthoringTurnStreamRequest request) {
-        if (request == null
-                || request.contextHints() != null
-                && request.contextHints().path("groundedRuntimeComponentContext").isObject()) {
+        if (request == null) {
             return request;
         }
         ObjectNode groundedContext = runtimeComponentGroundingService.ground(
                 request.runtimeComponentObservations(),
                 request.runtimeComponentObservationTrustBoundary());
-        if (groundedContext == null || groundedContext.isEmpty()) {
+        ObjectNode contextHints = contextHintsWithoutClientGroundedRuntimeContext(request.contextHints());
+        if (groundedContext != null && !groundedContext.isEmpty()) {
+            contextHints.set("groundedRuntimeComponentContext", groundedContext);
+        }
+        if (contextHints.isEmpty() && request.contextHints() == null) {
             return request;
         }
-        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
-                ? request.contextHints().deepCopy()
-                : objectMapper.createObjectNode();
-        contextHints.set("groundedRuntimeComponentContext", groundedContext);
         return copyWithContextHints(request, contextHints);
+    }
+
+    private ObjectNode contextHintsWithoutClientGroundedRuntimeContext(JsonNode contextHints) {
+        ObjectNode sanitized = contextHints != null && contextHints.isObject()
+                ? contextHints.deepCopy()
+                : objectMapper.createObjectNode();
+        sanitized.remove("groundedRuntimeComponentContext");
+        return sanitized;
     }
 
     private AgenticAuthoringResourceCandidatesResult maybePreDiscoverResourcesForMaterialization(
