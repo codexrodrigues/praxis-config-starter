@@ -7,6 +7,7 @@ import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
 import org.praxisplatform.config.service.DomainRuleSnapshotService;
+import org.praxisplatform.config.service.DomainRuleImplementationCatalog;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -23,14 +24,26 @@ import org.springframework.context.annotation.Bean;
 public class DomainRuleSnapshotAutoConfiguration {
   @Bean
   @ConditionalOnMissingBean
+  DomainRuleImplementationCatalog domainRuleImplementationCatalog() {
+    return DomainRuleImplementationCatalog.denyAll();
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   DomainRuleSnapshotService domainRuleSnapshotService(
       DomainRuleDefinitionRepository definitionRepository,
       DomainRuleSnapshotRepository snapshotRepository,
       DomainRuleSnapshotHeadRepository headRepository,
       DomainRuleSnapshotEventRepository eventRepository,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      DomainRuleImplementationCatalog implementationCatalog) {
     return new DomainRuleSnapshotService(
-        definitionRepository, snapshotRepository, headRepository, eventRepository, objectMapper);
+        definitionRepository,
+        snapshotRepository,
+        headRepository,
+        eventRepository,
+        objectMapper,
+        implementationCatalog);
   }
 
   @Bean

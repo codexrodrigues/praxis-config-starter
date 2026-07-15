@@ -8,6 +8,13 @@ or execute domain-host Java implementations. During publication it uses the
 engine's planning-only registry to validate exact implementation coordinates and
 the deterministic decision graph.
 
+Java coordinates are never allowlisted from the publication payload itself.
+The host supplies a `DomainRuleImplementationCatalog`, scoped by tenant,
+environment and `ownerServiceKey`. The default catalog is empty and therefore
+fails closed for every Java-backed RuleSet. Product entries identify code shipped
+by the host; customer entries must also carry the `RuleExtensionTrust` generated
+after external signature, artifact-digest and policy verification.
+
 Each scoped RuleSet has three independent records:
 
 - immutable snapshot content, addressed by `snapshotKey` and canonical
@@ -52,3 +59,26 @@ engine contract is Java 21. Duplicating engine DTOs or persisting an untyped JSO
 facsimile would create a second source of truth and was rejected. Hosts use the
 public `DomainRuleSnapshotReader` boundary for in-process loading, then compile
 with their executable registry before atomic activation.
+
+The planning catalog and executable registry must resolve the same exact
+coordinates. The Config Starter does not load plugins or verify signatures, and
+the engine is not a sandbox. A host must not register arbitrary tenant code in
+the application process.
+
+## Host catalog example
+
+```java
+@Bean
+DomainRuleImplementationCatalog ruleImplementationCatalog() {
+  return scope -> List.of(
+      new RuleImplementationRef("benefits:amount", "1.0.0"),
+      new RuleImplementationRef(
+          "customer:eligibility",
+          "1.0.0",
+          externallyVerifiedTrust));
+}
+```
+
+The catalog implementation must resolve scope from server-owned configuration;
+it must not trust tenant, signer, artifact digest or policy evidence copied from
+the snapshot request.
