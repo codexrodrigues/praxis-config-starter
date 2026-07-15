@@ -102,9 +102,10 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 27. [23-runtime-related-surface-preview-release-hardening.md](./23-runtime-related-surface-preview-release-hardening.md)
 28. [24-runtime-related-surface-demo-operator-playbook.md](./24-runtime-related-surface-demo-operator-playbook.md)
 29. [25-pre-intent-resource-discovery-demo-readiness.md](./25-pre-intent-resource-discovery-demo-readiness.md)
-30. [01-current-state-and-target.md](./01-current-state-and-target.md)
-31. [02-implementation-backlog.md](./02-implementation-backlog.md)
-32. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+30. [26-assistant-consistency-excellence-plan.md](./26-assistant-consistency-excellence-plan.md)
+31. [01-current-state-and-target.md](./01-current-state-and-target.md)
+32. [02-implementation-backlog.md](./02-implementation-backlog.md)
+33. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -182,6 +183,11 @@ inicial da refatoracao de pre-intent resource discovery: registra o antes/depois
 do prompt `empregados`, os smokes locais OpenAI, a guarda de perfil individual,
 os criterios de sucesso da demo e os gargalos que continuam fora do corte de
 apresentacao.
+`26-assistant-consistency-excellence-plan.md` passa a ser o plano ativo para
+converter capacidades ja demonstradas em consistencia de produto. Ele prioriza
+um corpus bloqueante do basico, as jornadas "o que posso fazer aqui?" e
+"formulario de funcionarios", a convergencia para um unico turn engine,
+modernizacao disciplinada de Spring AI/OpenAI e gates reproduziveis de mercado.
 
 ## Checkpoint 2026-06-18 - pre-intent resource discovery e UX de revisao
 
