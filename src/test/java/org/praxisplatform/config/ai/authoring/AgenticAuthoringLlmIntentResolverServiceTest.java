@@ -207,6 +207,163 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     }
 
     @Test
+    void platformGuidanceSemanticClassNormalizesAnInconsistentTechnicalTuple() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiJsonSchema> schemaCaptor = ArgumentCaptor.forClass(AiJsonSchema.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                schemaCaptor.capture(),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "semanticIntentClass": "platform_guidance",
+                  "operationKind": "explain",
+                  "artifactKind": "unknown",
+                  "changeKind": "unknown",
+                  "selectedResourcePath": "/api/payroll/salary-history",
+                  "resourceSearchQuery": "recursos disponiveis",
+                  "followUpKind": "unknown",
+                  "requiresGovernedAuthoring": true,
+                  "assistantMessage": "Aqui você pode criar formulários, tabelas, gráficos, filtros e páginas descrevendo sua intenção em linguagem natural.",
+                  "visualizationDecision": null,
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [
+                    {"id":"form","kind":"suggestion","label":"Criar formulário","prompt":"Crie um formulário"},
+                    {"id":"table","kind":"suggestion","label":"Criar tabela","prompt":"Crie uma tabela"},
+                    {"id":"chart","kind":"suggestion","label":"Criar gráfico","prompt":"Crie um gráfico"}
+                  ],
+                  "clarificationQuestions": ["Qual recurso?"],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "O que posso fazer aqui?",
+                        "page-builder",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-4.1-mini",
+                        "test-key",
+                        "session-platform-guidance",
+                        "turn-platform-guidance",
+                        List.of(),
+                        null,
+                        List.of(),
+                        objectMapper.createObjectNode()),
+                "O que posso fazer aqui?",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(),
+                componentCapabilities(),
+                "tenant",
+                "user",
+                "local").orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("semanticIntentClass")
+                .contains("platform_guidance")
+                .contains("in-scope platform guidance")
+                .contains("Do not start resource discovery");
+        assertThat(schemaCaptor.getValue().jsonSchema())
+                .contains("semanticIntentClass")
+                .contains("platform_guidance");
+        assertThat(result.semanticIntentClass()).isEqualTo("platform_guidance");
+        assertThat(result.resolved()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("explain");
+        assertThat(result.artifactKind()).isEqualTo("component");
+        assertThat(result.changeKind()).isEqualTo("answer_component_catalog_question");
+        assertThat(result.selectedResourcePath()).isNull();
+        assertThat(result.resourceSearchQuery()).isNull();
+        assertThat(result.followUpKind()).isEqualTo("none");
+        assertThat(result.requiresGovernedAuthoring()).isFalse();
+        assertThat(result.clarificationQuestions()).isEmpty();
+        assertThat(result.quickReplies()).hasSize(3);
+        assertThat(result.warnings())
+                .contains("llm-semantic-intent-tuple-normalized", "llm-fast-intent-resolution-used");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
+    void componentAuthoringSemanticClassNormalizesMaterializeComponentTuple() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "semanticIntentClass": "component_authoring",
+                  "operationKind": "create",
+                  "artifactKind": "table",
+                  "changeKind": "materialize_component",
+                  "selectedResourcePath": "/api/human-resources/employees",
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "requiresGovernedAuthoring": true,
+                  "assistantMessage": "Vou criar a tabela de funcionários.",
+                  "visualizationDecision": null,
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Crie uma tabela de funcionários",
+                        "page-builder",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-4.1-mini",
+                        "test-key"),
+                "Crie uma tabela de funcionários",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(),
+                componentCapabilities(),
+                "tenant",
+                "user",
+                "local").orElseThrow();
+
+        assertThat(result.semanticIntentClass()).isEqualTo("component_authoring");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.warnings())
+                .contains("llm-semantic-intent-tuple-normalized", "llm-fast-intent-resolution-used");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
     void semanticReconciliationForcesTheFullIntentPass() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
@@ -1315,6 +1472,74 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .doesNotContain("provider quota exhausted");
         assertThat(resolution.clarificationQuestions())
                 .contains("Você quer consultar dados disponíveis ou já quer criar uma tabela, formulário, gráfico ou painel?");
+    }
+
+    @Test
+    void recoversPlatformGuidanceFromPriorStructuredSemanticScopeWhenProviderFails() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenThrow(new RuntimeException("provider timeout"));
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "recommendedIntent": {
+                    "source": "page-builder-assistant-empty-state",
+                    "opportunityId": "page-builder.platform-capabilities.explore",
+                    "semanticScope": "platform-capabilities"
+                  }
+                }
+                """);
+
+        AgenticAuthoringLlmIntentResolution resolution = service.resolve(
+                        new AgenticAuthoringIntentResolutionRequest(
+                                "O que posso fazer aqui?",
+                                "page-builder",
+                                "praxis-dynamic-page-builder",
+                                "/page-builder-ia",
+                                objectMapper.createObjectNode(),
+                                null,
+                                "openai",
+                                "gpt-4.1-mini",
+                                "test-key",
+                                "session-platform-guidance",
+                                "turn-platform-guidance",
+                                List.of(),
+                                null,
+                                List.of(),
+                                contextHints),
+                        "O que posso fazer aqui?",
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(resolution.resolved()).isTrue();
+        assertThat(resolution.semanticIntentClass()).isEqualTo("platform_guidance");
+        assertThat(resolution.operationKind()).isEqualTo("explain");
+        assertThat(resolution.artifactKind()).isEqualTo("component");
+        assertThat(resolution.changeKind()).isEqualTo("answer_component_catalog_question");
+        assertThat(resolution.followUpKind()).isEqualTo("none");
+        assertThat(resolution.selectedResourcePath()).isNull();
+        assertThat(resolution.requiresGovernedAuthoring()).isFalse();
+        assertThat(resolution.assistantMessage())
+                .contains("formulários")
+                .contains("tabelas")
+                .contains("gráficos")
+                .contains("filtros");
+        assertThat(resolution.warnings())
+                .contains(
+                        "llm-intent-resolution-failed",
+                        "llm-provider-error",
+                        "platform-guidance-prior-semantic-scope-recovery-used");
     }
 
     @Test

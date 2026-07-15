@@ -1072,6 +1072,20 @@ public class AgenticAuthoringIntentResolverService {
             changeKind = "create_artifact";
             resourceDiscoveryAuthoringDriftNormalized = true;
         }
+        boolean llmPlatformGuidance = llmIntent != null
+                && ("platform_guidance".equals(llmIntent.semanticIntentClass())
+                        || (llmIntent.resolved()
+                                && ("explain".equals(operationKind) || "explore".equals(operationKind))
+                                && "component".equals(artifactKind)
+                                && ("answer_component_catalog_question".equals(changeKind)
+                                        || "answer_component_capability_question".equals(changeKind))));
+        boolean platformGuidanceResourceCandidatesCleared = false;
+        if (llmPlatformGuidance) {
+            platformGuidanceResourceCandidatesCleared = selectedCandidate != null
+                    || candidates != null && !candidates.isEmpty();
+            selectedCandidate = null;
+            candidates = List.of();
+        }
         if (primaryLlmIntentProviderFailure) {
             operationKind = "unknown";
             artifactKind = "unknown";
@@ -1188,6 +1202,11 @@ public class AgenticAuthoringIntentResolverService {
         List<AgenticAuthoringQuickReply> quickReplies = llmAuthoredQuickRepliesUsed
                 ? llmAuthoredQuickReplies
                 : fallbackQuickReplies;
+        boolean platformGuidanceQuickRepliesMaterialized = false;
+        if (quickReplies.isEmpty() && llmPlatformGuidance) {
+            quickReplies = platformCapabilityQuickReplies(effectivePrompt);
+            platformGuidanceQuickRepliesMaterialized = true;
+        }
         boolean contextHintSelectionApplied = contextHintCandidate != null
                 && selectedCandidate != null
                 && "eligible".equals(gate.status());
@@ -1240,6 +1259,12 @@ public class AgenticAuthoringIntentResolverService {
         }
         if (resourceDiscoveryFocusSelectionApplied) {
             warnings = withWarning(warnings, "llm-resource-discovery-focus-selection-applied");
+        }
+        if (platformGuidanceResourceCandidatesCleared) {
+            warnings = withWarning(warnings, "platform-guidance-resource-candidates-cleared");
+        }
+        if (platformGuidanceQuickRepliesMaterialized) {
+            warnings = withWarning(warnings, "platform-guidance-quick-replies-materialized");
         }
         if (conversationHistoryIsolatedForBlankCreate) {
             warnings = withWarning(warnings, "llm-conversation-history-isolated-for-blank-create");

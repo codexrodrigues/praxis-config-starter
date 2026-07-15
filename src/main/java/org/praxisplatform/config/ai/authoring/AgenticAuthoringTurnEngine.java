@@ -717,6 +717,14 @@ public class AgenticAuthoringTurnEngine {
         if (groundedClarificationOutcome != null) {
             return groundedClarificationOutcome;
         }
+        AgenticAuthoringTurnOutcome resolvedPlatformGuidance = maybeCompleteResolvedPlatformGuidance(
+                eventSink,
+                state,
+                intentResolution,
+                route);
+        if (resolvedPlatformGuidance != null) {
+            return resolvedPlatformGuidance;
+        }
         if (consultativeAnswerService == null) {
             log.info("[AgenticAuthoring] Post-intent consultative answer unavailable; service bean was not injected.");
             eventSink.append("thought.step", thoughtStepPayload(
@@ -779,7 +787,7 @@ public class AgenticAuthoringTurnEngine {
         if (answer.evidenceBundle() != null && !answer.evidenceBundle().isNull()) {
             resultPayload.put("evidenceBundle", answer.evidenceBundle());
         }
-        resultPayload.put("quickReplies", consultativeQuickReplies(answer));
+        resultPayload.put("quickReplies", consultativeQuickReplies(answer, intentResolution));
         resultPayload.put("canApply", false);
         resultPayload.put("decisionDiagnostics", decisionDiagnostics);
         resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
@@ -788,6 +796,59 @@ public class AgenticAuthoringTurnEngine {
         AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
+                : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private AgenticAuthoringTurnOutcome maybeCompleteResolvedPlatformGuidance(
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringTurnState state,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringTurnRoute route) {
+        if (eventSink == null
+                || eventSink.terminalReached()
+                || intentResolution == null
+                || !intentResolution.valid()
+                || !("explain".equals(intentResolution.operationKind())
+                        || "explore".equals(intentResolution.operationKind()))
+                || !"component".equals(intentResolution.artifactKind())
+                || !("answer_component_catalog_question".equals(intentResolution.changeKind())
+                        || "answer_component_capability_question".equals(intentResolution.changeKind()))
+                || !StringUtils.hasText(intentResolution.assistantMessage())) {
+            return null;
+        }
+        emitStatus(
+                eventSink,
+                "consultative.intent",
+                "A orientação sobre a plataforma já está pronta com base nas capacidades governadas disponíveis.");
+        eventSink.append("thought.step", streamEventPayload(
+                "consultative.answer",
+                "Completed platform guidance from the resolved semantic intent and governed component capabilities.",
+                Map.of(
+                        "category", "platform_guidance",
+                        "routeClass", safeText(route == null ? "" : route.routeClass()),
+                        "resolvedIntentAnswerUsed", true),
+                "consultative.answer:platform_guidance:resolved_intent"));
+        Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, null, null);
+        decisionDiagnostics.put("routeClass", safeText(route == null ? "" : route.routeClass()));
+        decisionDiagnostics.put("consultativePostIntent", false);
+        decisionDiagnostics.put("resolvedIntentAnswerUsed", true);
+        Map<String, Object> resultPayload = new LinkedHashMap<>();
+        resultPayload.put("intentResolution", intentResolution);
+        resultPayload.put("preview", objectMapper.createObjectNode());
+        resultPayload.put("assistantMessage", publicAssistantMessage(intentResolution.assistantMessage()));
+        resultPayload.put("assistantContent", intentResolution.assistantContent());
+        resultPayload.put("quickReplies", intentResolution.quickReplies() == null
+                ? List.of()
+                : intentResolution.quickReplies());
+        resultPayload.put("canApply", false);
+        resultPayload.put("decisionDiagnostics", decisionDiagnostics);
+        resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
+                "result:platform_guidance_from_resolved_intent",
+                false));
+        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        return terminalResult.appendedType("result")
+                ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(
+                        route == null ? "advisory_authoring" : route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
     }
 
@@ -968,7 +1029,7 @@ public class AgenticAuthoringTurnEngine {
                         "clarify_resource_selection",
                         "",
                         projection,
-                        List.of("resource-discovery-grounded-provider-failure-clarification")))
+                        List.of("resource-discovery-grounded-provider-failure-clarification")), intentResolution)
                 : resourceDiscoveryCandidateQuickReplies(presentableCandidates);
         String assistantMessage = groundedResourceDiscoveryClarificationMessage(request, presentableCandidates, projection);
         eventSink.append("thought.step", streamEventPayload(
@@ -1237,7 +1298,9 @@ public class AgenticAuthoringTurnEngine {
                 || "needs_clarification".equals(routeClass);
     }
 
-    private List<AgenticAuthoringQuickReply> consultativeQuickReplies(AgenticAuthoringConsultativeAnswer answer) {
+    private List<AgenticAuthoringQuickReply> consultativeQuickReplies(
+            AgenticAuthoringConsultativeAnswer answer,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
         if (answer == null) {
             return List.of();
         }
@@ -1246,7 +1309,9 @@ public class AgenticAuthoringTurnEngine {
         }
         AgenticAuthoringConsultativeApiCatalogProjection projection = answer.apiCatalogProjection();
         if (projection == null || !projection.hasResources()) {
-            return List.of();
+            return intentResolution != null && intentResolution.quickReplies() != null
+                    ? intentResolution.quickReplies()
+                    : List.of();
         }
         List<AgenticAuthoringQuickReply> replies = new ArrayList<>();
         AgenticAuthoringConsultativeApiCatalogProjection.Resource primary = firstResource(projection.resources());

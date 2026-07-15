@@ -129,16 +129,38 @@ public class AgenticAuthoringLlmIntentResolverService {
                     environment);
             return toResolution(result);
         } catch (RuntimeException ex) {
-            return Optional.of(failedResolution(ex));
+            return Optional.of(failedResolution(ex, request));
         }
     }
 
-    private AgenticAuthoringLlmIntentResolution failedResolution(RuntimeException ex) {
+    private AgenticAuthoringLlmIntentResolution failedResolution(
+            RuntimeException ex,
+            AgenticAuthoringIntentResolutionRequest request) {
         Throwable rootCause = rootCause(ex);
         log.warn(
                 "[AgenticAuthoringLlmIntentResolver] Provider intent resolution failed; kind={} cause={}",
                 providerFailureKind(rootCause),
                 safeProviderFailureSummary(rootCause));
+        if (hasPriorPlatformGuidanceSemanticScope(request)) {
+            LinkedHashSet<String> warnings = new LinkedHashSet<>(providerFailureWarnings(rootCause));
+            warnings.add("platform-guidance-prior-semantic-scope-recovery-used");
+            return new AgenticAuthoringLlmIntentResolution(
+                    true,
+                    "explain",
+                    "component",
+                    "answer_component_catalog_question",
+                    null,
+                    null,
+                    "none",
+                    "Aqui você pode descrever em linguagem natural a tela que deseja criar ou melhorar. Posso ajudar com formulários, tabelas, gráficos, filtros e composição de páginas, sempre usando os componentes e dados governados disponíveis e apresentando qualquer alteração para revisão antes de aplicá-la.",
+                    List.of(),
+                    List.of(),
+                    List.copyOf(warnings),
+                    null,
+                    null,
+                    false,
+                    "platform_guidance");
+        }
         return new AgenticAuthoringLlmIntentResolution(
                 false,
                 "unknown",
@@ -153,6 +175,15 @@ public class AgenticAuthoringLlmIntentResolverService {
                 providerFailureWarnings(rootCause),
                 null,
                 null);
+    }
+
+    private boolean hasPriorPlatformGuidanceSemanticScope(AgenticAuthoringIntentResolutionRequest request) {
+        if (request == null || request.contextHints() == null) {
+            return false;
+        }
+        JsonNode recommendedIntent = request.contextHints().path("recommendedIntent");
+        return recommendedIntent.isObject()
+                && "platform-capabilities".equals(nullableText(recommendedIntent, "semanticScope"));
     }
 
     private List<String> providerFailureWarnings(Throwable error) {
@@ -460,7 +491,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 resolution.warnings(),
                 resolution.consultativeRetrievalPlan(),
                 resolution.visualizationDecision(),
-                resolution.requiresGovernedAuthoring());
+                resolution.requiresGovernedAuthoring(),
+                resolution.semanticIntentClass());
     }
 
     private AgenticAuthoringLlmIntentResolution withFastIntentWarning(
@@ -484,7 +516,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 List.copyOf(warnings),
                 resolution.consultativeRetrievalPlan(),
                 resolution.visualizationDecision(),
-                resolution.requiresGovernedAuthoring());
+                resolution.requiresGovernedAuthoring(),
+                resolution.semanticIntentClass());
     }
 
     private String fastIntentPrompt(
@@ -586,6 +619,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Return only one JSON object matching the supplied schema.
 
                 Decide from the user's meaning, not from backend keywords.
+                Set semanticIntentClass to the primary AI-authored semantic decision: platform_guidance, api_catalog_guidance, component_authoring, shared_rule_authoring, out_of_scope, or unknown.
                 Treat semanticRetrievalIntent as prior AI-authored semantic evidence; reconcile it rather than silently replacing a concrete artifact with an unrelated container.
                 Select selectedResourcePath only from candidateResources.
                 When exactly one candidateResource is supplied and it matches the requested source, copy its resourcePath into selectedResourcePath.
@@ -594,6 +628,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 For an analytical composition whose meaning depends on multiple coordinated analytical regions, such as filters, KPIs, multiple charts and a detail/list/table surface, use artifactKind "dashboard" rather than a generic page.
                 Preserve the explicitly requested analytical regions in visualizationDecision; do not downgrade a coordinated dashboard to page or accordion merely because a page can host those regions.
                 Use artifactKind "page" for general layout or content composition where analytics are not the dominant requested outcome.
+                Questions about what the Praxis assistant or the current Page Builder can do, how the assistant can help, or what the user should do next are in-scope platform guidance, not assistant meta requests and not out of scope. Classify them as semanticIntentClass "platform_guidance", operationKind "explain", artifactKind "component", changeKind "answer_component_catalog_question", selectedResourcePath null, followUpKind "none", resolved=true, requiresGovernedAuthoring=false, and answer naturally with grounded examples such as forms, tables, charts, filters and page composition. Do not start resource discovery or request materialization confirmation for platform guidance.
                 If the user asks which governed data can be used to create a table, form, chart, dashboard, page or other component, classify the turn as a consultative catalog answer: operationKind "explore" or "explain", artifactKind "api_catalog", changeKind "answer_api_catalog_question". Do not select a weak resource or ask for a materialization confirmation before answering the catalog question.
                 If authoringScopePolicy is present and the semantic user intent is a loose instruction, assistant meta request, greeting, or unrelated ask that does not request an authorable UI/business decision, answer as an informational chat reply using the policy outOfScopeResponseType; do not create a component preview, edit plan, or governed authoring route.
                 For a requested page organized as accordion/acordeon/expansion panels, use artifactKind "page", operationKind "create", layoutKind "accordion_layout" or "single_column_expansion_page", primaryComponent "praxis-expansion", and no chart axes unless the user asks for a chart.
@@ -792,6 +827,50 @@ public class AgenticAuthoringLlmIntentResolverService {
         AgenticAuthoringConsultativeRetrievalPlan consultativeRetrievalPlan =
                 consultativeRetrievalPlan(result.path("consultativeRetrievalPlan"));
         boolean requiresGovernedAuthoring = result.path("requiresGovernedAuthoring").asBoolean(false);
+        String semanticIntentClass = semanticIntentClass(
+                nullableText(result, "semanticIntentClass"),
+                operationKind,
+                artifactKind,
+                changeKind,
+                requiresGovernedAuthoring);
+        if ("platform_guidance".equals(semanticIntentClass)) {
+            boolean tupleAlreadyConsistent = resolved
+                    && "explain".equals(operationKind)
+                    && "component".equals(artifactKind)
+                    && "answer_component_catalog_question".equals(changeKind)
+                    && selectedResourcePath == null
+                    && visualizationDecision == null
+                    && !requiresGovernedAuthoring;
+            if (!tupleAlreadyConsistent) {
+                ArrayList<String> normalizedWarnings = new ArrayList<>(warnings);
+                if (!normalizedWarnings.contains("llm-semantic-intent-tuple-normalized")) {
+                    normalizedWarnings.add("llm-semantic-intent-tuple-normalized");
+                }
+                warnings = List.copyOf(normalizedWarnings);
+            }
+            resolved = true;
+            operationKind = "explain";
+            artifactKind = "component";
+            changeKind = "answer_component_catalog_question";
+            selectedResourcePath = null;
+            resourceSearchQuery = null;
+            followUpKind = "none";
+            clarificationQuestions = List.of();
+            visualizationDecision = null;
+            requiresGovernedAuthoring = false;
+        } else if ("component_authoring".equals(semanticIntentClass)
+                && resolved
+                && "create".equals(operationKind)
+                && !"unknown".equals(artifactKind)
+                && ("materialize".equals(changeKind) || "materialize_component".equals(changeKind))
+                && ("none".equals(followUpKind) || "new_instruction".equals(followUpKind))) {
+            ArrayList<String> normalizedWarnings = new ArrayList<>(warnings);
+            if (!normalizedWarnings.contains("llm-semantic-intent-tuple-normalized")) {
+                normalizedWarnings.add("llm-semantic-intent-tuple-normalized");
+            }
+            warnings = List.copyOf(normalizedWarnings);
+            changeKind = "create_artifact";
+        }
         if (!resolved
                 && operationKind.isBlank()
                 && artifactKind.isBlank()
@@ -818,7 +897,37 @@ public class AgenticAuthoringLlmIntentResolverService {
                 warnings,
                 consultativeRetrievalPlan,
                 visualizationDecision,
-                requiresGovernedAuthoring));
+                requiresGovernedAuthoring,
+                semanticIntentClass));
+    }
+
+    private String semanticIntentClass(
+            String authoredClass,
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            boolean requiresGovernedAuthoring) {
+        if (StringUtils.hasText(authoredClass)) {
+            return authoredClass;
+        }
+        if (requiresGovernedAuthoring || "route_shared_rule_authoring".equals(changeKind)) {
+            return "shared_rule_authoring";
+        }
+        if (("explain".equals(operationKind) || "explore".equals(operationKind))
+                && "api_catalog".equals(artifactKind)
+                && "answer_api_catalog_question".equals(changeKind)) {
+            return "api_catalog_guidance";
+        }
+        if (("explain".equals(operationKind) || "explore".equals(operationKind))
+                && "component".equals(artifactKind)
+                && ("answer_component_catalog_question".equals(changeKind)
+                        || "answer_component_capability_question".equals(changeKind))) {
+            return "platform_guidance";
+        }
+        if (!"unknown".equals(operationKind) && !"unknown".equals(artifactKind)) {
+            return "component_authoring";
+        }
+        return "unknown";
     }
 
     private boolean missingRequiredIntentFields(JsonNode result) {
@@ -967,6 +1076,13 @@ public class AgenticAuthoringLlmIntentResolverService {
         properties.putObject("resolved").put("type", "boolean");
         stringEnum(properties, "operationKind", List.of("create", "modify", "remove", "compose", "connect", "explore", "explain", "unknown"));
         stringEnum(properties, "artifactKind", List.of("dashboard", "chart", "table", "form", "page", "api_catalog", "component", "unknown"));
+        stringEnum(properties, "semanticIntentClass", List.of(
+                "platform_guidance",
+                "api_catalog_guidance",
+                "component_authoring",
+                "shared_rule_authoring",
+                "out_of_scope",
+                "unknown"));
         properties.putObject("changeKind").put("type", "string");
         nullableString(properties, "selectedResourcePath");
         nullableString(properties, "resourceSearchQuery");
@@ -1006,6 +1122,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         required.add("resolved")
                 .add("operationKind")
                 .add("artifactKind")
+                .add("semanticIntentClass")
                 .add("changeKind")
                 .add("followUpKind")
                 .add("requiresGovernedAuthoring")

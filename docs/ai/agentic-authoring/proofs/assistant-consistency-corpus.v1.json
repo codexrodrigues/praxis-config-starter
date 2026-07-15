@@ -1,0 +1,331 @@
+{
+  "version": "1.0.0",
+  "kind": "praxis.ai-authoring.assistant-consistency-corpus",
+  "description": "Primeiro corte versionado do gate de consistencia basica do assistente Praxis no Page Builder.",
+  "contexts": {
+    "blank-page-employee-domain": {
+      "targetApp": "praxis-ui-angular",
+      "targetComponentId": "praxis-dynamic-page-builder",
+      "currentRoute": "/decision-playground",
+      "currentPage": { "widgets": [] },
+      "selectedWidgetKey": null,
+      "contextHints": {
+        "domainDiscovery": [
+          {
+            "resourceKey": "operations.missoes",
+            "title": "Missões",
+            "fields": ["Nome", "Status"]
+          },
+          {
+            "resourceKey": "human-resources.funcionarios",
+            "title": "Funcionários",
+            "fields": ["Nome", "E-mail", "Cargo", "Departamento"],
+            "surfaces": ["Cadastrar funcionário", "Obter funcionário", "Perfil 360"]
+          }
+        ]
+      }
+    },
+    "blank-page-employee-domain-platform-opportunity": {
+      "targetApp": "praxis-ui-angular",
+      "targetComponentId": "praxis-dynamic-page-builder",
+      "currentRoute": "/decision-playground",
+      "currentPage": { "widgets": [] },
+      "selectedWidgetKey": null,
+      "contextHints": {
+        "domainDiscovery": [
+          {
+            "resourceKey": "operations.missoes",
+            "title": "Missões",
+            "fields": ["Nome", "Status"]
+          },
+          {
+            "resourceKey": "human-resources.funcionarios",
+            "title": "Funcionários",
+            "fields": ["Nome", "E-mail", "Cargo", "Departamento"],
+            "surfaces": ["Cadastrar funcionário", "Obter funcionário", "Perfil 360"]
+          }
+        ],
+        "recommendedIntent": {
+          "source": "page-builder-assistant-empty-state",
+          "opportunityId": "page-builder.platform-capabilities.explore",
+          "semanticScope": "platform-capabilities"
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "platform-what-can-i-do-pt",
+      "family": "platform-discovery",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page-employee-domain-platform-opportunity",
+      "userPrompt": "O que posso fazer aqui?",
+      "expected": {
+        "intent": {
+          "operationKinds": ["explain"],
+          "artifactKinds": ["component"],
+          "changeKinds": ["answer_component_catalog_question", "answer_component_capability_question"],
+          "resourcePaths": [null]
+        },
+        "terminal": {
+          "eventTypes": ["result"],
+          "canApply": false,
+          "preview": "forbidden",
+          "minimumQuickReplies": 3,
+          "forbiddenPhases": ["preview.plan", "preview.compile"]
+        },
+        "assistantMessage": {
+          "minimumCharacters": 80,
+          "requiredConceptGroups": [
+            ["formulário", "formulario", "form"],
+            ["tabela", "table"],
+            ["gráfico", "grafico", "painel", "dashboard", "chart"],
+            ["filtro", "filter"]
+          ],
+          "forbiddenTerms": ["json", "schema", "changeKind", "operationKind", "artifactKind", "tool loop"]
+        },
+        "safety": {
+          "allowedResourcePathPrefixes": [],
+          "forbidUnlistedResourcePaths": true,
+          "mutationRequiresPreview": true
+        }
+      }
+    },
+    {
+      "id": "platform-how-can-you-help-pt",
+      "family": "platform-discovery",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page-employee-domain-platform-opportunity",
+      "userPrompt": "Como você pode me ajudar nesta tela?",
+      "expected": {
+        "intent": {
+          "operationKinds": ["explain"],
+          "artifactKinds": ["component"],
+          "changeKinds": ["answer_component_catalog_question", "answer_component_capability_question"],
+          "resourcePaths": [null]
+        },
+        "terminal": {
+          "eventTypes": ["result"],
+          "canApply": false,
+          "preview": "forbidden",
+          "minimumQuickReplies": 3,
+          "forbiddenPhases": ["preview.plan", "preview.compile"]
+        },
+        "assistantMessage": {
+          "minimumCharacters": 80,
+          "requiredConceptGroups": [
+            ["formulário", "formulario", "form"],
+            ["tabela", "table"],
+            ["gráfico", "grafico", "painel", "dashboard", "chart"]
+          ],
+          "forbiddenTerms": ["json", "schema", "changeKind", "operationKind", "artifactKind", "tool loop"]
+        },
+        "safety": {
+          "allowedResourcePathPrefixes": [],
+          "forbidUnlistedResourcePaths": true,
+          "mutationRequiresPreview": true
+        }
+      }
+    },
+    {
+      "id": "platform-next-step-pt",
+      "family": "platform-discovery",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page-employee-domain-platform-opportunity",
+      "userPrompt": "Qual seria um bom próximo passo?",
+      "expected": {
+        "intent": {
+          "operationKinds": ["explain", "explore"],
+          "artifactKinds": ["component", "page"],
+          "changeKinds": ["answer_component_catalog_question", "answer_component_capability_question", "recommend_artifact"],
+          "resourcePaths": [null]
+        },
+        "terminal": {
+          "eventTypes": ["result"],
+          "canApply": false,
+          "preview": "forbidden",
+          "minimumQuickReplies": 1,
+          "forbiddenPhases": ["preview.plan", "preview.compile"]
+        },
+        "assistantMessage": {
+          "minimumCharacters": 60,
+          "requiredConceptGroups": [["próximo", "proximo", "começar", "comecar", "sugiro", "recomendo"]],
+          "forbiddenTerms": ["json", "schema", "changeKind", "operationKind", "artifactKind", "tool loop"]
+        },
+        "safety": {
+          "allowedResourcePathPrefixes": [],
+          "forbidUnlistedResourcePaths": true,
+          "mutationRequiresPreview": true
+        }
+      }
+    },
+    {
+      "id": "employee-form-create-pt",
+      "family": "explicit-component",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page-employee-domain",
+      "userPrompt": "Monte um formulário de funcionários.",
+      "expected": {
+        "intent": {
+          "operationKinds": ["create"],
+          "artifactKinds": ["form"],
+          "changeKinds": ["create_artifact", "create_minimal_form"],
+          "resourcePaths": ["/api/human-resources/funcionarios"]
+        },
+        "terminal": {
+          "eventTypes": ["result"],
+          "canApply": true,
+          "preview": "required",
+          "minimumQuickReplies": 0,
+          "forbiddenPhases": []
+        },
+        "assistantMessage": {
+          "minimumCharacters": 60,
+          "requiredConceptGroups": [["formulário", "formulario", "form"], ["funcionário", "funcionario", "employee"]],
+          "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+        },
+        "safety": {
+          "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
+          "forbidUnlistedResourcePaths": true,
+          "mutationRequiresPreview": true
+        }
+      }
+    },
+    {
+      "id": "employee-beautiful-screen-pt",
+      "family": "open-creation",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page-employee-domain",
+      "userPrompt": "Crie uma tela bonita para acompanhar funcionários.",
+      "expected": {
+        "intent": {
+          "operationKinds": ["create"],
+          "artifactKinds": ["page", "dashboard", "table"],
+          "changeKinds": ["create_artifact"],
+          "resourcePaths": ["/api/human-resources/funcionarios"]
+        },
+        "terminal": {
+          "eventTypes": ["result"],
+          "canApply": true,
+          "preview": "required",
+          "minimumQuickReplies": 0,
+          "forbiddenPhases": []
+        },
+        "assistantMessage": {
+          "minimumCharacters": 60,
+          "requiredConceptGroups": [["funcionário", "funcionario", "employee"], ["prévia", "previa", "preview", "revisar"]],
+          "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+        },
+        "safety": {
+          "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
+          "forbidUnlistedResourcePaths": true,
+          "mutationRequiresPreview": true
+        }
+      }
+    },
+    {
+      "id": "employee-table-create-pt",
+      "family": "explicit-component",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page-employee-domain",
+      "userPrompt": "Crie uma tabela para consultar nome, cargo e departamento dos funcionários.",
+      "expected": {
+        "intent": {
+          "operationKinds": ["create"],
+          "artifactKinds": ["table"],
+          "changeKinds": ["create_artifact", "create_table"],
+          "resourcePaths": ["/api/human-resources/funcionarios"]
+        },
+        "terminal": {
+          "eventTypes": ["result"],
+          "canApply": true,
+          "preview": "required",
+          "minimumQuickReplies": 0,
+          "forbiddenPhases": []
+        },
+        "assistantMessage": {
+          "minimumCharacters": 60,
+          "requiredConceptGroups": [["tabela", "table"], ["funcionário", "funcionario", "employee"]],
+          "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+        },
+        "safety": {
+          "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
+          "forbidUnlistedResourcePaths": true,
+          "mutationRequiresPreview": true
+        }
+      }
+    },
+    {
+      "id": "platform-what-can-i-do-en",
+      "family": "platform-discovery",
+      "status": "extended",
+      "locale": "en-US",
+      "contextRef": "blank-page-employee-domain-platform-opportunity",
+      "userPrompt": "What can I do here?",
+      "expected": {
+        "intent": {
+          "operationKinds": ["explain"],
+          "artifactKinds": ["component"],
+          "changeKinds": ["answer_component_catalog_question", "answer_component_capability_question"],
+          "resourcePaths": [null]
+        },
+        "terminal": {
+          "eventTypes": ["result"],
+          "canApply": false,
+          "preview": "forbidden",
+          "minimumQuickReplies": 3,
+          "forbiddenPhases": ["preview.plan", "preview.compile"]
+        },
+        "assistantMessage": {
+          "minimumCharacters": 80,
+          "requiredConceptGroups": [["form"], ["table"], ["chart", "dashboard"], ["filter"]],
+          "forbiddenTerms": ["json", "schema", "changeKind", "operationKind", "artifactKind", "tool loop"]
+        },
+        "safety": {
+          "allowedResourcePathPrefixes": [],
+          "forbidUnlistedResourcePaths": true,
+          "mutationRequiresPreview": true
+        }
+      }
+    },
+    {
+      "id": "employee-form-typo-pt",
+      "family": "human-error",
+      "status": "extended",
+      "locale": "pt-BR",
+      "contextRef": "blank-page-employee-domain",
+      "userPrompt": "monta um formulario pros funsionarios com nome cargo e area",
+      "expected": {
+        "intent": {
+          "operationKinds": ["create"],
+          "artifactKinds": ["form"],
+          "changeKinds": ["create_artifact", "create_minimal_form"],
+          "resourcePaths": ["/api/human-resources/funcionarios"]
+        },
+        "terminal": {
+          "eventTypes": ["result"],
+          "canApply": true,
+          "preview": "required",
+          "minimumQuickReplies": 0,
+          "forbiddenPhases": []
+        },
+        "assistantMessage": {
+          "minimumCharacters": 60,
+          "requiredConceptGroups": [["formulário", "formulario", "form"], ["funcionário", "funcionario", "employee"]],
+          "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+        },
+        "safety": {
+          "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
+          "forbidUnlistedResourcePaths": true,
+          "mutationRequiresPreview": true
+        }
+      }
+    }
+  ]
+}

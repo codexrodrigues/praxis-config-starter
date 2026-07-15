@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://praxisplatform.org/schemas/ai/assistant-consistency-corpus.v1.schema.json",
+  "title": "Praxis assistant consistency corpus",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "kind", "contexts", "cases"],
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "kind": { "const": "praxis.ai-authoring.assistant-consistency-corpus" },
+    "description": { "type": "string", "minLength": 1 },
+    "contexts": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/context" }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targetApp", "targetComponentId", "currentRoute", "currentPage", "selectedWidgetKey", "contextHints"],
+      "properties": {
+        "targetApp": { "type": "string", "minLength": 1 },
+        "targetComponentId": { "type": "string", "minLength": 1 },
+        "currentRoute": { "type": "string", "minLength": 1 },
+        "currentPage": { "type": "object" },
+        "selectedWidgetKey": { "type": ["string", "null"] },
+        "contextHints": { "type": "object" }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "family", "status", "locale", "contextRef", "userPrompt", "expected"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "family": {
+          "enum": [
+            "platform-discovery",
+            "open-creation",
+            "explicit-component",
+            "refinement",
+            "human-error",
+            "governance"
+          ]
+        },
+        "status": { "enum": ["must-pass", "extended"] },
+        "locale": { "enum": ["pt-BR", "en-US"] },
+        "contextRef": { "type": "string", "minLength": 1 },
+        "userPrompt": { "type": "string", "minLength": 1 },
+        "expected": { "$ref": "#/$defs/expected" }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intent", "terminal", "assistantMessage", "safety"],
+      "properties": {
+        "intent": { "$ref": "#/$defs/intent" },
+        "terminal": { "$ref": "#/$defs/terminal" },
+        "assistantMessage": { "$ref": "#/$defs/assistantMessage" },
+        "safety": { "$ref": "#/$defs/safety" }
+      }
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operationKinds", "artifactKinds", "changeKinds"],
+      "properties": {
+        "operationKinds": { "$ref": "#/$defs/nonEmptyStrings" },
+        "artifactKinds": { "$ref": "#/$defs/nonEmptyStrings" },
+        "changeKinds": { "$ref": "#/$defs/nonEmptyStrings" },
+        "resourcePaths": {
+          "type": "array",
+          "items": { "type": ["string", "null"] },
+          "minItems": 1
+        }
+      }
+    },
+    "terminal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventTypes", "canApply", "preview", "minimumQuickReplies", "forbiddenPhases"],
+      "properties": {
+        "eventTypes": {
+          "type": "array",
+          "items": { "enum": ["result", "error", "cancelled"] },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "canApply": { "type": "boolean" },
+        "preview": { "enum": ["required", "forbidden", "optional"] },
+        "minimumQuickReplies": { "type": "integer", "minimum": 0 },
+        "forbiddenPhases": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "assistantMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimumCharacters", "requiredConceptGroups", "forbiddenTerms"],
+      "properties": {
+        "minimumCharacters": { "type": "integer", "minimum": 1 },
+        "requiredConceptGroups": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyStrings" }
+        },
+        "forbiddenTerms": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowedResourcePathPrefixes", "forbidUnlistedResourcePaths", "mutationRequiresPreview"],
+      "properties": {
+        "allowedResourcePathPrefixes": { "$ref": "#/$defs/strings" },
+        "forbidUnlistedResourcePaths": { "type": "boolean" },
+        "mutationRequiresPreview": { "type": "boolean" }
+      }
+    },
+    "strings": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "nonEmptyStrings": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  }
+}

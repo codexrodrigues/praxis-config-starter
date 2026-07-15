@@ -17,8 +17,25 @@ if [[ -z "${MODEL:-}" ]]; then
   fi
 fi
 USER_PROMPT="${USER_PROMPT:-quero criar algo que mostre informacoes dos empregados}"
+TARGET_APP="${TARGET_APP:-praxis-ui-angular}"
+TARGET_COMPONENT_ID="${TARGET_COMPONENT_ID:-praxis-dynamic-page-builder}"
+CURRENT_ROUTE="${CURRENT_ROUTE:-/decision-playground}"
+CURRENT_PAGE_JSON="${CURRENT_PAGE_JSON:-}"
+SELECTED_WIDGET_KEY_JSON="${SELECTED_WIDGET_KEY_JSON:-null}"
+CONVERSATION_MESSAGES_JSON="${CONVERSATION_MESSAGES_JSON:-[]}"
+PENDING_CLARIFICATION_JSON="${PENDING_CLARIFICATION_JSON:-null}"
+ATTACHMENT_SUMMARIES_JSON="${ATTACHMENT_SUMMARIES_JSON:-[]}"
+CONTEXT_HINTS_JSON="${CONTEXT_HINTS_JSON:-}"
+SESSION_ID="${SESSION_ID:-local-pre-intent-session}"
 STREAM_TIMEOUT_SECONDS="${STREAM_TIMEOUT_SECONDS:-180}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$STARTER_ROOT/artifacts/local-e2e/agentic-turn-pre-intent-$(date +%Y%m%d-%H%M%S)}"
+
+if [[ -z "$CURRENT_PAGE_JSON" ]]; then
+  CURRENT_PAGE_JSON='{"widgets":[]}'
+fi
+if [[ -z "$CONTEXT_HINTS_JSON" ]]; then
+  CONTEXT_HINTS_JSON='{"domainDiscovery":[{"resourceKey":"operations.missoes","title":"Missões","fields":["Nome","Status"]},{"resourceKey":"human-resources.funcionarios","title":"Funcionários","fields":["Nome","E-mail","Cargo","Departamento"],"surfaces":["Cadastrar funcionário","Obter funcionário","Perfil 360"]}]}'
+fi
 
 mkdir -p "$ARTIFACTS_DIR"
 
@@ -53,36 +70,32 @@ request_body="$(jq -n \
   --arg model "$MODEL" \
   --arg clientTurnId "$client_turn_id" \
   --arg userPrompt "$USER_PROMPT" \
+  --arg targetApp "$TARGET_APP" \
+  --arg targetComponentId "$TARGET_COMPONENT_ID" \
+  --arg currentRoute "$CURRENT_ROUTE" \
+  --arg sessionId "$SESSION_ID" \
+  --argjson currentPage "$CURRENT_PAGE_JSON" \
+  --argjson selectedWidgetKey "$SELECTED_WIDGET_KEY_JSON" \
+  --argjson conversationMessages "$CONVERSATION_MESSAGES_JSON" \
+  --argjson pendingClarification "$PENDING_CLARIFICATION_JSON" \
+  --argjson attachmentSummaries "$ATTACHMENT_SUMMARIES_JSON" \
+  --argjson contextHints "$CONTEXT_HINTS_JSON" \
   '{
     userPrompt: $userPrompt,
-    targetApp: "praxis-ui-angular",
-    targetComponentId: "praxis-dynamic-page-builder",
-    currentRoute: "/decision-playground",
-    currentPage: { widgets: [] },
-    selectedWidgetKey: null,
+    targetApp: $targetApp,
+    targetComponentId: $targetComponentId,
+    currentRoute: $currentRoute,
+    currentPage: $currentPage,
+    selectedWidgetKey: $selectedWidgetKey,
     provider: $provider,
     model: $model,
     apiKey: null,
-    sessionId: "local-pre-intent-session",
+    sessionId: $sessionId,
     clientTurnId: $clientTurnId,
-    conversationMessages: [],
-    pendingClarification: null,
-    attachmentSummaries: [],
-    contextHints: {
-      domainDiscovery: [
-        {
-          resourceKey: "operations.missoes",
-          title: "Missões",
-          fields: ["Nome", "Status"]
-        },
-        {
-          resourceKey: "human-resources.funcionarios",
-          title: "Funcionários",
-          fields: ["Nome", "E-mail", "Cargo", "Departamento"],
-          surfaces: ["Cadastrar funcionário", "Obter funcionário", "Perfil 360"]
-        }
-      ]
-    },
+    conversationMessages: $conversationMessages,
+    pendingClarification: $pendingClarification,
+    attachmentSummaries: $attachmentSummaries,
+    contextHints: $contextHints,
     componentCapabilities: null,
     runtimeComponentObservations: null,
     runtimeComponentObservationTrustBoundary: null

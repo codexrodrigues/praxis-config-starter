@@ -23,6 +23,50 @@ operar como uma plataforma de decisoes semanticas authoradas por IA: a LLM
 resolve intencao e plano usando contexto governado; contratos canonicos,
 manifests e tools validam e materializam o resultado.
 
+## Checkpoint de implementacao e evidencia real
+
+O primeiro slice P0 foi implementado em 2026-07-15:
+
+- corpus interno versionado `assistant-consistency-corpus.v1`, schema e runner
+  comparavel com perfis `must-pass` e `extended`;
+- oportunidade contextual no empty state do Page Builder para perguntar
+  "O que posso fazer aqui?", enviada pelo turn controller canonico com escopo
+  semantico estruturado;
+- `semanticIntentClass` authorado pela LLM para separar a decisao semantica do
+  tuple tecnico de materializacao;
+- normalizacao fail-safe do tuple de `platform_guidance`, sem classificar o
+  texto do usuario por palavras-chave;
+- preservacao das quick replies do intent resolution no resultado terminal;
+- conclusao de orientacao de plataforma a partir da primeira resposta
+  semantica, sem uma segunda chamada LLM redundante;
+- recuperacao nao mutante, em caso de falha do provider, quando a oportunidade
+  governada da UI ja declarou `semanticScope=platform-capabilities`.
+
+Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
+
+- `platform-what-can-i-do-pt`: 3/3 execucoes consecutivas corretas, sem preview,
+  sem recurso selecionado e com tres recommended intents;
+- `platform-how-can-you-help-pt` e `platform-next-step-pt`: ambas passaram no
+  ensaio focal posterior, tambem sem recurso e com tres proximas acoes;
+- formulario explicito de funcionarios: houve preview valido e `canApply=true`,
+  mas uma execucao selecionou incorretamente a projecao analitica de folha;
+- tabela explicita: houve execucoes com preview aplicavel, mas outra selecionou
+  incorretamente a projecao analitica de afastamentos;
+- tela aberta de funcionarios: chegou a preview aplicavel com recurso principal
+  de funcionarios, embora o discovery tenha considerado fontes de RH nao
+  necessarias;
+- a rodada completa anterior as ultimas correcoes passou apenas 1/6; ela nao e
+  aceite de release. O corpus cumpriu seu papel ao tornar a inconsistencia
+  reproduzivel e localizada.
+
+O baseline funcional da orientacao melhorou, mas o SLO de latencia ainda nao:
+a mediana observada nas tres execucoes da pergunta basica foi aproximadamente
+41 s. O trace mostra planejamento, discovery e resolucao semantica executados
+antes de uma resposta que nao precisa materializar recurso. Tambem foi
+observada uma metrica negativa em `intentResolveLlm` quando houve resolucao por
+evidencia; o calculo de telemetria deve ser corrigido antes de usar percentis
+como gate de release.
+
 ## Classificacao e mapa de impacto
 
 - Classificacao do plano: `arquitetural`.
@@ -54,6 +98,13 @@ um bot especial para o Page Builder.
 | Intencao semantica consistente | `suportado-parcialmente` | A LLM ja produz decisao tipada e o keyword fallback legado fica desabilitado por padrao | Remover heuristicas textuais residuais da decisao primaria e limitar matching a grounding pos-intencao |
 | Suite versionada de excelencia | `lacuna-real-de-contrato` | Existem matrizes e artefatos E2E, mas nao ha corpus canonico versionado com casos, expectativas, resultados e gate de release | Definir artefato interno de eval, sem transforma-lo em contrato HTTP publico prematuramente |
 | Politica de modelo/provider por tarefa | `lacuna-real-de-contrato` | O provider e configuravel, mas OpenAI ainda usa default global `gpt-4o-mini` e heuristicas por nome de modelo | Definir politica canonica de capability, tier, snapshot, custo, latencia e fallback |
+
+O ensaio real refinou ainda duas classificacoes de aderencia:
+
+| Necessidade | Aderencia refinada | Evidencia | Proximo ajuste |
+| --- | --- | --- | --- |
+| Escolher `funcionarios` para formulario/tabela | `ja-suportado-mal-nomeado-ou-mal-materializado` | `domainDiscovery` ja publica `human-resources.funcionarios`, campos e surfaces; o candidate set terminal ainda pode preferir uma projection analitica | Materializar recursos do `domainDiscovery` como candidatos verificados e aplicar compatibilidade de papel semantico depois da intencao LLM |
+| Responder orientacao sem tool de recurso | `suportado-parcialmente` | O resultado terminal agora e correto, mas o pre-intent planner ainda pode executar search desnecessario | Usar a evidencia semantica estruturada da oportunidade para planejar apenas contexto de plataforma, sem keyword shortcut |
 
 ## Diagnostico estrutural
 
@@ -455,15 +506,24 @@ ciclo:
 
 ## Proximo slice recomendado
 
-Executar primeiro `P0.1 + P0.3`: criar o corpus minimo de consistencia e fechar
-a jornada "o que posso fazer aqui?" no Page Builder, usando exclusivamente o
-`platformGuide`, registry de componentes, capabilities e recommended intents
-ja existentes. Esse slice oferece o maior ganho de percepcao de produto e, ao
-mesmo tempo, cria o gate que impedira as proximas melhorias de continuarem
-funcionando apenas ocasionalmente.
+`P0.1 + P0.3` ja possuem primeiro corte implementado. O proximo slice e
+`P0.4 - grounding operacional de funcionarios`, nesta ordem:
 
-Depois dele, executar `P0.4` para o formulario de funcionarios e somente entao
-promover a modernizacao de SDK/modelo contra um baseline mensuravel.
+1. projetar cada `domainDiscovery.resourceKey` em candidato real verificado por
+   catalogo/API metadata, sem criar novo contrato e sem confiar apenas em
+   similaridade vetorial;
+2. depois que a LLM decidir `form`, `table` ou pagina operacional, validar a
+   compatibilidade do papel do recurso: projection analitica nao pode alimentar
+   formulario de cadastro e nao deve vencer recurso operacional semanticamente
+   alinhado;
+3. usar matching textual somente para ranquear os candidatos canonicos dentro
+   desse escopo ja resolvido, nunca para decidir a intencao primaria;
+4. certificar formulario, tabela e tela aberta isoladamente e depois executar
+   os seis `must-pass` tres vezes consecutivas;
+5. em seguida, otimizar a rota consultiva para evitar planning/discovery de
+   recursos e fechar o alvo P95 de 12 s, corrigindo antes a telemetria negativa;
+6. somente com esse baseline verde iniciar a modernizacao de Spring AI, SDK e
+   politica de modelos, comparando o novo caminho com o mesmo corpus.
 
 ## Referencias oficiais para a frente de SDK
 

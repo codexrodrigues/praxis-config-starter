@@ -151,6 +151,72 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void completesResolvedPlatformGuidanceWithoutASecondLlmAnswerAndPreservesQuickReplies() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringQuickReply createForm = new AgenticAuthoringQuickReply(
+                "platform-create-form",
+                "suggestion",
+                "Criar formulário",
+                "Crie um formulário de funcionários.",
+                "Começa por um formulário governado para revisão.",
+                "dynamic_form",
+                "resource",
+                objectMapper.createObjectNode());
+        AgenticAuthoringIntentResolutionResult platformGuidanceIntent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "explain",
+                "component",
+                "answer_component_catalog_question",
+                "component-catalog-qa",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
+                "O que posso fazer aqui?",
+                "Posso explicar os componentes governados disponíveis.",
+                List.of(createForm),
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(platformGuidanceIntent);
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                null,
+                null,
+                null,
+                Mockito.mock(AgenticAuthoringComponentCapabilitiesService.class),
+                consultativeAnswerService);
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(
+                request("O que posso fazer aqui?"),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies")).hasSize(1);
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies").path(0).path("id").asText())
+                .isEqualTo("platform-create-form");
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(
+                result.path("decisionDiagnostics").path("resolvedIntentAnswerUsed").asBoolean()).isTrue();
+        verify(consultativeAnswerService, never()).answer(
+                any(AgenticAuthoringTurnStreamRequest.class), any(), any(), any(), any());
+        verify(previewService, never()).preview(any(), any(), any(), any());
+    }
+
+    @Test
     void continuesWithBuiltInCapabilitiesWhenPreloadMissesItsDeadline() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
