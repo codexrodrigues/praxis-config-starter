@@ -32,11 +32,14 @@ import org.praxisplatform.rules.contract.DecisionBinding;
 import org.praxisplatform.rules.contract.DecisionSlot;
 import org.praxisplatform.rules.contract.DecisionSource;
 import org.praxisplatform.rules.contract.DecisionStage;
+import org.praxisplatform.rules.contract.CompositionPolicy;
 import org.praxisplatform.rules.contract.OverridePolicy;
 import org.praxisplatform.rules.contract.PublishedRuleSnapshot;
 import org.praxisplatform.rules.contract.RuleDecision;
 import org.praxisplatform.rules.contract.RuleExecutorRef;
 import org.praxisplatform.rules.contract.RuleFailPolicy;
+import org.praxisplatform.rules.contract.RuleExtensionTrust;
+import org.praxisplatform.rules.contract.RuleImplementationRef;
 import org.praxisplatform.rules.contract.RuleRuntimeCompatibility;
 import org.praxisplatform.rules.contract.RuleSetDefinition;
 import org.praxisplatform.rules.contract.RuleSetRef;
@@ -52,12 +55,21 @@ class DomainRuleSnapshotServiceTest {
   private final DomainRuleSnapshotHeadRepository headRepository = mock(DomainRuleSnapshotHeadRepository.class);
   private final DomainRuleSnapshotEventRepository eventRepository = mock(DomainRuleSnapshotEventRepository.class);
   private final ObjectMapper objectMapper = new ObjectMapper();
+  private final DomainRuleImplementationCatalog implementationCatalog = mock(
+      DomainRuleImplementationCatalog.class);
   private DomainRuleSnapshotService service;
 
   @BeforeEach
   void setUp() {
     service = new DomainRuleSnapshotService(
-        definitionRepository, snapshotRepository, headRepository, eventRepository, objectMapper);
+        definitionRepository,
+        snapshotRepository,
+        headRepository,
+        eventRepository,
+        objectMapper,
+        implementationCatalog);
+    when(implementationCatalog.allowedImplementations(any())).thenReturn(List.of(
+        new RuleImplementationRef("benefits:amount", "1.0.0")));
     when(snapshotRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     when(headRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     when(eventRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -141,6 +153,71 @@ class DomainRuleSnapshotServiceTest {
 
     assertThat(stored.getSnapshotPayload()).contains("\"expression\":null");
     assertThat(active.snapshot().ruleSet().bindings().getFirst().executor().expression()).isNull();
+    verify(implementationCatalog).allowedImplementations(new DomainRuleImplementationScope(
+        "tenant-a", "prod", "quickstart"));
+  }
+
+  @Test
+  void javaPublicationFailsClosedWhenHostProvidesNoExternalCatalog() {
+    service = new DomainRuleSnapshotService(
+        definitionRepository, snapshotRepository, headRepository, eventRepository, objectMapper);
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    prepareFirstPublication(firstId, secondId);
+
+    assertThatThrownBy(() -> service.publish(
+        publication(javaRuleSet(), firstId, secondId),
+        "tenant-a", "prod", null, "*"))
+        .isInstanceOfSatisfying(DomainRuleSnapshotControlPlaneException.class,
+            exception -> {
+              assertThat(exception.status()).isEqualTo(HttpStatus.BAD_REQUEST);
+              assertThat(exception.getMessage()).contains("PLAN_IMPLEMENTATION_UNAVAILABLE");
+            });
+
+    verify(snapshotRepository, never()).save(any());
+  }
+
+  @Test
+  void customerJavaPublicationRequiresAttestedExternalCatalogEntry() {
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    prepareFirstPublication(firstId, secondId);
+    when(implementationCatalog.allowedImplementations(any())).thenReturn(List.of(
+        new RuleImplementationRef(
+            "customer:benefit-eligibility",
+            "1.0.0",
+            new RuleExtensionTrust(
+                "A".repeat(64),
+                "sigstore:tenant-a-release",
+                "policy:customer-extension-v1",
+                "B".repeat(64)))));
+
+    var response = service.publish(
+        publication(customerJavaRuleSet(), firstId, secondId),
+        "tenant-a", "prod", null, "*");
+
+    assertThat(response.activationType()).isEqualTo("PUBLISHED");
+    verify(snapshotRepository).save(any(DomainRuleSnapshot.class));
+  }
+
+  @Test
+  void customerJavaPublicationRejectsUnsignedCatalogEntry() {
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    prepareFirstPublication(firstId, secondId);
+    when(implementationCatalog.allowedImplementations(any())).thenReturn(List.of(
+        new RuleImplementationRef("customer:benefit-eligibility", "1.0.0")));
+
+    assertThatThrownBy(() -> service.publish(
+        publication(customerJavaRuleSet(), firstId, secondId),
+        "tenant-a", "prod", null, "*"))
+        .isInstanceOfSatisfying(DomainRuleSnapshotControlPlaneException.class,
+            exception -> {
+              assertThat(exception.status()).isEqualTo(HttpStatus.BAD_REQUEST);
+              assertThat(exception.getMessage()).contains("PLAN_EXTENSION_TRUST_INVALID");
+            });
+
+    verify(snapshotRepository, never()).save(any());
   }
 
   @Test
@@ -296,6 +373,46 @@ class DomainRuleSnapshotServiceTest {
             null, null, List.of("request.amount"))),
         RuleRuntimeCompatibility.current(),
         RuleFailPolicy.FAIL_CLOSED);
+  }
+
+  private RuleSetDefinition customerJavaRuleSet() {
+    return new RuleSetDefinition(
+        new RuleSetRef("benefits", "extraordinary-grants", "extraordinary-grant", "evaluate", 1),
+        List.of("request"),
+        List.of(new DecisionSlot(
+            "customer.eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
+            OverridePolicy.REPLACEABLE, DecisionAggregationPolicy.SINGLE_RESULT)),
+        List.of(new DecisionBinding(
+            "customer.eligibility", "customer.eligibility", DecisionSource.CUSTOMER,
+            CompositionPolicy.REPLACE_EXACT,
+            RuleExecutorRef.java("customer:benefit-eligibility", "1.0.0"),
+            List.of(), 10, true, null, null, List.of())),
+        RuleRuntimeCompatibility.current(),
+        RuleFailPolicy.FAIL_CLOSED);
+  }
+
+  private void prepareFirstPublication(UUID firstId, UUID secondId) {
+    when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.empty());
+    when(snapshotRepository.findByTenantIdAndEnvironmentAndRuleSetKeyOrderByPublicationRevisionDesc(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(List.of());
+    when(definitionRepository.findAllById(List.of(firstId, secondId))).thenReturn(List.of(
+        approvedDefinition(firstId, "grant:eligibility", "approver-a"),
+        approvedDefinition(secondId, "grant:amount", "approver-b")));
+  }
+
+  private DomainRuleSnapshotPublicationRequest publication(
+      RuleSetDefinition definition,
+      UUID firstId,
+      UUID secondId) {
+    return new DomainRuleSnapshotPublicationRequest(
+        definition,
+        List.of(firstId, secondId),
+        "quickstart",
+        "quickstart/1.0",
+        "2026-07-13T20:00:00Z",
+        null,
+        "release-manager");
   }
 
   private PublishedRuleSnapshot publishedSnapshot() {

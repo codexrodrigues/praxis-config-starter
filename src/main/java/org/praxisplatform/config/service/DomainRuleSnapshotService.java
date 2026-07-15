@@ -26,13 +26,12 @@ import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.praxisplatform.rules.contract.PublishedRuleSnapshot;
-import org.praxisplatform.rules.contract.RuleImplementationRef;
 import org.praxisplatform.rules.contract.RuleSnapshotApproval;
 import org.praxisplatform.rules.contract.RuleSnapshotSource;
-import org.praxisplatform.rules.contract.RuleExecutorType;
 import org.praxisplatform.rules.contract.RuleSetDefinition;
 import org.praxisplatform.rules.digest.PraxisCanonicalJson;
 import org.praxisplatform.rules.runtime.RuleBindingExecutorRegistry;
+import org.praxisplatform.rules.plan.RulePlanException;
 import org.praxisplatform.rules.snapshot.CompiledRuleSnapshot;
 import org.praxisplatform.rules.snapshot.PraxisRuleSnapshotCompiler;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -59,6 +58,28 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
   private final DomainRuleSnapshotHeadRepository headRepository;
   private final DomainRuleSnapshotEventRepository eventRepository;
   private final ObjectMapper objectMapper;
+  private final DomainRuleImplementationCatalog implementationCatalog;
+
+  /**
+   * Source-compatible constructor with a fail-closed Java implementation catalog.
+   *
+   * <p>Hosts that publish Java-backed RuleSets must use auto-configuration or the complete
+   * constructor and provide an external {@link DomainRuleImplementationCatalog}.</p>
+   */
+  public DomainRuleSnapshotService(
+      DomainRuleDefinitionRepository definitionRepository,
+      DomainRuleSnapshotRepository snapshotRepository,
+      DomainRuleSnapshotHeadRepository headRepository,
+      DomainRuleSnapshotEventRepository eventRepository,
+      ObjectMapper objectMapper) {
+    this(
+        definitionRepository,
+        snapshotRepository,
+        headRepository,
+        eventRepository,
+        objectMapper,
+        DomainRuleImplementationCatalog.denyAll());
+  }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleSnapshotActivationResponse publish(
@@ -124,8 +145,7 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
         provenance,
         approvals,
         request.ruleSet());
-    CompiledRuleSnapshot compiled = new PraxisRuleSnapshotCompiler(planningRegistry(candidate))
-        .compile(candidate, candidate.requiredHostContractVersion());
+    CompiledRuleSnapshot compiled = compileCandidate(candidate);
 
     DomainRuleSnapshot persisted = snapshotRepository.save(DomainRuleSnapshot.builder()
         .id(UUID.randomUUID())
@@ -258,15 +278,20 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
     }
   }
 
-  private RuleBindingExecutorRegistry planningRegistry(PublishedRuleSnapshot snapshot) {
-    List<RuleImplementationRef> declarations = snapshot.ruleSet().bindings().stream()
-        .map(binding -> binding.executor())
-        .filter(executor -> executor.type() == RuleExecutorType.JAVA)
-        .map(executor -> new RuleImplementationRef(
-            executor.implementationKey(), executor.implementationVersion()))
-        .distinct()
-        .toList();
-    return RuleBindingExecutorRegistry.planning(declarations);
+  private CompiledRuleSnapshot compileCandidate(PublishedRuleSnapshot snapshot) {
+    DomainRuleImplementationScope scope = new DomainRuleImplementationScope(
+        snapshot.tenantId(), snapshot.environment(), snapshot.ownerServiceKey());
+    var allowed = implementationCatalog.allowedImplementations(scope);
+    if (allowed == null) {
+      throw new IllegalStateException("DomainRuleImplementationCatalog must not return null");
+    }
+    try {
+      RuleBindingExecutorRegistry registry = RuleBindingExecutorRegistry.planning(allowed);
+      return new PraxisRuleSnapshotCompiler(registry)
+          .compile(snapshot, snapshot.requiredHostContractVersion());
+    } catch (RulePlanException exception) {
+      throw badRequest("RuleSet publication failed [" + exception.getCode() + "]");
+    }
   }
 
   private void verifyStableRuleSetIdentity(

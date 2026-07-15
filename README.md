@@ -170,6 +170,14 @@ Minimum runtime expectations:
 - PostgreSQL 14+
 - `pgvector` when vector search/RAG is enabled
 
+Hosts that publish Java-backed RuleSet snapshots must provide a
+`DomainRuleImplementationCatalog`. The default is deny-all. The catalog is an
+external supply-chain capability scoped by tenant, environment and owner host;
+it must never be derived from the snapshot being published. Customer Java
+extensions additionally require the signed/allowlisted `RuleExtensionTrust`
+contract from `praxis-rules-engine` `1.3`. See
+[Rule snapshot control plane v1](docs/domain-rules/snapshot-control-plane-v1.md).
+
 ## Minimal Configuration
 
 ```yaml

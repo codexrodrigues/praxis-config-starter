@@ -12,6 +12,8 @@ import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
 import org.praxisplatform.config.service.DomainRuleSnapshotReader;
+import org.praxisplatform.config.service.DomainRuleImplementationCatalog;
+import org.praxisplatform.config.service.DomainRuleImplementationScope;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
@@ -30,6 +32,20 @@ class DomainRuleSnapshotAutoConfigurationTest {
     contextRunner.run(context -> {
       assertThat(context).hasSingleBean(DomainRuleSnapshotReader.class);
       assertThat(context).hasSingleBean(DomainRuleSnapshotController.class);
+      assertThat(context).hasSingleBean(DomainRuleImplementationCatalog.class);
+      assertThat(context.getBean(DomainRuleImplementationCatalog.class)
+          .allowedImplementations(new DomainRuleImplementationScope(
+              "tenant-a", "prod", "quickstart"))).isEmpty();
     });
+  }
+
+  @Test
+  void preservesHostOwnedImplementationCatalog() {
+    DomainRuleImplementationCatalog hostCatalog = scope -> java.util.List.of();
+
+    contextRunner
+        .withBean(DomainRuleImplementationCatalog.class, () -> hostCatalog)
+        .run(context -> assertThat(context.getBean(DomainRuleImplementationCatalog.class))
+            .isSameAs(hostCatalog));
   }
 }
