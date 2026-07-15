@@ -12,10 +12,12 @@ import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
 import org.praxisplatform.config.service.DomainRuleSnapshotReader;
+import org.praxisplatform.config.service.DomainRuleSnapshotService;
 import org.praxisplatform.config.service.DomainRuleImplementationCatalog;
 import org.praxisplatform.config.service.DomainRuleImplementationScope;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.stereotype.Service;
 
 @Tag("unit")
 class DomainRuleSnapshotAutoConfigurationTest {
@@ -37,6 +39,11 @@ class DomainRuleSnapshotAutoConfigurationTest {
           .allowedImplementations(new DomainRuleImplementationScope(
               "tenant-a", "prod", "quickstart"))).isEmpty();
     });
+  }
+
+  @Test
+  void snapshotServiceIsOwnedExclusivelyByAutoConfiguration() {
+    assertThat(DomainRuleSnapshotService.class.isAnnotationPresent(Service.class)).isFalse();
   }
 
   @Test
