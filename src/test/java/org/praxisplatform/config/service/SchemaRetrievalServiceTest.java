@@ -64,6 +64,41 @@ class SchemaRetrievalServiceTest {
     }
 
     @Test
+    void fetchSchemaForwardsGovernedPrincipalHeaders() throws Exception {
+        List<String> tenantHeaders = new ArrayList<>();
+        List<String> userHeaders = new ArrayList<>();
+        List<String> environmentHeaders = new ArrayList<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/schemas/filtered", exchange -> {
+            tenantHeaders.add(exchange.getRequestHeaders().getFirst("X-Tenant-ID"));
+            userHeaders.add(exchange.getRequestHeaders().getFirst("X-User-ID"));
+            environmentHeaders.add(exchange.getRequestHeaders().getFirst("X-Env"));
+            writeJson(exchange, 200, "{\"x-ui\":{\"analytics\":{\"projections\":[]}}}");
+        });
+        server.start();
+
+        SchemaRetrievalService service = new SchemaRetrievalService(new ObjectMapper());
+        ReflectionTestUtils.setField(service, "schemasBaseUrl", "http://localhost:" + server.getAddress().getPort());
+        ReflectionTestUtils.setField(service, "timeoutMs", 5_000L);
+
+        SchemaFetchResult result = service.fetchSchemaResult(
+                org.praxisplatform.config.dto.AiSchemaContext.builder()
+                        .path("/api/human-resources/vw-analytics-afastamentos/stats/comparison")
+                        .operation("post")
+                        .schemaType("response")
+                        .build(),
+                null,
+                "tenant-a",
+                "user-a",
+                "production");
+
+        assertTrue(result.isSuccess());
+        assertEquals(List.of("tenant-a"), tenantHeaders);
+        assertEquals(List.of("user-a"), userHeaders);
+        assertEquals(List.of("production"), environmentHeaders);
+    }
+
+    @Test
     void fetchSchemaReturnsTypedFailureWithoutCatalogFallbackWhenFilteredFails() throws Exception {
         List<String> requests = new ArrayList<>();
         server = HttpServer.create(new InetSocketAddress(0), 0);

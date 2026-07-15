@@ -1952,6 +1952,147 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(chartConfig.path("series").get(0).path("type").asText()).isEqualTo("line");
     }
 
+    @Test
+    void materializesGovernedComparisonProjectionWithoutDowngradingToSingleMetricStats() {
+        ObjectNode contextHints = governedComparisonContext("verified");
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Materialize a leitura analitica resolvida para este recurso.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                objectMapper.createObjectNode(),
+                dashboardIntent(
+                        "/api/human-resources/vw-analytics-afastamentos",
+                        List.of(axis("department", "departamento", "Departamento", "bar", "vertical"))),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints)).orElseThrow();
+
+        assertThat(result.valid()).isTrue();
+        JsonNode plan = result.uiCompositionPlan();
+        JsonNode chart = findWidget(plan, "praxis-chart", "main");
+        JsonNode config = chart.path("inputs").path("config");
+        JsonNode query = config.path("dataSource").path("query");
+        JsonNode statsRequest = query.path("statsRequest");
+
+        assertThat(config.path("analyticsProjection").path("id").asText())
+                .isEqualTo("absence-department-comparison");
+        assertThat(config.path("analyticsProjection").path("governance").path("policyRefs").path(0)
+                .path("policyId").asText()).isEqualTo("absence-criticality-policy");
+        assertThat(config.path("analyticsProjection").path("governance").path("policyRefs").path(0)
+                .path("policyVersion").asText()).isEqualTo("2026-07");
+        assertThat(query.path("statsOperation").asText()).isEqualTo("comparison");
+        assertThat(query.path("statsPath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-afastamentos/stats/comparison");
+        assertThat(query.path("metrics")).hasSize(4);
+        assertThat(query.path("metrics").findValuesAsText("field"))
+                .containsExactly(
+                        "__praxisComparison_funcionarioId_current",
+                        "__praxisComparison_funcionarioId_previous",
+                        "__praxisComparison_diasAfastado_current",
+                        "__praxisComparison_diasAfastado_previous");
+        assertThat(statsRequest.has("metric")).isFalse();
+        assertThat(statsRequest.path("metrics")).hasSize(2);
+        assertThat(statsRequest.path("metrics").path(0).path("operation").asText())
+                .isEqualTo("DISTINCT_COUNT");
+        assertThat(statsRequest.path("metrics").path(0).path("alias").asText())
+                .isEqualTo("funcionarioId");
+        assertThat(statsRequest.path("metrics").path(1).path("operation").asText())
+                .isEqualTo("SUM");
+        assertThat(statsRequest.path("periodField").asText()).isEqualTo("competencia");
+        assertThat(statsRequest.path("period").path("preset").asText()).isEqualTo("LAST_30_DAYS");
+        assertThat(statsRequest.path("period").path("timezone").asText()).isEqualTo("America/Sao_Paulo");
+        assertThat(statsRequest.path("period").path("mode").asText()).isEqualTo("PREVIOUS_ALIGNED");
+        assertThat(statsRequest.path("orderBy").asText()).isEqualTo("VALUE_DESC");
+        assertThat(config.path("series")).hasSize(4);
+        assertThat(config.path("interactions").path("crossFilter").asBoolean()).isTrue();
+        assertThat(plan.path("bindings").toString())
+                .contains("crossFilter->vw-analytics-afastamentos-table.queryContext")
+                .contains("pointClick->surface.open");
+        assertThat(config.path("analyticsProjection").toString())
+                .doesNotContain("nomeCompleto")
+                .doesNotContain("diagnostico")
+                .doesNotContain("threshold");
+    }
+
+    @Test
+    void failsClosedWhenComparisonGroundingIsNotVerified() {
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Materialize a leitura analitica resolvida para este recurso.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                objectMapper.createObjectNode(),
+                dashboardIntent(
+                        "/api/human-resources/vw-analytics-afastamentos",
+                        List.of(axis("department", "departamento", "Departamento", "bar", "vertical"))),
+                null,
+                null,
+                null,
+                null,
+                null,
+                governedComparisonContext("operation-unsupported"))).orElseThrow();
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes())
+                .containsExactly("governed-analytics-comparison-operation-unsupported");
+        assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
+    }
+
+    private ObjectNode governedComparisonContext(String status) {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode governed = contextHints.putObject("governedAnalytics");
+        governed.put("schemaVersion", "praxis-agentic-authoring-governed-analytics.v1");
+        governed.put("requestedOperation", "comparison");
+        governed.put("status", status);
+        if (!"verified".equals(status)) {
+            return contextHints;
+        }
+        ObjectNode projection = governed.putObject("projection");
+        projection.put("id", "absence-department-comparison");
+        projection.put("intent", "comparison");
+        projection.putObject("source")
+                .put("kind", "praxis.stats")
+                .put("resource", "/api/human-resources/vw-analytics-afastamentos")
+                .put("operation", "comparison");
+        ObjectNode bindings = projection.putObject("bindings");
+        bindings.putObject("primaryDimension")
+                .put("field", "departamento")
+                .put("role", "category")
+                .put("label", "Departamento");
+        bindings.putArray("primaryMetrics")
+                .addObject()
+                .put("field", "funcionarioId")
+                .put("aggregation", "distinct-count")
+                .put("label", "Colaboradores");
+        bindings.withArray("primaryMetrics")
+                .addObject()
+                .put("field", "diasAfastado")
+                .put("aggregation", "sum")
+                .put("label", "Dias afastado");
+        bindings.putObject("comparisonPeriod")
+                .put("field", "competencia")
+                .put("timezone", "America/Sao_Paulo")
+                .put("preset", "LAST_30_DAYS")
+                .put("mode", "PREVIOUS_ALIGNED");
+        ObjectNode defaults = projection.putObject("defaults");
+        defaults.put("limit", 12);
+        defaults.putArray("sort").addObject().put("field", "diasAfastado").put("direction", "desc");
+        projection.putObject("interactions")
+                .put("drillDown", true)
+                .put("pointSelection", true)
+                .put("crossFilter", true);
+        ObjectNode policyRef = projection.putObject("governance").putArray("policyRefs").addObject();
+        policyRef.put("policyId", "absence-criticality-policy");
+        policyRef.put("policyVersion", "2026-07");
+        policyRef.put("role", "criticality");
+        policyRef.put("resultField", "criticalityLevel");
+        return contextHints;
+    }
+
     private AgenticAuthoringIntentResolutionResult dashboardIntent(
             String resourcePath,
             List<AgenticAuthoringVisualizationAxisDecision> axes) {

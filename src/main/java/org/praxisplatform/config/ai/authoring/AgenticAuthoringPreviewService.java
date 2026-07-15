@@ -295,6 +295,16 @@ public class AgenticAuthoringPreviewService {
             return Optional.empty();
         }
         PreviewSchemaFetchCache schemaFetchCache = new PreviewSchemaFetchCache(schemaRetrievalService);
+        PreviewResourceCapabilitiesFetchCache capabilitiesFetchCache =
+                new PreviewResourceCapabilitiesFetchCache(resourceCapabilitiesRetrievalService);
+        request = withGovernedAnalyticsContext(
+                request,
+                schemaBaseUrl,
+                tenantId,
+                userId,
+                environment,
+                schemaFetchCache,
+                capabilitiesFetchCache);
         request = withSchemaFieldContext(request, schemaBaseUrl, schemaFetchCache);
         for (AgenticAuthoringUiCompositionPlanProvider provider : uiCompositionPlanProviders) {
             Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(request);
@@ -329,7 +339,8 @@ public class AgenticAuthoringPreviewService {
                     schemaBaseUrl,
                     tenantId,
                     userId,
-                    environment);
+                    environment,
+                    capabilitiesFetchCache);
             uiCompositionPlan = verifyResourceSchemaGrounding(
                     request,
                     uiCompositionPlan,
@@ -402,6 +413,376 @@ public class AgenticAuthoringPreviewService {
             ));
         }
         return Optional.empty();
+    }
+
+    private AgenticAuthoringPlanRequest withGovernedAnalyticsContext(
+            AgenticAuthoringPlanRequest request,
+            String schemaBaseUrl,
+            String tenantId,
+            String userId,
+            String environment,
+            PreviewSchemaFetchCache schemaFetchCache,
+            PreviewResourceCapabilitiesFetchCache capabilitiesFetchCache) {
+        String requestedOperation = requestedGovernedAnalyticsOperation(request);
+        if (request == null || requestedOperation.isBlank()) {
+            return request;
+        }
+        AgenticAuthoringCandidate candidate = request.intentResolution() == null
+                ? null
+                : request.intentResolution().selectedCandidate();
+        String resourcePath = businessResourcePath(firstNonBlank(
+                candidate == null ? "" : candidate.resourcePath(),
+                candidate == null ? "" : candidate.submitUrl()));
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        ObjectNode grounding = contextHints.putObject("governedAnalytics");
+        grounding.put("schemaVersion", "praxis-agentic-authoring-governed-analytics.v1");
+        grounding.put("requestedOperation", requestedOperation);
+        grounding.put("resourcePath", resourcePath);
+        ArrayNode sources = grounding.putArray("sources");
+        sources.add("resource.capabilities");
+        sources.add("schemas.filtered:x-ui.analytics");
+
+        if (resourcePath.isBlank() || capabilitiesFetchCache == null) {
+            grounding.put("status", "invalid-resource");
+            return copyWithContextHints(request, contextHints);
+        }
+        ResourceCapabilitiesFetchResult capabilitiesResult = capabilitiesFetchCache.fetch(
+                resourcePath,
+                schemaBaseUrl,
+                tenantId,
+                userId,
+                environment);
+        if (capabilitiesResult == null || !capabilitiesResult.isSuccess()) {
+            grounding.put("status", "capabilities-" + fetchStatus(capabilitiesResult));
+            return copyWithContextHints(request, contextHints);
+        }
+        grounding.put("capabilityVerified", true);
+        if (!supportsCanonicalStatsOperation(capabilitiesResult.getCapabilities(), requestedOperation)) {
+            grounding.put("status", "operation-unsupported");
+            return copyWithContextHints(request, contextHints);
+        }
+
+        AiSchemaContext analyticsSchemaContext = AiSchemaContext.builder()
+                .path(resourcePath + "/stats/" + requestedOperation)
+                .operation("post")
+                .schemaType("response")
+                .build();
+        SchemaFetchResult schemaResult = schemaFetchCache.fetchPrincipalAware(
+                analyticsSchemaContext,
+                schemaBaseUrl,
+                tenantId,
+                userId,
+                environment);
+        if (schemaResult == null || !schemaResult.isSuccess()) {
+            grounding.put("status", "schema-" + schemaFetchStatus(schemaResult));
+            return copyWithContextHints(request, contextHints);
+        }
+        grounding.put("schemaVerified", true);
+        Optional<ObjectNode> projection = governedAnalyticsProjection(
+                schemaResult.getSchema(),
+                capabilitiesResult.getCapabilities(),
+                resourcePath,
+                requestedOperation);
+        if (projection.isEmpty()) {
+            grounding.put("status", "projection-ineligible");
+            return copyWithContextHints(request, contextHints);
+        }
+        grounding.put("status", "verified");
+        grounding.put("capabilityEndpointUrl", value(capabilitiesResult.getEndpointUrl()));
+        grounding.put("schemaEndpointUrl", value(schemaResult.getEndpointUrl()));
+        grounding.set("projection", projection.get());
+        return copyWithContextHints(request, contextHints);
+    }
+
+    private String requestedGovernedAnalyticsOperation(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.intentResolution() == null) {
+            return "";
+        }
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        AgenticAuthoringCandidate candidate = intent.selectedCandidate();
+        if (candidate != null && (endsWithStatsOperation(candidate.resourcePath(), "comparison")
+                || endsWithStatsOperation(candidate.submitUrl(), "comparison"))) {
+            return "comparison";
+        }
+        Set<String> semanticTokens = new LinkedHashSet<>();
+        AgenticAuthoringSemanticDecision semanticDecision = semanticDecision(intent);
+        AgenticAuthoringVisualizationDecision visualization = semanticDecision != null
+                && semanticDecision.visualizationDecision() != null
+                        ? semanticDecision.visualizationDecision()
+                        : intent.visualizationDecision();
+        if (visualization != null) {
+            addTokens(semanticTokens, visualization.intent());
+            addTokens(semanticTokens, visualization.layoutKind());
+        }
+        if (semanticDecision != null) {
+            addTokens(semanticTokens, semanticDecision.visualIntent());
+            addTokens(semanticTokens, semanticDecision.artifactIntent());
+        }
+        JsonNode focus = request.contextHints() == null
+                ? MissingNode.getInstance()
+                : request.contextHints().path("resourceDiscovery").path("resourceSearchFocus");
+        addTokens(semanticTokens, focus.path("desiredSurface").asText(""));
+        JsonNode supportingConcepts = focus.path("supportingConcepts");
+        if (supportingConcepts.isArray()) {
+            for (JsonNode concept : supportingConcepts) {
+                addTokens(semanticTokens, concept.asText(""));
+            }
+        }
+        return semanticTokens.stream().anyMatch(Set.of(
+                "comparison",
+                "comparative",
+                "comparacao",
+                "comparativo",
+                "comparativa")::contains)
+                        ? "comparison"
+                        : "";
+    }
+
+    private boolean endsWithStatsOperation(String path, String operation) {
+        String value = path == null ? "" : path.trim().replaceAll("/+$", "");
+        return value.endsWith("/stats/" + operation);
+    }
+
+    private boolean supportsCanonicalStatsOperation(JsonNode capabilities, String operation) {
+        JsonNode root = capabilityRoot(capabilities);
+        return switch (operation) {
+            case "comparison" -> root.path("canonicalOperations").path("statsComparison").asBoolean(false);
+            default -> false;
+        };
+    }
+
+    private JsonNode capabilityRoot(JsonNode capabilities) {
+        JsonNode root = capabilities == null ? MissingNode.getInstance() : capabilities;
+        return root.path("data").isObject() ? root.path("data") : root;
+    }
+
+    private Optional<ObjectNode> governedAnalyticsProjection(
+            JsonNode schema,
+            JsonNode capabilities,
+            String resourcePath,
+            String operation) {
+        JsonNode projections = schema == null
+                ? MissingNode.getInstance()
+                : schema.path("x-ui").path("analytics").path("projections");
+        if (!projections.isArray()) {
+            return Optional.empty();
+        }
+        List<StatsCapabilityFieldDescriptor> capabilityFields = statsCapabilityFields(capabilities);
+        for (JsonNode projection : projections) {
+            JsonNode source = projection.path("source");
+            if (!"praxis.stats".equals(source.path("kind").asText(""))
+                    || !operation.equals(source.path("operation").asText(""))
+                    || !sameResourcePath(resourcePath, source.path("resource").asText(""))
+                    || !eligibleComparisonProjection(projection, capabilityFields)) {
+                continue;
+            }
+            return Optional.of(sanitizeAnalyticsProjection(projection));
+        }
+        return Optional.empty();
+    }
+
+    private boolean sameResourcePath(String left, String right) {
+        return value(left).replaceAll("/+$", "").equals(value(right).replaceAll("/+$", ""));
+    }
+
+    private boolean eligibleComparisonProjection(
+            JsonNode projection,
+            List<StatsCapabilityFieldDescriptor> capabilityFields) {
+        if (!"comparison".equals(projection.path("intent").asText(""))) {
+            return false;
+        }
+        JsonNode bindings = projection.path("bindings");
+        String dimensionField = bindings.path("primaryDimension").path("field").asText("");
+        String periodField = bindings.path("comparisonPeriod").path("field").asText("");
+        JsonNode period = bindings.path("comparisonPeriod");
+        JsonNode metrics = bindings.path("primaryMetrics");
+        if (dimensionField.isBlank()
+                || periodField.isBlank()
+                || period.path("timezone").asText("").isBlank()
+                || period.path("preset").asText("").isBlank()
+                || period.path("mode").asText("").isBlank()
+                || !metrics.isArray()
+                || metrics.isEmpty()) {
+            return false;
+        }
+        boolean dimensionEligible = capabilityFields.stream()
+                .anyMatch(field -> normalize(field.field()).equals(normalize(dimensionField))
+                        && eligibleStatsDimension(field, "comparison"));
+        boolean periodEligible = capabilityFields.stream()
+                .anyMatch(field -> normalize(field.field()).equals(normalize(periodField))
+                        && (field.timeSeriesEligible() || field.modes().contains("time-series")));
+        if (!dimensionEligible || !periodEligible) {
+            return false;
+        }
+        Set<String> aliases = new LinkedHashSet<>();
+        for (JsonNode metric : metrics) {
+            String fieldName = metric.path("field").asText("");
+            String aggregation = normalize(metric.path("aggregation").asText("count")).replace('_', '-');
+            if (fieldName.isBlank()
+                    || !Set.of("count", "distinct-count", "sum").contains(aggregation)
+                    || !aliases.add(normalize(fieldName))) {
+                return false;
+            }
+            boolean metricEligible = capabilityFields.stream()
+                    .anyMatch(field -> normalize(field.field()).equals(normalize(fieldName))
+                            && field.metricFieldEligible()
+                            && field.metrics().contains(aggregation));
+            if (!metricEligible) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private ObjectNode sanitizeAnalyticsProjection(JsonNode projection) {
+        ObjectNode sanitized = objectMapper.createObjectNode();
+        putText(sanitized, "id", projection.path("id").asText(""));
+        putText(sanitized, "intent", projection.path("intent").asText(""));
+        ObjectNode source = sanitized.putObject("source");
+        copyTextFields(projection.path("source"), source, "kind", "resource", "operation");
+        ObjectNode bindings = sanitized.putObject("bindings");
+        copyAnalyticsBinding(projection.path("bindings"), bindings, "primaryDimension");
+        copyAnalyticsMetrics(projection.path("bindings"), bindings, "primaryMetrics");
+        copyAnalyticsMetrics(projection.path("bindings"), bindings, "secondaryMetrics");
+        copyAnalyticsBinding(projection.path("bindings"), bindings, "comparisonPeriod");
+        copyAnalyticsGovernance(projection.path("governance"), sanitized);
+        copyAnalyticsDefaults(projection.path("defaults"), sanitized);
+        copyAnalyticsPresentationHints(projection.path("presentationHints"), sanitized);
+        copyAnalyticsInteractions(projection.path("interactions"), sanitized);
+        return sanitized;
+    }
+
+    private void copyAnalyticsBinding(JsonNode source, ObjectNode target, String fieldName) {
+        JsonNode binding = source.path(fieldName);
+        if (!binding.isObject()) {
+            return;
+        }
+        ObjectNode copy = target.putObject(fieldName);
+        if ("comparisonPeriod".equals(fieldName)) {
+            copyTextFields(binding, copy, "field", "timezone", "preset", "mode");
+        } else {
+            copyTextFields(binding, copy, "field", "role", "label");
+        }
+    }
+
+    private void copyAnalyticsMetrics(JsonNode source, ObjectNode target, String fieldName) {
+        JsonNode metrics = source.path(fieldName);
+        if (!metrics.isArray() || metrics.isEmpty()) {
+            return;
+        }
+        ArrayNode copy = target.putArray(fieldName);
+        for (JsonNode metric : metrics) {
+            ObjectNode item = copy.addObject();
+            copyTextFields(metric, item, "field", "aggregation", "label");
+        }
+    }
+
+    private void copyAnalyticsGovernance(JsonNode governance, ObjectNode target) {
+        JsonNode policyRefs = governance.path("policyRefs");
+        if (!policyRefs.isArray() || policyRefs.isEmpty()) {
+            return;
+        }
+        ObjectNode governanceCopy = target.putObject("governance");
+        ArrayNode refsCopy = governanceCopy.putArray("policyRefs");
+        for (JsonNode policyRef : policyRefs) {
+            ObjectNode refCopy = refsCopy.addObject();
+            copyTextFields(policyRef, refCopy, "policyId", "policyVersion", "role", "resultField");
+            JsonNode attestation = policyRef.path("attestation");
+            if (attestation.isObject()) {
+                copyTextFields(
+                        attestation,
+                        refCopy.putObject("attestation"),
+                        "policyIdField",
+                        "policyVersionField");
+            }
+        }
+    }
+
+    private void copyAnalyticsDefaults(JsonNode defaults, ObjectNode target) {
+        if (!defaults.isObject()) {
+            return;
+        }
+        ObjectNode defaultsCopy = target.putObject("defaults");
+        if (defaults.path("limit").canConvertToInt()) {
+            defaultsCopy.put("limit", defaults.path("limit").asInt());
+        }
+        putText(defaultsCopy, "granularity", defaults.path("granularity").asText(""));
+        JsonNode sort = defaults.path("sort");
+        if (sort.isArray() && !sort.isEmpty()) {
+            ArrayNode sortCopy = defaultsCopy.putArray("sort");
+            for (JsonNode item : sort) {
+                copyTextFields(item, sortCopy.addObject(), "field", "direction");
+            }
+        }
+    }
+
+    private void copyAnalyticsPresentationHints(JsonNode hints, ObjectNode target) {
+        JsonNode families = hints.path("preferredFamilies");
+        if (!families.isArray() || families.isEmpty()) {
+            return;
+        }
+        ArrayNode familiesCopy = target.putObject("presentationHints").putArray("preferredFamilies");
+        for (JsonNode family : families) {
+            if (family.isTextual() && !family.asText("").isBlank()) {
+                familiesCopy.add(family.asText());
+            }
+        }
+    }
+
+    private void copyAnalyticsInteractions(JsonNode interactions, ObjectNode target) {
+        if (!interactions.isObject()) {
+            return;
+        }
+        ObjectNode copy = target.putObject("interactions");
+        for (String field : List.of("drillDown", "pointSelection", "crossFilter")) {
+            if (interactions.has(field) && interactions.path(field).isBoolean()) {
+                copy.put(field, interactions.path(field).asBoolean());
+            }
+        }
+    }
+
+    private void copyTextFields(JsonNode source, ObjectNode target, String... fields) {
+        for (String field : fields) {
+            putText(target, field, source.path(field).asText(""));
+        }
+    }
+
+    private void putText(ObjectNode target, String field, String text) {
+        if (target != null && text != null && !text.isBlank()) {
+            target.put(field, text.trim());
+        }
+    }
+
+    private String fetchStatus(ResourceCapabilitiesFetchResult result) {
+        return result == null || result.getStatus() == null
+                ? "unavailable"
+                : result.getStatus().name().toLowerCase(Locale.ROOT);
+    }
+
+    private String schemaFetchStatus(SchemaFetchResult result) {
+        return result == null || result.getStatus() == null
+                ? "unavailable"
+                : result.getStatus().name().toLowerCase(Locale.ROOT);
+    }
+
+    private AgenticAuthoringPlanRequest copyWithContextHints(
+            AgenticAuthoringPlanRequest request,
+            JsonNode contextHints) {
+        return new AgenticAuthoringPlanRequest(
+                request.userPrompt(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.currentPage(),
+                request.intentResolution(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                attachmentSummaries(request),
+                contextHints);
     }
 
     private AgenticAuthoringPlanRequest withSchemaFieldContext(
@@ -753,7 +1134,8 @@ public class AgenticAuthoringPreviewService {
             String requestBaseUrl,
             String tenantId,
             String userId,
-            String environment) {
+            String environment,
+            PreviewResourceCapabilitiesFetchCache capabilitiesFetchCache) {
         if (resourceCapabilitiesRetrievalService == null
                 || uiCompositionPlan == null
                 || uiCompositionPlan.isMissingNode()
@@ -775,7 +1157,7 @@ public class AgenticAuthoringPreviewService {
             return objectNode;
         }
 
-        ResourceCapabilitiesFetchResult result = resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+        ResourceCapabilitiesFetchResult result = capabilitiesFetchCache.fetch(
                 resourcePath,
                 requestBaseUrl,
                 tenantId,
@@ -818,6 +1200,11 @@ public class AgenticAuthoringPreviewService {
                     continue;
                 }
                 String operation = valueOrDefault(query.path("statsOperation").asText(""), "group-by");
+                if ("comparison".equals(normalize(operation))
+                        && !supportsCanonicalStatsOperation(result.getCapabilities(), "comparison")) {
+                    markStatsAxisUnsupported(objectNode, semanticAxis, "unsupported-operation");
+                    continue;
+                }
                 Optional<StatsCapabilityFieldDescriptor> dimension = resolveStatsDimensionCapability(
                         semanticAxis,
                         statsRequest.path("field").asText(""),
@@ -825,6 +1212,11 @@ public class AgenticAuthoringPreviewService {
                         capabilityFields);
                 if (dimension.isEmpty()) {
                     markStatsAxisUnsupported(objectNode, semanticAxis, "unsupported-dimension");
+                    continue;
+                }
+                if ("comparison".equals(normalize(operation))
+                        && !alignComparisonPeriodCapability(statsRequest, capabilityFields)) {
+                    markStatsAxisUnsupported(objectNode, semanticAxis, "unsupported-comparison-period");
                     continue;
                 }
                 if (!alignStatsMetricCapability(config, capabilityFields)) {
@@ -1645,6 +2037,7 @@ public class AgenticAuthoringPreviewService {
         return switch (normalized) {
             case "timeseries", "time-series" -> field.timeSeriesEligible()
                     || field.modes().contains("time-series");
+            case "comparison" -> field.groupByEligible() || field.modes().contains("group-by");
             case "distribution" -> field.distributionTermsEligible()
                     || field.distributionHistogramEligible()
                     || field.modes().contains("distribution-terms")
@@ -1657,6 +2050,9 @@ public class AgenticAuthoringPreviewService {
             ObjectNode config,
             List<StatsCapabilityFieldDescriptor> capabilityFields) {
         ObjectNode query = config.path("dataSource").path("query") instanceof ObjectNode value ? value : null;
+        if (query != null && "comparison".equals(normalize(query.path("statsOperation").asText("")))) {
+            return alignComparisonStatsMetricCapabilities(config, query, capabilityFields);
+        }
         ObjectNode statsMetric = query != null && query.path("statsRequest").path("metric") instanceof ObjectNode value
                 ? value
                 : null;
@@ -1700,6 +2096,145 @@ public class AgenticAuthoringPreviewService {
             }
         }
         return true;
+    }
+
+    private boolean alignComparisonPeriodCapability(
+            ObjectNode statsRequest,
+            List<StatsCapabilityFieldDescriptor> capabilityFields) {
+        if (statsRequest == null || statsRequest.path("metric").isObject()) {
+            return false;
+        }
+        String requestedPeriodField = statsRequest.path("periodField").asText("");
+        JsonNode period = statsRequest.path("period");
+        if (requestedPeriodField.isBlank()
+                || !period.isObject()
+                || period.path("preset").asText("").isBlank()
+                || period.path("timezone").asText("").isBlank()
+                || period.path("mode").asText("").isBlank()) {
+            return false;
+        }
+        Optional<StatsCapabilityFieldDescriptor> capability = capabilityFields.stream()
+                .filter(field -> normalize(field.field()).equals(normalize(requestedPeriodField)))
+                .filter(field -> field.timeSeriesEligible() || field.modes().contains("time-series"))
+                .findFirst();
+        if (capability.isEmpty()) {
+            return false;
+        }
+        statsRequest.put("periodField", capability.get().field());
+        return true;
+    }
+
+    private boolean alignComparisonStatsMetricCapabilities(
+            ObjectNode config,
+            ObjectNode query,
+            List<StatsCapabilityFieldDescriptor> capabilityFields) {
+        ObjectNode statsRequest = query.path("statsRequest") instanceof ObjectNode value ? value : null;
+        JsonNode executionMetrics = statsRequest == null ? MissingNode.getInstance() : statsRequest.path("metrics");
+        if (statsRequest == null
+                || statsRequest.path("metric").isObject()
+                || !executionMetrics.isArray()
+                || executionMetrics.isEmpty()) {
+            return false;
+        }
+        Set<String> aliases = new LinkedHashSet<>();
+        Map<String, String> canonicalAliases = new LinkedHashMap<>();
+        for (JsonNode metric : executionMetrics) {
+            if (!(metric instanceof ObjectNode metricObject)) {
+                return false;
+            }
+            String operation = normalize(metricObject.path("operation").asText("")).replace('_', '-');
+            String alias = metricObject.path("alias").asText("").trim();
+            String requestedField = "count".equals(operation)
+                    ? alias
+                    : metricObject.path("field").asText("").trim();
+            if (!Set.of("count", "distinct-count", "sum").contains(operation)
+                    || alias.isBlank()
+                    || requestedField.isBlank()
+                    || !aliases.add(normalize(alias))) {
+                return false;
+            }
+            Optional<StatsCapabilityFieldDescriptor> capability = capabilityFields.stream()
+                    .filter(StatsCapabilityFieldDescriptor::metricFieldEligible)
+                    .filter(field -> normalize(field.field()).equals(normalize(requestedField)))
+                    .filter(field -> field.metrics().contains(operation))
+                    .findFirst();
+            if (capability.isEmpty()) {
+                return false;
+            }
+            String canonicalField = capability.get().field();
+            canonicalAliases.put(alias, canonicalField);
+            metricObject.put("operation", operation.toUpperCase(Locale.ROOT).replace('-', '_'));
+            metricObject.put("alias", canonicalField);
+            if ("count".equals(operation)) {
+                metricObject.remove("field");
+            } else {
+                metricObject.put("field", canonicalField);
+            }
+        }
+        alignComparisonDisplayBindings(config, query, canonicalAliases);
+        return true;
+    }
+
+    private void alignComparisonDisplayBindings(
+            ObjectNode config,
+            ObjectNode query,
+            Map<String, String> canonicalAliases) {
+        JsonNode metrics = query.path("metrics");
+        if (metrics.isArray()) {
+            for (JsonNode metric : metrics) {
+                if (!(metric instanceof ObjectNode metricObject)) {
+                    continue;
+                }
+                String canonicalField = canonicalComparisonOutputField(
+                        metricObject.path("field").asText(""),
+                        canonicalAliases);
+                if (!canonicalField.isBlank()) {
+                    metricObject.put("field", canonicalField);
+                    metricObject.put("alias", canonicalField);
+                }
+            }
+        }
+        JsonNode series = config.path("series");
+        if (series.isArray()) {
+            for (JsonNode item : series) {
+                if (!(item instanceof ObjectNode seriesObject)
+                        || !(seriesObject.path("metric") instanceof ObjectNode seriesMetric)) {
+                    continue;
+                }
+                String canonicalField = canonicalComparisonOutputField(
+                        seriesMetric.path("field").asText(""),
+                        canonicalAliases);
+                if (!canonicalField.isBlank()) {
+                    seriesMetric.put("field", canonicalField);
+                }
+            }
+        }
+    }
+
+    private String canonicalComparisonOutputField(
+            String outputField,
+            Map<String, String> canonicalAliases) {
+        if (outputField == null || canonicalAliases == null || canonicalAliases.isEmpty()) {
+            return "";
+        }
+        String prefix = "__praxisComparison_";
+        if (!outputField.startsWith(prefix)) {
+            return "";
+        }
+        for (String period : List.of("current", "previous")) {
+            String suffix = "_" + period;
+            if (!outputField.endsWith(suffix)) {
+                continue;
+            }
+            String alias = outputField.substring(prefix.length(), outputField.length() - suffix.length());
+            String canonicalAlias = canonicalAliases.entrySet().stream()
+                    .filter(entry -> normalize(entry.getKey()).equals(normalize(alias)))
+                    .map(Map.Entry::getValue)
+                    .findFirst()
+                    .orElse("");
+            return canonicalAlias.isBlank() ? "" : prefix + canonicalAlias + suffix;
+        }
+        return "";
     }
 
     private void alignStatsExecutionField(
@@ -1944,6 +2479,7 @@ public class AgenticAuthoringPreviewService {
                 "/stats/group-by",
                 "/stats/timeseries",
                 "/stats/distribution",
+                "/stats/comparison",
                 "/filter/cursor",
                 "/filter",
                 "/all")) {
@@ -1959,7 +2495,8 @@ public class AgenticAuthoringPreviewService {
         String normalized = value(value);
         return normalized.contains("/stats/group-by")
                 || normalized.contains("/stats/timeseries")
-                || normalized.contains("/stats/distribution");
+                || normalized.contains("/stats/distribution")
+                || normalized.contains("/stats/comparison");
     }
 
     private Map<String, SchemaFieldDescriptor> schemaFields(JsonNode schema) {
@@ -4553,6 +5090,29 @@ public class AgenticAuthoringPreviewService {
             return result;
         }
 
+        private SchemaFetchResult fetchPrincipalAware(
+                AiSchemaContext context,
+                String schemaBaseUrl,
+                String tenantId,
+                String userId,
+                String environment) {
+            if (schemaRetrievalService == null || context == null) {
+                return null;
+            }
+            String key = cacheKey(context, schemaBaseUrl);
+            if (fetches.containsKey(key)) {
+                return fetches.get(key);
+            }
+            SchemaFetchResult result = schemaRetrievalService.fetchSchemaResult(
+                    context,
+                    schemaBaseUrl,
+                    tenantId,
+                    userId,
+                    environment);
+            fetches.put(key, result);
+            return result;
+        }
+
         private String cacheKey(AiSchemaContext context, String schemaBaseUrl) {
             return value(schemaBaseUrl)
                     + "|"
@@ -4561,6 +5121,45 @@ public class AgenticAuthoringPreviewService {
                     + value(context.getOperation())
                     + "|"
                     + value(context.getSchemaType());
+        }
+    }
+
+    private final class PreviewResourceCapabilitiesFetchCache {
+
+        private final ResourceCapabilitiesRetrievalService retrievalService;
+        private final Map<String, ResourceCapabilitiesFetchResult> fetches = new LinkedHashMap<>();
+
+        private PreviewResourceCapabilitiesFetchCache(ResourceCapabilitiesRetrievalService retrievalService) {
+            this.retrievalService = retrievalService;
+        }
+
+        private ResourceCapabilitiesFetchResult fetch(
+                String resourcePath,
+                String requestBaseUrl,
+                String tenantId,
+                String userId,
+                String environment) {
+            if (retrievalService == null || resourcePath == null || resourcePath.isBlank()) {
+                return null;
+            }
+            String key = String.join(
+                    "|",
+                    value(requestBaseUrl),
+                    value(resourcePath),
+                    value(tenantId),
+                    value(userId),
+                    value(environment));
+            if (fetches.containsKey(key)) {
+                return fetches.get(key);
+            }
+            ResourceCapabilitiesFetchResult result = retrievalService.fetchCapabilitiesResult(
+                    resourcePath,
+                    requestBaseUrl,
+                    tenantId,
+                    userId,
+                    environment);
+            fetches.put(key, result);
+            return result;
         }
     }
 

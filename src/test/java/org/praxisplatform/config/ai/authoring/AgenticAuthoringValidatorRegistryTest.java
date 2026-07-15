@@ -690,6 +690,78 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldValidateCanonicalComparisonBindingAndRejectSingleMetricFallback() throws Exception {
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "apiMetadata": {
+                    "resources": [
+                      {
+                        "resourcePath": "/api/human-resources/vw-analytics-afastamentos",
+                        "canonicalOperations": { "statsComparison": true }
+                      }
+                    ]
+                  }
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+        JsonNode operation = operation(
+                "data.resource.bind",
+                "dataBinding",
+                "x-ui-chart-source-and-field-catalog",
+                false,
+                "stats-operation-supported");
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation,
+                plan("{}", """
+                        {
+                          "sourceKind": "praxis.stats",
+                          "resource": "/api/human-resources/vw-analytics-afastamentos",
+                          "operation": "comparison",
+                          "dimensions": [{ "field": "departamento" }],
+                          "metrics": [
+                            { "field": "funcionarioId", "aggregation": "distinct-count", "alias": "funcionarioId" },
+                            { "field": "diasAfastado", "aggregation": "sum", "alias": "diasAfastado" }
+                          ],
+                          "comparisonPeriod": {
+                            "field": "competencia",
+                            "timezone": "America/Sao_Paulo",
+                            "preset": "LAST_30_DAYS",
+                            "mode": "PREVIOUS_ALIGNED"
+                          }
+                        }
+                        """),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation,
+                plan("{}", """
+                        {
+                          "sourceKind": "praxis.stats",
+                          "resource": "/api/human-resources/vw-analytics-afastamentos",
+                          "operation": "comparison",
+                          "metric": { "field": "diasAfastado", "aggregation": "sum" },
+                          "metrics": [],
+                          "comparisonPeriod": { "field": "competencia" }
+                        }
+                        """),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).contains(
+                "validator stats-operation-supported failed for data.resource.bind: comparison must use metrics[] and must not declare singular metric",
+                "validator stats-operation-supported failed for data.resource.bind: comparison requires non-empty metrics[]",
+                "validator stats-operation-supported failed for data.resource.bind: comparison requires governed comparisonPeriod field, timezone, preset and mode");
+    }
+
+    @Test
     void shouldFailClosedWhenChartGroundingCatalogsAreMissingOrUnsupported() throws Exception {
         List<String> failures = new ArrayList<>();
         JsonNode chartOnlyConfig = objectMapper.readTree("""

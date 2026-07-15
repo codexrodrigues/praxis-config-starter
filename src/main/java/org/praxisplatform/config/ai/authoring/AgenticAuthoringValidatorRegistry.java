@@ -3151,10 +3151,13 @@ public final class AgenticAuthoringValidatorRegistry {
                     + ": stats operation is required");
             return;
         }
-        if (!Set.of("group-by", "timeseries", "distribution").contains(operation)) {
+        if (!Set.of("group-by", "timeseries", "distribution", "comparison").contains(operation)) {
             failures.add("validator stats-operation-supported failed for " + operationId
                     + ": unsupported stats operation " + operation);
             return;
+        }
+        if ("comparison".equals(operation)) {
+            validateChartComparisonBinding(operationId, planOperation.path("input"), failures);
         }
         String resource = chartResource(planOperation, config);
         JsonNode resourceDescriptor = chartResourceDescriptor(config, resource);
@@ -3167,6 +3170,45 @@ public final class AgenticAuthoringValidatorRegistry {
         if (!supported.contains(operation)) {
             failures.add("validator stats-operation-supported failed for " + operationId
                     + ": unsupported stats operation " + operation);
+        }
+    }
+
+    private void validateChartComparisonBinding(
+            String operationId,
+            JsonNode input,
+            List<String> failures) {
+        if (input.path("metric").isObject()) {
+            failures.add("validator stats-operation-supported failed for " + operationId
+                    + ": comparison must use metrics[] and must not declare singular metric");
+        }
+        JsonNode metrics = input.path("metrics");
+        if (!metrics.isArray() || metrics.isEmpty()) {
+            failures.add("validator stats-operation-supported failed for " + operationId
+                    + ": comparison requires non-empty metrics[]");
+        } else {
+            Set<String> aliases = new HashSet<>();
+            for (JsonNode metric : metrics) {
+                String field = text(metric, "field");
+                String aggregation = text(metric, "aggregation");
+                String alias = firstNonBlank(text(metric, "alias"), field);
+                if (field.isBlank()
+                        || !Set.of("count", "distinct-count", "sum").contains(aggregation)
+                        || alias.isBlank()
+                        || !aliases.add(alias)) {
+                    failures.add("validator stats-operation-supported failed for " + operationId
+                            + ": comparison metrics require unique aliases, canonical fields and count, distinct-count or sum aggregation");
+                    break;
+                }
+            }
+        }
+        JsonNode period = input.path("comparisonPeriod");
+        if (!period.isObject()
+                || text(period, "field").isBlank()
+                || text(period, "timezone").isBlank()
+                || text(period, "preset").isBlank()
+                || text(period, "mode").isBlank()) {
+            failures.add("validator stats-operation-supported failed for " + operationId
+                    + ": comparison requires governed comparisonPeriod field, timezone, preset and mode");
         }
     }
 
@@ -3520,9 +3562,12 @@ public final class AgenticAuthoringValidatorRegistry {
             collectStatsOperationFlags(resourceDescriptor.path("statsCapabilities"), operations);
             collectStatsOperationFlags(resourceDescriptor.path("capabilities"), operations);
             collectStatsOperationFlags(resourceDescriptor.path("capabilities").path("stats"), operations);
+            collectStatsOperationFlags(resourceDescriptor.path("canonicalOperations"), operations);
+            collectStatsOperationFlags(resourceDescriptor.path("capabilities").path("canonicalOperations"), operations);
         }
         collectStatsOperationFlags(config.path("statsCapabilities"), operations);
         collectStatsOperationFlags(config.path("statsCapabilities").path("stats"), operations);
+        collectStatsOperationFlags(config.path("canonicalOperations"), operations);
         return operations;
     }
 
@@ -3533,11 +3578,23 @@ public final class AgenticAuthoringValidatorRegistry {
         if (node.path("groupBy").asBoolean(false) || node.path("group-by").asBoolean(false)) {
             operations.add("group-by");
         }
+        if (node.path("statsGroupBy").asBoolean(false)) {
+            operations.add("group-by");
+        }
         if (node.path("timeseries").asBoolean(false) || node.path("timeSeries").asBoolean(false)) {
+            operations.add("timeseries");
+        }
+        if (node.path("statsTimeSeries").asBoolean(false)) {
             operations.add("timeseries");
         }
         if (node.path("distribution").asBoolean(false)) {
             operations.add("distribution");
+        }
+        if (node.path("statsDistribution").asBoolean(false)) {
+            operations.add("distribution");
+        }
+        if (node.path("comparison").asBoolean(false) || node.path("statsComparison").asBoolean(false)) {
+            operations.add("comparison");
         }
     }
 

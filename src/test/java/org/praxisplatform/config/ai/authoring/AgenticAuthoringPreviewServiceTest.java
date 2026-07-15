@@ -1352,6 +1352,88 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewGroundsComparisonFromCanonicalCapabilitiesAndAnalyticsProjection() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Materialize a leitura analitica autorizada para este recurso.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                comparisonDashboardIntent());
+        ObjectNode responseSchema = comparisonResourceSchema();
+        ObjectNode filterSchema = comparisonFilterSchema();
+        ObjectNode comparisonSchema = comparisonAnalyticsSchema();
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), eq("http://localhost")))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    return SchemaFetchResult.success(
+                            "request".equals(context.getSchemaType()) ? filterSchema : responseSchema,
+                            "http://localhost/schemas/filtered");
+                });
+        when(schemaRetrievalService.fetchSchemaResult(
+                any(AiSchemaContext.class),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    assertThat(context.getPath())
+                            .isEqualTo("/api/human-resources/vw-analytics-afastamentos/stats/comparison");
+                    assertThat(context.getOperation()).isEqualTo("post");
+                    assertThat(context.getSchemaType()).isEqualTo("response");
+                    return SchemaFetchResult.success(comparisonSchema, "http://localhost/schemas/filtered");
+                });
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                eq("/api/human-resources/vw-analytics-afastamentos"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        comparisonStatsCapabilities(),
+                        "http://localhost/api/human-resources/vw-analytics-afastamentos/capabilities"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        JsonNode chart = result.uiCompositionPlan().path("widgets").findParents("componentId").stream()
+                .filter(widget -> "praxis-chart".equals(widget.path("componentId").asText()))
+                .findFirst()
+                .orElseThrow();
+        JsonNode config = chart.path("inputs").path("config");
+        JsonNode query = config.path("dataSource").path("query");
+        JsonNode statsRequest = query.path("statsRequest");
+        assertThat(query.path("statsOperation").asText()).isEqualTo("comparison");
+        assertThat(statsRequest.has("metric")).isFalse();
+        assertThat(statsRequest.path("metrics")).hasSize(2);
+        assertThat(statsRequest.path("periodField").asText()).isEqualTo("competencia");
+        assertThat(config.path("series")).hasSize(4);
+        assertThat(config.path("analyticsProjection").path("governance").path("policyRefs").path(0)
+                .path("policyId").asText()).isEqualTo("absence-criticality-policy");
+        assertThat(config.path("analyticsProjection").path("governance").path("policyRefs").path(0)
+                .path("policyVersion").asText()).isEqualTo("2026-07");
+        assertThat(config.path("semanticAxis").path("statsVerified").asBoolean()).isTrue();
+        assertThat(config.path("interactions").path("eventActions").path("crossFilter")
+                .path("mapping").toString()).isEqualTo("{\"key\":\"departamentoIdsIn\"}");
+        assertThat(result.warnings()).contains(
+                "semantic-axis-stats-capability-verified",
+                "semantic-chart-interactions-grounded");
+        assertThat(result.uiCompositionPlan().toString())
+                .doesNotContain("sampleRows")
+                .doesNotContain("rawRows")
+                .doesNotContain("threshold");
+    }
+
+    @Test
     void previewReusesSchemaFetchesDuringSingleUiCompositionPreview() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Quero um painel com indicadores e graficos sobre funcionarios.",
@@ -3803,6 +3885,109 @@ class AgenticAuthoringPreviewServiceTest {
         return capabilities;
     }
 
+    private ObjectNode comparisonStatsCapabilities() {
+        ObjectNode capabilities = objectMapper.createObjectNode();
+        capabilities.putObject("canonicalOperations").put("statsComparison", true);
+        ArrayNode fields = capabilities.putObject("stats").putArray("fields");
+        fields.addObject()
+                .put("field", "departamento")
+                .put("label", "Departamento")
+                .put("keyAndLabelDistinct", true)
+                .put("groupByEligible", true)
+                .putArray("modes").add("GROUP_BY");
+        fields.addObject()
+                .put("field", "competencia")
+                .put("label", "Competencia")
+                .put("timeSeriesEligible", true)
+                .putArray("modes").add("TIME_SERIES");
+        fields.addObject()
+                .put("field", "funcionarioId")
+                .put("label", "Funcionario")
+                .put("metricFieldEligible", true)
+                .putArray("metrics").add("DISTINCT_COUNT");
+        fields.addObject()
+                .put("field", "diasAfastado")
+                .put("label", "Dias afastado")
+                .put("metricFieldEligible", true)
+                .putArray("metrics").add("SUM");
+        return capabilities;
+    }
+
+    private ObjectNode comparisonResourceSchema() {
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("departamento").put("type", "string")
+                .putObject("x-ui").put("label", "Departamento");
+        properties.putObject("competencia").put("type", "string").put("format", "date");
+        properties.putObject("funcionarioId").put("type", "integer");
+        properties.putObject("diasAfastado").put("type", "number");
+        return schema;
+    }
+
+    private ObjectNode comparisonFilterSchema() {
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        ObjectNode department = properties.putObject("departamentoIdsIn");
+        department.put("type", "array");
+        department.putObject("x-ui")
+                .put("label", "Departamento")
+                .put("controlType", "async-select")
+                .put("multiple", true)
+                .put("endpoint", "/api/human-resources/departamentos/options/filter");
+        return schema;
+    }
+
+    private ObjectNode comparisonAnalyticsSchema() {
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode projection = schema.putObject("x-ui")
+                .putObject("analytics")
+                .putArray("projections")
+                .addObject();
+        projection.put("id", "absence-department-comparison");
+        projection.put("intent", "comparison");
+        projection.putObject("source")
+                .put("kind", "praxis.stats")
+                .put("resource", "/api/human-resources/vw-analytics-afastamentos")
+                .put("operation", "comparison");
+        ObjectNode bindings = projection.putObject("bindings");
+        bindings.putObject("primaryDimension")
+                .put("field", "departamento")
+                .put("role", "category")
+                .put("label", "Departamento");
+        bindings.putArray("primaryMetrics")
+                .addObject()
+                .put("field", "funcionarioId")
+                .put("aggregation", "distinct-count")
+                .put("label", "Colaboradores");
+        bindings.withArray("primaryMetrics")
+                .addObject()
+                .put("field", "diasAfastado")
+                .put("aggregation", "sum")
+                .put("label", "Dias afastado");
+        bindings.putObject("comparisonPeriod")
+                .put("field", "competencia")
+                .put("timezone", "America/Sao_Paulo")
+                .put("preset", "LAST_30_DAYS")
+                .put("mode", "PREVIOUS_ALIGNED");
+        ObjectNode defaults = projection.putObject("defaults");
+        defaults.put("limit", 12);
+        defaults.putArray("sort").addObject().put("field", "diasAfastado").put("direction", "desc");
+        projection.putObject("presentationHints").putArray("preferredFamilies").add("chart");
+        projection.putObject("interactions")
+                .put("drillDown", true)
+                .put("pointSelection", true)
+                .put("crossFilter", true);
+        ObjectNode policyRef = projection.putObject("governance").putArray("policyRefs").addObject();
+        policyRef.put("policyId", "absence-criticality-policy");
+        policyRef.put("policyVersion", "2026-07");
+        policyRef.put("role", "criticality");
+        policyRef.put("resultField", "criticalityLevel");
+        policyRef.putObject("attestation")
+                .put("policyIdField", "criticalityPolicyId")
+                .put("policyVersionField", "criticalityPolicyVersion");
+        return schema;
+    }
+
     private ObjectNode unresolvedAxisDashboardPlan() {
         ObjectNode plan = objectMapper.createObjectNode();
         plan.put("kind", "praxis.ui-composition-plan");
@@ -5149,6 +5334,53 @@ class AgenticAuthoringPreviewServiceTest {
                         "dashboard",
                         "praxis-chart",
                         List.of(visualizationAxis("role", "cargoNome", "Cargo", "bar", "vertical")),
+                        true,
+                        true,
+                        "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult comparisonDashboardIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/vw-analytics-afastamentos",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/vw-analytics-afastamentos/filter&operation=post&schemaType=response",
+                        "/api/human-resources/vw-analytics-afastamentos/filter",
+                        "POST",
+                        0.96d,
+                        "semantic comparison resource",
+                        List.of("semantic-retrieval", "resource-capabilities")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Materialize a leitura analitica autorizada para este recurso.",
+                "Vou materializar a projection governada.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "comparison",
+                        "dashboard",
+                        "praxis-chart",
+                        List.of(visualizationAxis(
+                                "department",
+                                "departamento",
+                                "Departamento",
+                                "bar",
+                                "vertical")),
                         true,
                         true,
                         "llm-authored-semantic-decision"));
