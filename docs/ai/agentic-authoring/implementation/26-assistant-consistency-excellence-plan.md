@@ -42,35 +42,62 @@ O primeiro slice P0 foi implementado em 2026-07-15:
 - recuperacao nao mutante, em caso de falha do provider, quando a oportunidade
   governada da UI ja declarou `semanticScope=platform-capabilities`.
 
+O segundo slice P0 fechou a perda de grounding entre decisao semantica e
+discovery de recurso sem criar um contrato paralelo:
+
+- o foco de recurso ja authorado pela LLM e reconciliado, depois da resolucao
+  de intencao, com os `resourceKey` canonicos publicados por
+  `contextHints.domainDiscovery`;
+- identidade textual serve apenas para grounding e desambiguacao dentro desse
+  escopo semantico ja resolvido; ela nao decide a intencao primaria;
+- empates ou matches fracos permanecem fail-closed no fluxo normal de retrieval
+  e clarificacao;
+- quando o catalogo `api_metadata` do tenant/release ainda nao materializou o
+  recurso canonico, o discovery publica um candidato `schema-probe-pending`,
+  sem alegar schema ou evidencia semantica inexistentes;
+- esse candidato so pode chegar a `canApply=true` depois da verificacao real
+  por `/schemas/filtered` e dos gates normais de preview/materializacao;
+- o prefixo semantico agora preserva marcadores estaveis para conceitos e
+  surface ausentes, evitando que trechos posteriores sejam incorporados ao
+  `resourceKey`;
+- o intent resolver preserva o `artifactKind` do proprio
+  `resourceDiscovery`, em vez de reclassificar a operacao pelo tipo do host
+  Page Builder; assim, formulario usa o POST do recurso base e tabela usa a
+  projection de consulta;
+- o corpus interno passou a aceitar `expected.intent.submitUrls`, porque
+  recurso correto com operacao incorreta e um falso positivo, nao sucesso.
+
 Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
 
 - `platform-what-can-i-do-pt`: 3/3 execucoes consecutivas corretas, sem preview,
   sem recurso selecionado e com tres recommended intents;
 - `platform-how-can-you-help-pt` e `platform-next-step-pt`: ambas passaram no
   ensaio focal posterior, tambem sem recurso e com tres proximas acoes;
-- formulario explicito de funcionarios: houve preview valido e `canApply=true`,
-  mas uma execucao selecionou incorretamente a projecao analitica de folha;
-- tabela explicita: houve execucoes com preview aplicavel, mas outra selecionou
-  incorretamente a projecao analitica de afastamentos;
-- tela aberta de funcionarios: chegou a preview aplicavel com recurso principal
-  de funcionarios, embora o discovery tenha considerado fontes de RH nao
-  necessarias;
-- a rodada completa anterior as ultimas correcoes passou apenas 1/6; ela nao e
-  aceite de release. O corpus cumpriu seu papel ao tornar a inconsistencia
-  reproduzivel e localizada.
+- antes do segundo slice, formulario e tabela chegaram a selecionar projections
+  analiticas de folha e afastamentos; a rodada completa daquele baseline passou
+  apenas 1/6 e continua registrada como evidencia negativa, nao como aceite;
+- depois do grounding canonico, formulario, tela aberta e tabela passaram 9/9:
+  tres jornadas, cada uma repetida tres vezes, com preview, `canApply=true`,
+  zero terminal incorreto e nenhum recurso analitico indevido;
+- as nove execucoes selecionaram
+  `/api/human-resources/funcionarios`; formularios usaram
+  `POST /api/human-resources/funcionarios` com schema de request, enquanto tela
+  e tabela usaram `/filter/cursor` para consulta;
+- o gate da vertical aplicou o limite de 45 s e passou com mediana terminal de
+  28,444 s; formularios ficaram entre 35,0 s e 36,388 s.
 
-O baseline funcional da orientacao melhorou, mas o SLO de latencia ainda nao:
+O baseline funcional da orientacao melhorou, mas seu SLO de latencia ainda nao:
 a mediana observada nas tres execucoes da pergunta basica foi aproximadamente
-41 s. O trace mostra planejamento, discovery e resolucao semantica executados
-antes de uma resposta que nao precisa materializar recurso. Tambem foi
-observada uma metrica negativa em `intentResolveLlm` quando houve resolucao por
-evidencia; o calculo de telemetria deve ser corrigido antes de usar percentis
-como gate de release.
+41 s. O trace mostra planning, discovery e resolucao semantica antes de uma
+resposta que nao precisa materializar recurso. A telemetria agora representa
+resolucao por evidencia como `intentResolveLlm=null`, mas a rota consultiva
+ainda deve ser otimizada antes de usar P95 de 12 s como gate global.
 
 ## Classificacao e mapa de impacto
 
 - Classificacao do plano: `arquitetural`.
-- Mudanca deste documento: `docs-apenas`; nenhum contrato publico e alterado.
+- Classificacao do segundo slice: `transversal`, com comportamento interno de
+  AI authoring e prova operacional; nenhum endpoint, DTO ou tipo publico novo.
 - Fonte canonica de orchestration e configuracao: `praxis-config-starter`.
 - Runtime e UX canonicos: `@praxisui/ai` em `praxis-ui-angular`.
 - Primeiros consumidores: Page Builder, Table e Dynamic Form.
@@ -92,18 +119,18 @@ um bot especial para o Page Builder.
 | --- | --- | --- | --- |
 | Responder "o que posso fazer aqui?" | `ja-suportado-mal-nomeado-ou-mal-materializado` | O prompt canonico classifica orientacao de plataforma, o context bundle publica `platformGuide`, componentes authoraveis e capabilities | Tornar a projecao obrigatoria em todo host e certificar a resposta ponta a ponta |
 | Sugerir o proximo passo | `ja-suportado-so-ux` | `@praxisui/ai` possui `PraxisAssistantOpportunityCatalog`, `PraxisAssistantRecommendedIntent` e empty state; Table ja deriva recomendacoes | Derivar recomendacoes do contexto canonico em todos os hosts, sem listas locais concorrentes |
-| Criar formulario/tela de funcionarios | `suportado-parcialmente` | Pre-intent discovery, `searchApiResources`, preview governada e Page Builder real ja selecionam o recurso de funcionarios | Certificar variacoes linguisticas, repeticao, review, apply e recuperacao em uma jornada unica |
+| Criar formulario/tela de funcionarios | `suportado-parcialmente` | A vertical de preview passou 9/9 com recurso e operacao canonicos | Acrescentar apply/readback, variacoes linguisticas, refinamento e recuperacao na mesma jornada |
 | Criar tabela, grafico e filtros | `suportado-parcialmente` | Manifests, handlers e validadores existem, mas a cobertura de hosts e o caminho de turno nao sao uniformes | Convergir os consumidores para o mesmo turn engine e os mesmos gates |
 | Continuidade e estados terminais | `suportado-parcialmente` | SSE, replay, heartbeat, registry e shell existem | Definir state machine observavel, timeout, retry seguro e zero sessoes presas |
 | Intencao semantica consistente | `suportado-parcialmente` | A LLM ja produz decisao tipada e o keyword fallback legado fica desabilitado por padrao | Remover heuristicas textuais residuais da decisao primaria e limitar matching a grounding pos-intencao |
-| Suite versionada de excelencia | `lacuna-real-de-contrato` | Existem matrizes e artefatos E2E, mas nao ha corpus canonico versionado com casos, expectativas, resultados e gate de release | Definir artefato interno de eval, sem transforma-lo em contrato HTTP publico prematuramente |
+| Suite versionada de excelencia | `ja-suportado-mal-nomeado-ou-mal-materializado` | Corpus, schema e runner internos agora existem e validam recurso, operacao, terminalidade, mensagem, seguranca e latencia | Expandir cobertura e ligar o perfil integral ao gate de fase sem transforma-lo em contrato HTTP publico |
 | Politica de modelo/provider por tarefa | `lacuna-real-de-contrato` | O provider e configuravel, mas OpenAI ainda usa default global `gpt-4o-mini` e heuristicas por nome de modelo | Definir politica canonica de capability, tier, snapshot, custo, latencia e fallback |
 
 O ensaio real refinou ainda duas classificacoes de aderencia:
 
 | Necessidade | Aderencia refinada | Evidencia | Proximo ajuste |
 | --- | --- | --- | --- |
-| Escolher `funcionarios` para formulario/tabela | `ja-suportado-mal-nomeado-ou-mal-materializado` | `domainDiscovery` ja publica `human-resources.funcionarios`, campos e surfaces; o candidate set terminal ainda pode preferir uma projection analitica | Materializar recursos do `domainDiscovery` como candidatos verificados e aplicar compatibilidade de papel semantico depois da intencao LLM |
+| Escolher `funcionarios` para formulario/tabela | `ja-suportado-mal-nomeado-ou-mal-materializado` | `domainDiscovery` ja publica `human-resources.funcionarios`, campos e surfaces; a perda ocorria entre o foco authorado pela LLM e o catalogo scoped | Reconciliar o foco pos-intencao com o `resourceKey` canonico e exigir schema live quando a projection de `api_metadata` estiver ausente |
 | Responder orientacao sem tool de recurso | `suportado-parcialmente` | O resultado terminal agora e correto, mas o pre-intent planner ainda pode executar search desnecessario | Usar a evidencia semantica estruturada da oportunidade para planejar apenas contexto de plataforma, sem keyword shortcut |
 
 ## Diagnostico estrutural
@@ -494,9 +521,10 @@ deve explicar indisponibilidade; nao pode simular sucesso.
 
 ## Artefatos derivados
 
-Este plano, sozinho, nao exige atualizar OpenAPI, bindings, landing page ou
-corpus HTTP. Quando os slices alterarem contratos publicos, revisar no mesmo
-ciclo:
+O segundo slice atualizou o schema, corpus e runner internos de consistencia.
+Nao houve mudanca de endpoint, DTO, OpenAPI ou public API; por isso bindings,
+landing page e corpus HTTP nao precisam de sincronizacao neste corte. Quando os
+proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
 
 - `docs/ai/contracts/**` e OpenAPI do Config Starter;
 - bindings e public APIs de `@praxisui/ai`;
@@ -506,24 +534,25 @@ ciclo:
 
 ## Proximo slice recomendado
 
-`P0.1 + P0.3` ja possuem primeiro corte implementado. O proximo slice e
-`P0.4 - grounding operacional de funcionarios`, nesta ordem:
+`P0.1 + P0.3` possuem primeiro corte e o grounding de preview de `P0.4` passou
+na vertical 3x. O proximo slice recomendado e fechar consistencia transacional
+e o gate P0 integral, nesta ordem:
 
-1. projetar cada `domainDiscovery.resourceKey` em candidato real verificado por
-   catalogo/API metadata, sem criar novo contrato e sem confiar apenas em
-   similaridade vetorial;
-2. depois que a LLM decidir `form`, `table` ou pagina operacional, validar a
-   compatibilidade do papel do recurso: projection analitica nao pode alimentar
-   formulario de cadastro e nao deve vencer recurso operacional semanticamente
-   alinhado;
-3. usar matching textual somente para ranquear os candidatos canonicos dentro
-   desse escopo ja resolvido, nunca para decidir a intencao primaria;
-4. certificar formulario, tabela e tela aberta isoladamente e depois executar
-   os seis `must-pass` tres vezes consecutivas;
-5. em seguida, otimizar a rota consultiva para evitar planning/discovery de
-   recursos e fechar o alvo P95 de 12 s, corrigindo antes a telemetria negativa;
-6. somente com esse baseline verde iniciar a modernizacao de Spring AI, SDK e
-   politica de modelos, comparando o novo caminho com o mesmo corpus.
+1. estender a jornada de formulario de preview para apply, readback e cleanup,
+   provando que o POST canonico persiste a composicao esperada sem duplicar
+   efeitos;
+2. executar os seis `must-pass` tres vezes consecutivas no mesmo gate, incluindo
+   as tres perguntas consultivas e as tres jornadas de criacao;
+3. adicionar variacoes de linguagem, erros humanos, refinamento e recuperacao
+   ao perfil `extended`, mantendo o baseline `must-pass` bloqueante;
+4. otimizar a rota consultiva para evitar planning/discovery de recursos e
+   fechar o alvo P95 de 12 s;
+5. corrigir os diagnostics residuais de provenance para que
+   `domain-discovery-resource-focus` apareca como grounding conhecido, sem
+   alterar a decisao funcional;
+6. somente com o gate P0 integral verde iniciar a modernizacao de Spring AI,
+   SDK OpenAI e politica de modelos, comparando o novo caminho com o mesmo
+   corpus.
 
 ## Referencias oficiais para a frente de SDK
 

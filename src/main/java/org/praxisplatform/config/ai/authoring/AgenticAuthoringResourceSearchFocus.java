@@ -38,14 +38,12 @@ record AgenticAuthoringResourceSearchFocus(
         if (!primaryBusinessEntity.isBlank()) {
             builder.append("primary business entity: ").append(primaryBusinessEntity).append(". ");
         }
-        if (!supportingConcepts.isEmpty()) {
-            builder.append("supporting concepts: ")
-                    .append(String.join(", ", supportingConcepts))
-                    .append(". ");
-        }
-        if (!desiredSurface.isBlank()) {
-            builder.append("desired surface: ").append(desiredSurface).append(". ");
-        }
+        builder.append("supporting concepts: ")
+                .append(supportingConcepts.isEmpty() ? "none" : String.join(", ", supportingConcepts))
+                .append(". ");
+        builder.append("desired surface: ")
+                .append(desiredSurface.isBlank() ? "unspecified" : desiredSurface)
+                .append(". ");
         return builder.toString().trim();
     }
 

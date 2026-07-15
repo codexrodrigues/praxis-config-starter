@@ -3504,6 +3504,12 @@ public class AgenticAuthoringIntentResolverService {
             return artifactKind;
         }
         JsonNode contextHints = request == null ? null : request.contextHints();
+        artifactKind = jsonText(
+                contextHints == null ? null : contextHints.path("resourceDiscovery"),
+                "artifactKind");
+        if (!artifactKind.isBlank()) {
+            return artifactKind;
+        }
         return valueOrUnknown(jsonText(contextHints, "artifactKind"));
     }
 

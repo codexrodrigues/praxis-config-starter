@@ -24,6 +24,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     private static final String SEMANTIC_ROLE_OPERATIONAL_RESOURCE = "semantic-role:operational-resource";
     private static final String SEMANTIC_ROLE_ANALYTICS_PROJECTION = "semantic-role:analytics-projection";
     private static final String SEMANTIC_ROLE_PROFILE_PROJECTION = "semantic-role:profile-projection";
+    private static final String DOMAIN_DISCOVERY_RESOURCE_FOCUS = "domain-discovery-resource-focus";
 
     private static final Set<String> STOP_WORDS = Set.of(
             "a", "as", "o", "os", "um", "uma", "de", "da", "das", "do", "dos", "para", "por",
@@ -247,6 +248,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             return List.of();
         }
         List<ApiMetadata> focusedMetadata = findLlmFocusedMetadata(resourceFocus, context);
+        if (focusedMetadata.isEmpty()) {
+            return List.of(toSchemaPendingCanonicalResourceFocusCandidate(context, resourceFocus));
+        }
         return focusedMetadata.stream()
                 .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
                 .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
@@ -258,6 +262,43 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 .limit(CANDIDATE_LIMIT)
                 .map(ScoredCandidate::candidate)
                 .toList();
+    }
+
+    private AgenticAuthoringCandidate toSchemaPendingCanonicalResourceFocusCandidate(
+            RetrievalContext context,
+            String resourceFocus) {
+        String resourcePath = resourceFocusToApiBasePath(resourceFocus);
+        String submitUrl = "form".equals(context.artifactKind())
+                ? resourcePath
+                : resourcePath + "/filter/cursor";
+        String operation = "post";
+        double score = 0.76d;
+        return new AgenticAuthoringCandidate(
+                resourcePath,
+                operation,
+                schemaUrl(submitUrl, operation),
+                submitUrl,
+                operation,
+                score,
+                "canonical domain discovery resource focus pending live schema verification",
+                List.of(
+                        DOMAIN_DISCOVERY_RESOURCE_FOCUS,
+                        "schema-probe-pending",
+                        "actions-probe-pending",
+                        "capabilities-probe-pending",
+                        SEMANTIC_ROLE_OPERATIONAL_RESOURCE),
+                evidenceBundle(
+                        "context_hint",
+                        resourcePath,
+                        submitUrl,
+                        operation,
+                        "Canonical resource focus from governed domain discovery; live schema verification is required before materialization.",
+                        score,
+                        domainTerms(resourcePath),
+                        context.tenantId(),
+                        context.environment(),
+                        context.releaseId(),
+                        false));
     }
 
     private List<ApiMetadata> findLlmFocusedMetadata(String resourceFocus, RetrievalContext context) {
@@ -315,8 +356,12 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     }
 
     private String canonicalLlmResourceFocus(String normalizedPrompt) {
+        String normalized = normalize(valueOrEmpty(normalizedPrompt));
+        if (!hasLlmAuthoredResourceFocus(normalized)) {
+            return "";
+        }
         String primaryBusinessEntity = semanticQuerySection(
-                normalize(valueOrEmpty(normalizedPrompt)),
+                normalized,
                 "primary business entity:",
                 "supporting concepts:");
         return canonicalResourceFocus(primaryBusinessEntity);

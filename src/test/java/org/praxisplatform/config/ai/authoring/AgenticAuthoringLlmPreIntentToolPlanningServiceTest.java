@@ -165,6 +165,120 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
     }
 
     @Test
+    void reconcilesLlmAuthoredBusinessEntityWithCanonicalDomainDiscoveryResourceKey() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "shouldRetrieveGovernedResources": true,
+                  "artifactKind": "table",
+                  "retrievalQuery": "consultar nome cargo e departamento",
+                  "resourceSearchFocus": {
+                    "primaryBusinessEntity": "funcionarios",
+                    "supportingConcepts": ["nome", "cargo", "departamento"],
+                    "desiredSurface": "tabela para consulta",
+                    "uncertainty": "",
+                    "rationale": "A entidade governada são os funcionários."
+                  },
+                  "reason": "O pedido depende do recurso operacional governado."
+                }
+                """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper, 7);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request(
+                        "monte a superfície de consulta solicitada",
+                        objectMapper.createObjectNode(),
+                        objectMapper.readTree("""
+                        {
+                          "domainDiscovery": [
+                            {
+                              "resourceKey": "operations.missoes",
+                              "title": "Missões"
+                            },
+                            {
+                              "resourceKey": "human-resources.funcionarios",
+                              "title": "Funcionários",
+                              "aliases": ["colaboradores", "staff"]
+                            }
+                          ]
+                        }
+                        """)),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        AgenticAuthoringResourceCandidatesRequest payload =
+                (AgenticAuthoringResourceCandidatesRequest) result.plan().toolCalls().get(0).payload();
+        assertThat(payload.resourceSearchFocus().primaryBusinessEntity())
+                .isEqualTo("human-resources.funcionarios");
+        assertThat(payload.retrievalQuery())
+                .contains("primary business entity: human-resources.funcionarios")
+                .contains("semantic query: consultar nome cargo e departamento");
+        assertThat(promptCaptor.getValue())
+                .contains("use its canonical resourceKey")
+                .contains("human-resources.funcionarios");
+    }
+
+    @Test
+    void keepsLlmAuthoredBusinessEntityWhenDomainDiscoveryIdentityIsAmbiguous() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "shouldRetrieveGovernedResources": true,
+                  "artifactKind": "table",
+                  "retrievalQuery": "consultar funcionarios",
+                  "resourceSearchFocus": {
+                    "primaryBusinessEntity": "funcionarios",
+                    "supportingConcepts": [],
+                    "desiredSurface": "tabela",
+                    "uncertainty": "duas fontes usam o mesmo nome",
+                    "rationale": "A entidade ainda precisa ser desambiguada."
+                  },
+                  "reason": "O pedido depende de busca governada."
+                }
+                """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper, 7);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request(
+                        "monte uma tabela",
+                        objectMapper.createObjectNode(),
+                        objectMapper.readTree("""
+                        {
+                          "domainDiscovery": [
+                            {"resourceKey": "human-resources.funcionarios", "title": "Funcionários"},
+                            {"resourceKey": "suppliers.funcionarios", "title": "Funcionários"}
+                          ]
+                        }
+                        """)),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        AgenticAuthoringResourceCandidatesRequest payload =
+                (AgenticAuthoringResourceCandidatesRequest) result.plan().toolCalls().get(0).payload();
+        assertThat(payload.resourceSearchFocus().primaryBusinessEntity()).isEqualTo("funcionarios");
+        assertThat(payload.retrievalQuery())
+                .contains("primary business entity: funcionarios")
+                .contains("supporting concepts: none")
+                .contains("desired surface: tabela")
+                .doesNotContain("primary business entity: human-resources.funcionarios");
+    }
+
+    @Test
     void sendsCompactPlannerContextInsteadOfRawPageAndHints() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         when(providerManagementService.generateJson(

@@ -80,6 +80,11 @@
           "type": "array",
           "items": { "type": ["string", "null"] },
           "minItems": 1
+        },
+        "submitUrls": {
+          "type": "array",
+          "items": { "type": ["string", "null"] },
+          "minItems": 1
         }
       }
     },

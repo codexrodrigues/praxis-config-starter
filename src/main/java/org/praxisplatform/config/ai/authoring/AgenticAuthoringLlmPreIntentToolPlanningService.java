@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.text.Normalizer;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -162,6 +164,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         }
         AgenticAuthoringResourceSearchFocus resourceSearchFocus =
                 resourceSearchFocus(result.path("resourceSearchFocus"));
+        resourceSearchFocus = reconcileDomainDiscoveryResourceFocus(request, resourceSearchFocus);
         retrievalQuery = focusedRetrievalQuery(retrievalQuery, resourceSearchFocus);
         String artifactKind = text(result, "artifactKind");
         if (!List.of("page", "dashboard", "chart", "table", "form", "api_catalog").contains(artifactKind)) {
@@ -265,6 +268,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 presentation includes charts, metrics, or a 360-degree overview. Select a profile projection only when
                 the user semantically requests an individual or single-record profile. Select another analytical
                 projection only when that projection's business subject, such as payroll, is itself requested.
+                When domainDiscovery contains the semantically matching business subject, use its canonical resourceKey
+                exactly as primaryBusinessEntity. Titles, aliases and fields explain that resource; they do not replace
+                the canonical key or authorize a different related projection.
                 Use artifactKind dashboard when the requested outcome depends on multiple coordinated analytical
                 regions such as filters, KPIs, multiple charts and a detail/list/table surface. Use artifactKind page
                 for general layout or content composition where analytics are not the dominant requested outcome.
@@ -515,7 +521,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         focus.put("type", "object");
         ObjectNode focusProperties = focus.putObject("properties");
         nullableString(focusProperties, "primaryBusinessEntity")
-                .put("description", "Canonical business subject explicitly requested by the user. Use the entity being governed, filtered, listed, or analyzed; never substitute a UI surface, profile/view name, or related analytical projection.");
+                .put("description", "Canonical business subject explicitly requested by the user. When domainDiscovery provides the matching subject, return its resourceKey exactly. Use the entity being governed, filtered, listed, or analyzed; never substitute a UI surface, profile/view name, or related analytical projection.");
         ObjectNode supportingConcepts = focusProperties.putObject("supportingConcepts");
         supportingConcepts.put("type", "array");
         supportingConcepts.putObject("items").put("type", "string");
@@ -575,6 +581,139 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 text(node, "desiredSurface"),
                 text(node, "uncertainty"),
                 text(node, "rationale"));
+    }
+
+    /**
+     * Grounds an already LLM-authored business subject in the canonical resource keys supplied by
+     * domain discovery. This is post-resolution target grounding: it never decides whether the turn
+     * needs a resource or which authoring intent applies. Ambiguous identity matches remain untouched
+     * so the normal semantic retrieval/clarification flow can resolve them safely.
+     */
+    private AgenticAuthoringResourceSearchFocus reconcileDomainDiscoveryResourceFocus(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringResourceSearchFocus focus) {
+        if (request == null
+                || focus == null
+                || !StringUtils.hasText(focus.primaryBusinessEntity())
+                || request.contextHints() == null) {
+            return focus;
+        }
+        JsonNode domainDiscovery = request.contextHints().path("domainDiscovery");
+        if (!domainDiscovery.isArray() || domainDiscovery.isEmpty()) {
+            return focus;
+        }
+        List<DomainDiscoveryResourceMatch> matches = new ArrayList<>();
+        for (JsonNode item : domainDiscovery) {
+            String resourceKey = canonicalDomainDiscoveryResourceKey(item);
+            if (!StringUtils.hasText(resourceKey)) {
+                continue;
+            }
+            int score = domainDiscoveryIdentityScore(focus.primaryBusinessEntity(), item, resourceKey);
+            if (score > 0) {
+                matches.add(new DomainDiscoveryResourceMatch(resourceKey, score));
+            }
+        }
+        matches.sort((left, right) -> Integer.compare(right.score(), left.score()));
+        if (matches.isEmpty() || matches.get(0).score() < 65) {
+            return focus;
+        }
+        DomainDiscoveryResourceMatch best = matches.get(0);
+        if (matches.size() > 1 && matches.get(1).score() >= best.score() - 10) {
+            return focus;
+        }
+        if (best.resourceKey().equals(focus.primaryBusinessEntity())) {
+            return focus;
+        }
+        return new AgenticAuthoringResourceSearchFocus(
+                best.resourceKey(),
+                focus.supportingConcepts(),
+                focus.desiredSurface(),
+                focus.uncertainty(),
+                focus.rationale());
+    }
+
+    private int domainDiscoveryIdentityScore(
+            String semanticEntity,
+            JsonNode item,
+            String resourceKey) {
+        String normalizedEntity = normalizeIdentity(semanticEntity);
+        if (normalizedEntity.isBlank()) {
+            return 0;
+        }
+        String normalizedResourceKey = normalizeIdentity(resourceKey);
+        String terminalResourceKey = resourceKey.substring(resourceKey.lastIndexOf('.') + 1);
+        int score = identityScore(normalizedEntity, normalizedResourceKey, 110, 72);
+        score = Math.max(score, identityScore(
+                normalizedEntity,
+                normalizeIdentity(terminalResourceKey),
+                105,
+                76));
+        for (String field : List.of("title", "label", "name")) {
+            score = Math.max(score, identityScore(
+                    normalizedEntity,
+                    normalizeIdentity(text(item, field)),
+                    100,
+                    70));
+        }
+        JsonNode aliases = item.path("aliases");
+        if (aliases.isArray()) {
+            for (JsonNode alias : aliases) {
+                if (alias != null && alias.isTextual()) {
+                    score = Math.max(score, identityScore(
+                            normalizedEntity,
+                            normalizeIdentity(alias.asText()),
+                            95,
+                            68));
+                }
+            }
+        }
+        return score;
+    }
+
+    private int identityScore(
+            String normalizedEntity,
+            String normalizedIdentity,
+            int exactScore,
+            int containmentScore) {
+        if (normalizedEntity.isBlank() || normalizedIdentity.isBlank()) {
+            return 0;
+        }
+        if (normalizedEntity.equals(normalizedIdentity)) {
+            return exactScore;
+        }
+        if (normalizedEntity.length() >= 4 && normalizedIdentity.contains(normalizedEntity)
+                || normalizedIdentity.length() >= 4 && normalizedEntity.contains(normalizedIdentity)) {
+            return containmentScore;
+        }
+        return 0;
+    }
+
+    private String canonicalDomainDiscoveryResourceKey(JsonNode item) {
+        String resourceKey = text(item, "resourceKey");
+        if (!StringUtils.hasText(resourceKey)) {
+            return "";
+        }
+        String canonical = resourceKey.trim();
+        if (canonical.startsWith("/api/")) {
+            canonical = canonical.substring(5);
+        }
+        canonical = canonical
+                .replace('/', '.')
+                .replaceAll("^\\.+|\\.+$", "")
+                .replaceAll("\\.+", ".");
+        return canonical.matches("^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)+$") ? canonical : "";
+    }
+
+    private String normalizeIdentity(String value) {
+        return Normalizer.normalize(valueOrEmpty(value), Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private record DomainDiscoveryResourceMatch(String resourceKey, int score) {
     }
 
     private List<String> streamTextValues(JsonNode array) {

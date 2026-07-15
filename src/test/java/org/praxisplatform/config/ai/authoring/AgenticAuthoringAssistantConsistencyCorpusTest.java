@@ -84,6 +84,23 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
         }
     }
 
+    @Test
+    void employeeFormRequiresTheCanonicalWriteEndpoint() throws Exception {
+        JsonNode employeeForm = null;
+        for (JsonNode testCase : corpus().path("cases")) {
+            if ("employee-form-create-pt".equals(testCase.path("id").asText())) {
+                employeeForm = testCase;
+                break;
+            }
+        }
+
+        assertThat(employeeForm).isNotNull();
+        JsonNode submitUrls = employeeForm.path("expected").path("intent").path("submitUrls");
+        assertThat(submitUrls.isArray()).isTrue();
+        assertThat(submitUrls.size()).isEqualTo(1);
+        assertThat(submitUrls.get(0).asText()).isEqualTo("/api/human-resources/funcionarios");
+    }
+
     private JsonNode corpus() throws Exception {
         return objectMapper.readTree(AgenticAuthoringTestPaths.proof(CORPUS_FILE).toFile());
     }

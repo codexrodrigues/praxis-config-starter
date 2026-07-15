@@ -170,12 +170,13 @@
       "contextRef": "blank-page-employee-domain",
       "userPrompt": "Monte um formulário de funcionários.",
       "expected": {
-        "intent": {
-          "operationKinds": ["create"],
-          "artifactKinds": ["form"],
-          "changeKinds": ["create_artifact", "create_minimal_form"],
-          "resourcePaths": ["/api/human-resources/funcionarios"]
-        },
+      "intent": {
+        "operationKinds": ["create"],
+        "artifactKinds": ["form"],
+        "changeKinds": ["create_artifact", "create_minimal_form"],
+        "resourcePaths": ["/api/human-resources/funcionarios"],
+        "submitUrls": ["/api/human-resources/funcionarios"]
+      },
         "terminal": {
           "eventTypes": ["result"],
           "canApply": true,
@@ -218,7 +219,7 @@
         },
         "assistantMessage": {
           "minimumCharacters": 60,
-          "requiredConceptGroups": [["funcionário", "funcionario", "employee"], ["prévia", "previa", "preview", "revisar"]],
+          "requiredConceptGroups": [["funcionário", "funcionario", "employee"], ["prévia", "previa", "preview", "pré-visualização", "pre-visualizacao", "visualização", "visualizacao", "revisar", "revise"]],
           "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
         },
         "safety": {

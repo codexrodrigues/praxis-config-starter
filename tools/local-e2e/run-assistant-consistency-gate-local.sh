@@ -286,6 +286,9 @@ for run in plan["runs"]:
     selected_resource = selected.get("resourcePath")
     if "resourcePaths" in intent_expected and selected_resource not in intent_expected["resourcePaths"]:
         failures.append(f"resourcePath {selected_resource!r} not in {intent_expected['resourcePaths']}")
+    selected_submit_url = selected.get("submitUrl")
+    if "submitUrls" in intent_expected and selected_submit_url not in intent_expected["submitUrls"]:
+        failures.append(f"submitUrl {selected_submit_url!r} not in {intent_expected['submitUrls']}")
 
     can_apply = terminal_payload.get("canApply")
     if can_apply is not terminal_expected["canApply"]:
@@ -370,6 +373,7 @@ for run in plan["runs"]:
             "artifactKind": intent.get("artifactKind"),
             "changeKind": intent.get("changeKind"),
             "resourcePath": selected_resource,
+            "submitUrl": selected_submit_url,
             "canApply": can_apply,
             "hasPreview": has_preview,
             "quickReplyCount": len(quick_replies),

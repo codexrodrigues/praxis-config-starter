@@ -518,6 +518,68 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void resourceDiscoveryArtifactKindPreservesFormWriteOperationInsidePageBuilderHost() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "form",
+                        "create_artifact",
+                        "/api/human-resources/funcionarios",
+                        null,
+                        "none",
+                        "Vou criar o formulario usando o recurso governado de funcionarios.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        quickstartCandidateCatalog(),
+                        llmIntentResolver,
+                        new AgenticAuthoringComponentCapabilitiesService());
+        String resourcePath = "/api/human-resources/funcionarios";
+        AgenticAuthoringCandidate employeeWrite = new AgenticAuthoringCandidate(
+                resourcePath,
+                "post",
+                "/schemas/filtered?path=" + resourcePath + "&operation=post&schemaType=request",
+                resourcePath,
+                "post",
+                0.76d,
+                "canonical domain discovery resource focus pending live schema verification",
+                List.of(
+                        "domain-discovery-resource-focus",
+                        "schema-probe-pending",
+                        "semantic-role:operational-resource",
+                        "tool-search-api-resources"));
+        ObjectNode contextHints = resourceDiscoveryContext("form", List.of(employeeWrite));
+        contextHints.put("artifactKind", "page");
+
+        AgenticAuthoringIntentResolutionResult result = llmBackedService.resolve(requestWithContextHints(
+                "Monte um formulario de funcionarios.",
+                "mock",
+                contextHints));
+
+        assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo(resourcePath);
+        assertThat(result.selectedCandidate().submitUrl()).isEqualTo(resourcePath);
+        assertThat(result.selectedCandidate().schemaUrl())
+                .isEqualTo("/schemas/filtered?path=" + resourcePath + "&operation=post&schemaType=request");
+    }
+
+    @Test
     void analyticalEmployeeDashboardKeepsPrimaryEntityAheadOfUnrelatedPayrollProjection() {
         AgenticAuthoringCandidate employee = withEvidence(withEvidence(
                 candidateWithEvidence(

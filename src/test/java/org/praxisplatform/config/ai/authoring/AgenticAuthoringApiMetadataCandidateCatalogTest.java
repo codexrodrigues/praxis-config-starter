@@ -598,6 +598,45 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
     }
 
     @Test
+    void llmAuthoredCanonicalResourceFocusCreatesSchemaPendingCandidateWhenScopedCatalogIsEmpty() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                        "tenant", "local", "default", "v1"))
+                .thenReturn(List.of());
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: human-resources.funcionarios. "
+                        + "supporting concepts: nome, cargo, departamento. "
+                        + "desired surface: tabela para consulta. "
+                        + "semantic query: consultar funcionarios",
+                "table",
+                "tenant",
+                "local",
+                null);
+
+        assertThat(candidates).singleElement().satisfies(candidate -> {
+            assertThat(candidate.resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+            assertThat(candidate.submitUrl())
+                    .isEqualTo("/api/human-resources/funcionarios/filter/cursor");
+            assertThat(candidate.schemaUrl())
+                    .contains("schemaType=response");
+            assertThat(candidate.evidence())
+                    .contains(
+                            "domain-discovery-resource-focus",
+                            "schema-probe-pending",
+                            "semantic-role:operational-resource")
+                    .doesNotContain("schema-available", "semantic-retrieval");
+            assertThat(candidate.evidenceBundle().retrievalSource()).isEqualTo("context_hint");
+        });
+        Mockito.verify(repository).findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant", "local", "default", "v1");
+        Mockito.verifyNoInteractions(retrievalService);
+    }
+
+    @Test
     void llmAuthoredCanonicalResourceFocusDoesNotBypassSemanticRetrievalForProfileNeed() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
