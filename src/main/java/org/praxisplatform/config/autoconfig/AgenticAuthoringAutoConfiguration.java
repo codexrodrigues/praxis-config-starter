@@ -52,6 +52,7 @@ import org.praxisplatform.config.service.AiTurnService;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
+import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
@@ -382,6 +383,18 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService(
+            ObjectMapper objectMapper,
+            @Value("${praxis.ai.capabilities.base-url:}") String capabilitiesBaseUrl,
+            @Value("${praxis.ai.capabilities.timeout-ms:15000}") long capabilitiesTimeoutMs) {
+        return new ResourceCapabilitiesRetrievalService(
+                objectMapper,
+                capabilitiesBaseUrl,
+                capabilitiesTimeoutMs);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     @ConditionalOnBean({AgenticAuthoringPlanService.class, AgenticAuthoringPatchCompilerService.class})
     public AgenticAuthoringPreviewService agenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
@@ -389,14 +402,16 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectMapper objectMapper,
             ObjectProvider<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders,
             ObjectProvider<AgenticAuthoringPreviewMessageSynthesizerService> messageSynthesizer,
-            ObjectProvider<SchemaRetrievalService> schemaRetrievalService) {
+            ObjectProvider<SchemaRetrievalService> schemaRetrievalService,
+            ObjectProvider<ResourceCapabilitiesRetrievalService> resourceCapabilitiesRetrievalService) {
         return new AgenticAuthoringPreviewService(
                 planService,
                 patchCompilerService,
                 objectMapper,
                 uiCompositionPlanProviders.orderedStream().toList(),
                 messageSynthesizer.getIfAvailable(),
-                schemaRetrievalService.getIfAvailable());
+                schemaRetrievalService.getIfAvailable(),
+                resourceCapabilitiesRetrievalService.getIfAvailable());
     }
 
     @Bean

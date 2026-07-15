@@ -144,6 +144,8 @@ Authoring manifests executaveis:
 - `compile-patch` compila efeitos genericos como `merge-by-key`, `remove-by-key`, `set-value`, `merge-object` e `append` em `compiledOperations` canÃƒÂ´nicas com `proposedConfig` resultante.
 - `operations` permanece como alias legado dos efeitos compilados nativos do compilador, inclusive handlers de domÃƒÂ­nio.
 - `patchOperations` expÃƒÂµe o patch aplicÃƒÂ¡vel concreto: para efeitos genericos, a lista materializa operaÃƒÂ§ÃƒÂµes com paths resolvidos e aplicÃƒÂ¡veis (`replace`, `add`, `remove`, `move`); para `compile-domain-patch`, a saÃƒÂ­da continua sendo a operaÃƒÂ§ÃƒÂ£o especializada emitida pelo handler.
+- `validationContext` e evidencia governada e transitoria, mesclada somente na visao usada por validadores/compiladores, sem sobrescrever caminhos ja presentes no `config` canonico, e nunca copiada para `proposedConfig`. Para Chart, o host/assistant projeta `availableTargets[]` com `id`, `actions[]` e o valor exato de `events[]` (`pointClick`, `crossFilter`, `drillDown` ou `selectionChange`); alvos ausentes, duplicados, incompativeis com a acao ou com outro evento falham fechados.
+- Contexto enviado pelo cliente nao concede autorizacao independente. O produtor deve deriva-lo da composicao canonica governada, e o catalogo nao deve ser persistido nos inputs do widget.
 
 Trilha API Catalog Q&A:
 

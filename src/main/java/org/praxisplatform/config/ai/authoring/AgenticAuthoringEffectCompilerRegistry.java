@@ -192,6 +192,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "chart-series-add".equals(handler)
                 || "chart-axis-configure".equals(handler)
                 || "chart-data-resource-bind".equals(handler)
+                || "chart-event-point-click-configure".equals(handler)
                 || "chart-event-cross-filter-configure".equals(handler)
                 || "chart-event-drilldown-configure".equals(handler)
                 || "chart-event-selection-configure".equals(handler)
@@ -788,6 +789,15 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     effect,
                     planOperation,
                     proposedConfig,
+                    failures);
+            case "chart-event-point-click-configure" -> compileChartEventConfigure(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    "pointClick",
+                    "configure-chart-point-click-event",
                     failures);
             case "chart-event-cross-filter-configure" -> compileChartEventConfigure(
                     componentId,

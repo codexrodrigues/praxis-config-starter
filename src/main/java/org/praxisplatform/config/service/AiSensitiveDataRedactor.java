@@ -37,6 +37,10 @@ public class AiSensitiveDataRedactor {
             "\\beyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\b");
     private static final Pattern OPENAI_KEY = Pattern.compile("\\bsk-[A-Za-z0-9]{20,}\\b");
     private static final Pattern LONG_NUMBER = Pattern.compile("\\b\\d{12,}\\b");
+    private static final Pattern QUICK_REPLY_CANONICAL_REFERENCE = Pattern.compile(
+            "[A-Za-z0-9][A-Za-z0-9._:@/\\-]{0,255}");
+    private static final int QUICK_REPLY_TEXT_MAX_LENGTH = 1024;
+    private static final int QUICK_REPLY_URI_MAX_LENGTH = 2048;
     private static final Set<String> EVENT_FORBIDDEN_FIELDS = Set.of(
             "currentstate",
             "messages",
@@ -60,13 +64,41 @@ public class AiSensitiveDataRedactor {
             "content");
     private static final Set<String> QUICK_REPLY_CONTEXT_HINT_FIELDS = Set.of(
             "artifactkind",
+            "candidateref",
+            "capabilityid",
+            "changekind",
+            "kind",
             "operation",
+            "operationkind",
+            "optionref",
+            "questionkind",
+            "requiresactivesemanticdecision",
+            "resourcekey",
             "resourcepath",
+            "resourcerole",
             "retrievalquery",
+            "schemaversion",
             "schemaurl",
+            "selectedcomponentid",
+            "selectedwidgetkey",
+            "source",
             "submitmethod",
             "submiturl",
+            "surfaceactionid",
+            "surfacepresentation",
+            "surfaceref",
+            "surfacewidgetid",
+            "targetcomponentid",
+            "targetwidgetkey",
             "tool");
+    private static final Set<String> QUICK_REPLY_URI_FIELDS = Set.of(
+            "resourcepath",
+            "schemaurl",
+            "submiturl");
+    private static final Set<String> QUICK_REPLY_FREE_TEXT_FIELDS = Set.of(
+            "retrievalquery");
+    private static final Set<String> QUICK_REPLY_BOOLEAN_FIELDS = Set.of(
+            "requiresactivesemanticdecision");
 
     public String redactText(String value) {
         if (value == null || value.isBlank()) {
@@ -183,9 +215,50 @@ public class AiSensitiveDataRedactor {
                 objectNode.put(field.getKey(), REDACTED);
                 continue;
             }
-            objectNode.set(field.getKey(), sanitizeEventPayload(field.getValue(), field.getKey()));
+            objectNode.set(
+                    field.getKey(),
+                    sanitizeQuickReplyContextHintValue(normalizedKey, field.getValue()));
         }
         return objectNode;
+    }
+
+    /**
+     * Projects only bounded scalar evidence required by quick-reply clients.
+     *
+     * <p>These values remain untrusted hints: authorization and capability decisions must be
+     * reconciled against canonical server-side contracts. Objects such as page/widget snapshots
+     * are deliberately rejected even when injected under an otherwise known scalar field.
+     */
+    private JsonNode sanitizeQuickReplyContextHintValue(String normalizedKey, JsonNode source) {
+        if (source == null || source.isNull()) {
+            return source;
+        }
+        if (QUICK_REPLY_BOOLEAN_FIELDS.contains(normalizedKey)) {
+            return source.isBoolean() ? source : JsonNodeFactory.instance.textNode(REDACTED);
+        }
+        if (!source.isTextual()) {
+            return JsonNodeFactory.instance.textNode(REDACTED);
+        }
+        String value = source.asText();
+        int maxLength = QUICK_REPLY_URI_FIELDS.contains(normalizedKey)
+                ? QUICK_REPLY_URI_MAX_LENGTH
+                : QUICK_REPLY_TEXT_MAX_LENGTH;
+        if (value.length() > maxLength || containsControlCharacter(value)) {
+            return JsonNodeFactory.instance.textNode(REDACTED);
+        }
+        String redacted = redactText(value);
+        if (QUICK_REPLY_URI_FIELDS.contains(normalizedKey)
+                || QUICK_REPLY_FREE_TEXT_FIELDS.contains(normalizedKey)) {
+            return JsonNodeFactory.instance.textNode(redacted);
+        }
+        if (!QUICK_REPLY_CANONICAL_REFERENCE.matcher(redacted).matches()) {
+            return JsonNodeFactory.instance.textNode(REDACTED);
+        }
+        return JsonNodeFactory.instance.textNode(redacted);
+    }
+
+    private boolean containsControlCharacter(String value) {
+        return value.chars().anyMatch(Character::isISOControl);
     }
 
     private String normalizeFieldName(String fieldName) {

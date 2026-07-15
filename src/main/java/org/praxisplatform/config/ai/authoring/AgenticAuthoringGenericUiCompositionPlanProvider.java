@@ -259,7 +259,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             addSummary(widgets, candidate, widgetKey(candidate, "summary"));
         }
         if (includeKpis) {
-            addKpis(widgets, candidate, widgetKey(candidate, "kpis"), renderableDimensions);
+            addKpis(widgets, candidate, widgetKey(candidate, "kpis"));
         }
         if (includeFilters(visualizationDecision) || forceDashboardFilters) {
             addFilter(widgets, candidate, widgetKey(candidate, "filter"), renderableDimensions);
@@ -312,6 +312,93 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 forceDashboardFilters,
                 includeKpis);
         return plan;
+    }
+
+    boolean reflowPrunedDashboard(
+            AgenticAuthoringPlanRequest request,
+            ObjectNode plan) {
+        if (request == null
+                || plan == null
+                || !"generic-ui-composition-plan-provider".equals(plan.path("plannerId").asText(""))
+                || !Set.of("resource-dashboard", "chart-surface-drilldown")
+                        .contains(plan.path("layoutPreset").asText(""))) {
+            return false;
+        }
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        AgenticAuthoringCandidate candidate = selectedCandidate(intent);
+        AgenticAuthoringSemanticDecision semanticDecision = intent == null ? null : intent.semanticDecision();
+        AgenticAuthoringVisualizationDecision visualizationDecision =
+                semanticDecision != null && semanticDecision.visualizationDecision() != null
+                        ? semanticDecision.visualizationDecision()
+                        : intent == null ? null : intent.visualizationDecision();
+        if (candidate == null) {
+            return false;
+        }
+
+        Set<String> presentChartKeys = new LinkedHashSet<>();
+        JsonNode widgets = plan.path("widgets");
+        if (widgets.isArray()) {
+            for (JsonNode widget : widgets) {
+                if ("praxis-chart".equals(widget.path("componentId").asText(""))) {
+                    String key = widget.path("key").asText("");
+                    if (!key.isBlank()) {
+                        presentChartKeys.add(key);
+                    }
+                }
+            }
+        }
+        List<DashboardDimension> plannedDimensions = dashboardDimensions(
+                visualizationDecision,
+                candidate,
+                request).stream()
+                .filter(this::isResolvedDimension)
+                .toList();
+        List<DashboardDimension> survivingDimensions = plannedDimensions.stream()
+                .filter(dimension -> presentChartKeys.contains(
+                        widgetKey(candidate, "chart-" + dimension.field())))
+                .toList();
+        if (survivingDimensions.size() == plannedDimensions.size()
+                || survivingDimensions.size() != presentChartKeys.size()) {
+            return false;
+        }
+
+        boolean surfaceOpenModal = isSurfaceOpenModalDrilldown(request);
+        boolean chartDashboard = isChartDashboardRequest(request, visualizationDecision);
+        boolean forceDashboardFilters = chartDashboard && !survivingDimensions.isEmpty();
+        boolean includeKpis = !surfaceOpenModal && includeKpis(visualizationDecision);
+        addDashboardPresetMetadata(
+                plan,
+                candidate,
+                survivingDimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceDashboardFilters,
+                includeKpis);
+        addDashboardCanvas(
+                plan,
+                candidate,
+                survivingDimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceDashboardFilters,
+                includeKpis);
+        addDashboardGrouping(
+                plan,
+                candidate,
+                survivingDimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceDashboardFilters,
+                includeKpis);
+        addDashboardDeviceLayouts(
+                plan,
+                candidate,
+                survivingDimensions,
+                visualizationDecision,
+                surfaceOpenModal,
+                forceDashboardFilters,
+                includeKpis);
+        return true;
     }
 
     private void addDashboardPresetMetadata(
@@ -670,10 +757,10 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         dataSource.putObject("query");
         ObjectNode layout = config.putObject("layout");
         layout.put("variant", "cards");
-        layout.put("density", "insight-list".equals(role) ? "compact" : "comfortable");
+        layout.put("density", "comfortable");
         layout.put("itemSpacing", "default");
-        layout.put("lines", "insight-list".equals(role) ? 2 : 3);
-        layout.put("pageSize", "insight-list".equals(role) ? 4 : 6);
+        layout.put("lines", 3);
+        layout.put("pageSize", 6);
         ObjectNode templating = config.putObject("templating");
         DashboardDimension primary = dimensions == null || dimensions.isEmpty() ? null : dimensions.get(0);
         String primaryField = primary == null ? "id" : canonicalFieldName(primary.field());
@@ -787,7 +874,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode actions = panels.addObject();
         actions.put("id", "actions");
         actions.put("title", "Acoes");
-        actions.put("description", "Formulario governado para revisar ou executar operacoes disponiveis.");
+        actions.put("description", "Formulário governado para revisar ou executar operações disponíveis.");
         actions.put("icon", "dynamic_form");
         addNestedDetail(actions.putArray("widgets"), candidate, widgetKey(candidate, "expansion-actions"));
     }
@@ -975,13 +1062,14 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     private void addKpis(
             ArrayNode widgets,
             AgenticAuthoringCandidate candidate,
-            String key,
-            List<DashboardDimension> dimensions) {
+            String key) {
         ObjectNode widget = widgets.addObject();
         widget.put("key", key);
         widget.put("componentId", "praxis-rich-content");
         widget.put("role", "kpi-band");
-        ObjectNode document = richContentDocument(widget.putObject("inputs"));
+        widget.putArray("bindingOrder").add("document").add("context");
+        ObjectNode inputs = widget.putObject("inputs");
+        ObjectNode document = richContentDocument(inputs);
         ObjectNode statGroup = document.putArray("nodes").addObject();
         statGroup.put("type", "statGroup");
         statGroup.put("id", key + "-stats");
@@ -992,23 +1080,35 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode total = items.addObject();
         total.put("id", key + "-total");
         total.put("label", "Total filtrado");
-        total.put("value", "-");
         total.put("valueExpr", "${table.totalItems}");
-        total.put("caption", "Sincronizado com os filtros");
-        total.put("captionExpr", "${table.caption}");
+        total.put("format", "integer");
+        total.put("captionExpr", "${table.totalCaption}");
         total.put("icon", "monitoring");
         total.put("tone", "info");
-        for (DashboardDimension dimension : dimensions.stream().filter(this::isResolvedDimension).limit(2).toList()) {
-            ObjectNode kpi = items.addObject();
-            kpi.put("id", key + "-" + dimension.field());
-            kpi.put("label", dimension.label());
-            kpi.put("value", "-");
-            kpi.put("caption", metricCaption(dimension) + " no recorte atual");
-            kpi.put("icon", "query_stats");
-            kpi.put("tone", "neutral");
-            kpi.put("dimensionField", dimension.field());
-            kpi.put("schemaVerified", false);
-        }
+        ObjectNode loaded = items.addObject();
+        loaded.put("id", key + "-loaded");
+        loaded.put("label", "Itens na página");
+        loaded.put("valueExpr", "${table.loadedItemsCount}");
+        loaded.put("format", "integer");
+        loaded.put("captionExpr", "${table.loadedItemsCaption}");
+        loaded.put("icon", "view_list");
+        loaded.put("tone", "neutral");
+        ObjectNode status = items.addObject();
+        status.put("id", key + "-status");
+        status.put("label", "Status da consulta");
+        status.put("valueExpr", "${table.status}");
+        status.put("captionExpr", "${table.statusCaption}");
+        status.put("icon", "sync");
+        status.put("tone", "neutral");
+
+        ObjectNode context = inputs.putObject("context");
+        ObjectNode table = context.putObject("table");
+        table.put("totalItems", 0);
+        table.put("loadedItemsCount", 0);
+        table.put("status", "Carregando");
+        table.put("totalCaption", "Total retornado pela consulta filtrada");
+        table.put("loadedItemsCaption", "Itens carregados nesta página");
+        table.put("statusCaption", "Atualizado pelo runtime da tabela");
     }
 
     private void addFilter(
@@ -1093,7 +1193,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             addFilterQueryContextBindings(bindings, filterKey, listKey);
         }
         if (includeKpis && includeDetailTable) {
-            addTableKpiContextBinding(bindings, tableKey, widgetKey(candidate, "kpis"));
+            addTableKpiContextBindings(bindings, tableKey, widgetKey(candidate, "kpis"));
         }
         for (DashboardDimension dimension : dimensions) {
             String chartKey = widgetKey(candidate, "chart-" + dimension.field());
@@ -1120,6 +1220,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
 
                 ObjectNode crossFilterBinding = bindings.addObject();
                 crossFilterBinding.put("id", chartKey + ".crossFilter->" + tableKey + ".queryContext");
+                crossFilterBinding.put("intent", "data-projection");
                 addComponentPortEndpoint(crossFilterBinding.putObject("from"), chartKey, "crossFilter", "output");
                 addComponentPortEndpoint(crossFilterBinding.putObject("to"), tableKey, "queryContext", "input");
                 addChartQueryContextPolicy(crossFilterBinding, dimension);
@@ -1131,6 +1232,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
 
                 ObjectNode listDrilldownBinding = bindings.addObject();
                 listDrilldownBinding.put("id", chartKey + ".crossFilter->" + listKey + ".queryContext");
+                listDrilldownBinding.put("intent", "data-projection");
                 addComponentPortEndpoint(listDrilldownBinding.putObject("from"), chartKey, "crossFilter", "output");
                 addComponentPortEndpoint(listDrilldownBinding.putObject("to"), listKey, "queryContext", "input");
                 addChartQueryContextPolicy(listDrilldownBinding, dimension);
@@ -1150,6 +1252,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             DashboardDimension dimension) {
         ObjectNode binding = bindings.addObject();
         binding.put("id", chartKey + ".pointClick->" + targetKey + ".queryContext");
+        binding.put("intent", "data-projection");
         addComponentPortEndpoint(binding.putObject("from"), chartKey, "pointClick", "output");
         addComponentPortEndpoint(binding.putObject("to"), targetKey, "queryContext", "input");
         ObjectNode policy = binding.putObject("policy");
@@ -1175,30 +1278,51 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         for (String eventPort : List.of("change", "requestSearch")) {
             ObjectNode binding = bindings.addObject();
             binding.put("id", filterKey + "." + eventPort + "->" + targetKey + ".queryContext");
+            binding.put("intent", "data-projection");
             addComponentPortEndpoint(binding.putObject("from"), filterKey, eventPort, "output");
             addComponentPortEndpoint(binding.putObject("to"), targetKey, "queryContext", "input");
             ObjectNode transform = binding.putObject("transform");
             transform.put("kind", "template");
+            transform.put("id", filterKey + "-" + eventPort + "-" + targetKey + "-query-context");
             ObjectNode template = transform.putObject("template");
             template.put("filters", "${payload}");
         }
     }
 
-    private void addTableKpiContextBinding(ArrayNode bindings, String tableKey, String kpiKey) {
-        ObjectNode binding = bindings.addObject();
-        binding.put("id", tableKey + ".loadingStateChange->" + kpiKey + ".context");
-        addComponentPortEndpoint(binding.putObject("from"), tableKey, "loadingStateChange", "output");
-        addComponentPortEndpoint(binding.putObject("to"), kpiKey, "context", "input");
-        ObjectNode transform = binding.putObject("transform");
+    private void addTableKpiContextBindings(ArrayNode bindings, String tableKey, String kpiKey) {
+        String statePath = "dashboardKpis." + tableKey;
+        String writeId = tableKey + ".loadingStateChange->" + statePath;
+        ObjectNode writeBinding = bindings.addObject();
+        writeBinding.put("id", writeId);
+        writeBinding.put("intent", "state-write");
+        addComponentPortEndpoint(writeBinding.putObject("from"), tableKey, "loadingStateChange", "output");
+        ObjectNode stateTarget = writeBinding.putObject("to");
+        stateTarget.put("kind", "state");
+        stateTarget.put("path", statePath);
+        stateTarget.put("layer", "transient");
+        ObjectNode transform = writeBinding.putObject("transform");
         transform.put("kind", "template");
         transform.put("id", tableKey + "-loading-state-kpi-context");
         ObjectNode template = transform.putObject("template");
         ObjectNode table = template.putObject("table");
         table.put("totalItems", "${payload.context.totalItems}");
         table.put("loadedItemsCount", "${payload.context.loadedItemsCount}");
-        table.put("caption", "${payload.context.loadedItemsCount} itens carregados nesta pagina");
         table.put("status", "${payload.status}");
+        table.put("totalCaption", "Total retornado pela consulta filtrada");
+        table.put("loadedItemsCaption", "${payload.context.loadedItemsCount} itens carregados nesta página");
+        table.put("statusCaption", "${payload.message}");
         table.put("resourcePath", "${payload.context.resourcePath}");
+        writeBinding.putObject("policy").put("distinct", true);
+
+        ObjectNode readBinding = bindings.addObject();
+        readBinding.put("id", statePath + "->" + kpiKey + ".context");
+        readBinding.put("intent", "state-read");
+        ObjectNode stateSource = readBinding.putObject("from");
+        stateSource.put("kind", "state");
+        stateSource.put("path", statePath);
+        stateSource.put("layer", "transient");
+        addComponentPortEndpoint(readBinding.putObject("to"), kpiKey, "context", "input");
+        readBinding.putObject("policy").put("missingValuePolicy", "skip");
     }
 
     private void addSurfaceOpenDrilldownComposition(
@@ -1271,7 +1395,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         payload.put("presentation", "modal");
         payload.put("title", "Detalhes por " + dimension.label());
         payload.put("icon", "table_view");
-        payload.put("subtitle", "Registros filtrados pela categoria selecionada no grafico.");
+        payload.put("subtitle", "Registros filtrados pela categoria selecionada no gráfico.");
         ObjectNode size = payload.putObject("size");
         size.put("width", "920px");
         size.put("maxWidth", "94vw");
@@ -1310,7 +1434,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         payload.put("presentation", "modal");
         payload.put("title", "Explorar " + dimension.label());
         payload.put("icon", "view_agenda");
-        payload.put("subtitle", "Lista filtrada pela categoria selecionada no grafico.");
+        payload.put("subtitle", "Lista filtrada pela categoria selecionada no gráfico.");
         ObjectNode size = payload.putObject("size");
         size.put("width", "860px");
         size.put("maxWidth", "94vw");
@@ -1359,7 +1483,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         templating.put("statusPosition", "top-right");
         ObjectNode emptyState = templating.putObject("emptyState");
         emptyState.put("type", "text");
-        emptyState.put("text", "Nenhum registro encontrado para esta selecao.");
+        emptyState.put("text", "Nenhum registro encontrado para esta seleção.");
         ObjectNode selection = config.putObject("selection");
         selection.put("mode", "single");
         ArrayNode itemActions = config.putArray("actions");
@@ -1404,7 +1528,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         payload.put("presentation", "modal");
         payload.put("title", "Detalhes do registro");
         payload.put("icon", "badge");
-        payload.put("subtitle", "Formulario rico em modo leitura para o item selecionado.");
+        payload.put("subtitle", "Formulário rico em modo leitura para o item selecionado.");
         ObjectNode size = payload.putObject("size");
         size.put("width", "760px");
         size.put("maxWidth", "94vw");
@@ -1460,9 +1584,6 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         items.addObject()
                 .put("type", "text")
                 .put("expr", "${item.description ?? item.descricao ?? item.category ?? item.categoria ?? item.type ?? item.tipo ?? item.group ?? item.grupo ?? item.segment ?? item.segmento}");
-        items.addObject()
-                .put("type", "text")
-                .put("expr", "${item.email ?? item.contact ?? item.contato ?? item.phone ?? item.telefone}");
     }
 
     private String recordMetaExpression() {
@@ -1627,7 +1748,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             ObjectNode analysis = grouping.addObject();
             analysis.put("kind", "section");
             analysis.put("id", widgetKey(candidate, "analysis-group"));
-            analysis.put("label", "Analise");
+            analysis.put("label", "Análise");
             analysis.put("layout", dimensions.size() == 1 ? "stack" : "grid");
             ArrayNode chartKeys = analysis.putArray("widgetKeys");
             for (DashboardDimension dimension : dimensions) {
@@ -1791,7 +1912,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode card = document.putArray("nodes").addObject();
         card.put("type", "card");
         card.put("title", resourceTitle(candidate));
-        card.put("subtitle", "Visao executiva");
+        card.put("subtitle", "Visão executiva");
         card.put("variant", "filled");
         card.put("tone", "info");
         card.put("size", "sm");
@@ -1804,8 +1925,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ArrayNode content = card.putArray("content");
         ObjectNode body = content.addObject();
         body.put("type", "text");
-        body.put("text", "Visao inicial baseada em " + resourceTitle(candidate)
-                + ". Use os filtros para refinar indicadores, graficos, lista e tabela. Selecione pontos do grafico para abrir uma exploracao contextual em modal e sincronizar os detalhes.");
+        body.put("text", "Visão inicial baseada em " + resourceTitle(candidate)
+                + ". Use os filtros para refinar indicadores, gráficos, lista e tabela. Selecione pontos do gráfico para abrir uma exploração contextual em modal e sincronizar os detalhes.");
     }
 
     private void addProfileSummary(ArrayNode widgets, AgenticAuthoringCandidate candidate, String key) {
@@ -2290,6 +2411,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                         valueOrDefault(axis.label(), titleFromResourcePath(field)),
                         fieldCandidates);
                 metricField = canonicalFieldName(metricField);
+                if ("count".equals(normalize(metricAggregation))) {
+                    metricField = "";
+                }
                 dimensions.add(new DashboardDimension(
                         safe(axis.concept()),
                         field,

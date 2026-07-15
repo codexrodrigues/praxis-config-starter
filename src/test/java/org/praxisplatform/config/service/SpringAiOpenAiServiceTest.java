@@ -91,6 +91,7 @@ class SpringAiOpenAiServiceTest {
         assertEquals(128, capturedRequest.get().path("max_completion_tokens").asInt());
         assertTrue(capturedRequest.get().path("max_tokens").isMissingNode());
         assertTrue(capturedRequest.get().path("temperature").isMissingNode());
+        assertEquals("none", capturedRequest.get().path("reasoning_effort").asText());
         } finally {
             server.stop(0);
         }
@@ -153,7 +154,7 @@ class SpringAiOpenAiServiceTest {
     }
 
     @Test
-    void gpt5JsonCallUsesLowReasoningForCompactExplicitBudget() throws Exception {
+    void gpt54JsonCallDisablesReasoningForCompactExplicitBudget() throws Exception {
         AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
         HttpServer server = openAiServer("\"{\\\"value\\\":123}\"", "gpt-5.4-mini", capturedRequest);
         server.start();
@@ -162,6 +163,34 @@ class SpringAiOpenAiServiceTest {
         ReflectionTestUtils.setField(service, "apiKey", "test-key");
         ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
         ReflectionTestUtils.setField(service, "model", "gpt-5.4-mini");
+        ReflectionTestUtils.setField(service, "temperature", 0.1d);
+        ReflectionTestUtils.setField(service, "maxTokens", 128);
+        ReflectionTestUtils.setField(service, "jsonMinCompletionTokens", 8192);
+
+        JsonNode node = service.generateJson(
+                "prompt",
+                AiJsonSchema.ofSchema("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\"}}}"),
+                AiCallConfig.builder().maxTokens(1800).build());
+
+        assertNotNull(node);
+        assertEquals(123, node.get("value").asInt());
+        assertEquals(1800, capturedRequest.get().path("max_completion_tokens").asInt());
+        assertEquals("none", capturedRequest.get().path("reasoning_effort").asText());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void legacyGpt5MiniJsonCallUsesLowReasoningForCompactExplicitBudget() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = openAiServer("\"{\\\"value\\\":123}\"", "gpt-5-mini", capturedRequest);
+        server.start();
+        try {
+        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
+        ReflectionTestUtils.setField(service, "apiKey", "test-key");
+        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
+        ReflectionTestUtils.setField(service, "model", "gpt-5-mini");
         ReflectionTestUtils.setField(service, "temperature", 0.1d);
         ReflectionTestUtils.setField(service, "maxTokens", 128);
         ReflectionTestUtils.setField(service, "jsonMinCompletionTokens", 8192);

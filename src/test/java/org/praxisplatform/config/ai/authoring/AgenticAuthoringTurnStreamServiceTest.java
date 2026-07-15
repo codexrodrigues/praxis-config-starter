@@ -811,6 +811,7 @@ class AgenticAuthoringTurnStreamServiceTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         AgenticAuthoringTurnStreamRequest request = request();
         CountDownLatch intentStarted = new CountDownLatch(1);
+        CountDownLatch intentInterrupted = new CountDownLatch(1);
         CountDownLatch releaseIntent = new CountDownLatch(1);
         AtomicLong seq = new AtomicLong();
         AtomicReference<AiTurnEventEnvelope> lastEvent = new AtomicReference<>();
@@ -844,21 +845,30 @@ class AgenticAuthoringTurnStreamServiceTest {
         when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
                 .thenAnswer(invocation -> {
                     intentStarted.countDown();
-                    releaseIntent.await(5, TimeUnit.SECONDS);
+                    try {
+                        releaseIntent.await(5, TimeUnit.SECONDS);
+                    } catch (InterruptedException ex) {
+                        intentInterrupted.countDown();
+                        throw ex;
+                    }
                     return validIntent();
                 });
 
         AgenticAuthoringTurnStreamService service = service();
         ReflectionTestUtils.setField(service, "processingTimeoutSeconds", 1L);
-        service.start(request, "http://localhost", principalContext);
+        try {
+            service.start(request, "http://localhost", principalContext);
 
-        intentStarted.await(2, TimeUnit.SECONDS);
-        org.mockito.Mockito.verify(turnService, org.mockito.Mockito.timeout(4000))
-                .expireTurn(eq(threadId), any(UUID.class));
-        releaseIntent.countDown();
-        org.mockito.Mockito.verify(turnService, org.mockito.Mockito.after(1000).never())
-                .completeTurn(eq(threadId), any(UUID.class));
-        service.shutdown();
+            org.assertj.core.api.Assertions.assertThat(intentStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            org.mockito.Mockito.verify(turnService, org.mockito.Mockito.timeout(4000))
+                    .expireTurn(eq(threadId), any(UUID.class));
+            org.assertj.core.api.Assertions.assertThat(intentInterrupted.await(2, TimeUnit.SECONDS)).isTrue();
+            org.mockito.Mockito.verify(turnService, org.mockito.Mockito.after(1000).never())
+                    .completeTurn(eq(threadId), any(UUID.class));
+        } finally {
+            releaseIntent.countDown();
+            service.shutdown();
+        }
 
         verify(previewService, never()).preview(any(), any(), any(), any());
     }
@@ -1444,6 +1454,100 @@ class AgenticAuthoringTurnStreamServiceTest {
         verify(turnEventService, never())
                 .appendEvent(any(), eq(streamId), eq(threadId), eq(turnId), eq("cancelled"), any());
         verify(turnService, never()).cancelTurn(threadId, turnId);
+    }
+
+    @Test
+    void cancelInterruptsRunningProcessingAndRejectsLateResult() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CountDownLatch processingStarted = new CountDownLatch(1);
+        CountDownLatch processingInterrupted = new CountDownLatch(1);
+        CountDownLatch processingFinished = new CountDownLatch(1);
+        CountDownLatch releaseProcessing = new CountDownLatch(1);
+        AtomicReference<Boolean> lateResultAppended = new AtomicReference<>();
+        AtomicReference<AiTurnEventEnvelope> persistedTail = new AtomicReference<>();
+        AtomicLong seq = new AtomicLong(1L);
+        AgenticAuthoringTurnEngine turnEngine = org.mockito.Mockito.mock(AgenticAuthoringTurnEngine.class);
+
+        when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), eq("Crie um painel")))
+                .thenReturn(AiThread.builder().threadId(threadId).build());
+        when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class))).thenReturn(Optional.empty());
+        when(turnEventService.isTerminalType(anyString()))
+                .thenAnswer(invocation -> isTerminal(invocation.getArgument(0, String.class)));
+        when(turnEventService.findLastEvent(any(UUID.class)))
+                .thenAnswer(invocation -> Optional.ofNullable(persistedTail.get()));
+        when(turnEventService.appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), any()))
+                .thenAnswer(invocation -> {
+                    AiTurnEventEnvelope current = persistedTail.get();
+                    if (current != null && isTerminal(current.getType())) {
+                        return current;
+                    }
+                    AiTurnEventEnvelope event = AiTurnEventEnvelope.builder()
+                            .eventId(UUID.randomUUID())
+                            .streamId(invocation.getArgument(1, UUID.class))
+                            .threadId(invocation.getArgument(2, UUID.class))
+                            .turnId(invocation.getArgument(3, UUID.class))
+                            .seq(seq.incrementAndGet())
+                            .type(invocation.getArgument(4, String.class))
+                            .timestamp(Instant.now())
+                            .payload(objectMapper.valueToTree(invocation.getArgument(5)))
+                            .build();
+                    persistedTail.set(event);
+                    return event;
+                });
+        when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
+        when(turnEngine.execute(any(), eq(principalContext), any(), eq("http://localhost")))
+                .thenAnswer(invocation -> {
+                    AgenticAuthoringTurnEventSink sink = invocation.getArgument(2, AgenticAuthoringTurnEventSink.class);
+                    processingStarted.countDown();
+                    try {
+                        releaseProcessing.await(5, TimeUnit.SECONDS);
+                    } catch (InterruptedException ex) {
+                        processingInterrupted.countDown();
+                    }
+                    lateResultAppended.set(sink.append("result", java.util.Map.of("late", true)).appended());
+                    processingFinished.countDown();
+                    return AgenticAuthoringTurnEngine.AgenticAuthoringTurnOutcome.noop(
+                            new AgenticAuthoringTurnEngine.AgenticAuthoringTurnState(
+                                    "component_authoring",
+                                    null,
+                                    null));
+                });
+
+        AgenticAuthoringTurnStreamService service = service(turnEngine);
+        ReflectionTestUtils.setField(service, "processingTimeoutSeconds", 60L);
+        try {
+            AgenticAuthoringTurnStreamService.StartResult started =
+                    service.start(request(), "http://localhost", principalContext);
+            UUID streamId = started.response().getStreamId();
+            UUID turnId = started.response().getTurnId();
+            when(turnEventService.requireOwnership(streamId, principalContext))
+                    .thenReturn(new AiTurnEventService.StreamOwnership(
+                            streamId,
+                            threadId,
+                            turnId,
+                            "tenant",
+                            "user",
+                            "local",
+                            Instant.now().plusSeconds(60)));
+
+            org.assertj.core.api.Assertions.assertThat(processingStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            AiPatchStreamCancelResponse response = service.cancel(streamId, principalContext);
+
+            org.assertj.core.api.Assertions.assertThat(response.getTerminalState()).isEqualTo("cancelled");
+            org.assertj.core.api.Assertions.assertThat(processingInterrupted.await(2, TimeUnit.SECONDS)).isTrue();
+            org.assertj.core.api.Assertions.assertThat(processingFinished.await(2, TimeUnit.SECONDS)).isTrue();
+            org.assertj.core.api.Assertions.assertThat(lateResultAppended).hasValue(false);
+            verify(turnEventService, times(1))
+                    .appendEvent(any(), eq(streamId), eq(threadId), eq(turnId), eq("cancelled"), any());
+            verify(turnEventService, never())
+                    .appendEvent(any(), eq(streamId), eq(threadId), eq(turnId), eq("result"), any());
+            verify(turnService, times(1)).cancelTurn(threadId, turnId);
+            verify(turnService, never()).completeTurn(threadId, turnId);
+        } finally {
+            releaseProcessing.countDown();
+            service.shutdown();
+        }
     }
 
     private AgenticAuthoringTurnStreamRequest request() {

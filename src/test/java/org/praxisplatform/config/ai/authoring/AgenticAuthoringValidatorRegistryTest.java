@@ -565,7 +565,7 @@ class AgenticAuthoringValidatorRegistryTest {
                     { "name": "revenue" }
                   ],
                   "availableTargets": [
-                    { "id": "orders-table", "inputFields": [{ "field": "month" }] }
+                    { "id": "orders-table", "events": ["crossFilter"], "inputFields": [{ "field": "month" }] }
                   ],
                   "chartDocument": {
                     "version": "0.1.0",
@@ -637,8 +637,9 @@ class AgenticAuthoringValidatorRegistryTest {
                     {
                       "id": "orders-filter",
                       "kind": "filter-widget",
-                      "supportedActions": ["filter-widget"],
-                      "inputFields": [{ "field": "month" }]
+                      "actions": ["filter-widget"],
+                      "events": ["crossFilter"],
+                      "inputFields": [{ "field": "month" }, { "field": "departmentIdsIn" }]
                     }
                   ],
                   "chartDocument": {
@@ -673,6 +674,14 @@ class AgenticAuthoringValidatorRegistryTest {
                 operation("crossFilter.configure", "crossFilter", "x-ui-chart-events-cross-filter", false,
                         "event-target-governed,event-action-supported,event-mapping-fields-exist"),
                 plan("{}", "{ \"action\": \"filter-widget\", \"target\": \"orders-filter\", \"mapping\": { \"month\": \"month\" } }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("crossFilter.configure", "crossFilter", "x-ui-chart-events-cross-filter", false,
+                        "event-target-governed,event-action-supported,event-mapping-fields-exist"),
+                plan("{}", "{ \"action\": \"filter-widget\", \"target\": \"orders-filter\", \"mapping\": { \"key\": \"departmentIdsIn\" } }"),
                 config,
                 failures,
                 new ArrayList<>());
@@ -737,7 +746,7 @@ class AgenticAuthoringValidatorRegistryTest {
                     ]
                   },
                   "availableTargets": [
-                    { "id": "orders-detail", "kind": "detail", "supportedActions": ["open-detail"], "inputFields": [{ "field": "month" }] }
+                    { "id": "orders-detail", "kind": "detail", "actions": ["open-detail"], "events": ["crossFilter"], "inputFields": [{ "field": "month" }] }
                   ],
                   "chartDocument": {
                     "version": "0.1.0",
@@ -782,6 +791,234 @@ class AgenticAuthoringValidatorRegistryTest {
                         "validator event-target-governed failed for crossFilter.configure: target orders-detail does not support action filter-widget",
                         "validator event-mapping-fields-exist failed for crossFilter.configure: unknown chart output field unknownSource",
                         "validator event-mapping-fields-exist failed for crossFilter.configure: target orders-detail does not accept mapped field unknownTarget");
+    }
+
+    @Test
+    void shouldEnforcePointClickStructureStatsExpressionAndActionSpecificTargetEvents() throws Exception {
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "availableTargets": [
+                    {
+                      "id": "employees-filter",
+                      "kind": "widget",
+                      "actions": ["filter-widget"],
+                      "events": ["pointClick"],
+                      "inputFields": [{ "field": "department" }]
+                    }
+                  ],
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "bar",
+                    "source": { "kind": "praxis.stats", "resource": "/api/hr/employees" },
+                    "dimensions": [{ "field": "department" }],
+                    "metrics": [{ "field": "headcount", "aggregation": "count" }]
+                  }
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation(
+                        "pointClick.configure",
+                        "pointClick",
+                        "x-ui-chart-events-point-click",
+                        false,
+                        "point-click-action-structured,event-target-governed,event-action-supported"),
+                plan("{}", "{ \"action\": \"filter-widget\", \"target\": \"employees-filter\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation(
+                        "pointClick.configure",
+                        "pointClick",
+                        "x-ui-chart-events-point-click",
+                        false,
+                        "point-click-action-structured,event-target-governed,event-action-supported"),
+                plan("{}", "{ \"action\": \"emit\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation(
+                        "queryContext.set",
+                        "queryContext",
+                        "praxis-chart-query-context",
+                        false,
+                        "query-context-filter-expression-stats-unsupported"),
+                plan("{}", "{ \"filters\": { \"status\": \"ACTIVE\" } }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation(
+                        "crossFilter.configure",
+                        "crossFilter",
+                        "x-ui-chart-events-cross-filter",
+                        false,
+                        "event-target-governed"),
+                plan("{}", "{ \"action\": \"filter-widget\", \"target\": \"employees-filter\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation(
+                        "pointClick.configure",
+                        "pointClick",
+                        "x-ui-chart-events-point-click",
+                        false,
+                        "event-target-governed"),
+                plan("{}", "{ \"action\": \"filter-widget\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        JsonNode targetWithoutEvents = objectMapper.readTree("""
+                {
+                  "availableTargets": [
+                    {
+                      "id": "employees-filter",
+                      "kind": "widget",
+                      "actions": ["filter-widget"]
+                    }
+                  ]
+                }
+                """);
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation(
+                        "pointClick.configure",
+                        "pointClick",
+                        "x-ui-chart-events-point-click",
+                        false,
+                        "event-target-governed"),
+                plan("{}", "{ \"action\": \"filter-widget\", \"target\": \"employees-filter\" }"),
+                targetWithoutEvents,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation(
+                        "pointClick.configure",
+                        "pointClick",
+                        "x-ui-chart-events-point-click",
+                        false,
+                        "point-click-action-structured"),
+                plan("{}", "{ \"event\": \"pointClick\", \"action\": \"filter-widget\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation(
+                        "queryContext.set",
+                        "queryContext",
+                        "praxis-chart-query-context",
+                        false,
+                        "query-context-filter-expression-stats-unsupported"),
+                plan("{}", "{ \"filterExpression\": { \"kind\": \"condition\", \"field\": \"status\", \"operator\": \"eq\", \"value\": \"ACTIVE\" } }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator event-target-governed failed for crossFilter.configure: target employees-filter is not governed for chart event crossFilter",
+                        "validator event-target-governed failed for pointClick.configure: target is required for action filter-widget",
+                        "validator event-target-governed failed for pointClick.configure: target employees-filter does not declare governed chart events",
+                        "validator point-click-action-structured failed for pointClick.configure: event selection is operation-owned and configured actions must use pointAction",
+                        "validator query-context-filter-expression-stats-unsupported failed for queryContext.set: praxis.stats does not support queryContext.filterExpression");
+    }
+
+    @Test
+    void shouldScopeSelectionTargetsByOperationAndRejectDuplicateCanonicalIds() throws Exception {
+        JsonNode selectionTarget = objectMapper.readTree("""
+                {
+                  "availableTargets": [
+                    {
+                      "id": "selection-output",
+                      "actions": ["emit"],
+                      "events": ["selectionChange"]
+                    }
+                  ]
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation(
+                        "selection.configure",
+                        "selection",
+                        "x-ui-chart-events-selection-change",
+                        false,
+                        "event-target-governed"),
+                plan("{}", "{ \"action\": \"emit\", \"target\": \"selection-output\" }"),
+                selectionTarget,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+
+        JsonNode wrongEventTarget = objectMapper.readTree("""
+                {
+                  "availableTargets": [
+                    {
+                      "id": "selection-output",
+                      "actions": ["emit"],
+                      "events": ["crossFilter"]
+                    }
+                  ]
+                }
+                """);
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation(
+                        "selection.configure",
+                        "crossFilter",
+                        "x-ui-chart-events-cross-filter",
+                        false,
+                        "event-target-governed"),
+                plan("{}", "{ \"action\": \"emit\", \"target\": \"selection-output\" }"),
+                wrongEventTarget,
+                failures,
+                new ArrayList<>());
+
+        JsonNode duplicateTarget = objectMapper.readTree("""
+                {
+                  "availableTargets": [
+                    { "id": "selection-output", "actions": ["emit"], "events": ["selectionChange"] },
+                    { "id": "selection-output", "actions": ["emit"], "events": ["selectionChange"] }
+                  ]
+                }
+                """);
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation(
+                        "selection.configure",
+                        "selection",
+                        "x-ui-chart-events-selection-change",
+                        false,
+                        "event-target-governed"),
+                plan("{}", "{ \"action\": \"emit\", \"target\": \"selection-output\" }"),
+                duplicateTarget,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .containsExactly(
+                        "validator event-target-governed failed for selection.configure: target selection-output is not governed for chart event selectionChange",
+                        "validator event-target-governed failed for selection.configure: ambiguous event target id selection-output");
     }
 
     @Test

@@ -78,7 +78,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("grouping").path(0).path("kind").asText()).isEqualTo("hero");
         assertThat(stringArray(plan.path("grouping").path(0).path("widgetKeys")))
                 .containsExactly("orders-summary", "orders-kpis");
-        assertThat(plan.path("grouping").path(2).path("label").asText()).isEqualTo("Analise");
+        assertThat(plan.path("grouping").path(2).path("label").asText()).isEqualTo("Análise");
         assertThat(stringArray(plan.path("grouping").path(2).path("widgetKeys")))
                 .containsExactly("orders-chart-status");
         assertThat(plan.path("grouping").path(3).path("layout").asText()).isEqualTo("row");
@@ -125,25 +125,38 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(summaryInputs.path("document").path("nodes").path(0).path("orientation").asText())
                 .isEqualTo("horizontal");
         assertThat(summaryInputs.path("document").path("nodes").toString())
-                .contains("Visao executiva")
-                .contains("Visao inicial baseada em Orders")
-                .contains("exploracao contextual em modal")
+                .contains("Visão executiva")
+                .contains("Visão inicial baseada em Orders")
+                .contains("exploração contextual em modal")
                 .doesNotContain("Preview for");
         JsonNode kpiInputs = findWidgetInputs(plan, "praxis-rich-content", "kpi-band");
         assertThat(kpiInputs.path("document").path("nodes").toString())
                 .contains("Leitura executiva")
                 .contains("Total filtrado")
-                .contains("Sincronizado com os filtros");
+                .contains("Itens na página")
+                .contains("Status da consulta")
+                .contains("${table.totalItems}")
+                .contains("${table.loadedItemsCount}")
+                .contains("${table.status}")
+                .doesNotContain("Sincronizado com os filtros");
+        assertThat(stringArray(findWidget(plan, "praxis-rich-content", "kpi-band").path("bindingOrder")))
+                .containsExactly("document", "context");
+        assertThat(kpiInputs.path("context").path("table").path("totalItems").asInt()).isZero();
+        assertThat(kpiInputs.path("context").path("table").path("loadedItemsCount").asInt()).isZero();
+        assertThat(kpiInputs.path("context").path("table").path("status").asText())
+                .isEqualTo("Carregando");
         JsonNode listInputs = findWidgetInputs(plan, "praxis-list");
         assertThat(listInputs.path("config").path("title").asText()).isEqualTo("Destaques de Orders");
         assertThat(listInputs.path("config").path("layout").path("variant").asText()).isEqualTo("cards");
-        assertThat(listInputs.path("config").path("layout").path("density").asText()).isEqualTo("compact");
-        assertThat(listInputs.path("config").path("layout").path("lines").asInt()).isEqualTo(2);
+        assertThat(listInputs.path("config").path("layout").path("density").asText()).isEqualTo("comfortable");
+        assertThat(listInputs.path("config").path("layout").path("density").asText())
+                .isEqualTo(plan.path("layoutPresetOptions").path("density").asText());
+        assertThat(listInputs.path("config").path("layout").path("lines").asInt()).isEqualTo(3);
         assertThat(listInputs.path("config").path("dataSource").path("resourcePath").asText())
                 .isEqualTo("/api/acme/orders");
         assertThat(listInputs.path("config").path("dataSource").path("query").isObject()).isTrue();
         assertThat(listInputs.path("config").path("dataSource").path("query").has("size")).isFalse();
-        assertThat(listInputs.path("config").path("layout").path("pageSize").asInt()).isEqualTo(4);
+        assertThat(listInputs.path("config").path("layout").path("pageSize").asInt()).isEqualTo(6);
         assertThat(listInputs.path("config").path("templating").path("leading").path("expr").asText())
                 .isEqualTo("subject");
         assertThat(listInputs.path("config").path("templating").path("primary").path("expr").asText())
@@ -156,7 +169,10 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(secondaryTemplate.path("props").path("compose").path("items").toString())
                 .contains("description")
                 .contains("category")
-                .contains("email")
+                .doesNotContain("email")
+                .doesNotContain("contact")
+                .doesNotContain("phone")
+                .doesNotContain("telefone")
                 .doesNotContain("cargoNome")
                 .doesNotContain("departamentoNome");
         assertThat(listInputs.path("config").path("templating").path("meta").path("expr").asText())
@@ -252,6 +268,48 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .isEqualTo("${payload.filters}");
         assertThat(chartToTable.path("policy").path("distinctBy").asText())
                 .isEqualTo("payload.filters.status");
+        JsonNode tableKpiStateWrite = findBinding(plan.path("bindings"),
+                "orders-table.loadingStateChange->dashboardKpis.orders-table");
+        assertThat(tableKpiStateWrite.path("intent").asText()).isEqualTo("state-write");
+        assertThat(tableKpiStateWrite.path("to").path("kind").asText()).isEqualTo("state");
+        assertThat(tableKpiStateWrite.path("to").path("path").asText())
+                .isEqualTo("dashboardKpis.orders-table");
+        assertThat(tableKpiStateWrite.path("to").path("layer").asText()).isEqualTo("transient");
+        assertThat(tableKpiStateWrite.path("policy").path("distinct").asBoolean()).isTrue();
+        assertThat(tableKpiStateWrite.path("transform").path("template").path("table")
+                .path("totalItems").asText()).isEqualTo("${payload.context.totalItems}");
+        assertThat(tableKpiStateWrite.path("transform").path("template").path("table")
+                .path("totalCaption").asText()).isEqualTo("Total retornado pela consulta filtrada");
+        assertThat(tableKpiStateWrite.path("transform").path("template").path("table")
+                .path("loadedItemsCaption").asText())
+                .isEqualTo("${payload.context.loadedItemsCount} itens carregados nesta página");
+        assertThat(tableKpiStateWrite.path("transform").path("template").path("table")
+                .path("statusCaption").asText()).isEqualTo("${payload.message}");
+        assertThat(tableKpiStateWrite.path("transform").path("template").path("table").has("caption"))
+                .isFalse();
+        JsonNode tableKpiStateRead = findBinding(plan.path("bindings"),
+                "dashboardKpis.orders-table->orders-kpis.context");
+        assertThat(tableKpiStateRead.path("intent").asText()).isEqualTo("state-read");
+        assertThat(tableKpiStateRead.path("from").path("path").asText())
+                .isEqualTo("dashboardKpis.orders-table");
+        assertThat(tableKpiStateRead.path("from").path("layer").asText()).isEqualTo("transient");
+        assertThat(tableKpiStateRead.path("to").path("widget").asText()).isEqualTo("orders-kpis");
+        assertThat(tableKpiStateRead.path("policy").path("missingValuePolicy").asText())
+                .isEqualTo("skip");
+        for (JsonNode binding : plan.path("bindings")) {
+            assertThat(binding.path("id").asText()).isNotBlank();
+            assertThat(binding.path("intent").asText()).isIn(
+                    "event-propagation",
+                    "state-write",
+                    "state-read",
+                    "command-dispatch",
+                    "selection-sync",
+                    "data-projection",
+                    "status-propagation");
+            if (binding.path("transform").isObject()) {
+                assertThat(binding.path("transform").path("id").asText()).isNotBlank();
+            }
+        }
     }
 
     @Test
@@ -320,6 +378,40 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(chartToTable.path("transform").path("kind").asText()).isEqualTo("template");
         assertThat(chartToTable.path("transform").path("template").path("filters").asText())
                 .isEqualTo("${payload.filters}");
+    }
+
+    @Test
+    void countAggregationNeverMaterializesAnInputMetricField() {
+        AgenticAuthoringVisualizationAxisDecision countAxis = new AgenticAuthoringVisualizationAxisDecision(
+                "employees by department",
+                "departamentoNome",
+                "Departamento",
+                "bar",
+                "vertical",
+                "count",
+                "funcionarioId",
+                "Total",
+                "llm-authored-semantic-axis");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie um painel de funcionarios por departamento.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                dashboardIntent("/api/human-resources/funcionarios", List.of(countAxis)))).orElseThrow();
+
+        JsonNode config = findWidget(result.uiCompositionPlan(), "praxis-chart", "main")
+                .path("inputs").path("config");
+        assertThat(config.path("series").path(0).path("metric").path("field").asText())
+                .isEqualTo("total");
+        assertThat(config.path("dataSource").path("query").path("metrics").path(0).has("field"))
+                .isFalse();
+        assertThat(config.path("dataSource").path("query").path("metrics").path(0).path("alias").asText())
+                .isEqualTo("total");
+        assertThat(config.path("dataSource").path("query").path("statsRequest")
+                .path("metric").has("field")).isFalse();
+        assertThat(config.path("dataSource").path("query").path("statsRequest")
+                .path("metric").path("alias").asText()).isEqualTo("total");
     }
 
     @Test

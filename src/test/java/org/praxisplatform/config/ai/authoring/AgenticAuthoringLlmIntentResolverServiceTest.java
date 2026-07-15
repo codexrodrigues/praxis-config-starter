@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -92,6 +93,16 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                     "kind": "praxis.authoring-scope-policy.v1",
                     "outOfScopeResponseType": "info",
                     "fallbackTone": "friendly-guided"
+                  },
+                  "resourceDiscovery": {
+                    "artifactKind": "chart",
+                    "resourceSearchFocus": {
+                      "primaryBusinessEntity": "incidentes",
+                      "supportingConcepts": ["severidade"],
+                      "desiredSurface": "grafico simples",
+                      "uncertainty": "",
+                      "rationale": "Decisao semantica do planejamento pre-intent."
+                    }
                   }
                 }
                 """);
@@ -149,6 +160,9 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(promptCaptor.getValue())
                 .contains("praxis-agentic-authoring-fast-intent-context.v1")
                 .contains("Decide from the user's meaning, not from backend keywords.")
+                .contains("whose meaning depends on multiple coordinated analytical regions")
+                .contains("do not downgrade a coordinated dashboard to page or accordion")
+                .contains("where analytics are not the dominant requested outcome")
                 .contains("which governed data can be used to create a table, form, chart, dashboard, page or other component")
                 .contains("Do not select a weak resource or ask for a materialization confirmation")
                 .contains("route_shared_rule_authoring")
@@ -158,6 +172,9 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("Never reinterpret a requested business rule as a dashboard or page")
                 .contains("\"authoringScopePolicy\"")
                 .contains("\"outOfScopeResponseType\" : \"info\"")
+                .contains("\"semanticRetrievalIntent\"")
+                .contains("\"artifactKind\" : \"chart\"")
+                .contains("\"primaryBusinessEntity\" : \"incidentes\"")
                 .contains("loose instruction, assistant meta request, greeting, or unrelated ask")
                 .contains("\"candidateResources\"")
                 .contains("/api/risk-intelligence/vw-indicadores-incidentes")
@@ -187,6 +204,85 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 eq("tenant"),
                 eq("user"),
                 eq("local"));
+    }
+
+    @Test
+    void semanticReconciliationForcesTheFullIntentPass() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                configCaptor.capture(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "operationKind": "create",
+                  "artifactKind": "table",
+                  "changeKind": "create_table",
+                  "selectedResourcePath": "/api/human-resources/funcionarios",
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
+                  "assistantMessage": "Vou criar a tabela governada.",
+                  "visualizationDecision": null,
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode reconciliation = contextHints.putObject("semanticReconciliation");
+        reconciliation.put("forceFullIntentResolution", true);
+        reconciliation.put("plannedArtifactKind", "table");
+        reconciliation.put("observedArtifactKind", "page");
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Crie uma tabela de funcionários",
+                        "page-builder",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        "session-1",
+                        "turn-1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints),
+                "Crie uma tabela de funcionários",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "GET",
+                        "/schemas/filtered/human-resources.funcionarios",
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        0.98d,
+                        "Fonte governada selecionada.",
+                        List.of("explicit-source-match"))),
+                componentCapabilities(),
+                "tenant",
+                "user",
+                "local").orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("contextBundle:")
+                .contains("semanticReconciliation")
+                .doesNotContain("praxis-agentic-authoring-fast-intent-context.v1");
+        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(4096);
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.warnings()).doesNotContain("llm-fast-intent-resolution-used");
     }
 
     @Test
@@ -758,6 +854,8 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(prompt).contains("loose instruction, assistant meta request, greeting, or unrelated ask");
         assertThat(prompt).contains("\"formAuthoringPolicy\"");
         assertThat(prompt).contains("consultativeRetrievalPlan");
+        assertThat(prompt).contains("depends on multiple coordinated analytical regions");
+        assertThat(prompt).contains("semanticReconciliation");
         assertThat(prompt).contains("consultative platform guidance");
         assertThat(prompt).contains("which governed data can be used to create a table, form, chart, dashboard, page or other component");
         assertThat(prompt).contains("Do not treat it as immediate component creation");

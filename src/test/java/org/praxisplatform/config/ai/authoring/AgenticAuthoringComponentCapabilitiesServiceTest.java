@@ -8,6 +8,8 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.domain.AiRegistry;
@@ -284,5 +286,61 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
                 "component-definition",
                 Scope.SYSTEM,
                 "GLOBAL");
+    }
+
+    @Test
+    void boundsRegistryLoadingAndCachesBuiltInFallbackWhenRepositoryBlocks() throws Exception {
+        AiRegistryRepository repository = mock(AiRegistryRepository.class);
+        CountDownLatch registryQueryStarted = new CountDownLatch(1);
+        CountDownLatch registryQueryInterrupted = new CountDownLatch(1);
+        CountDownLatch neverReleaseRegistryQuery = new CountDownLatch(1);
+        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                "component_definition",
+                "component-definition",
+                Scope.SYSTEM,
+                "GLOBAL"))
+                .thenAnswer(invocation -> {
+                    registryQueryStarted.countDown();
+                    try {
+                        neverReleaseRegistryQuery.await();
+                    } catch (InterruptedException ex) {
+                        registryQueryInterrupted.countDown();
+                        Thread.currentThread().interrupt();
+                    }
+                    return List.of();
+                });
+        AgenticAuthoringComponentCapabilitiesService service =
+                new AgenticAuthoringComponentCapabilitiesService(
+                        repository,
+                        new ObjectMapper(),
+                        300_000L,
+                        25L);
+
+        try {
+            long startedAtNanos = System.nanoTime();
+            AgenticAuthoringComponentCapabilitiesResult first = service.listCapabilities();
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
+            AgenticAuthoringComponentCapabilitiesResult second = service.listCapabilities();
+
+            assertThat(registryQueryStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(registryQueryInterrupted.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(elapsedMs).isLessThan(1_000L);
+            assertThat(first.catalogs())
+                    .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
+                    .containsExactly(
+                            "praxis-dynamic-form",
+                            "praxis-table",
+                            "praxis-chart",
+                            "praxis-filter");
+            assertThat(second).isSameAs(first);
+            verify(repository, times(1)).findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                    "component_definition",
+                    "component-definition",
+                    Scope.SYSTEM,
+                    "GLOBAL");
+        } finally {
+            neverReleaseRegistryQuery.countDown();
+            service.shutdown();
+        }
     }
 }

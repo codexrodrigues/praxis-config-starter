@@ -8,7 +8,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -17,6 +19,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.domain.AiTurn;
@@ -38,13 +41,15 @@ class AiTurnEventServiceTest {
     private AiTurnRepository turnRepository;
 
     private AiTurnEventService service;
+    private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
+        objectMapper = new ObjectMapper();
         service = new AiTurnEventService(
                 repository,
                 turnRepository,
-                new ObjectMapper(),
+                objectMapper,
                 new AiSensitiveDataRedactor());
         ReflectionTestUtils.setField(service, "eventSchemaVersion", "v1");
         ReflectionTestUtils.setField(service, "streamExpirySeconds", 900L);
@@ -202,6 +207,69 @@ class AiTurnEventServiceTest {
     }
 
     @Test
+    void shouldPersistOnlySafeQuickReplyContextHintProjection() throws Exception {
+        UUID streamId = UUID.randomUUID();
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        ObjectNode payload = contextualQuickReplyPayload();
+
+        when(turnRepository.findByThreadIdAndTurnIdForUpdate(threadId, turnId))
+                .thenReturn(Optional.of(turn(threadId, turnId)));
+        when(repository.findFirstByThreadIdAndTurnIdOrderBySeqDesc(threadId, turnId))
+                .thenReturn(Optional.empty());
+        when(repository.findMaxSeq(threadId, turnId)).thenReturn(null);
+        when(repository.saveAndFlush(any(AiTurnEvent.class))).thenAnswer(invocation -> {
+            AiTurnEvent event = invocation.getArgument(0, AiTurnEvent.class);
+            event.setEventId(eventId);
+            return event;
+        });
+
+        var envelope = service.appendEvent(
+                new AiPrincipalContext("tenant-a", "user-a", "prod", true),
+                streamId,
+                threadId,
+                turnId,
+                "result",
+                payload);
+
+        ArgumentCaptor<AiTurnEvent> persistedEvent = ArgumentCaptor.forClass(AiTurnEvent.class);
+        verify(repository).saveAndFlush(persistedEvent.capture());
+        JsonNode storedPayload = objectMapper.readTree(persistedEvent.getValue().getPayload());
+        assertSafeContextualQuickReplyProjection(storedPayload);
+        assertThat(envelope.getPayload()).isEqualTo(storedPayload);
+    }
+
+    @Test
+    void shouldSanitizeLegacyQuickReplyPayloadAgainDuringReplay() throws Exception {
+        UUID streamId = UUID.randomUUID();
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        AiTurnEvent legacyEvent = event(
+                streamId,
+                threadId,
+                turnId,
+                1L,
+                UUID.randomUUID(),
+                "tenant-a",
+                "user-a",
+                "prod");
+        legacyEvent.setEventType("result");
+        legacyEvent.setPayload(objectMapper.writeValueAsString(contextualQuickReplyPayload()));
+
+        when(repository.findFirstByStreamIdOrderBySeqAsc(streamId)).thenReturn(Optional.of(legacyEvent));
+        when(repository.findByStreamIdOrderBySeqAsc(streamId)).thenReturn(List.of(legacyEvent));
+
+        AiTurnEventService.ReplayResult replay = service.replay(
+                streamId,
+                null,
+                new AiPrincipalContext("tenant-a", "user-a", "prod", true));
+
+        assertThat(replay.events()).hasSize(1);
+        assertSafeContextualQuickReplyProjection(replay.events().get(0).getPayload());
+    }
+
+    @Test
     void intentResolvedIsNotTerminal() {
         assertThat(service.isTerminalType("intent.resolved")).isFalse();
     }
@@ -280,6 +348,43 @@ class AiTurnEventServiceTest {
                 .updatedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(60))
                 .build();
+    }
+
+    private ObjectNode contextualQuickReplyPayload() {
+        ObjectNode payload = objectMapper.createObjectNode();
+        ObjectNode hints = payload.putArray("quickReplies").addObject().putObject("contextHints");
+        hints.put("source", "component-capability-catalog");
+        hints.put("kind", "contextual-preview-action");
+        hints.put("operationKind", "modify");
+        hints.put("changeKind", "enable_chart_drilldown");
+        hints.put("capabilityId", "praxis-chart.drilldown.enable@0.1.0");
+        hints.put("targetComponentId", "praxis-chart");
+        hints.put("selectedWidgetKey", "department-chart");
+        hints.put("surfacePresentation", "modal");
+        hints.put("surfaceActionId", "surface.open");
+        hints.put("surfaceWidgetId", "praxis-table");
+        hints.put("submitUrl", "/api/people?token=do-not-persist");
+        hints.putObject("previewPage").putArray("widgets").addObject().put("key", "private-widget");
+        hints.putObject("targetWidgetSnapshot").put("key", "department-chart");
+        return payload;
+    }
+
+    private void assertSafeContextualQuickReplyProjection(JsonNode payload) {
+        JsonNode hints = payload.path("quickReplies").path(0).path("contextHints");
+        assertThat(hints.path("source").asText()).isEqualTo("component-capability-catalog");
+        assertThat(hints.path("kind").asText()).isEqualTo("contextual-preview-action");
+        assertThat(hints.path("operationKind").asText()).isEqualTo("modify");
+        assertThat(hints.path("changeKind").asText()).isEqualTo("enable_chart_drilldown");
+        assertThat(hints.path("capabilityId").asText())
+                .isEqualTo("praxis-chart.drilldown.enable@0.1.0");
+        assertThat(hints.path("targetComponentId").asText()).isEqualTo("praxis-chart");
+        assertThat(hints.path("selectedWidgetKey").asText()).isEqualTo("department-chart");
+        assertThat(hints.path("surfacePresentation").asText()).isEqualTo("modal");
+        assertThat(hints.path("surfaceActionId").asText()).isEqualTo("surface.open");
+        assertThat(hints.path("surfaceWidgetId").asText()).isEqualTo("praxis-table");
+        assertThat(hints.path("submitUrl").asText()).isEqualTo("/api/people?token=[REDACTED]");
+        assertThat(hints.path("previewPage").asText()).isEqualTo("[REDACTED]");
+        assertThat(hints.path("targetWidgetSnapshot").asText()).isEqualTo("[REDACTED]");
     }
 
     private AiTurnEvent event(

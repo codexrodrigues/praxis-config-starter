@@ -309,8 +309,10 @@ public final class AgenticAuthoringValidatorRegistry {
             "bound-fields-exist",
             "stats-operation-supported",
             "query-context-structured",
+            "query-context-filter-expression-stats-unsupported",
             "query-context-fields-exist",
             "query-context-safe-values",
+            "point-click-action-structured",
             "cross-filter-output-structured",
             "event-target-governed",
             "event-mapping-fields-exist",
@@ -762,11 +764,15 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "cartesian-dimension-required" -> validateChartCartesianDimensionRequired(operationId, planOperation, config, failures);
                 case "remote-resource-in-api-metadata" -> validateChartRemoteResource(operationId, planOperation, config, failures);
                 case "stats-operation-supported" -> validateChartStatsOperation(operationId, planOperation, config, failures);
+                case "query-context-filter-expression-stats-unsupported" ->
+                        validateChartStatsFilterExpressionUnsupported(operationId, planOperation, config, failures);
                 case "query-context-structured", "query-context-safe-values",
                      "cross-filter-output-structured", "selection-output-structured" ->
                         validateChartStructuredInput(operationId, planOperation, failures);
+                case "point-click-action-structured" ->
+                        validateChartPointClickActionStructured(operationId, operation, planOperation, failures);
                 case "event-target-governed", "drilldown-target-governed" ->
-                        validateChartEventTarget(operationId, planOperation, config, failures);
+                        validateChartEventTarget(operationId, operation, planOperation, config, failures);
                 case "event-action-supported" -> validateChartEventAction(operationId, planOperation, failures);
                 case "feature-toggle-valid" -> validateChartFeatureToggle(operationId, planOperation, failures);
                 case "editor-runtime-round-trip" -> {
@@ -3164,6 +3170,23 @@ public final class AgenticAuthoringValidatorRegistry {
         }
     }
 
+    private void validateChartStatsFilterExpressionUnsupported(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        JsonNode filterExpression = input.get("filterExpression");
+        if (filterExpression == null || filterExpression.isNull() || filterExpression.isMissingNode()) {
+            return;
+        }
+        String sourceKind = text(config.path("chartDocument").path("source"), "kind");
+        if ("praxis.stats".equals(sourceKind)) {
+            failures.add("validator query-context-filter-expression-stats-unsupported failed for " + operationId
+                    + ": praxis.stats does not support queryContext.filterExpression");
+        }
+    }
+
     private void validateChartStructuredInput(String operationId, JsonNode planOperation, List<String> failures) {
         JsonNode input = planOperation.path("input");
         if (!input.isObject()) {
@@ -3175,13 +3198,66 @@ public final class AgenticAuthoringValidatorRegistry {
         }
     }
 
+    private void validateChartPointClickActionStructured(
+            String operationId,
+            JsonNode operation,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (!input.isObject()) {
+            failures.add("validator point-click-action-structured failed for " + operationId
+                    + ": input must be a structured event action object");
+            return;
+        }
+        if (!"pointClick".equals(text(operation.path("target"), "kind"))
+                || !"x-ui-chart-events-point-click".equals(text(operation.path("target"), "resolver"))) {
+            failures.add("validator point-click-action-structured failed for " + operationId
+                    + ": operation must use the canonical pointClick target and resolver");
+        }
+        if (input.has("event")) {
+            failures.add("validator point-click-action-structured failed for " + operationId
+                    + ": event selection is operation-owned and configured actions must use pointAction");
+        }
+        Iterator<Map.Entry<String, JsonNode>> fields = input.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            if (!Set.of("action", "target", "mapping").contains(field.getKey())) {
+                failures.add("validator point-click-action-structured failed for " + operationId
+                        + ": unsupported structured action field " + field.getKey());
+            }
+        }
+        JsonNode mapping = input.path("mapping");
+        if (!mapping.isMissingNode() && !mapping.isObject()) {
+            failures.add("validator point-click-action-structured failed for " + operationId
+                    + ": mapping must be an object of sourceField to targetField strings");
+            return;
+        }
+        Iterator<Map.Entry<String, JsonNode>> mappings = mapping.fields();
+        while (mappings.hasNext()) {
+            Map.Entry<String, JsonNode> mappingEntry = mappings.next();
+            if (mappingEntry.getKey().isBlank()
+                    || !mappingEntry.getValue().isTextual()
+                    || mappingEntry.getValue().asText().isBlank()) {
+                failures.add("validator point-click-action-structured failed for " + operationId
+                        + ": mapping must contain non-empty sourceField to targetField strings");
+                return;
+            }
+        }
+    }
+
     private void validateChartEventTarget(
             String operationId,
+            JsonNode operation,
             JsonNode planOperation,
             JsonNode config,
             List<String> failures) {
+        String action = text(planOperation.path("input"), "action");
         String target = text(planOperation.path("input"), "target");
         if (target.isBlank()) {
+            if (!action.isBlank() && !"emit".equals(action)) {
+                failures.add("validator event-target-governed failed for " + operationId
+                        + ": target is required for action " + action);
+            }
             return;
         }
         JsonNode availableTargets = config.path("availableTargets");
@@ -3190,16 +3266,55 @@ public final class AgenticAuthoringValidatorRegistry {
                     + ": required event target catalog is unavailable");
             return;
         }
-        JsonNode targetDescriptor = findTargetDescriptor(availableTargets, target);
-        if (targetDescriptor.isMissingNode()) {
+        List<JsonNode> targetDescriptors = findTargetDescriptors(availableTargets, target);
+        if (targetDescriptors.isEmpty()) {
             failures.add("validator event-target-governed failed for " + operationId + ": unknown event target " + target);
             return;
         }
-        String action = text(planOperation.path("input"), "action");
+        if (targetDescriptors.size() > 1) {
+            failures.add("validator event-target-governed failed for " + operationId
+                    + ": ambiguous event target id " + target);
+            return;
+        }
+        JsonNode targetDescriptor = targetDescriptors.get(0);
+        String chartEvent = chartEventForOperation(operation);
+        if (chartEvent.isBlank()) {
+            failures.add("validator event-target-governed failed for " + operationId
+                    + ": operation does not declare a governed chart event");
+            return;
+        }
+        JsonNode supportedEvents = targetDescriptor.path("events");
+        if (!supportedEvents.isArray() || supportedEvents.isEmpty()) {
+            failures.add("validator event-target-governed failed for " + operationId
+                    + ": target " + target + " does not declare governed chart events");
+            return;
+        }
+        boolean eventSupported = false;
+        for (JsonNode supportedEvent : supportedEvents) {
+            if (supportedEvent.isTextual() && chartEvent.equals(supportedEvent.asText())) {
+                eventSupported = true;
+                break;
+            }
+        }
+        if (!eventSupported) {
+            failures.add("validator event-target-governed failed for " + operationId
+                    + ": target " + target + " is not governed for chart event " + chartEvent);
+            return;
+        }
         if (!action.isBlank() && !targetSupportsAction(targetDescriptor, action)) {
             failures.add("validator event-target-governed failed for " + operationId
                     + ": target " + target + " does not support action " + action);
         }
+    }
+
+    private String chartEventForOperation(JsonNode operation) {
+        return switch (text(operation, "operationId")) {
+            case "pointClick.configure" -> "pointClick";
+            case "crossFilter.configure" -> "crossFilter";
+            case "drilldown.configure" -> "drillDown";
+            case "selection.configure" -> "selectionChange";
+            default -> "";
+        };
     }
 
     private void validateChartEventAction(String operationId, JsonNode planOperation, List<String> failures) {
@@ -3312,6 +3427,10 @@ public final class AgenticAuthoringValidatorRegistry {
         collectFieldNames(config.path("chartDocument").path("metrics"), fields, "field", "name", "id");
         collectFieldNames(config.path("chartDocument").path("aggregations"), fields, "field", "name", "id", "as");
         collectTextValues(config.path("chartDocument").path("groupBy"), fields);
+        if ("praxis.stats".equals(text(config.path("chartDocument").path("source"), "kind"))) {
+            fields.add("key");
+            fields.add("label");
+        }
         return fields;
     }
 
@@ -3479,18 +3598,21 @@ public final class AgenticAuthoringValidatorRegistry {
     }
 
     private JsonNode findTargetDescriptor(JsonNode availableTargets, String target) {
+        List<JsonNode> descriptors = findTargetDescriptors(availableTargets, target);
+        return descriptors.size() == 1 ? descriptors.get(0) : MissingNode.getInstance();
+    }
+
+    private List<JsonNode> findTargetDescriptors(JsonNode availableTargets, String target) {
+        List<JsonNode> descriptors = new ArrayList<>();
         if (!availableTargets.isArray()) {
-            return MissingNode.getInstance();
+            return descriptors;
         }
         for (JsonNode descriptor : availableTargets) {
-            if (target.equals(text(descriptor, "id"))
-                    || target.equals(text(descriptor, "name"))
-                    || target.equals(text(descriptor, "field"))
-                    || target.equals(text(descriptor, "widgetKey"))) {
-                return descriptor;
+            if (target.equals(text(descriptor, "id"))) {
+                descriptors.add(descriptor);
             }
         }
-        return MissingNode.getInstance();
+        return descriptors;
     }
 
     private boolean targetSupportsAction(JsonNode targetDescriptor, String action) {

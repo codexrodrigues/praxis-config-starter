@@ -250,6 +250,7 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
         assertThat(chartConfig.path("dataSource").path("query").path("statsPath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/timeseries");
         assertThat(chartConfig.path("axes").path("x").path("field").asText()).isEqualTo("competencia");
+        assertThat(chartConfig.path("axes").path("x").path("type").asText()).isEqualTo("time");
         assertThat(chartConfig.path("series").get(0).path("categoryField").asText()).isEqualTo("competencia");
         assertThat(chartConfig.path("dataSource").path("query").path("dimensions"))
                 .extracting(JsonNode::asText)
@@ -264,9 +265,26 @@ class AgenticAuthoringReferenceUiCompositionPlanProviderTest {
                 .contains(
                         "payroll-by-competence-chart.selectionChange->state.selectedCompetence",
                         "state.selectedCompetence->payroll-drilldown-list.queryContext");
+        JsonNode selectionBinding = findBinding(plan.path("bindings"),
+                "payroll-by-competence-chart.selectionChange->state.selectedCompetence");
+        assertThat(selectionBinding.path("condition").path("and")).hasSize(2);
+        assertThat(selectionBinding.path("condition").toString())
+                .contains("payload.data.start")
+                .contains("payload.data.end");
+        assertThat(selectionBinding.path("transform").path("kind").asText()).isEqualTo("template");
+        assertThat(selectionBinding.path("transform").path("template").toString())
+                .isEqualTo("{\"start\":\"${payload.data.start}\",\"end\":\"${payload.data.end}\",\"label\":\"${payload.data.label}\"}");
         JsonNode listFilterBinding = findBinding(plan.path("bindings"),
                 "state.selectedCompetence->payroll-drilldown-list.queryContext");
-        assertThat(listFilterBinding.path("transform").path("field").asText()).isEqualTo("competencia");
+        assertThat(listFilterBinding.path("transform").path("kind").asText()).isEqualTo("template");
+        assertThat(listFilterBinding.path("transform").path("template").path("filters")
+                .path("competenciaBetween"))
+                .extracting(JsonNode::asText)
+                .containsExactly("${payload.start}", "${payload.end}");
+        JsonNode summaryBinding = findBinding(plan.path("bindings"),
+                "state.selectedCompetence->payroll-drilldown-summary.document");
+        assertThat(summaryBinding.path("transform").path("template").path("nodes").path(0)
+                .path("text").asText()).contains("${payload.label}");
         JsonNode list = plan.path("widgets").get(1);
         assertThat(list.path("inputs").has("resourcePath")).isFalse();
         assertThat(list.path("inputs").path("config").path("templating").path("secondary").path("expr").asText())

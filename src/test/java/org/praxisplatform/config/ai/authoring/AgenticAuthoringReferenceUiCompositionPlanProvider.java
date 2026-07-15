@@ -2879,7 +2879,10 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         config.put("type", breakdown.chartType());
         config.put("title", "Custo liquido da folha por " + breakdown.label().toLowerCase(Locale.ROOT));
         ObjectNode axes = config.putObject("axes");
-        axes.putObject("x").put("field", breakdown.field()).put("label", breakdown.label()).put("type", "category");
+        axes.putObject("x")
+                .put("field", breakdown.field())
+                .put("label", breakdown.label())
+                .put("type", isTemporalBreakdown(breakdown) ? "time" : "category");
         axes.putObject("y")
                 .put("field", "salarioLiquido")
                 .put("label", "Salario liquido")
@@ -2909,7 +2912,9 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         ObjectNode crossFilter = eventActions.putObject("crossFilter");
         crossFilter.put("action", "filter-widget");
         crossFilter.put("target", PAYROLL_DRILLDOWN_DETAIL_KEY);
-        crossFilter.putObject("mapping").put(breakdown.field(), breakdown.field());
+        crossFilter.putObject("mapping").put(
+                isTemporalBreakdown(breakdown) ? "start" : breakdown.field(),
+                breakdownFilterField(breakdown));
     }
 
     private void addPayrollDrillDownList(ArrayNode widgets) {
@@ -3172,10 +3177,24 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         to.put("kind", "state");
         to.put("path", breakdown.statePath());
         ObjectNode transform = binding.putObject("transform");
-        transform.put("kind", "pick-path");
-        transform.put("id", "pick-" + breakdown.keySuffix());
-        transform.put("inputSource", "payload");
-        transform.put("path", "filters." + breakdown.field());
+        if (isTemporalBreakdown(breakdown)) {
+            ObjectNode condition = binding.putObject("condition");
+            ArrayNode clauses = condition.putArray("and");
+            clauses.addObject().putObject("!!").put("var", "payload.data.start");
+            clauses.addObject().putObject("!!").put("var", "payload.data.end");
+            transform.put("kind", "template");
+            transform.put("id", "pick-" + breakdown.keySuffix() + "-range");
+            transform.put("inputSource", "payload");
+            ObjectNode template = transform.putObject("template");
+            template.put("start", "${payload.data.start}");
+            template.put("end", "${payload.data.end}");
+            template.put("label", "${payload.data.label}");
+        } else {
+            transform.put("kind", "pick-path");
+            transform.put("id", "pick-" + breakdown.keySuffix());
+            transform.put("inputSource", "payload");
+            transform.put("path", "filters." + breakdown.field());
+        }
         addMetadata(binding, "chart-drilldown");
     }
 
@@ -3196,14 +3215,25 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         ObjectNode condition = binding.putObject("condition");
         condition.putArray("!!").addObject().put("var", "state." + breakdown.statePath());
         ObjectNode transform = binding.putObject("transform");
-        transform.put("kind", "query-context");
-        transform.put("id", breakdown.keySuffix() + "-text-filter");
-        transform.put("field", breakdown.field());
-        transform.put("inputSource", "payload");
-        transform.put("valueVar", "payload");
+        if (isTemporalBreakdown(breakdown)) {
+            transform.put("kind", "template");
+            transform.put("id", breakdown.keySuffix() + "-range-filter");
+            transform.put("inputSource", "payload");
+            ArrayNode range = transform.putObject("template")
+                    .putObject("filters")
+                    .putArray(breakdownFilterField(breakdown));
+            range.add("${payload.start}");
+            range.add("${payload.end}");
+        } else {
+            transform.put("kind", "query-context");
+            transform.put("id", breakdown.keySuffix() + "-text-filter");
+            transform.put("field", breakdown.field());
+            transform.put("inputSource", "payload");
+            transform.put("valueVar", "payload");
+        }
         ObjectNode policy = binding.putObject("policy");
         policy.put("distinct", true);
-        policy.put("distinctBy", "value");
+        policy.put("distinctBy", isTemporalBreakdown(breakdown) ? "payload.start" : "value");
         policy.put("missingValuePolicy", "skip");
         addMetadata(binding, "list-filter");
     }
@@ -3232,8 +3262,19 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
         template.put("version", "1.0.0");
         ObjectNode node = template.putArray("nodes").addObject();
         node.put("type", "text");
-        node.put("text", "Detalhando folha por " + breakdown.label().toLowerCase(Locale.ROOT) + ": ${payload}");
+        node.put("text", "Detalhando folha por " + breakdown.label().toLowerCase(Locale.ROOT)
+                + ": " + (isTemporalBreakdown(breakdown) ? "${payload.label}" : "${payload}"));
         addMetadata(binding, "rich-content");
+    }
+
+    private boolean isTemporalBreakdown(PayrollBreakdown breakdown) {
+        return breakdown != null && "timeseries".equalsIgnoreCase(breakdown.statsOperation());
+    }
+
+    private String breakdownFilterField(PayrollBreakdown breakdown) {
+        return isTemporalBreakdown(breakdown)
+                ? breakdown.field() + "Between"
+                : breakdown.field();
     }
 
     private void addDepartmentMaster(ArrayNode widgets) {

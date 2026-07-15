@@ -702,7 +702,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
     }
 
     @Test
-    void llmAuthoredExplicitAnalyticalSurfaceKeepsAnalyticalProjectionAheadOfPrimaryEntity() {
+    void llmAuthoredExplicitPayrollEntityKeepsPayrollProjectionAheadOfOperationalResources() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
         Mockito.when(retrievalService.searchApiMetadata(
@@ -729,8 +729,8 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
 
         List<AgenticAuthoringCandidate> candidates = catalog.discover(
-                "primary business entity: Funcionarios. "
-                        + "supporting concepts: Folha de pagamento, salario, departamento. "
+                "primary business entity: Folha de pagamento. "
+                        + "supporting concepts: salario, departamento. "
                         + "desired surface: dashboard analitico de folha de pagamento com metricas agregadas. "
                         + "semantic query: indicadores agregados de remuneracao e pagamento por departamento",
                 "dashboard");
@@ -786,7 +786,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
     }
 
     @Test
-    void ranksAnalyticalProjectionAheadOfOperationalResourceForMetricPrompt() {
+    void keepsEmployeeSubjectAheadOfUnrelatedAnalyticsRoleForMetricPrompt() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of());
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
@@ -819,9 +819,9 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
 
         assertThat(candidates).isNotEmpty();
         assertThat(candidates.get(0).resourcePath())
-                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+                .isEqualTo("/api/human-resources/funcionarios");
         assertThat(candidates.get(0).evidence())
-                .contains("semantic-retrieval", "semantic-role:analytics-projection");
+                .contains("semantic-retrieval", "semantic-role:operational-resource");
     }
 
     private ApiMetadata apiMetadata(

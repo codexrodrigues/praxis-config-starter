@@ -19,6 +19,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.praxisplatform.config.dto.AiSchemaContext;
+import org.praxisplatform.config.service.ResourceCapabilitiesFetchResult;
+import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
 import org.praxisplatform.config.service.SchemaFetchResult;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 
@@ -44,6 +46,7 @@ public class AgenticAuthoringPreviewService {
     private final List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders;
     private final AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer;
     private final SchemaRetrievalService schemaRetrievalService;
+    private final ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService;
 
     public AgenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
@@ -82,6 +85,24 @@ public class AgenticAuthoringPreviewService {
             List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders,
             AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer,
             SchemaRetrievalService schemaRetrievalService) {
+        this(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                uiCompositionPlanProviders,
+                messageSynthesizer,
+                schemaRetrievalService,
+                null);
+    }
+
+    public AgenticAuthoringPreviewService(
+            AgenticAuthoringPlanService planService,
+            AgenticAuthoringPatchCompilerService patchCompilerService,
+            ObjectMapper objectMapper,
+            List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders,
+            AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer,
+            SchemaRetrievalService schemaRetrievalService,
+            ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService) {
         this.planService = Objects.requireNonNull(planService, "planService must not be null");
         this.patchCompilerService = Objects.requireNonNull(patchCompilerService, "patchCompilerService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
@@ -91,6 +112,7 @@ public class AgenticAuthoringPreviewService {
                 uiCompositionPlanProviders == null ? List.of() : uiCompositionPlanProviders);
         this.messageSynthesizer = messageSynthesizer;
         this.schemaRetrievalService = schemaRetrievalService;
+        this.resourceCapabilitiesRetrievalService = resourceCapabilitiesRetrievalService;
     }
 
     public AgenticAuthoringPreviewResult preview(
@@ -286,13 +308,35 @@ public class AgenticAuthoringPreviewService {
                     planResult.warnings() == null ? List.of() : planResult.warnings());
             boolean technicallyValid = planResult.valid();
             boolean semanticallyValid = planResult.valid();
-            JsonNode uiCompositionPlan = verifySemanticAxesWithSchema(
-                    request,
+            JsonNode uiCompositionPlan = normalizeCountMetricBindings(
                     planResult.uiCompositionPlan(),
+                    warnings);
+            uiCompositionPlan = verifySemanticAxesWithSchema(
+                    request,
+                    uiCompositionPlan,
                     warnings,
                     schemaBaseUrl,
                     schemaFetchCache);
+            if (provider instanceof AgenticAuthoringGenericUiCompositionPlanProvider genericProvider
+                    && uiCompositionPlan instanceof ObjectNode uiCompositionPlanObject
+                    && genericProvider.reflowPrunedDashboard(request, uiCompositionPlanObject)) {
+                addWarningOnce(warnings, "ui-composition-plan-layout-reflowed-after-widget-prune");
+            }
+            uiCompositionPlan = verifyStatsCapabilities(
+                    request,
+                    uiCompositionPlan,
+                    warnings,
+                    schemaBaseUrl,
+                    tenantId,
+                    userId,
+                    environment);
             uiCompositionPlan = verifyResourceSchemaGrounding(
+                    request,
+                    uiCompositionPlan,
+                    warnings,
+                    schemaBaseUrl,
+                    schemaFetchCache);
+            uiCompositionPlan = reconcileChartInteractionsWithGrounding(
                     request,
                     uiCompositionPlan,
                     warnings,
@@ -308,6 +352,9 @@ public class AgenticAuthoringPreviewService {
             JsonNode semanticMaterialization = semanticMaterialization(planResult, uiCompositionPlan);
             if (containsUnverifiedSemanticAxes(semanticMaterialization)) {
                 warnings.add("semantic-axis-schema-verification-pending");
+            }
+            if (containsUnverifiedStatsAxes(semanticMaterialization)) {
+                warnings.add("semantic-axis-stats-capability-verification-pending");
             }
             AgenticAuthoringSemanticMaterializationPolicy.ValidationResult semanticValidation =
                     AgenticAuthoringSemanticMaterializationPolicy.validate(
@@ -326,7 +373,7 @@ public class AgenticAuthoringPreviewService {
                     semanticallyValid,
                     List.copyOf(failureCodes));
             return Optional.of(new AgenticAuthoringPreviewResult(
-                    technicallyValid,
+                    technicallyValid && !containsUnverifiedStatsAxes(semanticMaterialization),
                     List.copyOf(failureCodes),
                     List.copyOf(warnings),
                     MissingNode.getInstance(),
@@ -531,6 +578,7 @@ public class AgenticAuthoringPreviewService {
             }
             ArrayNode columns = configObject.putArray("columns");
             schemaFields.values().stream()
+                    .filter(this::isDefaultTableProjectionField)
                     .limit(16)
                     .map(this::tableColumnFromSchemaField)
                     .forEach(columns::add);
@@ -541,6 +589,10 @@ public class AgenticAuthoringPreviewService {
         if (materialized) {
             addWarningOnce(warnings, "table-columns-materialized-from-schema");
         }
+    }
+
+    private boolean isDefaultTableProjectionField(SchemaFieldDescriptor field) {
+        return field != null && !field.hidden() && !field.tableHidden();
     }
 
     private ObjectNode tableColumnFromSchemaField(SchemaFieldDescriptor field) {
@@ -633,6 +685,1131 @@ public class AgenticAuthoringPreviewService {
             return objectNode;
         }
         return copy;
+    }
+
+    private JsonNode normalizeCountMetricBindings(
+            JsonNode uiCompositionPlan,
+            List<String> warnings) {
+        if (uiCompositionPlan == null
+                || uiCompositionPlan.isMissingNode()
+                || !containsComponent(uiCompositionPlan, "praxis-chart")) {
+            return uiCompositionPlan;
+        }
+        JsonNode copy = uiCompositionPlan == null ? MissingNode.getInstance() : uiCompositionPlan.deepCopy();
+        JsonNode widgets = copy.path("widgets");
+        if (!(widgets instanceof ArrayNode widgetArray)) {
+            return copy;
+        }
+        boolean normalized = false;
+        for (JsonNode widget : widgetArray) {
+            if (!"praxis-chart".equals(widget.path("componentId").asText(""))) {
+                continue;
+            }
+            JsonNode config = widget.path("inputs").path("config");
+            JsonNode series = config.path("series");
+            if (series.isArray()) {
+                for (JsonNode item : series) {
+                    JsonNode metric = item.path("metric");
+                    if (metric instanceof ObjectNode metricObject
+                            && "count".equals(normalize(metricObject.path("aggregation").asText("")))) {
+                        metricObject.put("field", "total");
+                        metricObject.put("schemaVerified", true);
+                        metricObject.put("schemaProbeStatus", "derived-record-count");
+                        normalized = true;
+                    }
+                }
+            }
+            JsonNode queryMetrics = config.path("dataSource").path("query").path("metrics");
+            if (queryMetrics.isArray()) {
+                for (JsonNode metric : queryMetrics) {
+                    if (metric instanceof ObjectNode metricObject
+                            && "count".equals(normalize(metricObject.path("aggregation").asText("")))) {
+                        metricObject.remove(List.of("field", "schemaVerified", "schemaProbeStatus"));
+                        metricObject.put("alias", "total");
+                        normalized = true;
+                    }
+                }
+            }
+            JsonNode statsMetric = config.path("dataSource").path("query").path("statsRequest").path("metric");
+            if (statsMetric instanceof ObjectNode metricObject
+                    && "count".equals(normalize(metricObject.path("operation").asText("")))) {
+                metricObject.remove(List.of("field", "schemaVerified", "schemaProbeStatus"));
+                metricObject.put("alias", "total");
+                normalized = true;
+            }
+        }
+        if (normalized) {
+            addWarningOnce(warnings, "semantic-chart-count-metric-normalized-for-stats-contract");
+            addWarningOnce(warnings, "semantic-chart-count-metric-preserved-for-record-count");
+            warnings.remove("semantic-chart-metric-schema-verification-unsupported-field");
+        }
+        return copy;
+    }
+
+    private JsonNode verifyStatsCapabilities(
+            AgenticAuthoringPlanRequest request,
+            JsonNode uiCompositionPlan,
+            List<String> warnings,
+            String requestBaseUrl,
+            String tenantId,
+            String userId,
+            String environment) {
+        if (resourceCapabilitiesRetrievalService == null
+                || uiCompositionPlan == null
+                || uiCompositionPlan.isMissingNode()
+                || !containsComponent(uiCompositionPlan, "praxis-chart")) {
+            return uiCompositionPlan;
+        }
+        AgenticAuthoringCandidate candidate = request == null || request.intentResolution() == null
+                ? null
+                : request.intentResolution().selectedCandidate();
+        String resourcePath = businessResourcePath(firstNonBlank(
+                candidate == null ? "" : candidate.resourcePath(),
+                candidate == null ? "" : candidate.submitUrl()));
+        JsonNode copy = uiCompositionPlan.deepCopy();
+        if (!(copy instanceof ObjectNode objectNode)) {
+            return copy;
+        }
+        if (resourcePath.isBlank()) {
+            markStatsAxesUnsupported(objectNode, "invalid-resource", warnings);
+            return objectNode;
+        }
+
+        ResourceCapabilitiesFetchResult result = resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                resourcePath,
+                requestBaseUrl,
+                tenantId,
+                userId,
+                environment);
+        if (result == null || !result.isSuccess()) {
+            String status = result == null || result.getStatus() == null
+                    ? "unavailable"
+                    : result.getStatus().name().toLowerCase(Locale.ROOT);
+            markStatsAxesUnsupported(objectNode, status, warnings);
+            return objectNode;
+        }
+
+        List<StatsCapabilityFieldDescriptor> capabilityFields = statsCapabilityFields(result.getCapabilities());
+        if (capabilityFields.isEmpty()) {
+            markStatsAxesUnsupported(objectNode, "no-fields", warnings);
+            return objectNode;
+        }
+        int groundedCharts = 0;
+        JsonNode widgets = objectNode.path("widgets");
+        if (widgets.isArray()) {
+            for (JsonNode widget : widgets) {
+                if (!(widget instanceof ObjectNode widgetObject) || !isPraxisStatsChart(widgetObject)) {
+                    continue;
+                }
+                ObjectNode config = widgetObject.path("inputs").path("config") instanceof ObjectNode value
+                        ? value
+                        : null;
+                ObjectNode query = config != null && config.path("dataSource").path("query") instanceof ObjectNode value
+                        ? value
+                        : null;
+                ObjectNode statsRequest = query != null && query.path("statsRequest") instanceof ObjectNode value
+                        ? value
+                        : null;
+                ObjectNode semanticAxis = config != null && config.path("semanticAxis") instanceof ObjectNode value
+                        ? value
+                        : null;
+                if (config == null || query == null || statsRequest == null || semanticAxis == null) {
+                    markStatsAxisUnsupported(objectNode, semanticAxis, "invalid-chart-contract");
+                    continue;
+                }
+                String operation = valueOrDefault(query.path("statsOperation").asText(""), "group-by");
+                Optional<StatsCapabilityFieldDescriptor> dimension = resolveStatsDimensionCapability(
+                        semanticAxis,
+                        statsRequest.path("field").asText(""),
+                        operation,
+                        capabilityFields);
+                if (dimension.isEmpty()) {
+                    markStatsAxisUnsupported(objectNode, semanticAxis, "unsupported-dimension");
+                    continue;
+                }
+                if (!alignStatsMetricCapability(config, capabilityFields)) {
+                    markStatsAxisUnsupported(objectNode, semanticAxis, "unsupported-metric");
+                    continue;
+                }
+                alignStatsExecutionField(query, statsRequest, dimension.get());
+                markStatsAxisVerified(objectNode, semanticAxis, dimension.get(), result);
+                groundedCharts++;
+            }
+        }
+        int expectedCharts = countPraxisStatsCharts(objectNode);
+        markResourceStatsGrounding(
+                objectNode,
+                resourcePath,
+                result,
+                capabilityFields.size(),
+                groundedCharts,
+                expectedCharts);
+        if (groundedCharts < expectedCharts) {
+            addWarningOnce(warnings, "semantic-axis-stats-capability-verification-unsupported");
+        } else if (expectedCharts > 0) {
+            addWarningOnce(warnings, "semantic-axis-stats-capability-verified");
+        }
+        return objectNode;
+    }
+
+    private JsonNode reconcileChartInteractionsWithGrounding(
+            AgenticAuthoringPlanRequest request,
+            JsonNode uiCompositionPlan,
+            List<String> warnings,
+            String schemaBaseUrl,
+            PreviewSchemaFetchCache schemaFetchCache) {
+        if (!(uiCompositionPlan instanceof ObjectNode plan)
+                || schemaFetchCache == null
+                || !containsComponent(plan, "praxis-chart")) {
+            return uiCompositionPlan;
+        }
+        Map<String, SchemaFieldDescriptor> filterFields = filterSchemaFields(
+                request,
+                schemaBaseUrl,
+                schemaFetchCache).orElse(Map.of());
+        boolean reconciled = false;
+        JsonNode widgets = plan.path("widgets");
+        if (!widgets.isArray()) {
+            return plan;
+        }
+        for (JsonNode widget : widgets) {
+            if (!(widget instanceof ObjectNode chart)
+                    || !"praxis-chart".equals(chart.path("componentId").asText(""))) {
+                continue;
+            }
+            Optional<ChartInteractionProjection> projection = chartInteractionProjection(chart, filterFields);
+            if (projection.isEmpty()) {
+                JsonNode semanticAxis = chart.path("inputs").path("config").path("semanticAxis");
+                if (isTimeseriesChart(chart)) {
+                    String chartKey = firstNonBlank(chart.path("key").asText(""), chart.path("id").asText(""));
+                    if (!chartKey.isBlank()) {
+                        disableUngroundedTemporalFilterInteractions(plan, chart, chartKey);
+                    }
+                    addWarningOnce(warnings, "semantic-chart-temporal-range-filter-target-unresolved");
+                }
+                if (semanticAxis.path("statsEvidence").path("keyAndLabelDistinct").asBoolean(false)) {
+                    addWarningOnce(warnings, "semantic-chart-interaction-key-filter-target-unresolved");
+                }
+                continue;
+            }
+            ChartInteractionProjection resolved = projection.get();
+            reconciled = reconcileChartEventMappings(chart, resolved) || reconciled;
+            String chartKey = firstNonBlank(chart.path("key").asText(""), chart.path("id").asText(""));
+            if (!chartKey.isBlank()) {
+                reconciled = reconcileChartInteractionBindings(plan, chartKey, resolved) || reconciled;
+            }
+            reconciled = reconcileItemTemplateFields(plan, resolved) || reconciled;
+        }
+        if (reconciled) {
+            addWarningOnce(warnings, "semantic-chart-interactions-grounded");
+        }
+        return plan;
+    }
+
+    private boolean isTimeseriesChart(ObjectNode chart) {
+        return chart != null && "timeseries".equalsIgnoreCase(chart.path("inputs").path("config")
+                .path("dataSource").path("query").path("statsOperation").asText(""));
+    }
+
+    private void disableUngroundedTemporalFilterInteractions(
+            ObjectNode plan,
+            ObjectNode chart,
+            String chartKey) {
+        JsonNode interactions = chart.path("inputs").path("config").path("interactions");
+        if (interactions instanceof ObjectNode interactionConfig && interactionConfig.has("crossFilter")) {
+            interactionConfig.put("crossFilter", false);
+        }
+        JsonNode eventActions = interactions.path("eventActions");
+        if (eventActions instanceof ObjectNode actions) {
+            actions.remove("crossFilter");
+        }
+        removeUngroundedTemporalFilterLinks(plan.path("bindings"), chartKey);
+        removeUngroundedTemporalFilterLinks(plan.path("composition").path("links"), chartKey);
+    }
+
+    private boolean removeUngroundedTemporalFilterLinks(JsonNode links, String chartKey) {
+        if (!(links instanceof ArrayNode array)) {
+            return false;
+        }
+        boolean changed = false;
+        for (int index = array.size() - 1; index >= 0; index--) {
+            JsonNode link = array.path(index);
+            JsonNode from = link.path("from");
+            if (!chartKey.equals(bindingWidgetKey(from))) {
+                continue;
+            }
+            boolean queryContextTarget = "queryContext".equals(bindingPort(link.path("to")));
+            boolean filteredSurfaceTarget = surfacePayloadContainsQueryContextFilter(link.path("to"));
+            if (queryContextTarget || filteredSurfaceTarget) {
+                array.remove(index);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private boolean surfacePayloadContainsQueryContextFilter(JsonNode to) {
+        ObjectNode payload = surfaceOpenPayload(to);
+        if (payload == null || !payload.path("bindings").isArray()) {
+            return false;
+        }
+        for (JsonNode binding : payload.path("bindings")) {
+            if (binding.path("to").asText("").contains(".queryContext.filters.")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Optional<ChartInteractionProjection> chartInteractionProjection(
+            ObjectNode chart,
+            Map<String, SchemaFieldDescriptor> filterFields) {
+        ObjectNode semanticAxis = chart.path("inputs").path("config").path("semanticAxis") instanceof ObjectNode axis
+                ? axis
+                : null;
+        if (semanticAxis == null || !semanticAxis.path("schemaVerified").asBoolean(false)) {
+            return Optional.empty();
+        }
+        String displayField = semanticAxis.path("field").asText("").trim();
+        if (displayField.isBlank()) {
+            return Optional.empty();
+        }
+        boolean keyAndLabelDistinct = semanticAxis.path("statsEvidence")
+                .path("keyAndLabelDistinct")
+                .asBoolean(false);
+        boolean timeseries = "timeseries".equalsIgnoreCase(chart.path("inputs").path("config")
+                .path("dataSource").path("query").path("statsOperation").asText(""));
+        LinkedHashSet<String> axisFields = new LinkedHashSet<>();
+        addNonBlank(axisFields, displayField);
+        addNonBlank(axisFields, semanticAxis.path("requestedField").asText(""));
+        addNonBlank(axisFields, semanticAxis.path("concept").asText(""));
+        addNonBlank(axisFields, semanticAxis.path("statsExecutionField").asText(""));
+        LinkedHashSet<String> explicitMappingSourceFields = new LinkedHashSet<>(axisFields);
+        if (timeseries) {
+            addNonBlank(explicitMappingSourceFields, "start");
+            addNonBlank(explicitMappingSourceFields, "end");
+        }
+        Set<String> explicitTargets = explicitChartInteractionTargets(chart, explicitMappingSourceFields);
+        if (explicitTargets.size() > 1) {
+            return Optional.empty();
+        }
+        String explicitTarget = explicitTargets.stream().findFirst().orElse("");
+        SchemaFieldDescriptor target = explicitTarget.isBlank()
+                ? null
+                : filterFields.get(normalize(explicitTarget));
+        if (!explicitTarget.isBlank() && target == null) {
+            return Optional.empty();
+        }
+        SchemaFieldDescriptor probe = chartInteractionFilterProbe(semanticAxis);
+        if (target == null && timeseries) {
+            target = preferredTemporalRangeFilterField(probe, filterFields).orElse(null);
+            if (target == null) {
+                return Optional.empty();
+            }
+        }
+        if (target == null && keyAndLabelDistinct) {
+            target = preferredFilterInputField(probe, filterFields).orElse(null);
+            if (target == null || normalize(target.name()).equals(normalize(displayField))) {
+                return Optional.empty();
+            }
+        } else if (target == null) {
+            target = filterFields.get(normalize(displayField));
+            if (target == null) {
+                String requestedField = semanticAxis.path("requestedField").asText("");
+                SchemaFieldDescriptor requestedTarget = filterFields.get(normalize(requestedField));
+                if (requestedTarget != null && !requestedTarget.multiple()
+                        && !"array".equals(normalize(requestedTarget.type()))) {
+                    target = requestedTarget;
+                }
+            }
+            if (target == null && filterFields.isEmpty()) {
+                target = chartInteractionFilterProbe(semanticAxis);
+            }
+            if (target == null || target.multiple() || "array".equals(normalize(target.type()))) {
+                return Optional.empty();
+            }
+        }
+
+        boolean temporalRangeTarget = isTemporalRangeFilterField(target);
+        if (timeseries != temporalRangeTarget) {
+            return Optional.empty();
+        }
+        ChartInteractionValueShape valueShape = temporalRangeTarget
+                ? ChartInteractionValueShape.TEMPORAL_RANGE
+                : target.multiple() || "array".equals(normalize(target.type()))
+                        ? ChartInteractionValueShape.SINGLETON_ARRAY
+                        : ChartInteractionValueShape.SCALAR;
+        String sourceField = valueShape == ChartInteractionValueShape.TEMPORAL_RANGE
+                ? "start"
+                : keyAndLabelDistinct ? "key" : displayField;
+        String pointValuePath = valueShape == ChartInteractionValueShape.TEMPORAL_RANGE
+                ? "payload.data.start"
+                : keyAndLabelDistinct
+                ? "payload.data.key"
+                : "payload.data." + displayField;
+        return Optional.of(new ChartInteractionProjection(
+                displayField,
+                sourceField,
+                target.name(),
+                valueShape,
+                pointValuePath,
+                Set.copyOf(axisFields),
+                governedCrossFilterTargetFields(chart, filterFields, axisFields)));
+    }
+
+    private Set<String> governedCrossFilterTargetFields(
+            ObjectNode chart,
+            Map<String, SchemaFieldDescriptor> filterFields,
+            Set<String> axisFields) {
+        JsonNode mapping = chart.path("inputs").path("config")
+                .path("interactions").path("eventActions").path("crossFilter").path("mapping");
+        if (!mapping.isObject() || filterFields == null || filterFields.isEmpty()) {
+            return Set.of();
+        }
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        mapping.fields().forEachRemaining(entry -> {
+            String target = entry.getValue().asText("");
+            SchemaFieldDescriptor governed = filterFields.get(normalize(target));
+            if (governed != null && !matchesAxisField(target, axisFields)) {
+                targets.add(governed.name());
+            }
+        });
+        return Set.copyOf(targets);
+    }
+
+    private Set<String> explicitChartInteractionTargets(
+            ObjectNode chart,
+            Set<String> axisFields) {
+        JsonNode eventActions = chart.path("inputs").path("config")
+                .path("interactions").path("eventActions");
+        if (!eventActions.isObject()) {
+            return Set.of();
+        }
+        LinkedHashSet<String> explicitTargets = new LinkedHashSet<>();
+        for (JsonNode action : eventActions) {
+            JsonNode mapping = action.path("mapping");
+            if (!mapping.isObject()) {
+                continue;
+            }
+            mapping.fields().forEachRemaining(entry -> {
+                String source = entry.getKey();
+                String target = entry.getValue().asText("");
+                if (matchesAxisField(source, axisFields)
+                        && !normalize(source).equals(normalize(target))
+                        && !matchesAxisField(target, axisFields)) {
+                    explicitTargets.add(target);
+                }
+            });
+        }
+        return Set.copyOf(explicitTargets);
+    }
+
+    private boolean matchesAxisField(String field, Set<String> axisFields) {
+        if (field == null || field.isBlank() || axisFields == null) {
+            return false;
+        }
+        String normalized = normalize(field);
+        return axisFields.stream().map(this::normalize).anyMatch(normalized::equals);
+    }
+
+    private SchemaFieldDescriptor chartInteractionFilterProbe(ObjectNode semanticAxis) {
+        String field = semanticAxis == null ? "" : semanticAxis.path("field").asText("");
+        String label = semanticAxis == null ? "" : semanticAxis.path("label").asText("");
+        return new SchemaFieldDescriptor(
+                field,
+                label,
+                "",
+                "",
+                "",
+                false,
+                "",
+                false,
+                "",
+                false,
+                false,
+                tokens(field),
+                tokens(label),
+                Set.of());
+    }
+
+    private void addNonBlank(Set<String> values, String candidate) {
+        String resolved = value(candidate);
+        if (!resolved.isBlank()) {
+            values.add(resolved);
+        }
+    }
+
+    private boolean reconcileChartEventMappings(
+            ObjectNode chart,
+            ChartInteractionProjection projection) {
+        JsonNode eventActions = chart.path("inputs").path("config")
+                .path("interactions").path("eventActions");
+        if (!eventActions.isObject()) {
+            return false;
+        }
+        boolean changed = false;
+        for (JsonNode action : eventActions) {
+            if (!(action.path("mapping") instanceof ObjectNode mapping) || mapping.isEmpty()) {
+                continue;
+            }
+            ObjectNode replacement = objectMapper.createObjectNode();
+            var fields = mapping.fields();
+            while (fields.hasNext()) {
+                var entry = fields.next();
+                String source = entry.getKey();
+                String target = entry.getValue().asText("");
+                if (!isInteractionAxisField(source, projection)) {
+                    replacement.set(source, entry.getValue().deepCopy());
+                    continue;
+                }
+                String nextTarget = isInferredInteractionTarget(source, target, projection)
+                        ? projection.targetField()
+                        : target;
+                replacement.put(projection.sourceField(), nextTarget);
+            }
+            if (!replacement.equals(mapping)) {
+                mapping.removeAll();
+                mapping.setAll(replacement);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private boolean reconcileChartInteractionBindings(
+            ObjectNode plan,
+            String chartKey,
+            ChartInteractionProjection projection) {
+        JsonNode bindings = plan.path("bindings");
+        if (!bindings.isArray()) {
+            return false;
+        }
+        boolean changed = false;
+        for (JsonNode binding : bindings) {
+            if (!(binding instanceof ObjectNode bindingObject)) {
+                continue;
+            }
+            JsonNode from = bindingObject.path("from");
+            if (!chartKey.equals(bindingWidgetKey(from))) {
+                continue;
+            }
+            String fromPort = bindingPort(from);
+            if ("pointClick".equals(fromPort)) {
+                changed = alignInteractionPolicy(bindingObject, projection.pointValuePath()) || changed;
+                if (projection.temporalRange()) {
+                    changed = reconcileTemporalRangeCondition(bindingObject, "payload.data") || changed;
+                }
+                ObjectNode surfacePayload = surfaceOpenPayload(bindingObject.path("to"));
+                if (surfacePayload != null) {
+                    changed = reconcileSurfaceBindings(surfacePayload, projection) || changed;
+                }
+                if ("queryContext".equals(bindingPort(bindingObject.path("to")))) {
+                    changed = reconcilePointQueryContextTransform(bindingObject, projection) || changed;
+                }
+            } else if ("crossFilter".equals(fromPort)
+                    && "queryContext".equals(bindingPort(bindingObject.path("to")))) {
+                String distinctBy = projection.temporalRange()
+                        ? "payload.source.data.start"
+                        : "payload.filters." + projection.targetField();
+                changed = alignInteractionPolicy(
+                        bindingObject,
+                        distinctBy) || changed;
+                if (projection.temporalRange()) {
+                    changed = reconcileTemporalRangeCondition(bindingObject, "payload.source.data") || changed;
+                }
+                changed = reconcileCrossFilterQueryContextTransform(bindingObject, projection) || changed;
+            }
+        }
+        return changed;
+    }
+
+    private ObjectNode surfaceOpenPayload(JsonNode to) {
+        if (to == null || to.isMissingNode()) {
+            return null;
+        }
+        String actionId = firstNonBlank(
+                to.path("actionId").asText(""),
+                to.path("ref").path("actionId").asText(""));
+        if (!"surface.open".equals(actionId)) {
+            return null;
+        }
+        JsonNode payload = to.path("payload");
+        if (!(payload instanceof ObjectNode)) {
+            payload = to.path("ref").path("payload");
+        }
+        return payload instanceof ObjectNode payloadObject ? payloadObject : null;
+    }
+
+    private boolean alignInteractionPolicy(ObjectNode binding, String distinctBy) {
+        if (!(binding.path("policy") instanceof ObjectNode policy)
+                || distinctBy == null
+                || distinctBy.isBlank()
+                || distinctBy.equals(policy.path("distinctBy").asText(""))) {
+            return false;
+        }
+        policy.put("distinctBy", distinctBy);
+        return true;
+    }
+
+    private boolean reconcileTemporalRangeCondition(ObjectNode binding, String dataPath) {
+        String startPath = dataPath + ".start";
+        String endPath = dataPath + ".end";
+        JsonNode current = binding.path("condition");
+        ArrayNode clauses = objectMapper.createArrayNode();
+        if (current.path("and").isArray()) {
+            current.path("and").forEach(clause -> clauses.add(clause.deepCopy()));
+        } else if (!current.isMissingNode() && !current.isNull()) {
+            clauses.add(current.deepCopy());
+        }
+        boolean hasStart = containsTemporalBoundaryClause(clauses, startPath);
+        boolean hasEnd = containsTemporalBoundaryClause(clauses, endPath);
+        if (hasStart && hasEnd && current.path("and").isArray()) {
+            return false;
+        }
+        if (!hasStart) {
+            clauses.add(temporalBoundaryCondition(startPath));
+        }
+        if (!hasEnd) {
+            clauses.add(temporalBoundaryCondition(endPath));
+        }
+        binding.set("condition", objectMapper.createObjectNode().set("and", clauses));
+        return true;
+    }
+
+    private ObjectNode temporalBoundaryCondition(String path) {
+        ObjectNode truthy = objectMapper.createObjectNode();
+        truthy.set("!!", objectMapper.createObjectNode().put("var", path));
+        return truthy;
+    }
+
+    private boolean containsTemporalBoundaryClause(ArrayNode clauses, String path) {
+        for (JsonNode clause : clauses) {
+            if (path.equals(clause.path("!!").path("var").asText(""))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean reconcilePointQueryContextTransform(
+            ObjectNode binding,
+            ChartInteractionProjection projection) {
+        ObjectNode template = bindingTransformTemplate(binding);
+        if (template == null) {
+            return false;
+        }
+        ObjectNode filters = template.path("filters") instanceof ObjectNode existing
+                ? existing
+                : template.putObject("filters");
+        boolean changed = removeInferredInteractionFields(filters, projection);
+        JsonNode nextValue = pointInteractionTemplateValue(projection);
+        if (!nextValue.equals(filters.path(projection.targetField()))) {
+            filters.set(projection.targetField(), nextValue);
+            changed = true;
+        }
+        return changed;
+    }
+
+    private boolean reconcileCrossFilterQueryContextTransform(
+            ObjectNode binding,
+            ChartInteractionProjection projection) {
+        ObjectNode template = bindingTransformTemplate(binding);
+        if (template == null) {
+            return false;
+        }
+        JsonNode existingFilters = template.path("filters");
+        ObjectNode filters;
+        boolean changed = false;
+        if (existingFilters instanceof ObjectNode existing) {
+            filters = existing;
+        } else if ("${payload.filters}".equals(existingFilters.asText(""))) {
+            filters = objectMapper.createObjectNode();
+            for (String targetField : projection.crossFilterTargetFields()) {
+                filters.put(targetField, "${payload.filters." + targetField + "}");
+            }
+            template.set("filters", filters);
+            changed = true;
+        } else if (existingFilters.isMissingNode() || existingFilters.isNull()) {
+            filters = template.putObject("filters");
+            changed = true;
+        } else {
+            return false;
+        }
+        changed = removeInferredInteractionFields(filters, projection) || changed;
+        JsonNode nextValue = crossFilterInteractionTemplateValue(projection);
+        if (!nextValue.equals(filters.path(projection.targetField()))) {
+            filters.set(projection.targetField(), nextValue);
+            changed = true;
+        }
+        return changed;
+    }
+
+    private ObjectNode bindingTransformTemplate(ObjectNode binding) {
+        JsonNode transform = binding.path("transform");
+        if (transform.path("template") instanceof ObjectNode directTemplate) {
+            return directTemplate;
+        }
+        JsonNode steps = transform.path("steps");
+        if (steps.isArray()) {
+            for (JsonNode step : steps) {
+                JsonNode template = step.path("config").path("template");
+                if (template instanceof ObjectNode objectNode) {
+                    return objectNode;
+                }
+            }
+        }
+        return null;
+    }
+
+    private JsonNode pointInteractionTemplateValue(ChartInteractionProjection projection) {
+        if (projection.temporalRange()) {
+            return interactionTemplateArray("payload.data.start", "payload.data.end");
+        }
+        return interactionTemplateValue(projection.pointValuePath(), projection.targetMultiple());
+    }
+
+    private JsonNode crossFilterInteractionTemplateValue(ChartInteractionProjection projection) {
+        if (projection.temporalRange()) {
+            return interactionTemplateArray("payload.source.data.start", "payload.source.data.end");
+        }
+        return interactionTemplateValue(
+                "payload.filters." + projection.targetField(),
+                projection.targetMultiple());
+    }
+
+    private JsonNode interactionTemplateValue(String path, boolean multiple) {
+        String expression = "${" + path + "}";
+        if (!multiple) {
+            return objectMapper.getNodeFactory().textNode(expression);
+        }
+        return interactionTemplateArray(path);
+    }
+
+    private ArrayNode interactionTemplateArray(String... paths) {
+        ArrayNode values = objectMapper.createArrayNode();
+        for (String path : paths) {
+            values.add("${" + path + "}");
+        }
+        return values;
+    }
+
+    private boolean reconcileSurfaceBindings(
+            ObjectNode surfacePayload,
+            ChartInteractionProjection projection) {
+        JsonNode bindings = surfacePayload.path("bindings");
+        if (!bindings.isArray()) {
+            return false;
+        }
+        boolean changed = false;
+        for (JsonNode binding : bindings) {
+            if (!(binding instanceof ObjectNode bindingObject)) {
+                continue;
+            }
+            String targetPath = bindingObject.path("to").asText("");
+            int separator = targetPath.lastIndexOf('.');
+            if (separator < 0) {
+                continue;
+            }
+            String targetField = targetPath.substring(separator + 1);
+            if (!isInteractionAxisField(targetField, projection)
+                    && !normalize(targetField).equals(normalize(projection.targetField()))) {
+                continue;
+            }
+            String nextTargetPath = targetPath.substring(0, separator + 1) + projection.targetField();
+            if (!nextTargetPath.equals(targetPath)) {
+                bindingObject.put("to", nextTargetPath);
+                changed = true;
+            }
+            if (projection.targetMultiple()) {
+                JsonNode nextValue = pointInteractionTemplateValue(projection);
+                if (!"template".equals(bindingObject.path("mode").asText(""))
+                        || !nextValue.equals(bindingObject.path("value"))
+                        || bindingObject.has("from")) {
+                    bindingObject.remove("from");
+                    bindingObject.put("mode", "template");
+                    bindingObject.set("value", nextValue);
+                    changed = true;
+                }
+            } else if (!projection.pointValuePath().equals(bindingObject.path("from").asText(""))
+                    || bindingObject.has("mode")
+                    || bindingObject.has("value")) {
+                bindingObject.put("from", projection.pointValuePath());
+                bindingObject.remove(List.of("mode", "value"));
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private boolean removeInferredInteractionFields(
+            ObjectNode filters,
+            ChartInteractionProjection projection) {
+        List<String> fieldsToRemove = new ArrayList<>();
+        filters.fieldNames().forEachRemaining(field -> {
+            if (isInteractionAxisField(field, projection)
+                    && !normalize(field).equals(normalize(projection.targetField()))) {
+                fieldsToRemove.add(field);
+            }
+        });
+        if (fieldsToRemove.isEmpty()) {
+            return false;
+        }
+        filters.remove(fieldsToRemove);
+        return true;
+    }
+
+    private boolean reconcileItemTemplateFields(
+            JsonNode node,
+            ChartInteractionProjection projection) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return false;
+        }
+        boolean changed = false;
+        if (node instanceof ObjectNode objectNode) {
+            JsonNode expression = objectNode.path("expr");
+            if (expression.isTextual()) {
+                String current = expression.asText("");
+                for (String legacyField : projection.axisFields()) {
+                    if (normalize(legacyField).equals(normalize(projection.displayField()))) {
+                        continue;
+                    }
+                    String expected = "${item." + legacyField + "}";
+                    if (expected.equals(current)) {
+                        objectNode.put("expr", "${item." + projection.displayField() + "}");
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            var fields = objectNode.fields();
+            while (fields.hasNext()) {
+                var entry = fields.next();
+                changed = reconcileItemTemplateFields(entry.getValue(), projection) || changed;
+            }
+        } else if (node.isArray()) {
+            for (JsonNode item : node) {
+                changed = reconcileItemTemplateFields(item, projection) || changed;
+            }
+        }
+        return changed;
+    }
+
+    private boolean isInferredInteractionTarget(
+            String source,
+            String target,
+            ChartInteractionProjection projection) {
+        return normalize(source).equals(normalize(target))
+                || isInteractionAxisField(target, projection);
+    }
+
+    private boolean isInteractionAxisField(
+            String field,
+            ChartInteractionProjection projection) {
+        if (field == null || field.isBlank() || projection == null) {
+            return false;
+        }
+        String normalized = normalize(field);
+        if (normalized.equals(normalize(projection.sourceField()))
+                || normalized.equals(normalize(projection.displayField()))) {
+            return true;
+        }
+        return projection.axisFields().stream()
+                .map(this::normalize)
+                .anyMatch(normalized::equals);
+    }
+
+    private boolean isPraxisStatsChart(ObjectNode widget) {
+        return widget != null
+                && "praxis-chart".equals(widget.path("componentId").asText(""))
+                && "praxis.stats".equals(widget.path("inputs").path("config")
+                        .path("dataSource").path("query").path("sourceKind").asText(""));
+    }
+
+    private int countPraxisStatsCharts(ObjectNode uiCompositionPlan) {
+        int count = 0;
+        JsonNode widgets = uiCompositionPlan.path("widgets");
+        if (widgets.isArray()) {
+            for (JsonNode widget : widgets) {
+                if (widget instanceof ObjectNode widgetObject && isPraxisStatsChart(widgetObject)) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    private List<StatsCapabilityFieldDescriptor> statsCapabilityFields(JsonNode capabilities) {
+        JsonNode root = capabilities == null ? MissingNode.getInstance() : capabilities;
+        if (root.path("data").path("stats").isObject()) {
+            root = root.path("data");
+        }
+        JsonNode fields = root.path("stats").path("fields");
+        if (!fields.isArray()) {
+            return List.of();
+        }
+        List<StatsCapabilityFieldDescriptor> result = new ArrayList<>();
+        for (JsonNode field : fields) {
+            String fieldName = field.path("field").asText("").trim();
+            if (fieldName.isBlank()) {
+                continue;
+            }
+            result.add(new StatsCapabilityFieldDescriptor(
+                    fieldName,
+                    field.path("label").asText("").trim(),
+                    normalizedTextValues(field.path("metrics")),
+                    normalizedTextValues(field.path("modes")),
+                    field.path("groupByEligible").asBoolean(false),
+                    field.path("timeSeriesEligible").asBoolean(false),
+                    field.path("distributionTermsEligible").asBoolean(false),
+                    field.path("distributionHistogramEligible").asBoolean(false),
+                    field.path("metricFieldEligible").asBoolean(false),
+                    field.path("keyAndLabelDistinct").asBoolean(false)));
+        }
+        return List.copyOf(result);
+    }
+
+    private Set<String> normalizedTextValues(JsonNode values) {
+        Set<String> result = new LinkedHashSet<>();
+        if (values != null && values.isArray()) {
+            for (JsonNode value : values) {
+                String normalized = normalize(value.asText("")).replace('_', '-');
+                if (!normalized.isBlank()) {
+                    result.add(normalized);
+                }
+            }
+        }
+        return Set.copyOf(result);
+    }
+
+    private Optional<StatsCapabilityFieldDescriptor> resolveStatsDimensionCapability(
+            ObjectNode semanticAxis,
+            String requestedExecutionField,
+            String operation,
+            List<StatsCapabilityFieldDescriptor> fields) {
+        String requested = normalize(requestedExecutionField);
+        Optional<StatsCapabilityFieldDescriptor> exactRequested = fields.stream()
+                .filter(field -> eligibleStatsDimension(field, operation))
+                .filter(field -> normalize(field.field()).equals(requested))
+                .findFirst();
+        if (exactRequested.isPresent()) {
+            return exactRequested;
+        }
+        String semanticField = normalize(semanticAxis.path("field").asText(""));
+        Optional<StatsCapabilityFieldDescriptor> exactSemantic = fields.stream()
+                .filter(field -> eligibleStatsDimension(field, operation))
+                .filter(field -> normalize(field.field()).equals(semanticField))
+                .findFirst();
+        if (exactSemantic.isPresent()) {
+            return exactSemantic;
+        }
+        List<StatsCapabilityFieldDescriptor> eligible = fields.stream()
+                .filter(field -> eligibleStatsDimension(field, operation))
+                .toList();
+        int bestScore = 0;
+        StatsCapabilityFieldDescriptor best = null;
+        boolean ambiguous = false;
+        for (StatsCapabilityFieldDescriptor field : eligible) {
+            int score = statsCapabilityMatchScore(semanticAxis, field);
+            if (score > bestScore) {
+                bestScore = score;
+                best = field;
+                ambiguous = false;
+            } else if (score > 0 && score == bestScore) {
+                ambiguous = true;
+            }
+        }
+        return !ambiguous && best != null && bestScore >= 4 ? Optional.of(best) : Optional.empty();
+    }
+
+    private int statsCapabilityMatchScore(
+            ObjectNode semanticAxis,
+            StatsCapabilityFieldDescriptor capability) {
+        String axisLabel = normalize(semanticAxis.path("label").asText(""));
+        String capabilityLabel = normalize(capability.label());
+        int score = !axisLabel.isBlank() && axisLabel.equals(capabilityLabel) ? 12 : 0;
+        Set<String> axisTokens = semanticAxisTokens(semanticAxis);
+        Set<String> capabilityTokens = new LinkedHashSet<>(tokens(capability.field()));
+        capabilityTokens.addAll(tokens(capability.label()));
+        for (String token : axisTokens) {
+            if (capabilityTokens.contains(token)) {
+                score += 2;
+            }
+        }
+        return score;
+    }
+
+    private boolean eligibleStatsDimension(
+            StatsCapabilityFieldDescriptor field,
+            String operation) {
+        String normalized = normalize(operation).replace('_', '-');
+        return switch (normalized) {
+            case "timeseries", "time-series" -> field.timeSeriesEligible()
+                    || field.modes().contains("time-series");
+            case "distribution" -> field.distributionTermsEligible()
+                    || field.distributionHistogramEligible()
+                    || field.modes().contains("distribution-terms")
+                    || field.modes().contains("distribution-histogram");
+            default -> field.groupByEligible() || field.modes().contains("group-by");
+        };
+    }
+
+    private boolean alignStatsMetricCapability(
+            ObjectNode config,
+            List<StatsCapabilityFieldDescriptor> capabilityFields) {
+        ObjectNode query = config.path("dataSource").path("query") instanceof ObjectNode value ? value : null;
+        ObjectNode statsMetric = query != null && query.path("statsRequest").path("metric") instanceof ObjectNode value
+                ? value
+                : null;
+        if (query == null || statsMetric == null) {
+            return false;
+        }
+        String operation = normalize(statsMetric.path("operation").asText(""));
+        if ("count".equals(operation)) {
+            statsMetric.remove("field");
+            statsMetric.put("alias", "total");
+            JsonNode metrics = query.path("metrics");
+            if (metrics.isArray()) {
+                for (JsonNode metric : metrics) {
+                    if (metric instanceof ObjectNode metricObject
+                            && "count".equals(normalize(metricObject.path("aggregation").asText("")))) {
+                        metricObject.remove("field");
+                        metricObject.put("alias", "total");
+                    }
+                }
+            }
+            return true;
+        }
+        String requestedField = statsMetric.path("field").asText("");
+        Optional<StatsCapabilityFieldDescriptor> metricCapability = capabilityFields.stream()
+                .filter(StatsCapabilityFieldDescriptor::metricFieldEligible)
+                .filter(field -> normalize(field.field()).equals(normalize(requestedField)))
+                .filter(field -> field.metrics().contains(operation))
+                .findFirst();
+        if (metricCapability.isEmpty()) {
+            return false;
+        }
+        String canonicalField = metricCapability.get().field();
+        statsMetric.put("field", canonicalField);
+        JsonNode metrics = query.path("metrics");
+        if (metrics.isArray()) {
+            for (JsonNode metric : metrics) {
+                if (metric instanceof ObjectNode metricObject
+                        && normalize(metricObject.path("aggregation").asText("")).equals(operation)) {
+                    metricObject.put("field", canonicalField);
+                }
+            }
+        }
+        return true;
+    }
+
+    private void alignStatsExecutionField(
+            ObjectNode query,
+            ObjectNode statsRequest,
+            StatsCapabilityFieldDescriptor capability) {
+        statsRequest.put("field", capability.field());
+        JsonNode dimensions = query.path("dimensions");
+        if (dimensions instanceof ArrayNode dimensionArray) {
+            dimensionArray.removeAll();
+            dimensionArray.add(capability.field());
+        }
+    }
+
+    private void markStatsAxesUnsupported(
+            ObjectNode uiCompositionPlan,
+            String status,
+            List<String> warnings) {
+        if (uiCompositionPlan == null) {
+            return;
+        }
+        JsonNode widgets = uiCompositionPlan.path("widgets");
+        if (widgets.isArray()) {
+            for (JsonNode widget : widgets) {
+                if (widget instanceof ObjectNode widgetObject && isPraxisStatsChart(widgetObject)) {
+                    JsonNode axis = widgetObject.path("inputs").path("config").path("semanticAxis");
+                    markStatsAxisUnsupported(
+                            uiCompositionPlan,
+                            axis instanceof ObjectNode axisObject ? axisObject : null,
+                            status);
+                }
+            }
+        }
+        addWarningOnce(warnings, "semantic-axis-stats-capability-verification-" + status);
+    }
+
+    private void markStatsAxisUnsupported(
+            ObjectNode uiCompositionPlan,
+            ObjectNode semanticAxis,
+            String status) {
+        if (semanticAxis == null) {
+            return;
+        }
+        semanticAxis.put("statsVerified", false);
+        semanticAxis.put("statsProbeStatus", status);
+        updateDiagnosticStatsAxis(uiCompositionPlan, semanticAxis, null, null, false, status);
+    }
+
+    private void markStatsAxisVerified(
+            ObjectNode uiCompositionPlan,
+            ObjectNode semanticAxis,
+            StatsCapabilityFieldDescriptor capability,
+            ResourceCapabilitiesFetchResult result) {
+        semanticAxis.put("statsVerified", true);
+        semanticAxis.put("statsProbeStatus", "verified");
+        semanticAxis.put("statsExecutionField", capability.field());
+        ObjectNode evidence = semanticAxis.putObject("statsEvidence");
+        evidence.put("source", "resource.capabilities");
+        evidence.put("endpointUrl", value(result == null ? null : result.getEndpointUrl()));
+        evidence.put("keyAndLabelDistinct", capability.keyAndLabelDistinct());
+        updateDiagnosticStatsAxis(uiCompositionPlan, semanticAxis, capability, result, true, "verified");
+    }
+
+    private void updateDiagnosticStatsAxis(
+            ObjectNode uiCompositionPlan,
+            ObjectNode semanticAxis,
+            StatsCapabilityFieldDescriptor capability,
+            ResourceCapabilitiesFetchResult result,
+            boolean verified,
+            String status) {
+        JsonNode axes = uiCompositionPlan.path("diagnostics").path("semanticAxes");
+        if (!axes.isArray()) {
+            return;
+        }
+        String field = normalize(semanticAxis.path("field").asText(""));
+        for (JsonNode axis : axes) {
+            if (!(axis instanceof ObjectNode axisObject)
+                    || !normalize(axisObject.path("field").asText("")).equals(field)) {
+                continue;
+            }
+            axisObject.put("statsVerified", verified);
+            axisObject.put("statsProbeStatus", status);
+            if (capability != null) {
+                axisObject.put("statsExecutionField", capability.field());
+                ObjectNode evidence = axisObject.putObject("statsEvidence");
+                evidence.put("source", "resource.capabilities");
+                evidence.put("endpointUrl", value(result == null ? null : result.getEndpointUrl()));
+                evidence.put("keyAndLabelDistinct", capability.keyAndLabelDistinct());
+            }
+        }
+    }
+
+    private void markResourceStatsGrounding(
+            ObjectNode uiCompositionPlan,
+            String resourcePath,
+            ResourceCapabilitiesFetchResult result,
+            int fieldCount,
+            int groundedChartCount,
+            int chartCount) {
+        ObjectNode diagnostics = uiCompositionPlan.path("diagnostics") instanceof ObjectNode existing
+                ? existing
+                : uiCompositionPlan.putObject("diagnostics");
+        ObjectNode grounding = diagnostics.putObject("resourceStatsGrounding");
+        grounding.put("verified", chartCount > 0 && groundedChartCount == chartCount);
+        grounding.put("source", "resource.capabilities");
+        grounding.put("resourcePath", resourcePath);
+        grounding.put("endpointUrl", value(result == null ? null : result.getEndpointUrl()));
+        grounding.put("fieldCount", Math.max(0, fieldCount));
+        grounding.put("chartCount", Math.max(0, chartCount));
+        grounding.put("groundedChartCount", Math.max(0, groundedChartCount));
     }
 
     private AiSchemaContext schemaContext(AgenticAuthoringCandidate candidate, JsonNode uiCompositionPlan) {
@@ -1722,9 +2899,64 @@ public class AgenticAuthoringPreviewService {
                 "",
                 false,
                 "",
+                false,
+                false,
                 tokens(field),
                 tokens(field),
                 Set.of());
+    }
+
+    private Optional<SchemaFieldDescriptor> preferredTemporalRangeFilterField(
+            SchemaFieldDescriptor requestedField,
+            Map<String, SchemaFieldDescriptor> schemaFields) {
+        if (requestedField == null || schemaFields == null || schemaFields.isEmpty()) {
+            return Optional.empty();
+        }
+        Set<String> requestedTokens = new LinkedHashSet<>();
+        requestedTokens.addAll(requestedField.fieldTokens());
+        requestedTokens.addAll(requestedField.labelTokens());
+        requestedTokens.addAll(requestedField.descriptionTokens());
+        SchemaFieldDescriptor best = null;
+        int bestScore = 0;
+        boolean ambiguous = false;
+        for (SchemaFieldDescriptor candidate : schemaFields.values()) {
+            if (!isTemporalRangeFilterField(candidate)) {
+                continue;
+            }
+            int score = semanticMatchScore(requestedTokens, candidate);
+            if (score < 6 && !temporalRangeStemMatches(requestedField, candidate)) {
+                continue;
+            }
+            if (score > bestScore) {
+                best = candidate;
+                bestScore = score;
+                ambiguous = false;
+            } else if (score > 0 && score == bestScore) {
+                ambiguous = true;
+            }
+        }
+        return best != null && bestScore >= 3 && !ambiguous
+                ? Optional.of(best)
+                : Optional.empty();
+    }
+
+    private boolean temporalRangeStemMatches(
+            SchemaFieldDescriptor requestedField,
+            SchemaFieldDescriptor candidate) {
+        String requestedName = normalize(requestedField.name()).replaceAll("[^a-z0-9]", "");
+        String candidateName = normalize(candidate.name()).replaceAll("[^a-z0-9]", "");
+        return !requestedName.isBlank()
+                && (candidateName.equals(requestedName)
+                || candidateName.startsWith(requestedName + "between")
+                || candidateName.startsWith(requestedName + "range"));
+    }
+
+    private boolean isTemporalRangeFilterField(SchemaFieldDescriptor field) {
+        if (field == null || !"array".equals(normalize(field.type()))) {
+            return false;
+        }
+        String controlType = normalize(field.controlType());
+        return containsAny(controlType, "date-range", "date_range", "daterange", "date range");
     }
 
     private Optional<SchemaFieldDescriptor> preferredFilterInputField(
@@ -1759,7 +2991,8 @@ public class AgenticAuthoringPreviewService {
             return false;
         }
         String controlType = normalize(field.controlType());
-        return field.multiple()
+        return isTemporalRangeFilterField(field)
+                || field.multiple()
                 || field.hasEnum()
                 || !field.endpoint().isBlank()
                 || containsAny(controlType, "select", "autocomplete", "radio");
@@ -1883,6 +3116,11 @@ public class AgenticAuthoringPreviewService {
             for (JsonNode item : series) {
                 if (item instanceof ObjectNode seriesObject) {
                     seriesObject.put("categoryField", field.name());
+                    JsonNode metric = seriesObject.path("metric");
+                    if (metric instanceof ObjectNode metricObject
+                            && "count".equals(normalize(metricObject.path("aggregation").asText("")))) {
+                        metricObject.put("dimensionField", field.name());
+                    }
                 }
             }
         }
@@ -2451,6 +3689,8 @@ public class AgenticAuthoringPreviewService {
                 xUi.path("controlType").asText(""),
                 xUi.path("multiple").asBoolean(false),
                 xUi.path("endpoint").asText(""),
+                xUi.path("hidden").asBoolean(false),
+                xUi.path("tableHidden").asBoolean(false),
                 tokens(field),
                 tokens(label),
                 tokens(description));
@@ -2491,6 +3731,24 @@ public class AgenticAuthoringPreviewService {
                 continue;
             }
             if (!axis.path("schemaVerified").asBoolean(false)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsUnverifiedStatsAxes(JsonNode uiCompositionPlan) {
+        JsonNode axes = uiCompositionPlan == null
+                ? MissingNode.getInstance()
+                : uiCompositionPlan.path("diagnostics").path("semanticAxes");
+        if (!axes.isArray()) {
+            return false;
+        }
+        for (JsonNode axis : axes) {
+            if (axis.path("materialized").isBoolean() && !axis.path("materialized").asBoolean()) {
+                continue;
+            }
+            if (axis.path("statsVerified").isBoolean() && !axis.path("statsVerified").asBoolean()) {
                 return true;
             }
         }
@@ -3316,9 +4574,48 @@ public class AgenticAuthoringPreviewService {
             String controlType,
             boolean multiple,
             String endpoint,
+            boolean hidden,
+            boolean tableHidden,
             Set<String> fieldTokens,
             Set<String> labelTokens,
             Set<String> descriptionTokens) {
+    }
+
+    private record StatsCapabilityFieldDescriptor(
+            String field,
+            String label,
+            Set<String> metrics,
+            Set<String> modes,
+            boolean groupByEligible,
+            boolean timeSeriesEligible,
+            boolean distributionTermsEligible,
+            boolean distributionHistogramEligible,
+            boolean metricFieldEligible,
+            boolean keyAndLabelDistinct) {
+    }
+
+    private enum ChartInteractionValueShape {
+        SCALAR,
+        SINGLETON_ARRAY,
+        TEMPORAL_RANGE
+    }
+
+    private record ChartInteractionProjection(
+            String displayField,
+            String sourceField,
+            String targetField,
+            ChartInteractionValueShape valueShape,
+            String pointValuePath,
+            Set<String> axisFields,
+            Set<String> crossFilterTargetFields) {
+
+        boolean targetMultiple() {
+            return valueShape != ChartInteractionValueShape.SCALAR;
+        }
+
+        boolean temporalRange() {
+            return valueShape == ChartInteractionValueShape.TEMPORAL_RANGE;
+        }
     }
 
     private record SemanticAxisAssistantSummary(

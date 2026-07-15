@@ -446,7 +446,30 @@ public class SpringAiOpenAiService implements AiProvider {
         if (!supportsCompactReasoningEffort(modelName) || maxTokens > 2048) {
             return;
         }
-        payload.put("reasoning_effort", "low");
+        payload.put("reasoning_effort", supportsNoReasoningEffort(modelName) ? "none" : "low");
+    }
+
+    private boolean supportsNoReasoningEffort(String modelName) {
+        if (modelName == null) {
+            return false;
+        }
+        String normalized = modelName.trim().toLowerCase();
+        String versionPrefix = "gpt-5.";
+        if (!normalized.startsWith(versionPrefix)) {
+            return false;
+        }
+        int end = versionPrefix.length();
+        while (end < normalized.length() && Character.isDigit(normalized.charAt(end))) {
+            end++;
+        }
+        if (end == versionPrefix.length()) {
+            return false;
+        }
+        try {
+            return Integer.parseInt(normalized.substring(versionPrefix.length(), end)) >= 1;
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
     }
 
     private boolean requiresMaxCompletionTokens(String modelName) {

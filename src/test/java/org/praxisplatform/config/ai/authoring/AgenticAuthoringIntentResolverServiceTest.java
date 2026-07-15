@@ -483,6 +483,188 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void operationalOverviewFocusKeepsPrimaryEntityWhenSecondaryConceptsMentionChartsAndMetrics() {
+        AgenticAuthoringCandidate employee = withEvidence(withEvidence(
+                candidateWithEvidence(
+                        "/api/human-resources/funcionarios",
+                        0.61d,
+                        List.of("funcionarios", "colaboradores", "cargo", "departamento", "detalhes")),
+                "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        AgenticAuthoringCandidate payrollAnalytics = withEvidence(withEvidence(
+                candidateWithEvidence(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        0.67d,
+                        List.of("analytics", "folha", "pagamento", "cargo", "departamento", "graficos", "metricas")),
+                "tool-search-api-resources"),
+                "semantic-role:analytics-projection");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(requestWithContextHints(
+                "quero um painel 360 dos funcionarios com graficos por departamento e cargo",
+                "openai",
+                resourceDiscoveryContext(
+                        "dashboard",
+                        List.of(payrollAnalytics, employee),
+                        new AgenticAuthoringResourceSearchFocus(
+                                "funcionarios",
+                                List.of("cargo", "departamento", "graficos", "metricas", "detalhes"),
+                                "dashboard 360 com filtros e graficos por departamento e cargo e tabela de detalhes",
+                                "low",
+                                "The primary business entity is the employee registry; charts support its overview."))));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/funcionarios");
+    }
+
+    @Test
+    void analyticalEmployeeDashboardKeepsPrimaryEntityAheadOfUnrelatedPayrollProjection() {
+        AgenticAuthoringCandidate employee = withEvidence(withEvidence(
+                candidateWithEvidence(
+                        "/api/human-resources/funcionarios",
+                        0.61d,
+                        List.of("funcionarios", "cargo", "departamento", "detalhes")),
+                "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        AgenticAuthoringCandidate payrollAnalytics = withEvidence(withEvidence(
+                candidateWithEvidence(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        0.71d,
+                        List.of("analytics", "folha", "pagamento", "cargo", "departamento", "metricas")),
+                "tool-search-api-resources"),
+                "semantic-role:analytics-projection");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(requestWithContextHints(
+                "quero um dashboard analitico de funcionarios por departamento e cargo",
+                "openai",
+                resourceDiscoveryContext(
+                        "dashboard",
+                        List.of(payrollAnalytics, employee),
+                        new AgenticAuthoringResourceSearchFocus(
+                                "funcionarios",
+                                List.of("departamento", "cargo", "distribuicao", "metricas"),
+                                "dashboard analitico com distribuicao por departamento e cargo",
+                                "low",
+                                "The employee registry is the primary subject; analytics are its presentation."))));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/funcionarios");
+    }
+
+    @Test
+    void explicitPayrollPrimaryEntityStillSelectsPayrollAnalyticsProjection() {
+        AgenticAuthoringCandidate employee = withEvidence(withEvidence(
+                candidateWithEvidence(
+                        "/api/human-resources/funcionarios",
+                        0.68d,
+                        List.of("funcionarios", "cargo", "departamento")),
+                "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        AgenticAuthoringCandidate payrollAnalytics = withEvidence(withEvidence(
+                candidateWithEvidence(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        0.62d,
+                        List.of("folha", "pagamento", "salario", "departamento", "metricas")),
+                "tool-search-api-resources"),
+                "semantic-role:analytics-projection");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(requestWithContextHints(
+                "quero um dashboard analitico de folha de pagamento por departamento",
+                "openai",
+                resourceDiscoveryContext(
+                        "dashboard",
+                        List.of(employee, payrollAnalytics),
+                        new AgenticAuthoringResourceSearchFocus(
+                                "folha de pagamento",
+                                List.of("departamento", "salario", "custos", "metricas"),
+                                "dashboard analitico de folha de pagamento por departamento",
+                                "low",
+                                "Payroll is the explicit primary business entity."))));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+    }
+
+    @Test
+    void individualProfile360RemainsAProfileProjection() {
+        AgenticAuthoringCandidate employee = withEvidence(withEvidence(
+                candidateWithEvidence(
+                        "/api/human-resources/funcionarios",
+                        0.65d,
+                        List.of("funcionarios", "nome", "cargo", "departamento")),
+                "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        AgenticAuthoringCandidate profile = withEvidence(withEvidence(
+                candidateWithEvidence(
+                        "/api/human-resources/vw-perfil-heroi",
+                        0.63d,
+                        List.of("perfil", "360", "individual", "funcionario", "cargo")),
+                "tool-search-api-resources"),
+                "semantic-role:profile-projection");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(requestWithContextHints(
+                "quero uma tela de perfil 360 individual do funcionario",
+                "openai",
+                resourceDiscoveryContext(
+                        "page",
+                        List.of(employee, profile),
+                        new AgenticAuthoringResourceSearchFocus(
+                                "funcionarios",
+                                List.of("nome", "cargo", "departamento", "resumo individual"),
+                                "perfil 360 individual do funcionario",
+                                "low",
+                                "The requested surface is an individual employee profile."))));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-perfil-heroi");
+    }
+
+    @Test
+    void profileFocusDoesNotPromotePayrollWhenRawPromptAlsoMentionsAChart() {
+        AgenticAuthoringCandidate employee = withEvidence(withEvidence(
+                candidateWithEvidence(
+                        "/api/human-resources/funcionarios",
+                        0.59d,
+                        List.of("funcionarios", "nome", "cargo", "departamento")),
+                "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        AgenticAuthoringCandidate profile = withEvidence(withEvidence(
+                candidateWithEvidence(
+                        "/api/human-resources/vw-perfil-heroi",
+                        0.60d,
+                        List.of("perfil", "360", "individual", "funcionario", "resumo")),
+                "tool-search-api-resources"),
+                "semantic-role:profile-projection");
+        AgenticAuthoringCandidate payrollAnalytics = withEvidence(withEvidence(
+                candidateWithEvidence(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        0.75d,
+                        List.of("analytics", "folha", "pagamento", "grafico", "departamento")),
+                "tool-search-api-resources"),
+                "semantic-role:analytics-projection");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(requestWithContextHints(
+                "quero um perfil 360 individual do funcionario com um grafico de contexto",
+                "openai",
+                resourceDiscoveryContext(
+                        "page",
+                        List.of(payrollAnalytics, employee, profile),
+                        new AgenticAuthoringResourceSearchFocus(
+                                "funcionarios",
+                                List.of("perfil", "resumo individual", "cargo", "departamento"),
+                                "perfil 360 individual do funcionario",
+                                "low",
+                                "Profile is the governed surface; the chart is only supporting content."))));
+
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-perfil-heroi");
+    }
+
+    @Test
     void concreteDashboardPromptWithResolvedResourceStillConsultsLlmIntent() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
@@ -12930,6 +13112,34 @@ class AgenticAuthoringIntentResolverServiceTest {
 
         assertThat(result.gate().status()).isNotEqualTo("route_required");
         assertThat(result.failureCodes()).doesNotContain("shared-rule-authoring-required");
+    }
+
+    @Test
+    void semanticRawPromptKeepsPriorHistoryButDeduplicatesTheCurrentTransportMessage() {
+        String currentPrompt = "Crie um dashboard de funcionários";
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                currentPrompt,
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                null,
+                null,
+                null,
+                null,
+                null,
+                "session-1",
+                "turn-2",
+                List.of(
+                        new AgenticAuthoringConversationMessage(
+                                "user-1", "user", "Use a fonte de colaboradores", null),
+                        new AgenticAuthoringConversationMessage(
+                                "assistant-1", "assistant", "Quais análises você precisa?", null),
+                        new AgenticAuthoringConversationMessage(
+                                "user-2", "user", "  CRIE   UM dashboard de funcionários  ", null)),
+                null);
+
+        assertThat(service.semanticRawPrompt(request, currentPrompt))
+                .isEqualTo("Crie um dashboard de funcionários Use a fonte de colaboradores");
     }
 
     @Test

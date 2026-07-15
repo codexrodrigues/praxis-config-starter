@@ -21,7 +21,7 @@ import org.springframework.util.StringUtils;
 public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticAuthoringPreIntentToolPlanningService {
 
     private static final Logger log = LoggerFactory.getLogger(AgenticAuthoringLlmPreIntentToolPlanningService.class);
-    private static final int MAX_PLANNING_TOKENS = 320;
+    private static final int MAX_PLANNING_TOKENS = 640;
     private static final int MAX_PLANNER_CONTEXT_ARRAY_ITEMS = 8;
     private static final int MAX_PLANNER_PAGE_WIDGETS = 12;
     private static final int MAX_PLANNER_TEXT_LENGTH = 700;
@@ -107,6 +107,21 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                         tenantId,
                         userId,
                         environment);
+                if (result == null
+                        || !result.isObject()
+                        || !result.path("shouldRetrieveGovernedResources").isBoolean()) {
+                    lastFailure = new IllegalStateException(
+                            "Provider returned invalid structured pre-intent planning output");
+                    if (attempt < providerAttempts) {
+                        log.debug(
+                                "[AgenticAuthoringPreIntentToolPlanning] Retrying provider planning after invalid structured output; attempt={}/{}",
+                                attempt,
+                                providerAttempts);
+                        sleepBeforeRetry();
+                        continue;
+                    }
+                    break;
+                }
                 return toPlan(request, result);
             } catch (RuntimeException ex) {
                 lastFailure = ex;
@@ -138,7 +153,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private AgenticAuthoringPreIntentToolPlanningResult toPlan(
             AgenticAuthoringTurnStreamRequest request,
             JsonNode result) {
-        if (result == null || !result.path("shouldRetrieveGovernedResources").asBoolean(false)) {
+        if (!result.path("shouldRetrieveGovernedResources").asBoolean(false)) {
             return AgenticAuthoringPreIntentToolPlanningResult.skipped("llm-no-tool-requested");
         }
         String retrievalQuery = text(result, "retrievalQuery");
@@ -242,6 +257,17 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Return false only for visual/local/editorial work, existing resourceDiscovery, or no data grounding need.
                 When true, author only retrievalQuery and resourceSearchFocus; do not choose resourcePath, endpoints,
                 configuration, patches, or a user answer.
+                Model resourceSearchFocus in two separate semantic layers. primaryBusinessEntity is the canonical
+                business subject explicitly requested by the user; it must not become the name of a view, projection,
+                visualization, profile, or dashboard merely because that presentation is available. desiredSurface
+                describes presentation and interaction only. A collection-oriented dashboard that filters or groups
+                many records and keeps a detail table remains grounded in the primary business entity, even when its
+                presentation includes charts, metrics, or a 360-degree overview. Select a profile projection only when
+                the user semantically requests an individual or single-record profile. Select another analytical
+                projection only when that projection's business subject, such as payroll, is itself requested.
+                Use artifactKind dashboard when the requested outcome depends on multiple coordinated analytical
+                regions such as filters, KPIs, multiple charts and a detail/list/table surface. Use artifactKind page
+                for general layout or content composition where analytics are not the dominant requested outcome.
                 Context JSON: %s
                 """.formatted(context.toString());
     }
@@ -488,14 +514,19 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         ObjectNode focus = properties.putObject("resourceSearchFocus");
         focus.put("type", "object");
         ObjectNode focusProperties = focus.putObject("properties");
-        nullableString(focusProperties, "primaryBusinessEntity");
+        nullableString(focusProperties, "primaryBusinessEntity")
+                .put("description", "Canonical business subject explicitly requested by the user. Use the entity being governed, filtered, listed, or analyzed; never substitute a UI surface, profile/view name, or related analytical projection.");
         ObjectNode supportingConcepts = focusProperties.putObject("supportingConcepts");
         supportingConcepts.put("type", "array");
         supportingConcepts.putObject("items").put("type", "string");
         supportingConcepts.put("maxItems", 8);
-        nullableString(focusProperties, "desiredSurface");
-        nullableString(focusProperties, "uncertainty");
-        nullableString(focusProperties, "rationale");
+        supportingConcepts.put("description", "Dimensions, fields, filters, groupings, and supporting concepts that refine the primary business entity without replacing it.");
+        nullableString(focusProperties, "desiredSurface")
+                .put("description", "Presentation and interaction requested by the user, such as a collection dashboard with filters, charts, and a detail table, or an explicitly individual profile.");
+        nullableString(focusProperties, "uncertainty")
+                .put("description", "Material semantic ambiguity that remains after separating the business subject from its presentation.");
+        nullableString(focusProperties, "rationale")
+                .put("description", "Short explanation of why the primary business entity is the correct grounding subject and how supporting concepts and desired surface relate to it.");
         focus.putArray("required")
                 .add("primaryBusinessEntity")
                 .add("supportingConcepts")
@@ -514,11 +545,12 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         return root.toString();
     }
 
-    private void nullableString(ObjectNode properties, String name) {
+    private ObjectNode nullableString(ObjectNode properties, String name) {
         ObjectNode node = properties.putObject(name);
         ArrayNode type = node.putArray("type");
         type.add("string");
         type.add("null");
+        return node;
     }
 
     private String text(JsonNode node, String field) {

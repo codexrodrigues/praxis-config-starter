@@ -11,6 +11,8 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
     static final String PRIMARY_COMPONENT_REQUIRED_FAILURE = "semantic-preview-primary-component-required";
     static final String RESOURCE_BINDING_MISMATCH_FAILURE = "semantic-preview-resource-binding-mismatch";
     static final String AXIS_SCHEMA_VERIFICATION_REQUIRED_FAILURE = "semantic-preview-axis-schema-verification-required";
+    static final String AXIS_STATS_CAPABILITY_VERIFICATION_REQUIRED_FAILURE =
+            "semantic-preview-axis-stats-capability-verification-required";
     static final String MATERIALIZATION_MISMATCH_WARNING = "semantic-preview-materialization-mismatch";
 
     private AgenticAuthoringSemanticMaterializationPolicy() {
@@ -51,6 +53,11 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         if (hasUnverifiedSemanticAxes(materialization)) {
             failureCodes.add(AXIS_SCHEMA_VERIFICATION_REQUIRED_FAILURE);
             warnings.add("semantic-axis-schema-verification-pending");
+            warnings.add(MATERIALIZATION_MISMATCH_WARNING);
+        }
+        if (hasUnverifiedStatsAxes(materialization)) {
+            failureCodes.add(AXIS_STATS_CAPABILITY_VERIFICATION_REQUIRED_FAILURE);
+            warnings.add("semantic-axis-stats-capability-verification-pending");
             warnings.add(MATERIALIZATION_MISMATCH_WARNING);
         }
         return new ValidationResult(failureCodes, warnings);
@@ -136,6 +143,24 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
                 continue;
             }
             if (!axis.path("schemaVerified").asBoolean(false)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasUnverifiedStatsAxes(JsonNode materialization) {
+        JsonNode axes = materialization == null
+                ? null
+                : materialization.path("diagnostics").path("semanticAxes");
+        if (axes == null || !axes.isArray()) {
+            return false;
+        }
+        for (JsonNode axis : axes) {
+            if (axis.path("materialized").isBoolean() && !axis.path("materialized").asBoolean()) {
+                continue;
+            }
+            if (axis.path("statsVerified").isBoolean() && !axis.path("statsVerified").asBoolean()) {
                 return true;
             }
         }

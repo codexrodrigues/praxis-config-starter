@@ -17,6 +17,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.praxisplatform.config.dto.AiSchemaContext;
+import org.praxisplatform.config.service.ResourceCapabilitiesFetchResult;
+import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
 import org.praxisplatform.config.service.SchemaFetchResult;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 import org.junit.jupiter.api.Tag;
@@ -40,6 +42,9 @@ class AgenticAuthoringPreviewServiceTest {
 
     @Mock
     private SchemaRetrievalService schemaRetrievalService;
+
+    @Mock
+    private ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -1112,8 +1117,41 @@ class AgenticAuthoringPreviewServiceTest {
         properties.putObject("cargoNome").put("type", "string")
                 .putObject("x-ui").put("label", "Cargo");
         properties.putObject("dataAdmissao").put("type", "string").put("format", "date");
+        ObjectNode filterSchema = objectMapper.createObjectNode();
+        ObjectNode filterProperties = filterSchema.putObject("properties");
+        filterProperties.putObject("departamentoNome").put("type", "string")
+                .putObject("x-ui").put("label", "Departamento");
+        filterProperties.putObject("cargoNome").put("type", "string")
+                .putObject("x-ui").put("label", "Cargo");
+        ObjectNode departmentIds = filterProperties.putObject("departamentoIdsIn");
+        departmentIds.put("type", "array");
+        departmentIds.putObject("x-ui")
+                .put("label", "Departamento")
+                .put("controlType", "async-select")
+                .put("multiple", true)
+                .put("endpoint", "/api/human-resources/departamentos/options/filter");
+        ObjectNode roleIds = filterProperties.putObject("cargoIdsIn");
+        roleIds.put("type", "array");
+        roleIds.putObject("x-ui")
+                .put("label", "Cargo")
+                .put("controlType", "async-select")
+                .put("multiple", true)
+                .put("endpoint", "/api/human-resources/cargos/options/filter");
         when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
-                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    JsonNode resolvedSchema = "request".equals(context.getSchemaType()) ? filterSchema : schema;
+                    return SchemaFetchResult.success(resolvedSchema, "http://localhost/schemas/filtered");
+                });
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                eq("/api/human-resources/funcionarios"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        employeeStatsCapabilities(),
+                        "http://localhost/api/human-resources/funcionarios/capabilities"));
 
         AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
                 planService,
@@ -1121,7 +1159,8 @@ class AgenticAuthoringPreviewServiceTest {
                 objectMapper,
                 List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
                 null,
-                schemaRetrievalService)
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService)
                 .preview(request, "tenant", "user", "local", "http://localhost");
 
         assertThat(result.valid()).isTrue();
@@ -1131,8 +1170,185 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.uiCompositionPlan().path("bindings").toString())
                 .contains("funcionarios-chart-departamentoNome.crossFilter->funcionarios-table.queryContext")
                 .contains("funcionarios-chart-cargoNome.crossFilter->funcionarios-table.queryContext");
+        JsonNode departmentChart = result.uiCompositionPlan().path("widgets").findParents("key").stream()
+                .filter(widget -> "funcionarios-chart-departamentoNome".equals(widget.path("key").asText()))
+                .findFirst()
+                .orElseThrow();
+        JsonNode roleChart = result.uiCompositionPlan().path("widgets").findParents("key").stream()
+                .filter(widget -> "funcionarios-chart-cargoNome".equals(widget.path("key").asText()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(departmentChart.path("inputs").path("config").path("semanticAxis").path("field").asText())
+                .isEqualTo("departamentoNome");
+        assertThat(departmentChart.path("inputs").path("config").path("semanticAxis")
+                .path("statsExecutionField").asText()).isEqualTo("departamento");
+        assertThat(departmentChart.path("inputs").path("config").path("dataSource").path("query")
+                .path("statsRequest").path("field").asText()).isEqualTo("departamento");
+        assertThat(roleChart.path("inputs").path("config").path("dataSource").path("query")
+                .path("statsRequest").path("field").asText()).isEqualTo("cargoNome");
+        assertThat(departmentChart.path("inputs").path("config").path("dataSource").path("query")
+                .path("statsRequest").path("metric").has("field")).isFalse();
+        assertThat(departmentChart.path("inputs").path("config").path("dataSource").path("query")
+                .path("statsRequest").path("metric").path("alias").asText()).isEqualTo("total");
+        assertThat(departmentChart.path("inputs").path("config").path("interactions")
+                .path("eventActions").path("crossFilter").path("mapping").toString())
+                .isEqualTo("{\"key\":\"departamentoIdsIn\"}");
+        assertThat(roleChart.path("inputs").path("config").path("interactions")
+                .path("eventActions").path("crossFilter").path("mapping").toString())
+                .isEqualTo("{\"cargoNome\":\"cargoNome\"}");
+        JsonNode departmentPointLink = findBinding(
+                result.uiCompositionPlan().path("bindings"),
+                "funcionarios-chart-departamentoNome.pointClick->funcionarios-table.queryContext");
+        assertThat(departmentPointLink.path("policy").path("distinctBy").asText())
+                .isEqualTo("payload.data.key");
+        assertThat(departmentPointLink.path("transform").path("template").path("filters")
+                .path("departamentoIdsIn").toString())
+                .isEqualTo("[\"${payload.data.key}\"]");
+        JsonNode departmentCrossFilterLink = findBinding(
+                result.uiCompositionPlan().path("bindings"),
+                "funcionarios-chart-departamentoNome.crossFilter->funcionarios-table.queryContext");
+        assertThat(departmentCrossFilterLink.path("policy").path("distinctBy").asText())
+                .isEqualTo("payload.filters.departamentoIdsIn");
+        assertThat(departmentCrossFilterLink.path("transform").path("template").path("filters")
+                .path("departamentoIdsIn").toString())
+                .isEqualTo("[\"${payload.filters.departamentoIdsIn}\"]");
+        JsonNode departmentSurfaceLink = findBinding(
+                result.uiCompositionPlan().path("bindings"),
+                "funcionarios-chart-departamentoNome.pointClick->surface.open");
+        JsonNode departmentSurfaceBinding = departmentSurfaceLink.path("to").path("payload").path("bindings").path(0);
+        assertThat(departmentSurfaceBinding.path("to").asText())
+                .endsWith("queryContext.filters.departamentoIdsIn");
+        assertThat(departmentSurfaceBinding.path("mode").asText()).isEqualTo("template");
+        assertThat(departmentSurfaceBinding.path("value").toString())
+                .isEqualTo("[\"${payload.data.key}\"]");
+        JsonNode roleSurfaceLink = findBinding(
+                result.uiCompositionPlan().path("bindings"),
+                "funcionarios-chart-cargoNome.pointClick->surface.open");
+        JsonNode roleSurfaceBinding = roleSurfaceLink.path("to").path("payload").path("bindings").path(0);
+        assertThat(roleSurfaceLink.path("policy").path("distinctBy").asText())
+                .isEqualTo("payload.data.cargoNome");
+        assertThat(roleSurfaceBinding.path("from").asText()).isEqualTo("payload.data.cargoNome");
+        assertThat(roleSurfaceBinding.path("to").asText()).endsWith("queryContext.filters.cargoNome");
+        assertThat(result.uiCompositionPlan().toString())
+                .contains("${item.departamentoNome}", "${item.cargoNome}")
+                .doesNotContain("${item.departamento}", "${item.cargo}");
+        assertThat(result.warnings()).contains("semantic-chart-interactions-grounded");
         assertThat(result.uiCompositionPlan().path("diagnostics").path("dashboardBlueprint").path("domainSpecific").asBoolean())
                 .isFalse();
+    }
+
+    @Test
+    void previewReflowsInferredDashboardAfterUnsupportedSchemaAxisPrune() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Quero um painel de funcionarios por departamento e cargo, com graficos e detalhes.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                inferredEmployeeDashboardIntentWithCargoIdEvidence());
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("cargoNome").put("type", "string")
+                .putObject("x-ui").put("label", "Cargo");
+        properties.putObject("departamentoNome").put("type", "string")
+                .putObject("x-ui").put("label", "Departamento");
+        properties.putObject("cargoId").put("type", "integer")
+                .putObject("x-ui").put("label", "Cargo");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                eq("/api/human-resources/funcionarios"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        employeeStatsCapabilities(),
+                        "http://localhost/api/human-resources/funcionarios/capabilities"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings())
+                .as("widgets=%s axes=%s",
+                        result.uiCompositionPlan().path("widgets").findValuesAsText("key"),
+                        result.uiCompositionPlan().path("diagnostics").path("semanticAxes"))
+                .contains(
+                "semantic-chart-group-by-unsupported-field-type",
+                "ui-composition-plan-layout-reflowed-after-widget-prune");
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("key"))
+                .contains("funcionarios-chart-cargoNome", "funcionarios-chart-departamentoNome")
+                .doesNotContain("funcionarios-chart-cargoId");
+
+        JsonNode desktopItems = result.uiCompositionPlan().path("canvas").path("items");
+        assertThat(desktopItems.path("funcionarios-chart-cargoNome").path("colSpan").asInt()).isEqualTo(6);
+        assertThat(desktopItems.path("funcionarios-chart-departamentoNome").path("colSpan").asInt()).isEqualTo(6);
+        assertThat(List.of(
+                desktopItems.path("funcionarios-chart-cargoNome").path("col").asInt(),
+                desktopItems.path("funcionarios-chart-departamentoNome").path("col").asInt()))
+                .containsExactlyInAnyOrder(1, 7);
+
+        JsonNode mobileItems = result.uiCompositionPlan().path("deviceLayouts")
+                .path("mobile").path("canvas").path("items");
+        assertThat(mobileItems.path("funcionarios-list").path("row").asInt()).isEqualTo(17);
+        assertThat(mobileItems.path("funcionarios-table").path("row").asInt()).isEqualTo(23);
+
+        JsonNode tabletItems = result.uiCompositionPlan().path("deviceLayouts")
+                .path("tablet").path("canvas").path("items");
+        assertThat(tabletItems.path("funcionarios-list").path("row").asInt()).isEqualTo(11);
+        assertThat(tabletItems.path("funcionarios-table").path("row").asInt()).isEqualTo(18);
+    }
+
+    @Test
+    void previewFailsClosedWhenStatsDimensionIsNotInResourceCapabilities() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Quero um painel de funcionarios por departamento.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                operationalMonitoringDashboardIntentWithoutVisualizationDecision());
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.putObject("properties").putObject("departamentoNome")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Departamento");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+        ObjectNode unsupported = objectMapper.createObjectNode();
+        unsupported.putObject("stats").putArray("fields").addObject()
+                .put("field", "ativo")
+                .put("label", "Ativo")
+                .put("groupByEligible", true)
+                .putArray("metrics").add("COUNT");
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(anyString(), any(), any(), any(), any()))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        unsupported,
+                        "http://localhost/api/human-resources/funcionarios/capabilities"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes())
+                .contains("semantic-preview-axis-stats-capability-verification-required");
+        assertThat(result.warnings())
+                .contains("semantic-axis-stats-capability-verification-unsupported");
     }
 
     @Test
@@ -1445,7 +1661,9 @@ class AgenticAuthoringPreviewServiceTest {
                 .preview(request, "tenant", "user", "local");
 
         assertThat(result.valid()).isTrue();
-        assertThat(result.warnings()).contains("semantic-chart-group-by-unsupported-field-type");
+        assertThat(result.warnings()).contains(
+                "semantic-chart-group-by-unsupported-field-type",
+                "ui-composition-plan-layout-reflowed-after-widget-prune");
         assertThat(result.uiCompositionPlan().path("widgets").toString())
                 .contains("incidentes-chart-gravidade")
                 .contains("incidentes-chart-responsavel")
@@ -1454,6 +1672,37 @@ class AgenticAuthoringPreviewServiceTest {
                 .doesNotContain("incidentes-chart-andamento");
         assertThat(result.uiCompositionPlan().path("diagnostics").path("semanticAxes").toString())
                 .contains("\"field\":\"andamento\",\"label\":\"Andamento\",\"provenance\":\"llm-authored-semantic-axis\",\"schemaVerified\":false,\"schemaProbeStatus\":\"unsupported\"");
+        JsonNode desktopItems = result.uiCompositionPlan().path("canvas").path("items");
+        assertThat(desktopItems.path("incidentes-chart-gravidade").path("col").asInt()).isEqualTo(1);
+        assertThat(desktopItems.path("incidentes-chart-gravidade").path("colSpan").asInt()).isEqualTo(6);
+        assertThat(desktopItems.path("incidentes-chart-responsavel").path("col").asInt()).isEqualTo(7);
+        assertThat(desktopItems.path("incidentes-chart-responsavel").path("colSpan").asInt()).isEqualTo(6);
+        assertThat(desktopItems.path("incidentes-list").path("row").asInt()).isEqualTo(10);
+
+        JsonNode mobileItems = result.uiCompositionPlan().path("deviceLayouts")
+                .path("mobile").path("canvas").path("items");
+        assertThat(mobileItems.path("incidentes-chart-gravidade").path("row").asInt()).isEqualTo(9);
+        assertThat(mobileItems.path("incidentes-chart-responsavel").path("row").asInt()).isEqualTo(13);
+        assertThat(mobileItems.path("incidentes-list").path("row").asInt()).isEqualTo(17);
+        assertThat(mobileItems.path("incidentes-table").path("row").asInt()).isEqualTo(23);
+
+        JsonNode tabletItems = result.uiCompositionPlan().path("deviceLayouts")
+                .path("tablet").path("canvas").path("items");
+        assertThat(tabletItems.path("incidentes-chart-gravidade").path("row").asInt()).isEqualTo(7);
+        assertThat(tabletItems.path("incidentes-chart-gravidade").path("col").asInt()).isEqualTo(1);
+        assertThat(tabletItems.path("incidentes-chart-responsavel").path("row").asInt()).isEqualTo(7);
+        assertThat(tabletItems.path("incidentes-chart-responsavel").path("col").asInt()).isEqualTo(4);
+        assertThat(tabletItems.path("incidentes-list").path("row").asInt()).isEqualTo(11);
+        assertThat(tabletItems.path("incidentes-table").path("row").asInt()).isEqualTo(18);
+
+        assertThat(result.uiCompositionPlan().path("grouping").toString())
+                .contains("incidentes-chart-gravidade")
+                .contains("incidentes-chart-responsavel")
+                .doesNotContain("incidentes-chart-andamento");
+        assertThat(result.uiCompositionPlan().path("slotAssignments").toString())
+                .contains("\"incidentes-chart-gravidade\":\"primary-chart\"")
+                .contains("\"incidentes-chart-responsavel\":\"secondary-chart-1\"")
+                .doesNotContain("incidentes-chart-andamento");
     }
 
     @Test
@@ -1470,6 +1719,11 @@ class AgenticAuthoringPreviewServiceTest {
         properties.putObject("ano").put("type", "integer");
         properties.putObject("mes").put("type", "integer");
         properties.putObject("salarioLiquido").put("type", "number");
+        properties.putObject("cpf")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "CPF")
+                .put("tableHidden", true);
         when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
                 .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
 
@@ -1486,13 +1740,14 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.uiCompositionPlan().path("diagnostics").path("resourceSchemaGrounding").path("verified").asBoolean())
                 .isTrue();
         assertThat(result.uiCompositionPlan().path("diagnostics").path("resourceSchemaGrounding").path("fieldCount").asInt())
-                .isEqualTo(3);
+                .isEqualTo(4);
         JsonNode columns = result.uiCompositionPlan().path("widgets").path(0).path("inputs").path("config").path("columns");
         assertThat(columns).hasSize(3);
         assertThat(columns.path(0).path("field").asText()).isEqualTo("ano");
         assertThat(columns.path(0).path("type").asText()).isEqualTo("number");
         assertThat(columns.path(2).path("field").asText()).isEqualTo("salarioLiquido");
         assertThat(columns.path(2).path("type").asText()).isEqualTo("number");
+        assertThat(columns.toString()).doesNotContain("cpf");
         assertThat(result.warnings()).contains("table-columns-materialized-from-schema");
         assertThat(result.uiCompositionPlan().path("widgets").toString())
                 .doesNotContain("schemaVerification")
@@ -2479,6 +2734,544 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewGroundsTimeseriesInteractionsAsGuardedTemporalRangeFilters() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie um dashboard da evolucao mensal da folha por competencia com detalhes.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                payrollTimeseriesDashboardIntent());
+        ObjectNode responseSchema = objectMapper.createObjectNode();
+        ObjectNode responseProperties = responseSchema.putObject("properties");
+        responseProperties.putObject("competencia")
+                .put("type", "string")
+                .put("format", "date")
+                .put("description", "Competencia temporal da folha.")
+                .putObject("x-ui")
+                .put("label", "Competencia");
+        responseProperties.putObject("salarioLiquido")
+                .put("type", "number")
+                .put("format", "decimal")
+                .putObject("x-ui")
+                .put("label", "Salario liquido");
+        ObjectNode filterSchema = objectMapper.createObjectNode();
+        ObjectNode competenceRange = filterSchema.putObject("properties")
+                .putObject("competenciaBetween");
+        competenceRange.put("type", "array");
+        competenceRange.put("description", "Intervalo inclusivo da competencia selecionada.");
+        competenceRange.putObject("items")
+                .put("type", "string")
+                .put("format", "date");
+        competenceRange.putObject("x-ui")
+                .put("label", "Competencia")
+                .put("controlType", "dateRange");
+        ((ObjectNode) filterSchema.path("properties"))
+                .putObject("status")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Status");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    if ("request".equals(context.getSchemaType())
+                            && context.getPath().endsWith("/filter")) {
+                        return SchemaFetchResult.success(filterSchema, "http://localhost/schemas/filtered");
+                    }
+                    return SchemaFetchResult.success(responseSchema, "http://localhost/schemas/filtered");
+                });
+
+        AgenticAuthoringGenericUiCompositionPlanProvider genericProvider =
+                new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper);
+        AgenticAuthoringUiCompositionPlanProvider weakTemporalGuardProvider = authoredRequest -> {
+            AgenticAuthoringUiCompositionPlanResult authored = genericProvider.plan(authoredRequest).orElseThrow();
+            JsonNode authoredChart = authored.uiCompositionPlan().path("widgets").findParents("key").stream()
+                    .filter(widget -> "vw-analytics-folha-pagamento-chart-competencia"
+                            .equals(widget.path("key").asText()))
+                    .findFirst()
+                    .orElseThrow();
+            ((ObjectNode) authoredChart.path("inputs").path("config").path("interactions")
+                    .path("eventActions").path("crossFilter").path("mapping"))
+                    .put("status", "status");
+            ObjectNode pointBinding = (ObjectNode) findBinding(
+                    authored.uiCompositionPlan().path("bindings"),
+                    "vw-analytics-folha-pagamento-chart-competencia.pointClick->vw-analytics-folha-pagamento-table.queryContext");
+            ArrayNode alternatives = pointBinding.putObject("condition").putArray("or");
+            alternatives.addObject().putObject("!!").put("var", "payload.data.start");
+            alternatives.addObject().putObject("!!").put("var", "payload.data.end");
+            ObjectNode crossFilterBinding = (ObjectNode) findBinding(
+                    authored.uiCompositionPlan().path("bindings"),
+                    "vw-analytics-folha-pagamento-chart-competencia.crossFilter->vw-analytics-folha-pagamento-table.queryContext");
+            crossFilterBinding.put("condition", false);
+            return java.util.Optional.of(authored);
+        };
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(weakTemporalGuardProvider),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        JsonNode plan = result.uiCompositionPlan();
+        JsonNode chart = plan.path("widgets").findParents("key").stream()
+                .filter(widget -> "vw-analytics-folha-pagamento-chart-competencia"
+                        .equals(widget.path("key").asText()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(chart.path("inputs").path("config").path("dataSource").path("query")
+                .path("statsOperation").asText()).isEqualTo("timeseries");
+        JsonNode crossFilterMapping = chart.path("inputs").path("config").path("interactions")
+                .path("eventActions").path("crossFilter").path("mapping");
+        assertThat(crossFilterMapping.path("start").asText()).isEqualTo("competenciaBetween");
+        assertThat(crossFilterMapping.path("status").asText()).isEqualTo("status");
+
+        JsonNode pointLink = findBinding(
+                plan.path("bindings"),
+                "vw-analytics-folha-pagamento-chart-competencia.pointClick->vw-analytics-folha-pagamento-table.queryContext");
+        assertThat(pointLink.path("policy").path("distinctBy").asText())
+                .isEqualTo("payload.data.start");
+        assertThat(pointLink.path("condition").path("and")).hasSize(3);
+        assertThat(pointLink.path("condition").path("and").path(0).path("or")).hasSize(2);
+        assertThat(pointLink.path("condition").toString())
+                .contains("payload.data.start")
+                .contains("payload.data.end");
+        assertThat(pointLink.path("transform").path("template").path("filters")
+                .path("competenciaBetween"))
+                .extracting(JsonNode::asText)
+                .containsExactly("${payload.data.start}", "${payload.data.end}");
+
+        JsonNode crossFilterLink = findBinding(
+                plan.path("bindings"),
+                "vw-analytics-folha-pagamento-chart-competencia.crossFilter->vw-analytics-folha-pagamento-table.queryContext");
+        assertThat(crossFilterLink.path("policy").path("distinctBy").asText())
+                .isEqualTo("payload.source.data.start");
+        assertThat(crossFilterLink.path("condition").path("and")).hasSize(3);
+        assertThat(crossFilterLink.path("condition").path("and").path(0).asBoolean()).isFalse();
+        assertThat(crossFilterLink.path("condition").toString())
+                .contains("payload.source.data.start")
+                .contains("payload.source.data.end");
+        assertThat(crossFilterLink.path("transform").path("template").path("filters")
+                .path("competenciaBetween"))
+                .extracting(JsonNode::asText)
+                .containsExactly("${payload.source.data.start}", "${payload.source.data.end}");
+        assertThat(crossFilterLink.path("transform").path("template").path("filters")
+                .path("status").asText()).isEqualTo("${payload.filters.status}");
+
+        JsonNode surfaceLink = findBinding(
+                plan.path("bindings"),
+                "vw-analytics-folha-pagamento-chart-competencia.pointClick->surface.open");
+        JsonNode surfaceBinding = surfaceLink.path("to").path("payload").path("bindings").path(0);
+        assertThat(surfaceBinding.path("to").asText())
+                .endsWith("queryContext.filters.competenciaBetween");
+        assertThat(surfaceBinding.path("mode").asText()).isEqualTo("template");
+        assertThat(surfaceBinding.path("value"))
+                .extracting(JsonNode::asText)
+                .containsExactly("${payload.data.start}", "${payload.data.end}");
+        assertThat(surfaceBinding.has("from")).isFalse();
+        assertThat(result.warnings()).contains("semantic-chart-interactions-grounded");
+
+        AgenticAuthoringUiCompositionPlanProvider replayProvider = ignored -> java.util.Optional.of(
+                new AgenticAuthoringUiCompositionPlanResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        result.uiCompositionPlan().deepCopy(),
+                        result.compiledFormPatch().deepCopy()));
+        AgenticAuthoringPreviewResult replayed = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(replayProvider),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+        assertThat(findBinding(replayed.uiCompositionPlan().path("bindings"), pointLink.path("id").asText()))
+                .isEqualTo(pointLink);
+        assertThat(findBinding(replayed.uiCompositionPlan().path("bindings"), crossFilterLink.path("id").asText()))
+                .isEqualTo(crossFilterLink);
+        assertThat(findBinding(replayed.uiCompositionPlan().path("bindings"), surfaceLink.path("id").asText()))
+                .isEqualTo(surfaceLink);
+    }
+
+    @Test
+    void previewKeepsDateRangeTargetsNonTemporalForCategoricalCharts() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Quero um painel de funcionarios por departamento, com grafico e detalhes.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                operationalMonitoringDashboardIntentWithoutVisualizationDecision());
+        ObjectNode responseSchema = objectMapper.createObjectNode();
+        responseSchema.putObject("properties")
+                .putObject("departamentoNome")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Departamento");
+        ObjectNode filterSchema = objectMapper.createObjectNode();
+        ObjectNode departmentRange = filterSchema.putObject("properties")
+                .putObject("departamentoBetween");
+        departmentRange.put("type", "array");
+        departmentRange.putObject("items")
+                .put("type", "string")
+                .put("format", "date");
+        departmentRange.putObject("x-ui")
+                .put("label", "Departamento")
+                .put("controlType", "date-range");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    return SchemaFetchResult.success(
+                            "request".equals(context.getSchemaType()) ? filterSchema : responseSchema,
+                            "http://localhost/schemas/filtered");
+                });
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                eq("/api/human-resources/funcionarios"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        employeeStatsCapabilities(),
+                        "http://localhost/api/human-resources/funcionarios/capabilities"));
+
+        AgenticAuthoringGenericUiCompositionPlanProvider genericProvider =
+                new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper);
+        AgenticAuthoringUiCompositionPlanProvider categoricalDateRangeProvider = authoredRequest -> {
+            AgenticAuthoringUiCompositionPlanResult authored = genericProvider.plan(authoredRequest).orElseThrow();
+            JsonNode authoredChart = authored.uiCompositionPlan().path("widgets").findParents("key").stream()
+                    .filter(widget -> "funcionarios-chart-departamentoNome"
+                            .equals(widget.path("key").asText()))
+                    .findFirst()
+                    .orElseThrow();
+            ObjectNode mapping = (ObjectNode) authoredChart.path("inputs").path("config")
+                    .path("interactions").path("eventActions").path("crossFilter").path("mapping");
+            mapping.removeAll();
+            mapping.put("departamentoNome", "departamentoBetween");
+            return java.util.Optional.of(authored);
+        };
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(categoricalDateRangeProvider),
+                null,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        JsonNode plan = result.uiCompositionPlan();
+        JsonNode chart = plan.path("widgets").findParents("key").stream()
+                .filter(widget -> "funcionarios-chart-departamentoNome".equals(widget.path("key").asText()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(chart.path("inputs").path("config").path("dataSource").path("query")
+                .path("statsOperation").asText()).isEqualTo("group-by");
+        assertThat(chart.path("inputs").path("config").path("interactions")
+                .path("eventActions").path("crossFilter").path("mapping").toString())
+                .isEqualTo("{\"departamentoNome\":\"departamentoBetween\"}");
+        JsonNode pointLink = findBinding(
+                plan.path("bindings"),
+                "funcionarios-chart-departamentoNome.pointClick->funcionarios-table.queryContext");
+        assertThat(pointLink.path("transform").path("template").path("filters")
+                .has("departamentoBetween")).isFalse();
+        assertThat(pointLink.path("condition").toString())
+                .doesNotContain("payload.data.start", "payload.data.end");
+    }
+
+    @Test
+    void previewDisablesTimeseriesFilteringWhenTheExplicitTargetIsScalar() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie um dashboard da evolucao mensal da folha por competencia com detalhes.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                payrollTimeseriesDashboardIntent());
+        ObjectNode responseSchema = objectMapper.createObjectNode();
+        responseSchema.putObject("properties")
+                .putObject("competencia")
+                .put("type", "string")
+                .put("format", "date")
+                .putObject("x-ui")
+                .put("label", "Competencia");
+        ObjectNode filterSchema = responseSchema.deepCopy();
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    if ("request".equals(context.getSchemaType())
+                            && context.getPath().endsWith("/filter")) {
+                        return SchemaFetchResult.success(filterSchema, "http://localhost/schemas/filtered");
+                    }
+                    return SchemaFetchResult.success(responseSchema, "http://localhost/schemas/filtered");
+                });
+        AgenticAuthoringGenericUiCompositionPlanProvider genericProvider =
+                new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper);
+        AgenticAuthoringUiCompositionPlanProvider scalarTargetProvider = authoredRequest -> {
+            AgenticAuthoringUiCompositionPlanResult authored = genericProvider.plan(authoredRequest).orElseThrow();
+            JsonNode authoredChart = authored.uiCompositionPlan().path("widgets").findParents("key").stream()
+                    .filter(widget -> "vw-analytics-folha-pagamento-chart-competencia"
+                            .equals(widget.path("key").asText()))
+                    .findFirst()
+                    .orElseThrow();
+            ObjectNode mapping = (ObjectNode) authoredChart.path("inputs").path("config")
+                    .path("interactions").path("eventActions").path("crossFilter").path("mapping");
+            mapping.removeAll();
+            mapping.put("start", "competencia");
+            return java.util.Optional.of(authored);
+        };
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(scalarTargetProvider),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        JsonNode plan = result.uiCompositionPlan();
+        JsonNode chart = plan.path("widgets").findParents("key").stream()
+                .filter(widget -> "vw-analytics-folha-pagamento-chart-competencia"
+                        .equals(widget.path("key").asText()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(chart.path("inputs").path("config").path("interactions")
+                .path("crossFilter").asBoolean()).isFalse();
+        assertThat(chart.path("inputs").path("config").path("interactions")
+                .path("eventActions").has("crossFilter")).isFalse();
+        assertThat(plan.path("bindings").findValuesAsText("id"))
+                .doesNotContain(
+                        "vw-analytics-folha-pagamento-chart-competencia.pointClick->surface.open",
+                        "vw-analytics-folha-pagamento-chart-competencia.pointClick->vw-analytics-folha-pagamento-table.queryContext",
+                        "vw-analytics-folha-pagamento-chart-competencia.crossFilter->vw-analytics-folha-pagamento-table.queryContext");
+        assertThat(result.warnings()).contains("semantic-chart-temporal-range-filter-target-unresolved");
+    }
+
+    @Test
+    void previewDisablesTemporalFilteringWhenExplicitRangeTargetsConflict() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie um dashboard da evolucao mensal da folha por competencia com detalhes.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                payrollTimeseriesDashboardIntent());
+        ObjectNode responseSchema = objectMapper.createObjectNode();
+        responseSchema.putObject("properties")
+                .putObject("competencia")
+                .put("type", "string")
+                .put("format", "date")
+                .putObject("x-ui")
+                .put("label", "Competencia");
+        ObjectNode filterSchema = objectMapper.createObjectNode();
+        ObjectNode filterProperties = filterSchema.putObject("properties");
+        ObjectNode firstRange = filterProperties.putObject("competenciaBetween");
+        firstRange.put("type", "array");
+        firstRange.putObject("items").put("type", "string").put("format", "date");
+        firstRange.putObject("x-ui").put("label", "Competencia").put("controlType", "dateRange");
+        ObjectNode secondRange = filterProperties.putObject("competenciaBetweenInclusive");
+        secondRange.put("type", "array");
+        secondRange.putObject("items").put("type", "string").put("format", "date");
+        secondRange.putObject("x-ui").put("label", "Competencia").put("controlType", "dateRange");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    if ("request".equals(context.getSchemaType())
+                            && context.getPath().endsWith("/filter")) {
+                        return SchemaFetchResult.success(filterSchema, "http://localhost/schemas/filtered");
+                    }
+                    return SchemaFetchResult.success(responseSchema, "http://localhost/schemas/filtered");
+                });
+
+        AgenticAuthoringGenericUiCompositionPlanProvider genericProvider =
+                new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper);
+        AgenticAuthoringUiCompositionPlanProvider conflictingTargetProvider = authoredRequest -> {
+            AgenticAuthoringUiCompositionPlanResult authored = genericProvider.plan(authoredRequest).orElseThrow();
+            ObjectNode plan = (ObjectNode) authored.uiCompositionPlan();
+            JsonNode authoredChart = plan.path("widgets").findParents("key").stream()
+                    .filter(widget -> "vw-analytics-folha-pagamento-chart-competencia"
+                            .equals(widget.path("key").asText()))
+                    .findFirst()
+                    .orElseThrow();
+            ObjectNode mapping = (ObjectNode) authoredChart.path("inputs").path("config")
+                    .path("interactions").path("eventActions").path("crossFilter").path("mapping");
+            mapping.removeAll();
+            mapping.put("start", "competenciaBetween");
+            mapping.put("end", "competenciaBetweenInclusive");
+            ObjectNode selectionLink = plan.withArray("bindings").addObject();
+            selectionLink.put("id", "vw-analytics-folha-pagamento-chart-competencia.selectionChange->vw-analytics-folha-pagamento-table.queryContext");
+            selectionLink.put("intent", "data-projection");
+            selectionLink.putObject("from")
+                    .put("kind", "component-port")
+                    .put("widget", "vw-analytics-folha-pagamento-chart-competencia")
+                    .put("port", "selectionChange")
+                    .put("direction", "output");
+            selectionLink.putObject("to")
+                    .put("kind", "component-port")
+                    .put("widget", "vw-analytics-folha-pagamento-table")
+                    .put("port", "queryContext")
+                    .put("direction", "input");
+            return java.util.Optional.of(authored);
+        };
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(conflictingTargetProvider),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        JsonNode plan = result.uiCompositionPlan();
+        JsonNode chart = plan.path("widgets").findParents("key").stream()
+                .filter(widget -> "vw-analytics-folha-pagamento-chart-competencia"
+                        .equals(widget.path("key").asText()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(chart.path("inputs").path("config").path("interactions")
+                .path("crossFilter").asBoolean()).isFalse();
+        assertThat(chart.path("inputs").path("config").path("interactions")
+                .path("eventActions").has("crossFilter")).isFalse();
+        assertThat(plan.path("bindings").findValuesAsText("id"))
+                .doesNotContain(
+                        "vw-analytics-folha-pagamento-chart-competencia.pointClick->surface.open",
+                        "vw-analytics-folha-pagamento-chart-competencia.pointClick->vw-analytics-folha-pagamento-table.queryContext",
+                        "vw-analytics-folha-pagamento-chart-competencia.crossFilter->vw-analytics-folha-pagamento-table.queryContext",
+                        "vw-analytics-folha-pagamento-chart-competencia.selectionChange->vw-analytics-folha-pagamento-table.queryContext");
+        assertThat(result.warnings())
+                .contains("semantic-chart-temporal-range-filter-target-unresolved")
+                .doesNotContain("semantic-chart-interactions-grounded");
+    }
+
+    @Test
+    void previewDisablesTemporalFilteringWhenInferredRangeTargetsAreAmbiguous() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie um dashboard da evolucao mensal da folha por competencia com detalhes.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                payrollTimeseriesDashboardIntent());
+        ObjectNode responseSchema = objectMapper.createObjectNode();
+        responseSchema.putObject("properties")
+                .putObject("competencia")
+                .put("type", "string")
+                .put("format", "date")
+                .putObject("x-ui")
+                .put("label", "Competencia");
+        ObjectNode filterSchema = objectMapper.createObjectNode();
+        ObjectNode filterProperties = filterSchema.putObject("properties");
+        for (String field : List.of("competenciaBetween", "competenciaBetweenInclusive")) {
+            ObjectNode range = filterProperties.putObject(field);
+            range.put("type", "array");
+            range.putObject("items").put("type", "string").put("format", "date");
+            range.putObject("x-ui").put("label", "Competencia").put("controlType", "dateRange");
+        }
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    if ("request".equals(context.getSchemaType())
+                            && context.getPath().endsWith("/filter")) {
+                        return SchemaFetchResult.success(filterSchema, "http://localhost/schemas/filtered");
+                    }
+                    return SchemaFetchResult.success(responseSchema, "http://localhost/schemas/filtered");
+                });
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        JsonNode plan = result.uiCompositionPlan();
+        JsonNode chart = plan.path("widgets").findParents("key").stream()
+                .filter(widget -> "vw-analytics-folha-pagamento-chart-competencia"
+                        .equals(widget.path("key").asText()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(chart.path("inputs").path("config").path("interactions")
+                .path("crossFilter").asBoolean()).isFalse();
+        assertThat(findBinding(
+                plan.path("bindings"),
+                "vw-analytics-folha-pagamento-chart-competencia.pointClick->vw-analytics-folha-pagamento-table.queryContext")
+                .isMissingNode()).isTrue();
+        assertThat(result.warnings())
+                .contains("semantic-chart-temporal-range-filter-target-unresolved")
+                .doesNotContain("semantic-chart-interactions-grounded");
+    }
+
+    @Test
+    void previewDisablesTemporalFilteringWhenTheFilterSchemaIsUnavailable() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie um dashboard da evolucao mensal da folha por competencia com detalhes.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                payrollTimeseriesDashboardIntent());
+        ObjectNode responseSchema = objectMapper.createObjectNode();
+        responseSchema.putObject("properties")
+                .putObject("competencia")
+                .put("type", "string")
+                .put("format", "date")
+                .putObject("x-ui")
+                .put("label", "Competencia");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    if ("request".equals(context.getSchemaType())
+                            && context.getPath().endsWith("/filter")) {
+                        return SchemaFetchResult.failure(
+                                SchemaFetchResult.Status.UNAVAILABLE,
+                                503,
+                                "http://localhost/schemas/filtered",
+                                "SCHEMA_UNAVAILABLE",
+                                "temporary test failure");
+                    }
+                    return SchemaFetchResult.success(responseSchema, "http://localhost/schemas/filtered");
+                });
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        JsonNode plan = result.uiCompositionPlan();
+        JsonNode chart = plan.path("widgets").findParents("key").stream()
+                .filter(widget -> "vw-analytics-folha-pagamento-chart-competencia"
+                        .equals(widget.path("key").asText()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(chart.path("inputs").path("config").path("interactions")
+                .path("crossFilter").asBoolean()).isFalse();
+        assertThat(chart.path("inputs").path("config").path("interactions")
+                .path("eventActions").has("crossFilter")).isFalse();
+        assertThat(plan.path("bindings").findValuesAsText("id"))
+                .doesNotContain(
+                        "vw-analytics-folha-pagamento-chart-competencia.pointClick->surface.open",
+                        "vw-analytics-folha-pagamento-chart-competencia.pointClick->vw-analytics-folha-pagamento-table.queryContext",
+                        "vw-analytics-folha-pagamento-chart-competencia.crossFilter->vw-analytics-folha-pagamento-table.queryContext");
+        assertThat(result.warnings())
+                .contains("semantic-chart-temporal-range-filter-target-unresolved")
+                .doesNotContain("semantic-chart-interactions-grounded");
+    }
+
+    @Test
     void previewRepairsStatsTimeseriesAxisAwayFromNumericMonthBucket() throws Exception {
         AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
                 true,
@@ -2986,6 +3779,28 @@ class AgenticAuthoringPreviewServiceTest {
 
     private AgenticAuthoringPreviewService service() {
         return new AgenticAuthoringPreviewService(planService, patchCompilerService);
+    }
+
+    private ObjectNode employeeStatsCapabilities() {
+        ObjectNode capabilities = objectMapper.createObjectNode();
+        ArrayNode fields = capabilities.putObject("stats").putArray("fields");
+        fields.addObject()
+                .put("field", "departamento")
+                .put("label", "Departamento")
+                .put("keyAndLabelDistinct", true)
+                .put("groupByEligible", true)
+                .putArray("metrics").add("COUNT");
+        fields.addObject()
+                .put("field", "cargoNome")
+                .put("label", "Cargo Nome")
+                .put("groupByEligible", true)
+                .putArray("metrics").add("COUNT");
+        fields.addObject()
+                .put("field", "salario")
+                .put("label", "Salario")
+                .put("metricFieldEligible", true)
+                .putArray("metrics").add("COUNT").add("SUM").add("AVG");
+        return capabilities;
     }
 
     private ObjectNode unresolvedAxisDashboardPlan() {
@@ -3566,6 +4381,57 @@ class AgenticAuthoringPreviewServiceTest {
                         List.of("praxis-table", "praxis-filter", "praxis-rich-content"),
                         false,
                         false,
+                        "llm-authored-semantic-decision"));
+    }
+
+    private AgenticAuthoringIntentResolutionResult payrollTimeseriesDashboardIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/filter/cursor&operation=post&schemaType=response",
+                        "/api/human-resources/vw-analytics-folha-pagamento/filter/cursor",
+                        "POST",
+                        0.95d,
+                        "matched payroll analytics",
+                        List.of("semantic-retrieval", "analytics-projection")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie um dashboard da evolucao mensal da folha por competencia com detalhes.",
+                "Vou criar uma pre-visualizacao governada.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "payroll-monthly-evolution-dashboard",
+                        "dashboard",
+                        "praxis-chart",
+                        List.of(new AgenticAuthoringVisualizationAxisDecision(
+                                "competence",
+                                "competencia",
+                                "Competencia",
+                                "line",
+                                "temporal",
+                                "sum",
+                                "salarioLiquido",
+                                "Salario liquido",
+                                "llm-authored-semantic-axis")),
+                        true,
+                        true,
                         "llm-authored-semantic-decision"));
     }
 
@@ -4178,6 +5044,40 @@ class AgenticAuthoringPreviewServiceTest {
                 null);
     }
 
+    private AgenticAuthoringIntentResolutionResult inferredEmployeeDashboardIntentWithCargoIdEvidence() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                        "/api/human-resources/funcionarios/filter/cursor",
+                        "POST",
+                        0.94d,
+                        "matched employees",
+                        List.of("semantic-retrieval", "schema-probe-pending", "field: cargoId")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Quero um painel de funcionarios por departamento e cargo, com graficos e detalhes.",
+                "Vou criar um dashboard inicial.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
+    }
+
     private AgenticAuthoringIntentResolutionResult dashboardQualityRepairIntent() {
         return new AgenticAuthoringIntentResolutionResult(
                 true,
@@ -4493,6 +5393,17 @@ class AgenticAuthoringPreviewServiceTest {
         for (JsonNode column : columns) {
             if (field.equals(column.path("field").asText())) {
                 return column;
+            }
+        }
+        return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
+    }
+
+    private JsonNode findBinding(JsonNode bindings, String id) {
+        if (bindings != null && bindings.isArray()) {
+            for (JsonNode binding : bindings) {
+                if (id.equals(binding.path("id").asText())) {
+                    return binding;
+                }
             }
         }
         return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
