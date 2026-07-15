@@ -6,6 +6,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentEditPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeAnswerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeApiCatalogProjectionService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringCurrentPageAnalyzer;
@@ -226,6 +227,19 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    @ConditionalOnBean({AiProviderManagementService.class, AgenticAuthoringManifestService.class})
+    public AgenticAuthoringComponentEditPlanService agenticAuthoringComponentEditPlanService(
+            AiProviderManagementService providerManagementService,
+            AgenticAuthoringManifestService manifestService,
+            ObjectMapper objectMapper) {
+        return new AgenticAuthoringComponentEditPlanService(
+                providerManagementService,
+                manifestService,
+                objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     @ConditionalOnBean(AgenticAuthoringManifestService.class)
     @ConditionalOnProperty(prefix = "praxis.ai.authoring", name = "http-enabled", havingValue = "true")
     public AgenticAuthoringManifestController agenticAuthoringManifestController(
@@ -417,7 +431,8 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectProvider<AgenticAuthoringPreviewMessageSynthesizerService> messageSynthesizer,
             ObjectProvider<SchemaRetrievalService> schemaRetrievalService,
             ObjectProvider<ResourceCapabilitiesRetrievalService> resourceCapabilitiesRetrievalService,
-            ObjectProvider<ResourceSurfaceCatalogRetrievalService> resourceSurfaceCatalogRetrievalService) {
+            ObjectProvider<ResourceSurfaceCatalogRetrievalService> resourceSurfaceCatalogRetrievalService,
+            ObjectProvider<AgenticAuthoringComponentEditPlanService> componentEditPlanService) {
         return new AgenticAuthoringPreviewService(
                 planService,
                 patchCompilerService,
@@ -426,7 +441,8 @@ public class AgenticAuthoringAutoConfiguration {
                 messageSynthesizer.getIfAvailable(),
                 schemaRetrievalService.getIfAvailable(),
                 resourceCapabilitiesRetrievalService.getIfAvailable(),
-                resourceSurfaceCatalogRetrievalService.getIfAvailable());
+                resourceSurfaceCatalogRetrievalService.getIfAvailable(),
+                componentEditPlanService.getIfAvailable());
     }
 
     @Bean

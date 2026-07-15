@@ -50,6 +50,7 @@ public class AgenticAuthoringPreviewService {
     private final SchemaRetrievalService schemaRetrievalService;
     private final ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService;
     private final ResourceSurfaceCatalogRetrievalService resourceSurfaceCatalogRetrievalService;
+    private final AgenticAuthoringComponentEditPlanService componentEditPlanService;
 
     public AgenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
@@ -114,6 +115,7 @@ public class AgenticAuthoringPreviewService {
                 messageSynthesizer,
                 schemaRetrievalService,
                 resourceCapabilitiesRetrievalService,
+                null,
                 null);
     }
 
@@ -126,6 +128,49 @@ public class AgenticAuthoringPreviewService {
             SchemaRetrievalService schemaRetrievalService,
             ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService,
             ResourceSurfaceCatalogRetrievalService resourceSurfaceCatalogRetrievalService) {
+        this(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                uiCompositionPlanProviders,
+                messageSynthesizer,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService,
+                resourceSurfaceCatalogRetrievalService,
+                null);
+    }
+
+    public AgenticAuthoringPreviewService(
+            AgenticAuthoringPlanService planService,
+            AgenticAuthoringPatchCompilerService patchCompilerService,
+            ObjectMapper objectMapper,
+            List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders,
+            AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer,
+            SchemaRetrievalService schemaRetrievalService,
+            ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService,
+            AgenticAuthoringComponentEditPlanService componentEditPlanService) {
+        this(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                uiCompositionPlanProviders,
+                messageSynthesizer,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService,
+                null,
+                componentEditPlanService);
+    }
+
+    public AgenticAuthoringPreviewService(
+            AgenticAuthoringPlanService planService,
+            AgenticAuthoringPatchCompilerService patchCompilerService,
+            ObjectMapper objectMapper,
+            List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders,
+            AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer,
+            SchemaRetrievalService schemaRetrievalService,
+            ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService,
+            ResourceSurfaceCatalogRetrievalService resourceSurfaceCatalogRetrievalService,
+            AgenticAuthoringComponentEditPlanService componentEditPlanService) {
         this.planService = Objects.requireNonNull(planService, "planService must not be null");
         this.patchCompilerService = Objects.requireNonNull(patchCompilerService, "patchCompilerService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
@@ -137,6 +182,7 @@ public class AgenticAuthoringPreviewService {
         this.schemaRetrievalService = schemaRetrievalService;
         this.resourceCapabilitiesRetrievalService = resourceCapabilitiesRetrievalService;
         this.resourceSurfaceCatalogRetrievalService = resourceSurfaceCatalogRetrievalService;
+        this.componentEditPlanService = componentEditPlanService;
     }
 
     public AgenticAuthoringPreviewResult preview(
@@ -176,6 +222,11 @@ public class AgenticAuthoringPreviewService {
                 previewConsultativeAnswer(effectiveRequest, intentResolution);
         if (consultativeAnswer.isPresent()) {
             return consultativeAnswer.get();
+        }
+        Optional<AgenticAuthoringPreviewResult> componentEditPreview =
+                previewComponentEditPlan(effectiveRequest, tenantId, userId, environment);
+        if (componentEditPreview.isPresent()) {
+            return componentEditPreview.get();
         }
         Optional<AgenticAuthoringPreviewResult> uiCompositionPreview =
                 previewUiCompositionPlan(effectiveRequest, tenantId, userId, environment, schemaBaseUrl);
@@ -307,6 +358,229 @@ public class AgenticAuthoringPreviewService {
                 && (changeKind.startsWith("answer_")
                 || "api_catalog".equals(artifactKind)
                 || "component".equals(artifactKind));
+    }
+
+    private Optional<AgenticAuthoringPreviewResult> previewComponentEditPlan(
+            AgenticAuthoringPlanRequest request,
+            String tenantId,
+            String userId,
+            String environment) {
+        JsonNode contextHints = request == null ? null : request.contextHints();
+        JsonNode manifestRef = contextHints == null
+                ? MissingNode.getInstance()
+                : contextHints.path("authoringManifestRef");
+        if (!manifestRef.isObject()) {
+            return Optional.empty();
+        }
+
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        if (intent == null || !intent.valid()) {
+            return Optional.empty();
+        }
+        AgenticAuthoringSemanticDecision semanticDecision = semanticDecision(intent);
+        String operationKind = semanticDecision != null && !value(semanticDecision.operationKind()).isBlank()
+                ? value(semanticDecision.operationKind())
+                : value(intent.operationKind());
+        if (!"modify".equals(operationKind)) {
+            return Optional.empty();
+        }
+
+        List<String> contextFailures = validateComponentEditContext(request, manifestRef);
+        if (!contextFailures.isEmpty()) {
+            return Optional.of(componentEditFailure(
+                    request,
+                    contextFailures,
+                    List.of("component-edit-plan-skipped-invalid-context"),
+                    MissingNode.getInstance()));
+        }
+        if (componentEditPlanService == null) {
+            return Optional.of(componentEditFailure(
+                    request,
+                    List.of("component-edit-plan-service-unavailable"),
+                    List.of("component-edit-plan-failed-closed"),
+                    MissingNode.getInstance()));
+        }
+
+        String selectedWidgetKey = contextHints.path("selectedWidgetKey").asText("").trim();
+        String componentId = manifestRef.path("componentId").asText("").trim();
+        JsonNode selectedWidget = selectedComponentWidget(request.currentPage(), selectedWidgetKey);
+        JsonNode config = selectedWidget.path("definition").path("inputs");
+        JsonNode validationContext = contextHints.path("validationContext");
+        AgenticAuthoringComponentEditPlanResult result = componentEditPlanService.generateAndCompile(
+                request,
+                componentId,
+                config,
+                validationContext,
+                tenantId,
+                userId,
+                environment);
+        if (!result.valid()) {
+            return Optional.of(componentEditFailure(
+                    request,
+                    result.failureCodes(),
+                    result.warnings(),
+                    result.plan()));
+        }
+
+        JsonNode proposedConfig = result.compiledPatch().path("proposedConfig");
+        if (!proposedConfig.isObject()) {
+            return Optional.of(componentEditFailure(
+                    request,
+                    List.of("component-edit-plan-proposed-config-missing"),
+                    result.warnings(),
+                    result.plan()));
+        }
+        ObjectNode compiledFormPatch = materializeComponentEditPagePatch(
+                request.currentPage(),
+                selectedWidgetKey,
+                componentId,
+                result.plan(),
+                result.compiledPatch(),
+                proposedConfig);
+        List<String> warnings = new ArrayList<>(
+                result.warnings() == null ? List.of() : result.warnings());
+        warnings.add("compiled-from-component-authoring-manifest");
+        return Optional.of(new AgenticAuthoringPreviewResult(
+                true,
+                List.of(),
+                List.copyOf(warnings),
+                result.plan(),
+                compiledFormPatch,
+                diagnostics(
+                        request,
+                        intent,
+                        List.of(),
+                        List.copyOf(warnings),
+                        result.plan(),
+                        compiledFormPatch),
+                null,
+                deterministicPreviewAssistantMessage(request, intent, null, true, List.of())));
+    }
+
+    private List<String> validateComponentEditContext(
+            AgenticAuthoringPlanRequest request,
+            JsonNode manifestRef) {
+        List<String> failures = new ArrayList<>();
+        JsonNode contextHints = request.contextHints();
+        String selectedWidgetKey = contextHints.path("selectedWidgetKey").asText("").trim();
+        String selectedComponentId = contextHints.path("selectedComponentId").asText("").trim();
+        String manifestComponentId = manifestRef.path("componentId").asText("").trim();
+        if (selectedWidgetKey.isBlank()) {
+            failures.add("component-edit-plan-selected-widget-required");
+        }
+        if (selectedComponentId.isBlank()) {
+            failures.add("component-edit-plan-selected-component-required");
+        }
+        if (manifestComponentId.isBlank()) {
+            failures.add("component-edit-plan-manifest-component-required");
+        }
+        if (!selectedComponentId.isBlank()
+                && !manifestComponentId.isBlank()
+                && !selectedComponentId.equals(manifestComponentId)) {
+            failures.add("component-edit-plan-manifest-component-mismatch");
+        }
+
+        JsonNode selectedWidget = selectedComponentWidget(request.currentPage(), selectedWidgetKey);
+        if (selectedWidget.isMissingNode()) {
+            failures.add("component-edit-plan-selected-widget-not-found");
+        } else if (!selectedComponentId.equals(
+                selectedWidget.path("definition").path("id").asText("").trim())) {
+            failures.add("component-edit-plan-selected-widget-component-mismatch");
+        }
+
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        if (intent.gate() == null || !"eligible".equals(intent.gate().status())) {
+            failures.add("component-edit-plan-intent-not-eligible");
+        }
+        AgenticAuthoringTarget target = intent.target();
+        if (target == null
+                || !selectedWidgetKey.equals(value(target.widgetKey()).trim())
+                || (!value(target.componentId()).trim().isBlank()
+                && !selectedComponentId.equals(value(target.componentId()).trim()))) {
+            failures.add("component-edit-plan-semantic-target-mismatch");
+        }
+
+        JsonNode diagnostics = contextHints.path("contextDiagnostics");
+        if (diagnostics.isArray()) {
+            for (JsonNode diagnostic : diagnostics) {
+                if (!"error".equals(diagnostic.path("severity").asText("").trim())) {
+                    continue;
+                }
+                failures.add("component-authoring-context-unavailable");
+                String code = diagnostic.path("code").asText("").trim();
+                if (!code.isBlank()) {
+                    failures.add("component-authoring-context-diagnostic:" + code);
+                }
+            }
+        }
+        return List.copyOf(new LinkedHashSet<>(failures));
+    }
+
+    private JsonNode selectedComponentWidget(JsonNode currentPage, String widgetKey) {
+        if (currentPage == null || widgetKey == null || widgetKey.isBlank()) {
+            return MissingNode.getInstance();
+        }
+        for (JsonNode widget : currentPage.path("widgets")) {
+            if (widgetKey.equals(widget.path("key").asText(""))) {
+                return widget;
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private ObjectNode materializeComponentEditPagePatch(
+            JsonNode currentPage,
+            String widgetKey,
+            String componentId,
+            JsonNode plan,
+            JsonNode componentPatch,
+            JsonNode proposedConfig) {
+        ObjectNode page = currentPage != null && currentPage.isObject()
+                ? currentPage.deepCopy()
+                : objectMapper.createObjectNode();
+        JsonNode selectedWidget = selectedComponentWidget(page, widgetKey);
+        if (selectedWidget instanceof ObjectNode widgetObject) {
+            ObjectNode definition = widgetObject.path("definition") instanceof ObjectNode existingDefinition
+                    ? existingDefinition
+                    : widgetObject.putObject("definition");
+            definition.set("inputs", proposedConfig.deepCopy());
+        }
+
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        compiledFormPatch.put("version", "1.0.0");
+        compiledFormPatch.put("profileId", "component-manifest-edit");
+        compiledFormPatch.put("targetComponentId", "praxis-dynamic-page-builder");
+        ObjectNode componentEdit = compiledFormPatch.putObject("componentEdit");
+        componentEdit.put("componentId", componentId);
+        componentEdit.put("widgetKey", widgetKey);
+        componentEdit.put("manifestVersion", componentPatch.path("manifestVersion").asText(""));
+        componentEdit.set("plan", plan == null ? MissingNode.getInstance() : plan.deepCopy());
+        componentEdit.set("compiledPatch", componentPatch.deepCopy());
+        compiledFormPatch.putObject("patch").set("page", page);
+        return compiledFormPatch;
+    }
+
+    private AgenticAuthoringPreviewResult componentEditFailure(
+            AgenticAuthoringPlanRequest request,
+            List<String> failureCodes,
+            List<String> warnings,
+            JsonNode plan) {
+        List<String> failures = failureCodes == null ? List.of() : List.copyOf(failureCodes);
+        List<String> safeWarnings = warnings == null ? List.of() : List.copyOf(warnings);
+        JsonNode safePlan = plan == null ? MissingNode.getInstance() : plan;
+        return new AgenticAuthoringPreviewResult(
+                false,
+                failures,
+                safeWarnings,
+                safePlan,
+                MissingNode.getInstance(),
+                diagnostics(
+                        request,
+                        request.intentResolution(),
+                        failures,
+                        safeWarnings,
+                        safePlan,
+                        MissingNode.getInstance()));
     }
 
     private Optional<AgenticAuthoringPreviewResult> previewUiCompositionPlan(

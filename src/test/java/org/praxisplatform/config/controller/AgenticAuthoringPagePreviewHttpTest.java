@@ -2,6 +2,7 @@ package org.praxisplatform.config.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -30,6 +31,8 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringCandidate;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringCompileResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentEditPlanResult;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentEditPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeAnswer;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeAnswerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
@@ -1004,6 +1007,145 @@ class AgenticAuthoringPagePreviewHttpTest {
         assertThat(body.path("compiledFormPatch").isMissingNode() || body.path("compiledFormPatch").isNull()
                 || body.path("compiledFormPatch").isEmpty()).isTrue();
         assertThat(body.path("uiCompositionPlan").isMissingNode() || body.path("uiCompositionPlan").isNull()).isTrue();
+    }
+
+    @Test
+    void pagePreviewMaterializesComponentManifestEditWithoutLeakingTransientContextOverHttp() throws Exception {
+        AgenticAuthoringPlanService planService = mock(AgenticAuthoringPlanService.class);
+        AgenticAuthoringPatchCompilerService compilerService = mock(AgenticAuthoringPatchCompilerService.class);
+        AgenticAuthoringComponentEditPlanService componentEditPlanService =
+                mock(AgenticAuthoringComponentEditPlanService.class);
+        JsonNode componentPlan = objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-component-edit-plan.v1",
+                  "componentId": "praxis-chart",
+                  "operations": [{
+                    "operationId": "crossFilter.configure",
+                    "input": { "action": "filter-widget", "target": "employeesTable" }
+                  }]
+                }
+                """);
+        JsonNode compiledComponentPatch = objectMapper.readTree("""
+                {
+                  "manifestVersion": "1.0.0",
+                  "proposedConfig": {
+                    "chartDocument": {
+                      "version": "0.1.0",
+                      "kind": "bar",
+                      "events": {
+                        "crossFilter": { "action": "filter-widget", "target": "employeesTable" }
+                      }
+                    }
+                  }
+                }
+                """);
+        when(componentEditPlanService.generateAndCompile(
+                any(), eq("praxis-chart"), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringComponentEditPlanResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        componentPlan,
+                        compiledComponentPatch));
+        AgenticAuthoringPreviewService previewService = new AgenticAuthoringPreviewService(
+                planService,
+                compilerService,
+                objectMapper,
+                List.of(),
+                null,
+                null,
+                null,
+                componentEditPlanService);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
+                mock(AgenticAuthoringDryRunService.class),
+                mock(AgenticAuthoringArtifactSource.class),
+                mock(AgenticAuthoringIntentResolverService.class),
+                planService,
+                compilerService,
+                previewService,
+                mock(AgenticAuthoringApplyService.class),
+                mock(AgenticAuthoringComponentCapabilitiesService.class),
+                mock(AgenticAuthoringResourceDiscoveryService.class))).build();
+
+        ObjectNode request = objectMapper.createObjectNode();
+        request.put("userPrompt", "Use o departamento selecionado para filtrar a tabela");
+        request.put("provider", "openai");
+        request.put("model", "gpt-5");
+        request.put("apiKey", "secret");
+        ObjectNode widget = request.putObject("currentPage").putArray("widgets").addObject();
+        widget.put("key", "chartOne");
+        ObjectNode chartDocument = widget.putObject("definition")
+                .put("id", "praxis-chart")
+                .putObject("inputs")
+                .putObject("chartDocument");
+        chartDocument.put("version", "0.1.0");
+        chartDocument.put("kind", "bar");
+        ObjectNode intent = request.putObject("intentResolution");
+        intent.put("valid", true);
+        intent.put("operationKind", "modify");
+        intent.put("artifactKind", "chart");
+        intent.put("changeKind", "configure_cross_filter");
+        intent.put("authoringProfile", "semantic-manifest");
+        intent.put("targetApp", "praxis-ui-angular");
+        intent.put("targetComponentId", "praxis-dynamic-page-builder");
+        intent.putObject("target")
+                .put("widgetKey", "chartOne")
+                .put("componentId", "praxis-chart");
+        intent.putObject("gate")
+                .put("gateId", "component-edit")
+                .put("status", "eligible")
+                .putArray("messages");
+        intent.putArray("candidates");
+        intent.putArray("quickReplies");
+        intent.putArray("clarificationQuestions");
+        intent.putArray("warnings");
+        intent.putArray("failureCodes");
+        intent.putObject("currentPageSummary");
+        ObjectNode contextHints = request.putObject("contextHints");
+        contextHints.put("selectedWidgetKey", "chartOne");
+        contextHints.put("selectedComponentId", "praxis-chart");
+        contextHints.putObject("authoringManifestRef")
+                .put("componentId", "praxis-chart")
+                .put("version", "1.0.0")
+                .put("source", "PRAXIS_CHART_AUTHORING_MANIFEST");
+        ObjectNode availableTarget = contextHints.putObject("validationContext")
+                .putArray("availableTargets")
+                .addObject();
+        availableTarget.put("id", "employeesTable");
+        availableTarget.putArray("actions").add("filter-widget");
+        availableTarget.putArray("events").add("crossFilter");
+        contextHints.putArray("contextDiagnostics");
+
+        String response = mockMvc.perform(post("/api/praxis/config/ai/authoring/page-preview")
+                        .header("X-Tenant-ID", "tenant")
+                        .header("X-User-ID", "user")
+                        .header("X-Env", "local")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode body = objectMapper.readTree(response);
+        assertThat(body.path("valid").asBoolean()).isTrue();
+        assertThat(body.path("compiledFormPatch").path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs")
+                .path("chartDocument").path("events").path("crossFilter").path("target").asText())
+                .isEqualTo("employeesTable");
+        assertThat(response).doesNotContain("availableTargets").doesNotContain("contextDiagnostics");
+
+        ArgumentCaptor<JsonNode> validationContext = ArgumentCaptor.forClass(JsonNode.class);
+        verify(componentEditPlanService).generateAndCompile(
+                any(),
+                eq("praxis-chart"),
+                any(),
+                validationContext.capture(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        assertThat(validationContext.getValue().path("availableTargets").get(0).path("events").get(0).asText())
+                .isEqualTo("crossFilter");
     }
 
     @Test

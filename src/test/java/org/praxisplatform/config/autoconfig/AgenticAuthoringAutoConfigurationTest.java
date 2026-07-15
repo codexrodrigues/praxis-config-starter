@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentEditPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeAnswerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunReportService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunService;
@@ -190,6 +191,25 @@ class AgenticAuthoringAutoConfigurationTest {
                 .run(context -> {
                     assertThat(context).hasSingleBean(AgenticAuthoringPlanService.class);
                     assertThat(context).hasSingleBean(AgenticAuthoringPreviewService.class);
+                    assertThat(context).doesNotHaveBean(AgenticAuthoringComponentEditPlanService.class);
+                });
+    }
+
+    @Test
+    void shouldRegisterComponentEditPlannerWhenProviderAndManifestRegistryExist() {
+        AiProviderManagementService providerManagementService = org.mockito.Mockito.mock(AiProviderManagementService.class);
+        AiRegistryRepository aiRegistryRepository = org.mockito.Mockito.mock(AiRegistryRepository.class);
+        contextRunner
+                .withBean(AiProviderManagementService.class, () -> providerManagementService)
+                .withBean(AiRegistryRepository.class, () -> aiRegistryRepository)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(AgenticAuthoringManifestService.class);
+                    assertThat(context).hasSingleBean(AgenticAuthoringComponentEditPlanService.class);
+                    assertThat(context).hasSingleBean(AgenticAuthoringPreviewService.class);
+                    assertThat(ReflectionTestUtils.getField(
+                            context.getBean(AgenticAuthoringPreviewService.class),
+                            "componentEditPlanService"))
+                            .isSameAs(context.getBean(AgenticAuthoringComponentEditPlanService.class));
                 });
     }
 
