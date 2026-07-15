@@ -34,21 +34,12 @@ import org.praxisplatform.rules.runtime.RuleBindingExecutorRegistry;
 import org.praxisplatform.rules.plan.RulePlanException;
 import org.praxisplatform.rules.snapshot.CompiledRuleSnapshot;
 import org.praxisplatform.rules.snapshot.PraxisRuleSnapshotCompiler;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Governed publication, activation and rollback of immutable RuleSet snapshots. */
-@Service
 @RequiredArgsConstructor
-@ConditionalOnBean({
-  DomainRuleDefinitionRepository.class,
-  DomainRuleSnapshotRepository.class,
-  DomainRuleSnapshotHeadRepository.class,
-  DomainRuleSnapshotEventRepository.class
-})
 public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
   private static final Set<String> PUBLISHABLE_STATUSES = Set.of("approved", "active");
   private static final int MINIMUM_DISTINCT_APPROVERS = 2;
