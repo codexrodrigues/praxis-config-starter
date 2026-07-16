@@ -68,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stop sending the removed caller-supplied definition actor fields.
 - Added a deterministic domain-rule-only mode to the official HTTP smoke so a
   rules release gate does not depend on an unrelated external LLM call.
+- Made the agentic semantic-intent schema compatible with OpenAI strict
+  Structured Outputs by closing nested objects, requiring every declared field
+  and representing optional values as nullable types. The OpenAI adapter now
+  rejects incompatible schemas locally before issuing a provider request.
 - Fixed table runtime operation compilation so selected-record related-surface
   requests can produce `tableRuntimeOperations` with `surfaceId` instead of
   falling back to column clarification.
@@ -84,6 +88,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only fall back to monorepo-level docs when expected files exist there.
 
 ### Validated
+- OpenAI strict-schema/provider and semantic-intent gates passed with `44/44`
+  and `323/323` tests; the `ci-smoke-unit` profile passed with `1,997/1,997`
+  tests and the quickstart packaged against the locally installed starter.
 - Official runtime tool plan readonly-beta smoke battery passed locally against
   real Angular, real Quickstart and Neon/Postgres with `15/15` scenarios,
   `0` retries, no raw leaks, no partial terminal reads on fail-closed paths,

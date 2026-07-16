@@ -90,6 +90,27 @@ class SpringAiOpenAiServiceTest {
     }
 
     @Test
+    void generatedTypedSchemaIsStrictCompatibleAndConvertsTheResult() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = responseServer(completedResponse("{\"value\":123}"), capturedRequest);
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
+        server.start();
+        try {
+            JsonNode node = service.generateJson(
+                    "author this typed decision",
+                    AiJsonSchema.ofClass(TypedValue.class));
+
+            assertEquals(123, node.path("value").asInt());
+            JsonNode schema = capturedRequest.get().path("text").path("format").path("schema");
+            assertFalse(schema.path("additionalProperties").asBoolean(true));
+            assertEquals("value", schema.path("required").path(0).asText());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
     void generateJsonWithoutSchemaUsesNativeJsonObjectFormat() throws Exception {
         AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
         HttpServer server = responseServer(completedResponse("{\"value\":123}"), capturedRequest);
@@ -120,7 +141,7 @@ class SpringAiOpenAiServiceTest {
         server.start();
         try {
             AiJsonSchema schema = AiJsonSchema.ofSchema(
-                    "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\"}}}");
+                    "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\"}},\"required\":[\"value\"],\"additionalProperties\":false}");
 
             service.generateJson("first", schema);
             service.generateJson("second", schema, AiCallConfig.builder().maxTokens(1800).build());
@@ -201,6 +222,40 @@ class SpringAiOpenAiServiceTest {
                     () -> service.generateJson("ping", AiJsonSchema.ofSchema("[\"not-an-object\"]")));
 
             assertEquals(AiProviderCallException.Kind.CLIENT_ERROR, exception.getKind());
+            assertNull(capturedRequest.get());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void nonStrictNestedObjectSchemaFailsBeforeCallingProvider() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = responseServer(completedResponse("{}"), capturedRequest);
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
+        server.start();
+        try {
+            AiProviderCallException exception = assertThrows(
+                    AiProviderCallException.class,
+                    () -> service.generateJson("ping", AiJsonSchema.ofSchema("""
+                            {
+                              "type": "object",
+                              "properties": {
+                                "decision": {
+                                  "type": "object",
+                                  "properties": {"value": {"type": "string"}},
+                                  "required": [],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": ["decision"],
+                              "additionalProperties": false
+                            }
+                            """)));
+
+            assertEquals(AiProviderCallException.Kind.CLIENT_ERROR, exception.getKind());
+            assertTrue(exception.getMessage().contains("required must contain every declared property"));
             assertNull(capturedRequest.get());
         } finally {
             service.closeDefaultClient();
@@ -402,6 +457,9 @@ class SpringAiOpenAiServiceTest {
             service.closeDefaultClient();
             server.stop(0);
         }
+    }
+
+    private record TypedValue(int value) {
     }
 
     private SpringAiOpenAiService service(HttpServer server, String model) {

@@ -39,6 +39,7 @@ como `openai-responses-sdk`; tipos do SDK nao escapam pelo contrato `AiProvider`
 | Telemetria | `ja-suportado-mal-nomeado-ou-mal-materializado` | `AiProviderInvocationTrace` ja aceita transporte, response id, modelo, status e usage | Responses alimenta os campos existentes, incluindo cached input tokens; cache write permanece `null` porque o provider nao o publica |
 | Retry | `ja-suportado-mal-nomeado-ou-mal-materializado` | Orquestrador ja governa retry/fallback e budget terminal | Retry interno do SDK foi desativado para evitar duplicacao e custo invisivel |
 | Persistencia no provider | `lacuna-real-de-contrato` no adapter antigo | Praxis opera turn/thread em sua propria fronteira canonica | Toda criacao usa `store=false`; estado do provider nao vira segunda fonte de verdade |
+| Compatibilidade do schema estrito | `ja-suportado-mal-nomeado-ou-mal-materializado` | O resolver ja declarava a decisao semantica completa, mas alguns objetos/campos nao obedeciam as invariantes de `strict=true` | Schema fechado e validação recursiva local antes da chamada; nenhum contrato publico novo |
 
 Nao foi necessario criar contrato canonico. A plataforma ja possuia os
 contratos internos necessarios; a lacuna estava na materializacao do transporte.
@@ -50,6 +51,9 @@ contratos internos necessarios; a lacuna estava na materializacao do transporte.
 - Responses sincrono para texto e JSON;
 - `text.format` com `json_schema`, `strict=true` e schema derivado do contrato
   Praxis; `json_object` somente quando nenhum schema foi fornecido;
+- validacao recursiva local exige `additionalProperties=false` em cada objeto e
+  correspondencia exata entre `properties` e `required`, falhando como erro de
+  cliente antes de qualquer request remoto;
 - `store=false` em todas as geracoes;
 - streaming assincrono com eventos semanticos do SDK, acumulacao do terminal e
   fechamento deterministico do recurso;
@@ -66,10 +70,16 @@ contratos internos necessarios; a lacuna estava na materializacao do transporte.
 
 ## Validacao local
 
-- `SpringAiOpenAiServiceTest`: 16 testes, zero falha, cobrindo request shape,
+- `SpringAiOpenAiServiceTest`: 18 testes, zero falha, cobrindo request shape,
   `store=false`, texto, schema estrito, JSON object, budget GPT-5, resposta
   vazia/incompleta, recusa, quota/rate limit, streaming, cancelamento antes e
-  depois do primeiro chunk, timeout e ausencia de retry do SDK;
+  depois do primeiro chunk, timeout, ausencia de retry do SDK, schema tipado e
+  rejeicao local de objeto aninhado nao estrito;
+- gate focal de provider + resolver LLM: 44 testes, zero falha;
+- gate semantico ampliado de intent, provenance, Domain Catalog, quick replies e
+  fail-closed: 323 testes, zero falha;
+- perfil `ci-smoke-unit`: 1.997 testes, zero falha, com instalacao local do
+  starter `0.1.0-rc.82`;
 - gate focal de provider, router, fallback/cancelamento, metricas e turn/SSE:
   verde;
 - suite completa do starter rebased sobre `origin/main`: 2.060 testes, zero
@@ -92,12 +102,24 @@ O teste passou a aguardar um terminal real por no maximo cinco segundos antes
 do replay, usando o mesmo padrao ja aplicado ao authoring SSE; a reproducao
 isolada e a suite ampla posterior ficaram verdes.
 
-## Validacao externa pendente
+## Validacao externa e regressao encontrada
 
-`PRAXIS_AI_OPENAI_API_KEY` e `OPENAI_API_KEY` nao estavam configuradas no
-ambiente deste corte. Por isso, o corpus `must-pass`/`extended` nao foi repetido
-contra a API real depois da migracao. A ausencia de credencial nao foi
-contornada com chave, porta, bridge ou sucesso simulado.
+O workflow oficial [Agentic Authoring Smoke](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/29519846106)
+executou com OpenAI real e `gpt-5.4-mini`. A migracao V37 resolveu o bloqueio de
+persistencia anterior, mas o primeiro smoke de intent recebeu HTTP `400` do
+provider e degradou corretamente para `clarification_required`, sem materializar
+uma rota lexical ou sucesso falso.
+
+A causa foi a projecao `AiJsonSchema` do passe semantico: apesar de
+`strict=true`, o objeto de quick reply aceitava propriedades abertas e campos
+de raiz/visualizacao anulaveis nao estavam todos em `required`. Isso viola as
+invariantes oficiais de Structured Outputs. O corte atual fecha essa projecao e
+adiciona uma barreira recursiva no adapter para transformar futuros drifts em
+falha local focal, antes de custo e latencia externos.
+
+O rerun remoto no novo SHA continua pendente. As credenciais locais disponiveis
+neste workspace permanecem invalidas/expiradas; por isso nao foi simulado um
+sucesso local contra a API real.
 
 Antes de declarar o Gate C operacionalmente fechado, executar uma rodada
 controlada no quickstart real e comparar com a evidencia anterior:
@@ -117,7 +139,8 @@ derivadas aplicaveis ao corte.
 
 ## Proximo passo recomendado
 
-Revalidar o corpus real com o novo transporte. Se assertividade, P95 ou custo
+Reexecutar uma vez o gate HTTP oficial no SHA que contem a correcao de schema e,
+estando verde, revalidar o corpus real com o novo transporte. Se assertividade, P95 ou custo
 regredirem, ajustar policy de modelo/budget no boundary canonico, sem restaurar
 Chat Completions manual. Depois do gate real verde, ampliar a jornada
 progressiva de Table para reordenacao, visibilidade, formato, filtros e

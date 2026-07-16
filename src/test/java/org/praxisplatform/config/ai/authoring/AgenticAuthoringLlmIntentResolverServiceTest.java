@@ -8,7 +8,9 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -187,6 +189,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("\"requiresGovernedAuthoring\"")
                 .contains("\"required\"")
                 .contains("requiresGovernedAuthoring");
+        assertStrictSchemaCompatible(objectMapper.readTree(schemaCaptor.getValue().jsonSchema()), "$");
         assertThat(result.requiresGovernedAuthoring()).isFalse();
         assertThat(result.artifactKind()).isEqualTo("chart");
         assertThat(result.selectedResourcePath())
@@ -204,6 +207,41 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 eq("tenant"),
                 eq("user"),
                 eq("local"));
+    }
+
+    private void assertStrictSchemaCompatible(JsonNode schema, String path) {
+        if (schema == null || !schema.isObject()) {
+            return;
+        }
+        JsonNode type = schema.path("type");
+        boolean objectType = "object".equals(type.asText());
+        if (type.isArray()) {
+            for (JsonNode value : type) {
+                objectType = objectType || "object".equals(value.asText());
+            }
+        }
+        if (objectType) {
+            assertThat(schema.path("additionalProperties").asBoolean(true))
+                    .as(path + " must be closed")
+                    .isFalse();
+            Set<String> properties = new HashSet<>();
+            schema.path("properties").fieldNames().forEachRemaining(properties::add);
+            Set<String> required = new HashSet<>();
+            schema.path("required").forEach(value -> required.add(value.asText()));
+            assertThat(required)
+                    .as(path + " must require every property")
+                    .containsExactlyInAnyOrderElementsOf(properties);
+        }
+        schema.fields().forEachRemaining(entry -> {
+            JsonNode value = entry.getValue();
+            if (value.isObject()) {
+                assertStrictSchemaCompatible(value, path + "." + entry.getKey());
+            } else if (value.isArray()) {
+                for (int index = 0; index < value.size(); index++) {
+                    assertStrictSchemaCompatible(value.get(index), path + "." + entry.getKey() + "[" + index + "]");
+                }
+            }
+        });
     }
 
     @Test
