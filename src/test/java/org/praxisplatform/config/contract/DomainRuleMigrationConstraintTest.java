@@ -62,4 +62,45 @@ class DomainRuleMigrationConstraintTest {
         assertThat(migration).contains("'PUBLISHED', 'ROLLED_BACK'");
         assertThat(migration).contains("uq_domain_rule_snapshot_head");
     }
+
+    @Test
+    void cleanInstallBaselineIncludesSnapshotControlPlaneSchema() throws IOException {
+        String baseline = Files.readString(Path.of(
+                "src/main/resources/db/baseline/V1__baseline.sql"));
+
+        assertThat(baseline).contains("CREATE TABLE IF NOT EXISTS domain_rule_snapshot (");
+        assertThat(baseline).contains("CREATE TABLE IF NOT EXISTS domain_rule_snapshot_head (");
+        assertThat(baseline).contains("CREATE TABLE IF NOT EXISTS domain_rule_snapshot_event (");
+        assertThat(baseline).contains("uq_domain_rule_snapshot_version");
+        assertThat(baseline).contains("uq_domain_rule_snapshot_head");
+        assertThat(baseline).contains("fk_domain_rule_snapshot_head_active_scope");
+        assertThat(baseline).contains("fk_domain_rule_snapshot_event_to_scope");
+    }
+
+    @Test
+    void snapshotReferencesAreConstrainedToTheSameGovernedScope() throws IOException {
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/V32__enforce_domain_rule_snapshot_scope_references.sql"));
+
+        assertThat(migration).contains("uq_domain_rule_snapshot_scope_id");
+        assertThat(migration).contains("fk_domain_rule_snapshot_supersedes_scope");
+        assertThat(migration).contains("fk_domain_rule_snapshot_head_active_scope");
+        assertThat(migration).contains("fk_domain_rule_snapshot_event_from_scope");
+        assertThat(migration).contains("fk_domain_rule_snapshot_event_to_scope");
+        assertThat(migration).contains(
+                "FOREIGN KEY (active_snapshot_id, tenant_id, environment, rule_set_key)");
+        assertThat(migration).contains(
+                "REFERENCES domain_rule_snapshot (id, tenant_id, environment, rule_set_key)");
+    }
+
+    @Test
+    void compositionApprovalMigrationPreservesLegacyAuditDataAndAddsDigestEvidence() throws IOException {
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/V33__bind_snapshot_to_approved_composition.sql"));
+
+        assertThat(migration).contains("composition_manifest JSONB");
+        assertThat(migration).contains("composition_digest VARCHAR(64)");
+        assertThat(migration).contains("ck_domain_rule_snapshot_composition_digest");
+        assertThat(migration).doesNotContain("DELETE FROM domain_rule_snapshot");
+    }
 }

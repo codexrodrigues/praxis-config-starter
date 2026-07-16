@@ -205,7 +205,16 @@ praxis:
         mode: cookie
 ```
 
-For clean installations that should not replay the historical migration chain, use the squashed baseline:
+The squashed baseline is a limited bootstrap convenience for the compact
+configuration, API metadata, UI registry and RuleSet snapshot-store surfaces it
+explicitly declares. It is not a complete clean-install schema for every
+Config Starter capability. In particular, governed rule definitions,
+materializations, domain knowledge, federation and later AI authoring stores
+still require `classpath:db/migration` (or a separately verified, host-owned
+full baseline).
+
+Use the limited squashed baseline only when the host has verified that it needs
+no tables outside that declared subset:
 
 ```properties
 spring.flyway.locations=classpath:db/baseline
@@ -339,6 +348,7 @@ discarded instead of falling back to a legacy or unscoped corpus.
 | `/api/praxis/config/ai/patch` | Generate structured configuration patches from governed AI context. |
 | `/api/praxis/config/ai/authoring/**` | Validate, compile, preview, apply, stream, replay, and cancel agentic authoring turns. |
 | `/api/praxis/config/domain-rules/**` | Govern shared business rules and semantic decisions, including immutable RuleSet snapshots, conditional head publication and rollback-by-selection. |
+| `GET /api/praxis/config/domain-rules/snapshots/head/status` | Expose safe readiness and the concurrency ETag for a scoped RuleSet head, including governed recovery of preserved pre-manifest beta snapshots without returning unverified content. |
 | `/api/praxis/config/domain-knowledge/**` | Govern domain knowledge change sets and evidence lifecycle. |
 | `GET /api/praxis/runtime/context` | Return a safe, host-neutral enterprise runtime context projection. Private auth and authorization internals remain host-owned. |
 | `PUT /api/praxis/runtime/context` | Request a host-authorized context switch. The response returns the effective context and safe propagation headers; the default provider never switches to a different tenant without a host-owned provider. |
@@ -354,6 +364,12 @@ Start with these repository documents:
 - [Agentic authoring streaming](docs/ai/agentic-authoring-streaming.md)
 - [Memory and PII guidance](docs/ai/memory-and-pii.md)
 - [Rule snapshot control plane v1](docs/domain-rules/snapshot-control-plane-v1.md)
+
+RuleSet publication is a two-step governed flow: first request
+`POST /api/praxis/config/domain-rules/snapshots/composition-manifest`, obtain two
+segregated approvals over the returned digest, then publish the unchanged
+candidate with that digest. The Config Starter rejects composition or catalog
+drift and never treats caller-declared Java coordinates as an admission catalog.
 - [Runtime enforcement release checklist](docs/ai/runtime-enforcement-consumer-release-checklist-2026-05-02.md)
 - [Domain catalog contract](docs/domain-catalog/domain-catalog-contract-v0.2.md)
 - [Release process](RELEASING.md)
