@@ -193,6 +193,10 @@ modernizacao disciplinada de Spring AI/OpenAI e gates reproduziveis de mercado.
 o gate deterministico da state machine e a lacuna real de telemetria de
 retries, tokens e custo que precisa ser fechada no boundary canonico de
 provider antes da comparacao de SDK/modelo.
+`28-assistant-consistency-apply-lineage-evidence.md` fecha a linhagem governada
+entre resultado terminal, decisao, preview e `ui_user_config`, incluindo o
+contrato publico, consumidores e falhas certificadas antes do slice de
+telemetria de provider.
 
 ## Checkpoint 2026-06-18 - pre-intent resource discovery e UX de revisao
 

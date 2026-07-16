@@ -458,12 +458,17 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    @ConditionalOnBean(UserConfigService.class)
+    @ConditionalOnBean({UserConfigService.class, AiTurnEventService.class})
     public AgenticAuthoringApplyService agenticAuthoringApplyService(
             UserConfigService userConfigService,
             AiApiKeyProtectionService apiKeyProtectionService,
+            AiTurnEventService turnEventService,
             ObjectMapper objectMapper) {
-        return new AgenticAuthoringApplyService(userConfigService, apiKeyProtectionService, objectMapper);
+        return new AgenticAuthoringApplyService(
+                userConfigService,
+                apiKeyProtectionService,
+                turnEventService,
+                objectMapper);
     }
 
     @Bean

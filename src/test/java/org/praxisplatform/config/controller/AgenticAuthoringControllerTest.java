@@ -318,6 +318,8 @@ class AgenticAuthoringControllerTest {
 
     @Test
     void pageApplyReturnsPersistedResultWithEtag() {
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         AgenticAuthoringApplyRequest request = new AgenticAuthoringApplyRequest(
                 com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
                 "praxis-dynamic-page",
@@ -336,9 +338,18 @@ class AgenticAuthoringControllerTest {
                 com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
                 com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
                 List.of("persisted-page-payload-from-compiled-form-patch"));
-        when(applyService.apply(request, "tenant", "user", "local", "author", "\"current\"")).thenReturn(expected);
+        when(principalContextResolver.resolve(servletRequest, "tenant", "user", "local"))
+                .thenReturn(principalContext);
+        when(applyService.apply(request, principalContext, "author", "\"current\"")).thenReturn(expected);
 
-        ResponseEntity<?> response = controller().applyPage(request, "tenant", "user", "local", "author", "\"current\"");
+        ResponseEntity<?> response = controller().applyPage(
+                request,
+                servletRequest,
+                "tenant",
+                "user",
+                "local",
+                "author",
+                "\"current\"");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getHeaders().getETag()).isEqualTo("\"00000000-0000-0000-0000-000000000123\"");
@@ -347,6 +358,8 @@ class AgenticAuthoringControllerTest {
 
     @Test
     void pageApplyReturnsPreconditionFailedForStaleEtag() {
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         AgenticAuthoringApplyRequest request = new AgenticAuthoringApplyRequest(
                 com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
                 "praxis-dynamic-page",
@@ -354,10 +367,19 @@ class AgenticAuthoringControllerTest {
                 "user",
                 null,
                 validSemanticDecision());
-        when(applyService.apply(request, "tenant", "user", "local", "author", "\"stale\""))
+        when(principalContextResolver.resolve(servletRequest, "tenant", "user", "local"))
+                .thenReturn(principalContext);
+        when(applyService.apply(request, principalContext, "author", "\"stale\""))
                 .thenThrow(new UserConfigService.PreconditionFailedException("stale configuration"));
 
-        ResponseEntity<?> response = controller().applyPage(request, "tenant", "user", "local", "author", "\"stale\"");
+        ResponseEntity<?> response = controller().applyPage(
+                request,
+                servletRequest,
+                "tenant",
+                "user",
+                "local",
+                "author",
+                "\"stale\"");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.PRECONDITION_FAILED);
         assertThat(response.getBody()).isEqualTo("stale configuration");

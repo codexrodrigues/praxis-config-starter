@@ -492,13 +492,19 @@ public class AgenticAuthoringController {
     @PostMapping("/page-apply")
     public ResponseEntity<?> applyPage(
             @RequestBody AgenticAuthoringApplyRequest request,
-            @RequestHeader("X-Tenant-ID") String tenantId,
+            HttpServletRequest servletRequest,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Env", required = false) String environment,
             @RequestHeader(value = "X-Updated-By", required = false) String updatedBy,
             @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch) {
         try {
-            AgenticAuthoringApplyResult result = applyService.apply(request, tenantId, userId, environment, updatedBy, ifMatch);
+            AiPrincipalContext principalContext = principalContextResolver.resolve(
+                    servletRequest,
+                    tenantId,
+                    userId,
+                    environment);
+            AgenticAuthoringApplyResult result = applyService.apply(request, principalContext, updatedBy, ifMatch);
             String etag = result.etag() == null ? null : "\"" + result.etag() + "\"";
             return ResponseEntity.ok().eTag(etag).body(result);
         } catch (UserConfigService.PreconditionFailedException ex) {

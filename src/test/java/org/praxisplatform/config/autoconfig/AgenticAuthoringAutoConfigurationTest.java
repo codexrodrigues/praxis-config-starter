@@ -294,12 +294,14 @@ class AgenticAuthoringAutoConfigurationTest {
     }
 
     @Test
-    void shouldRegisterApplyServiceWhenUserConfigServiceExists() {
+    void shouldRegisterApplyServiceWhenPersistenceAndTurnEventServicesExist() {
         UserConfigService userConfigService = org.mockito.Mockito.mock(UserConfigService.class);
         AiApiKeyProtectionService apiKeyProtectionService = org.mockito.Mockito.mock(AiApiKeyProtectionService.class);
+        AiTurnEventService turnEventService = org.mockito.Mockito.mock(AiTurnEventService.class);
         contextRunner
                 .withBean(UserConfigService.class, () -> userConfigService)
                 .withBean(AiApiKeyProtectionService.class, () -> apiKeyProtectionService)
+                .withBean(AiTurnEventService.class, () -> turnEventService)
                 .run(context -> assertThat(context).hasSingleBean(AgenticAuthoringApplyService.class));
     }
 

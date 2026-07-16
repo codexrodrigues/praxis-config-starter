@@ -681,8 +681,14 @@ Regra de aplicacao:
   e emitir `llm-provider-failure-recovered-by-grounded-candidates`. Esse caminho
   nao deve reaplicar warnings de fail-safe/clarificacao como se a evidencia
   tivesse desaparecido.
-- `page-apply` deve exigir `semanticDecision`; aplicar apenas
-  `compiledFormPatch` sem decisao canonica e um bypass de contrato.
+- `page-apply` deve exigir `semanticDecision`, `streamId` e `resultEventId`;
+  aplicar apenas `compiledFormPatch` sem decisao canonica e sem referencia ao
+  evento terminal persistido e um bypass de contrato.
+- Antes de persistir, `page-apply` deve revalidar ownership do stream,
+  tenant/usuario/ambiente, expiracao, tipo terminal `result`, `canApply=true` e
+  igualdade exata da decisao semantica e do patch compilado emitidos naquele
+  evento. A materializacao deve preservar `stream/thread/turn/event/decision`
+  como tags auditaveis, sem payload sensivel.
 - `page-apply` deve rejeitar `semanticDecision.reviewRequired=true`, mesmo que
   a materializacao seja estruturalmente valida, exceto pelo caso estrito
   `reviewReason=weak-lexical-evidence` quando o `compiledFormPatch` carrega
@@ -736,8 +742,9 @@ O Page Builder deve:
   `decisionDiagnostics.requiresReview=true`, apresentar revisao/clarificacao em
   vez de aplicar a materializacao;
 - reenviar `intentResolution.semanticDecision` em `page-apply` junto com o
-  `compiledFormPatch`, para que o backend rejeite materializacoes que nao
-  cumpram a decisao canonica authorada.
+  `compiledFormPatch`, `streamId` e `resultEventId` recebidos no envelope
+  terminal, para que o backend rejeite materializacoes que nao cumpram a
+  decisao canonica authorada ou que nao derivem do resultado revisado.
 
 ## Evidencia de validacao ponta a ponta
 

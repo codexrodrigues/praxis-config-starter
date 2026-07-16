@@ -4,8 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
+import java.util.UUID;
 import org.praxisplatform.config.domain.UiUserConfig;
+import org.praxisplatform.config.dto.AiTurnEventEnvelope;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
+import org.praxisplatform.config.service.AiPrincipalContext;
+import org.praxisplatform.config.service.AiTurnEventService;
 import org.praxisplatform.config.service.UserConfigService;
 
 public class AgenticAuthoringApplyService {
@@ -14,45 +18,53 @@ public class AgenticAuthoringApplyService {
 
     private final UserConfigService userConfigService;
     private final AiApiKeyProtectionService apiKeyProtectionService;
+    private final AiTurnEventService turnEventService;
     private final ObjectMapper objectMapper;
 
     public AgenticAuthoringApplyService(
             UserConfigService userConfigService,
             AiApiKeyProtectionService apiKeyProtectionService,
+            AiTurnEventService turnEventService,
             ObjectMapper objectMapper) {
         this.userConfigService = userConfigService;
         this.apiKeyProtectionService = apiKeyProtectionService;
+        this.turnEventService = turnEventService;
         this.objectMapper = objectMapper;
     }
 
     public AgenticAuthoringApplyResult apply(
             AgenticAuthoringApplyRequest request,
-            String tenantId,
-            String userId,
-            String environment,
+            AiPrincipalContext principalContext,
             String updatedBy,
             String ifMatch) {
         if (request == null) {
             throw new IllegalArgumentException("request is required");
         }
-        if (tenantId == null || tenantId.isBlank()) {
-            throw new IllegalArgumentException("X-Tenant-ID is required");
+        if (principalContext == null
+                || principalContext.tenantId() == null
+                || principalContext.userId() == null) {
+            throw new IllegalArgumentException("AI principal context is required");
         }
 
         String componentType = defaultIfBlank(request.componentType(), DEFAULT_COMPONENT_TYPE);
         String componentId = requireText(request.componentId(), "componentId is required");
-        UserConfigService.Scope scope = resolveScope(request.scope(), userId);
+        UserConfigService.Scope scope = resolveScope(request.scope(), principalContext.userId());
         JsonNode payload = extractPagePayload(request.compiledFormPatch());
         validateSemanticMaterialization(request.semanticDecision(), request.compiledFormPatch());
-        JsonNode tags = buildTags(request.compiledFormPatch(), request.tags());
+        AiTurnEventService.StreamOwnership ownership = turnEventService.requireOwnership(
+                requireUuid(request.streamId(), "streamId is required"),
+                principalContext);
+        AiTurnEventEnvelope terminalResult = requireTerminalResult(request, ownership);
+        validateTerminalMaterialization(request, terminalResult);
+        JsonNode tags = buildTags(request, terminalResult);
 
         UiUserConfig saved = userConfigService.upsert(
                 scope,
-                tenantId,
-                userId,
+                principalContext.tenantId(),
+                principalContext.userId(),
                 componentType,
                 componentId,
-                environment,
+                principalContext.environment(),
                 payload,
                 tags,
                 ifMatch,
@@ -66,13 +78,54 @@ public class AgenticAuthoringApplyService {
                 true,
                 componentType,
                 componentId,
-                environment,
+                principalContext.environment(),
                 scope.name().toLowerCase(),
                 saved.getVersion(),
                 etag,
                 savedPayload,
                 savedTags,
-                List.of("persisted-page-payload-from-compiled-form-patch"));
+                List.of(
+                        "persisted-page-payload-from-compiled-form-patch",
+                        "verified-agentic-turn-result-lineage"));
+    }
+
+    private AiTurnEventEnvelope requireTerminalResult(
+            AgenticAuthoringApplyRequest request,
+            AiTurnEventService.StreamOwnership ownership) {
+        UUID resultEventId = requireUuid(request.resultEventId(), "resultEventId is required");
+        AiTurnEventEnvelope terminal = turnEventService.findLastEvent(ownership.streamId())
+                .orElseThrow(() -> new IllegalStateException("agentic-turn-terminal-result-not-found"));
+        if (!"result".equalsIgnoreCase(terminal.getType())) {
+            throw new IllegalStateException("agentic-turn-terminal-event-is-not-applicable-result");
+        }
+        if (!resultEventId.equals(terminal.getEventId())) {
+            throw new IllegalStateException("agentic-turn-result-event-mismatch");
+        }
+        if (!ownership.threadId().equals(terminal.getThreadId())
+                || !ownership.turnId().equals(terminal.getTurnId())) {
+            throw new IllegalStateException("agentic-turn-result-lineage-mismatch");
+        }
+        return terminal;
+    }
+
+    private void validateTerminalMaterialization(
+            AgenticAuthoringApplyRequest request,
+            AiTurnEventEnvelope terminalResult) {
+        JsonNode payload = terminalResult.getPayload();
+        if (payload == null || !payload.isObject() || !payload.path("canApply").asBoolean(false)) {
+            throw new IllegalStateException("agentic-turn-result-is-not-applicable");
+        }
+        JsonNode issuedPatch = payload.path("preview").path("compiledFormPatch");
+        if (!issuedPatch.isObject() || !issuedPatch.equals(request.compiledFormPatch())) {
+            throw new IllegalStateException("agentic-turn-result-patch-mismatch");
+        }
+        JsonNode issuedDecision = payload.path("intentResolution").path("semanticDecision");
+        JsonNode requestedDecision = request.semanticDecision() == null
+                ? null
+                : objectMapper.valueToTree(request.semanticDecision());
+        if (!issuedDecision.isObject() || requestedDecision == null || !issuedDecision.equals(requestedDecision)) {
+            throw new IllegalStateException("agentic-turn-result-semantic-decision-mismatch");
+        }
     }
 
     private JsonNode extractPagePayload(JsonNode compiledFormPatch) {
@@ -101,14 +154,23 @@ public class AgenticAuthoringApplyService {
         }
     }
 
-    private JsonNode buildTags(JsonNode compiledFormPatch, JsonNode requestTags) {
-        ObjectNode tags = requestTags != null && requestTags.isObject()
-                ? requestTags.deepCopy()
+    private JsonNode buildTags(
+            AgenticAuthoringApplyRequest request,
+            AiTurnEventEnvelope terminalResult) {
+        ObjectNode tags = request.tags() != null && request.tags().isObject()
+                ? request.tags().deepCopy()
                 : objectMapper.createObjectNode();
         tags.put("source", "agentic-authoring");
-        copyText(compiledFormPatch, tags, "profileId");
-        copyText(compiledFormPatch, tags, "catalogReleaseId");
-        copyText(compiledFormPatch, tags, "builderVersion");
+        copyText(request.compiledFormPatch(), tags, "profileId");
+        copyText(request.compiledFormPatch(), tags, "catalogReleaseId");
+        copyText(request.compiledFormPatch(), tags, "builderVersion");
+        tags.put("authoringStreamId", terminalResult.getStreamId().toString());
+        tags.put("authoringThreadId", terminalResult.getThreadId().toString());
+        tags.put("authoringTurnId", terminalResult.getTurnId().toString());
+        tags.put("authoringResultEventId", terminalResult.getEventId().toString());
+        if (request.semanticDecision() != null && request.semanticDecision().decisionId() != null) {
+            tags.put("semanticDecisionId", request.semanticDecision().decisionId());
+        }
         return tags;
     }
 
@@ -141,6 +203,13 @@ public class AgenticAuthoringApplyService {
             throw new IllegalArgumentException(message);
         }
         return value.trim();
+    }
+
+    private UUID requireUuid(UUID value, String message) {
+        if (value == null) {
+            throw new IllegalArgumentException(message);
+        }
+        return value;
     }
 
     private JsonNode readJson(String raw) {

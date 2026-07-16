@@ -78,8 +78,21 @@ echo "[5/7] page-apply/get/delete"
 component_type="praxis-dynamic-page"
 component_id="agentic-authoring:local-e2e:operations-incident-form"
 ui_uri="$BASE_URL/api/praxis/config/ui?componentType=$(urlencode "$component_type")&componentId=$(urlencode "$component_id")&scope=user"
-apply_body="$(jq -n --argjson compiledFormPatch "$(jq '.compiledFormPatch' <<<"$preview")" --argjson semanticDecision "$(jq '.semanticDecision' <<<"$intent")" --arg componentType "$component_type" --arg componentId "$component_id" \
-  '{compiledFormPatch:$compiledFormPatch, semanticDecision:$semanticDecision, componentType:$componentType, componentId:$componentId, scope:"user", tags:{purpose:"agentic-authoring-local-e2e"}}')"
+authoring_turn_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+authoring_stream_body="$(jq --arg turn "$authoring_turn_id" \
+  '. + {clientTurnId:$turn, targetApp:"praxis-api-quickstart", targetComponentId:"praxis-dynamic-page-builder", currentPage:{widgets:[]}}' <<<"$body")"
+printf '%s' "$authoring_stream_body" | jq 'del(.apiKey) + {apiKey:"***"}' > "$ARTIFACTS_DIR/authoring-stream.start.request.sanitized.json"
+authoring_stream_start="$(curl -fsS --max-time 120 -X POST "$BASE_URL/api/praxis/config/ai/authoring/turn/stream/start" "${headers[@]}" --data-binary @<(printf '%s' "$authoring_stream_body") | tee "$ARTIFACTS_DIR/authoring-stream.start.response.json")"
+authoring_stream_id="$(jq -r '.streamId' <<<"$authoring_stream_start")"
+authoring_token="$(jq -r '.streamAccessToken // empty' <<<"$authoring_stream_start")"
+authoring_query=""
+[[ -n "$authoring_token" ]] && authoring_query="?accessToken=$(urlencode "$authoring_token")"
+curl -sS --max-time 180 "$BASE_URL/api/praxis/config/ai/authoring/turn/stream/$authoring_stream_id$authoring_query" "${headers[@]}" -o "$ARTIFACTS_DIR/authoring-stream.raw.sse" || true
+awk '/^data:/ {sub(/^data:[[:space:]]*/, ""); print}' "$ARTIFACTS_DIR/authoring-stream.raw.sse" > "$ARTIFACTS_DIR/authoring-stream.events.jsonl"
+jq -s 'map(select(.type == "result")) | first' "$ARTIFACTS_DIR/authoring-stream.events.jsonl" > "$ARTIFACTS_DIR/authoring-stream.terminal-event.json"
+jq -e '.payload.canApply == true and ((.payload.preview.compiledFormPatch.patch.page.widgets | length) > 0)' "$ARTIFACTS_DIR/authoring-stream.terminal-event.json" >/dev/null
+apply_body="$(jq --arg componentType "$component_type" --arg componentId "$component_id" \
+  '{compiledFormPatch:.payload.preview.compiledFormPatch, semanticDecision:.payload.intentResolution.semanticDecision, streamId:.streamId, resultEventId:.eventId, componentType:$componentType, componentId:$componentId, scope:"user", tags:{purpose:"agentic-authoring-local-e2e"}}' "$ARTIFACTS_DIR/authoring-stream.terminal-event.json")"
 curl -fsS --max-time 60 -D "$ARTIFACTS_DIR/apply.headers" -o "$ARTIFACTS_DIR/apply.response.json" \
   -X POST "$BASE_URL/api/praxis/config/ai/authoring/page-apply" "${headers[@]}" -H "X-Updated-By: agentic-authoring-local-e2e" --data-binary @<(printf '%s' "$apply_body")
 test "$(jq -r '.applied' "$ARTIFACTS_DIR/apply.response.json")" = "true"

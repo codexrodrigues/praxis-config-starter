@@ -656,8 +656,11 @@ transacional P0.6 do authoring turn**.
 - a matriz P0.6 executa 76 testes sem provider externo e certifica retomada,
   replay SSE, cancelamento, timeout, schema indisponivel fail-closed,
   ownership, fronteira transacional e terminal unico no mesmo gate local;
-- proxima pendencia bloqueante do Gate A: fechar diagnostics residuais de
-  provenance e provar lineage completo ate preview e materializacao.
+- lineage de apply certificado: a materializacao exige `streamId` e
+  `resultEventId`, revalida ownership e igualdade exata da decisao/preview
+  persistidos e grava `stream/thread/turn/event/decision` nas tags;
+- proxima pendencia bloqueante do Gate A: telemetria canonica de provider por
+  fase (`attempt`, usage de tokens e custo por snapshot versionado).
 
 ### Gate B - Runtime canonico
 
@@ -711,8 +714,11 @@ O nono slice formalizou a maquina de estados ja suportada, corrigiu a fixture
 do teste de transaction manager e adicionou o gate local P0.6 que agrega 76
 provas de retomada, replay, cancelamento, timeout, schema indisponivel,
 ownership e terminal unico.
-Nao houve mudanca de endpoint, DTO, evento SSE, OpenAPI ou public API; por isso
-bindings, landing page e corpus HTTP nao precisam de sincronizacao neste corte.
+O decimo slice fechou a linhagem do `page-apply`: alterou o DTO/OpenAPI,
+regenerou bindings Java/Angular, projetou a referencia terminal ja existente no
+cliente SSE, atualizou Page Builder, runners transacionais e a prova Playwright.
+A landing page e o corpus HTTP nao possuem payload de `page-apply` a sincronizar;
+o inventario de cobertura continua valido.
 Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
 
 - `docs/ai/contracts/**` e OpenAPI do Config Starter;
@@ -733,14 +739,16 @@ SDK, nesta ordem:
    [`27-assistant-consistency-p06-evidence.md`](27-assistant-consistency-p06-evidence.md),
    registrando P50/P95 e classificando a ausencia atual de retries, tokens e
    custo sem inventar valores;
-2. corrigir diagnostics residuais de provenance e provar lineage completo da
-   decisao semantica ate o preview e a materializacao;
+2. [x] corrigir diagnostics residuais de provenance e provar lineage completo
+   da decisao semantica ate o preview e a materializacao; evidencia em
+   [`28-assistant-consistency-apply-lineage-evidence.md`](28-assistant-consistency-apply-lineage-evidence.md);
 3. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
    minimo de contexto assistivel;
 4. ampliar a jornada progressiva com reordenacao, visibilidade, formato,
    filtros e recuperacao apos schema temporariamente indisponivel, provando que
    cada capability governada continua semanticamente distinta;
-5. iniciar a pista compativel Spring AI 1.1.8 e a politica de modelos em slice
+5. implementar primeiro telemetria canonica de provider por fase e, depois,
+   iniciar a pista compativel Spring AI 1.1.8 e a politica de modelos em slice
    dedicado, comparando o novo caminho com os perfis `must-pass` e `extended`;
 6. manter Spring AI 2.0 + Boot 4 como spike arquitetural separado, promovendo
    apenas se a evidencia superar o caminho compativel.

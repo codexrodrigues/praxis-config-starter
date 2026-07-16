@@ -77,9 +77,12 @@ cleanup_on_exit() {
 trap cleanup_on_exit EXIT
 
 started_at="$(date +%s)"
-jq -s 'map(select(.type == "result")) | first | .payload' "$events_path" \
+jq -s 'map(select(.type == "result")) | first' "$events_path" \
+  > "$ARTIFACTS_DIR/transaction.terminal-event.json"
+jq '.payload' "$ARTIFACTS_DIR/transaction.terminal-event.json" \
   > "$ARTIFACTS_DIR/transaction.terminal-result.json"
 terminal="$ARTIFACTS_DIR/transaction.terminal-result.json"
+terminal_event="$ARTIFACTS_DIR/transaction.terminal-event.json"
 jq -e '.canApply == true' "$terminal" >/dev/null
 jq -e '.preview.compiledFormPatch.patch.page.widgets | type == "array" and length > 0' "$terminal" >/dev/null
 jq -e '.intentResolution.semanticDecision.schemaVersion == "praxis-agentic-authoring-semantic-decision.v1"' "$terminal" >/dev/null
@@ -87,9 +90,13 @@ jq -e '.intentResolution.semanticDecision.schemaVersion == "praxis-agentic-autho
 jq \
   --arg componentType "$COMPONENT_TYPE" \
   --arg componentId "$component_id" \
+  --arg streamId "$(jq -r '.streamId' "$terminal_event")" \
+  --arg resultEventId "$(jq -r '.eventId' "$terminal_event")" \
   '{
     compiledFormPatch: .preview.compiledFormPatch,
     semanticDecision: .intentResolution.semanticDecision,
+    streamId: $streamId,
+    resultEventId: $resultEventId,
     componentType: $componentType,
     componentId: $componentId,
     scope: "user",

@@ -737,6 +737,8 @@ export interface AgenticAuthoringPreviewResultContract {
 export interface AgenticAuthoringApplyRequestContract {
   componentType: string;
   componentId: string;
+  streamId: string;
+  resultEventId: string;
   scope?: string | null;
   compiledFormPatch: AiJsonObject;
   tags?: AiJsonObject | null;

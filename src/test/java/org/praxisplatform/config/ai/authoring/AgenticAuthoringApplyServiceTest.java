@@ -10,20 +10,30 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.UiUserConfig;
+import org.praxisplatform.config.dto.AiTurnEventEnvelope;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
+import org.praxisplatform.config.service.AiPrincipalContext;
+import org.praxisplatform.config.service.AiTurnEventService;
 import org.praxisplatform.config.service.UserConfigService;
 
 @Tag("unit")
 class AgenticAuthoringApplyServiceTest {
 
+    private static final UUID STREAM_ID = UUID.fromString("00000000-0000-0000-0000-000000000201");
+    private static final UUID THREAD_ID = UUID.fromString("00000000-0000-0000-0000-000000000202");
+    private static final UUID TURN_ID = UUID.fromString("00000000-0000-0000-0000-000000000203");
+    private static final UUID RESULT_EVENT_ID = UUID.fromString("00000000-0000-0000-0000-000000000204");
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final UserConfigService userConfigService = org.mockito.Mockito.mock(UserConfigService.class);
     private final AiApiKeyProtectionService apiKeyProtectionService = org.mockito.Mockito.mock(AiApiKeyProtectionService.class);
+    private final AiTurnEventService turnEventService = org.mockito.Mockito.mock(AiTurnEventService.class);
 
     @Test
     void applyPersistsCompiledPageThroughCanonicalUserConfigService() throws Exception {
@@ -51,17 +61,18 @@ class AgenticAuthoringApplyServiceTest {
                 eq("author"))).thenReturn(saved);
         when(apiKeyProtectionService.sanitizeForResponse(savedPayload)).thenReturn(savedPayload);
 
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                null,
+                "helpdesk:notebook-screen",
+                null,
+                validSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+
         AgenticAuthoringApplyResult result = service().apply(
-                new AgenticAuthoringApplyRequest(
-                        compiledPatch(),
-                        null,
-                        "helpdesk:notebook-screen",
-                        null,
-                        null,
-                        validSemanticDecision()),
-                "tenant",
-                "user",
-                "local",
+                request,
+                principalContext,
                 "author",
                 "\"stale-etag\"");
 
@@ -95,11 +106,108 @@ class AgenticAuthoringApplyServiceTest {
         assertThat(persistedInputs.path("componentInstanceId").asText()).isEqualTo("ticket-form-minimal");
         assertThat(tagsCaptor.getValue().path("source").asText()).isEqualTo("agentic-authoring");
         assertThat(tagsCaptor.getValue().path("profileId").asText()).isEqualTo("create-minimal-form");
+        assertThat(tagsCaptor.getValue().path("authoringStreamId").asText()).isEqualTo(STREAM_ID.toString());
+        assertThat(tagsCaptor.getValue().path("authoringThreadId").asText()).isEqualTo(THREAD_ID.toString());
+        assertThat(tagsCaptor.getValue().path("authoringTurnId").asText()).isEqualTo(TURN_ID.toString());
+        assertThat(tagsCaptor.getValue().path("authoringResultEventId").asText()).isEqualTo(RESULT_EVENT_ID.toString());
+        assertThat(tagsCaptor.getValue().path("semanticDecisionId").asText()).isEqualTo("decision-form");
         assertThat(result.applied()).isTrue();
         assertThat(result.version()).isEqualTo(2L);
         assertThat(result.scope()).isEqualTo("user");
         assertThat(result.etag()).isEqualTo("00000000-0000-0000-0000-000000000123");
         assertThat(result.payload()).isEqualTo(savedPayload);
+    }
+
+    @Test
+    void applyRejectsMissingTerminalResultReference() throws Exception {
+        AgenticAuthoringApplyRequest request = new AgenticAuthoringApplyRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "user",
+                null,
+                validSemanticDecision());
+
+        assertThatThrownBy(() -> service().apply(request, principal("user"), "author", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("streamId is required");
+    }
+
+    @Test
+    void applyRejectsResultEventOutsideRequestedTerminalResult() throws Exception {
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "user",
+                validSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+        AiTurnEventEnvelope mismatched = terminalResult(request, true);
+        mismatched.setEventId(UUID.fromString("00000000-0000-0000-0000-000000000299"));
+        when(turnEventService.findLastEvent(STREAM_ID)).thenReturn(Optional.of(mismatched));
+
+        assertThatThrownBy(() -> service().apply(request, principalContext, "author", null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("agentic-turn-result-event-mismatch");
+    }
+
+    @Test
+    void applyRejectsPatchDifferentFromTerminalPreview() throws Exception {
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "user",
+                validSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+        AiTurnEventEnvelope terminal = terminalResult(request, true);
+        ((ObjectNode) terminal.getPayload().path("preview"))
+                .set("compiledFormPatch", objectMapper.createObjectNode().put("forged", true));
+        when(turnEventService.findLastEvent(STREAM_ID)).thenReturn(Optional.of(terminal));
+
+        assertThatThrownBy(() -> service().apply(request, principalContext, "author", null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("agentic-turn-result-patch-mismatch");
+    }
+
+    @Test
+    void applyRejectsTerminalResultWithoutApplyAuthorization() throws Exception {
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "user",
+                validSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+        when(turnEventService.findLastEvent(STREAM_ID))
+                .thenReturn(Optional.of(terminalResult(request, false)));
+
+        assertThatThrownBy(() -> service().apply(request, principalContext, "author", null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("agentic-turn-result-is-not-applicable");
+    }
+
+    @Test
+    void applyRejectsSemanticDecisionDifferentFromTerminalResult() throws Exception {
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "user",
+                validSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+        AiTurnEventEnvelope terminal = terminalResult(request, true);
+        ((ObjectNode) terminal.getPayload().path("intentResolution"))
+                .set("semanticDecision", objectMapper.valueToTree(chartSemanticDecision()));
+        when(turnEventService.findLastEvent(STREAM_ID)).thenReturn(Optional.of(terminal));
+
+        assertThatThrownBy(() -> service().apply(request, principalContext, "author", null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("agentic-turn-result-semantic-decision-mismatch");
     }
 
     @Test
@@ -115,9 +223,7 @@ class AgenticAuthoringApplyServiceTest {
                         "tenant",
                         null,
                         validSemanticDecision()),
-                "tenant",
-                null,
-                null,
+                principal("user"),
                 "author",
                 null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -134,9 +240,7 @@ class AgenticAuthoringApplyServiceTest {
                         "tenant",
                         null,
                         null),
-                "tenant",
-                null,
-                null,
+                principal("user"),
                 "author",
                 null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -154,9 +258,7 @@ class AgenticAuthoringApplyServiceTest {
                         "tenant",
                         null,
                         chartSemanticDecision()),
-                "tenant",
-                null,
-                null,
+                principal("user"),
                 "author",
                 null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -174,9 +276,7 @@ class AgenticAuthoringApplyServiceTest {
                         "tenant",
                         null,
                         semanticDecisionForResource("/api/helpdesk/clients")),
-                "tenant",
-                null,
-                null,
+                principal("user"),
                 "author",
                 null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -194,9 +294,7 @@ class AgenticAuthoringApplyServiceTest {
                         "tenant",
                         null,
                         reviewRequiredSemanticDecision()),
-                "tenant",
-                null,
-                null,
+                principal("user"),
                 "author",
                 null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -220,7 +318,7 @@ class AgenticAuthoringApplyServiceTest {
         when(userConfigService.upsert(
                 eq(UserConfigService.Scope.TENANT),
                 eq("tenant"),
-                eq(null),
+                eq("user"),
                 eq("praxis-dynamic-page"),
                 eq("page"),
                 eq("local"),
@@ -230,17 +328,18 @@ class AgenticAuthoringApplyServiceTest {
                 eq("author"))).thenReturn(saved);
         when(apiKeyProtectionService.sanitizeForResponse(savedPayload)).thenReturn(savedPayload);
 
-        AgenticAuthoringApplyResult result = service().apply(
-                new AgenticAuthoringApplyRequest(
-                        compiledPatch,
-                        "praxis-dynamic-page",
-                        "page",
-                        "tenant",
-                        null,
-                        weakLexicalReviewSemanticDecision()),
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch,
+                "praxis-dynamic-page",
+                "page",
                 "tenant",
-                null,
-                "local",
+                weakLexicalReviewSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+
+        AgenticAuthoringApplyResult result = service().apply(
+                request,
+                principalContext,
                 "author",
                 null);
 
@@ -258,9 +357,7 @@ class AgenticAuthoringApplyServiceTest {
                         "tenant",
                         null,
                         weakLexicalReviewSemanticDecision()),
-                "tenant",
-                null,
-                "local",
+                principal("user"),
                 "author",
                 null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -269,7 +366,67 @@ class AgenticAuthoringApplyServiceTest {
     }
 
     private AgenticAuthoringApplyService service() {
-        return new AgenticAuthoringApplyService(userConfigService, apiKeyProtectionService, objectMapper);
+        return new AgenticAuthoringApplyService(
+                userConfigService,
+                apiKeyProtectionService,
+                turnEventService,
+                objectMapper);
+    }
+
+    private AgenticAuthoringApplyRequest applicableRequest(
+            JsonNode compiledFormPatch,
+            String componentType,
+            String componentId,
+            String scope,
+            AgenticAuthoringSemanticDecision semanticDecision) {
+        return new AgenticAuthoringApplyRequest(
+                compiledFormPatch,
+                componentType,
+                componentId,
+                scope,
+                null,
+                semanticDecision,
+                STREAM_ID,
+                RESULT_EVENT_ID);
+    }
+
+    private AiPrincipalContext principal(String userId) {
+        return new AiPrincipalContext("tenant", userId, "local", true);
+    }
+
+    private void authorize(
+            AgenticAuthoringApplyRequest request,
+            AiPrincipalContext principalContext) {
+        when(turnEventService.requireOwnership(STREAM_ID, principalContext))
+                .thenReturn(new AiTurnEventService.StreamOwnership(
+                        STREAM_ID,
+                        THREAD_ID,
+                        TURN_ID,
+                        principalContext.tenantId(),
+                        principalContext.userId(),
+                        principalContext.environment(),
+                        java.time.Instant.now().plusSeconds(900)));
+        when(turnEventService.findLastEvent(STREAM_ID))
+                .thenReturn(Optional.of(terminalResult(request, true)));
+    }
+
+    private AiTurnEventEnvelope terminalResult(
+            AgenticAuthoringApplyRequest request,
+            boolean canApply) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("canApply", canApply);
+        payload.putObject("preview").set("compiledFormPatch", request.compiledFormPatch());
+        payload.putObject("intentResolution")
+                .set("semanticDecision", objectMapper.valueToTree(request.semanticDecision()));
+        return AiTurnEventEnvelope.builder()
+                .eventId(RESULT_EVENT_ID)
+                .streamId(STREAM_ID)
+                .threadId(THREAD_ID)
+                .turnId(TURN_ID)
+                .seq(7L)
+                .type("result")
+                .payload(payload)
+                .build();
     }
 
     private JsonNode compiledPatch() throws Exception {

@@ -713,7 +713,7 @@ paths:
     post:
       tags: [ai-authoring]
       operationId: applyAgenticAuthoringPage
-      summary: Persiste pagina revisada pelo fluxo de authoring agentico
+      summary: Persiste pagina revisada e vinculada ao resultado terminal do fluxo de authoring agentico
       parameters:
         - $ref: '#/components/parameters/TenantIdHeader'
         - $ref: '#/components/parameters/UserIdHeader'
@@ -1551,7 +1551,7 @@ components:
       required: false
       schema:
         type: string
-        default: 66579be4b7637d3c8579e299388e45b89a17e164e72886f0895e98be5fa83c16
+        default: 42c2cf6441397e87270fac2eeb7ce0c9a69ef6b069aa691e839556d4f06fedfa
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1581,7 +1581,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 66579be4b7637d3c8579e299388e45b89a17e164e72886f0895e98be5fa83c16
+        example: 42c2cf6441397e87270fac2eeb7ce0c9a69ef6b069aa691e839556d4f06fedfa
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -2383,6 +2383,8 @@ components:
         - componentType
         - componentId
         - semanticDecision
+        - streamId
+        - resultEventId
       properties:
         compiledFormPatch:
           type: object
@@ -2402,6 +2404,14 @@ components:
         semanticDecision:
           $ref: '#/components/schemas/AgenticAuthoringSemanticDecision'
           description: Decisao semantica obrigatoria que autorizou a materializacao. O apply deve rejeitar requisicoes sem decisao, patches que nao cumpram esta decisao ou decisoes com reviewRequired=true.
+        streamId:
+          type: string
+          format: uuid
+          description: Identidade canonica do stream de authoring que publicou o resultado aplicavel. O backend revalida ownership, tenant, usuario, ambiente e expiracao antes de persistir.
+        resultEventId:
+          type: string
+          format: uuid
+          description: eventId do evento terminal result recebido no envelope SSE. A decisao semantica e o compiledFormPatch devem coincidir exatamente com o payload persistido deste evento.
       additionalProperties: true
 
     AgenticAuthoringComponentCapabilitiesResult:
