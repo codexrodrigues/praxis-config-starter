@@ -63,15 +63,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must not be enabled implicitly by host applications.
 
 ### Fixed
-- Updated the Quickstart domain-rule HTTP lifecycle proof to derive author and
-  reviewer from distinct server identities, assert self-approval rejection and
-  stop sending the removed caller-supplied definition actor fields.
 - Added a deterministic domain-rule-only mode to the official HTTP smoke so a
   rules release gate does not depend on an unrelated external LLM call.
+- Made synchronous OpenAI Responses consumption forward-compatible with output
+  union evolution by using the official SDK raw-response surface and projecting
+  only the stable fields consumed by Praxis, without retries or raw-payload logs.
 - Made the agentic semantic-intent schema compatible with OpenAI strict
   Structured Outputs by closing nested objects, requiring every declared field
   and representing optional values as nullable types. The OpenAI adapter now
   rejects incompatible schemas locally before issuing a provider request.
+- Updated the Quickstart domain-rule HTTP lifecycle proof to derive author and
+  reviewer from distinct server identities, assert self-approval rejection and
+  stop sending the removed caller-supplied definition actor fields.
 - Fixed table runtime operation compilation so selected-record related-surface
   requests can produce `tableRuntimeOperations` with `surfaceId` instead of
   falling back to column clarification.
@@ -88,8 +91,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only fall back to monorepo-level docs when expected files exist there.
 
 ### Validated
-- OpenAI strict-schema/provider and semantic-intent gates passed with `44/44`
-  and `323/323` tests; the `ci-smoke-unit` profile passed with `1,997/1,997`
+- The official OpenAI `gpt-5.4-mini` HTTP intent gate reached
+  `route_required` with LLM-authored quick replies after the raw-response
+  projection fix; the later lifecycle failure was isolated to a stale
+  same-identity maker-checker fixture.
+- OpenAI provider focal tests passed with `19/19`, including an incomplete,
+  unconsumed output variant alongside a valid assistant message; the combined
+  provider and semantic-intent resolver gate passed with `45/45` tests.
+- OpenAI strict-schema/provider and semantic-intent gates passed with `45/45`
+  and `323/323` tests; the `ci-smoke-unit` profile passed with `1,998/1,998`
   tests and the quickstart packaged against the locally installed starter.
 - Official runtime tool plan readonly-beta smoke battery passed locally against
   real Angular, real Quickstart and Neon/Postgres with `15/15` scenarios,

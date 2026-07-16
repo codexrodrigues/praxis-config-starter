@@ -6,6 +6,7 @@ import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.JsonValue;
 import com.openai.core.http.AsyncStreamResponse;
+import com.openai.core.http.HttpResponseFor;
 import com.openai.errors.OpenAIIoException;
 import com.openai.errors.OpenAIServiceException;
 import com.openai.helpers.ResponseAccumulator;
@@ -104,8 +105,8 @@ public class SpringAiOpenAiService implements AiProvider {
     @Override
     public JsonNode generateJson(String prompt, AiJsonSchema schema, AiCallConfig config) {
         PreparedSchema preparedSchema = prepareSchema(schema);
-        Response response = callResponses(prompt, config, preparedSchema, true);
-        String text = extractResponseText(response);
+        OpenAiResponseProjection response = callResponses(prompt, config, preparedSchema, true);
+        String text = response.text();
         if (text == null || text.isBlank()) {
             return null;
         }
@@ -127,7 +128,7 @@ public class SpringAiOpenAiService implements AiProvider {
 
     @Override
     public String generateText(String prompt, AiCallConfig config) {
-        return extractResponseText(callResponses(prompt, config, PreparedSchema.none(), false));
+        return callResponses(prompt, config, PreparedSchema.none(), false).text();
     }
 
     @Override
@@ -199,7 +200,7 @@ public class SpringAiOpenAiService implements AiProvider {
         return PROVIDER;
     }
 
-    private Response callResponses(
+    private OpenAiResponseProjection callResponses(
             String prompt,
             AiCallConfig config,
             PreparedSchema preparedSchema,
@@ -207,9 +208,17 @@ public class SpringAiOpenAiService implements AiProvider {
         int resolvedTimeoutSeconds = resolveTimeoutSeconds(config);
         try (ClientLease lease = acquireClient(config)) {
             ResponseCreateParams params = buildParams(prompt, config, preparedSchema, jsonMode);
-            CompletableFuture<Response> future = lease.client().async().responses().create(params);
+            CompletableFuture<HttpResponseFor<Response>> future = lease.client()
+                    .async()
+                    .responses()
+                    .withRawResponse()
+                    .create(params);
             try {
-                Response response = future.get(Math.max(1, resolvedTimeoutSeconds), TimeUnit.SECONDS);
+                OpenAiResponseProjection response;
+                try (HttpResponseFor<Response> rawResponse =
+                        future.get(Math.max(1, resolvedTimeoutSeconds), TimeUnit.SECONDS)) {
+                    response = projectResponse(rawResponse);
+                }
                 validateCompletedResponse(response);
                 captureInvocationMetadata(config, response);
                 return response;
@@ -223,6 +232,56 @@ public class SpringAiOpenAiService implements AiProvider {
             throw exception;
         } catch (Exception exception) {
             throw classifyCallFailure(exception);
+        }
+    }
+
+    /**
+     * Projects only the stable Responses fields consumed by Praxis from the SDK raw-response
+     * surface. This keeps transport and request authoring in the official SDK while avoiding a
+     * dependency on every variant of the provider's evolving output union.
+     */
+    private OpenAiResponseProjection projectResponse(HttpResponseFor<Response> rawResponse) {
+        try {
+            JsonNode root = objectMapper.readTree(rawResponse.body());
+            if (root == null || !root.isObject()) {
+                throw new IllegalStateException("OpenAI returned a non-object response");
+            }
+            StringBuilder text = new StringBuilder();
+            String refusal = null;
+            JsonNode output = root.path("output");
+            if (output.isArray()) {
+                for (JsonNode item : output) {
+                    if (!"message".equals(item.path("type").asText()) || !item.path("content").isArray()) {
+                        continue;
+                    }
+                    for (JsonNode content : item.path("content")) {
+                        String contentType = content.path("type").asText();
+                        if ("output_text".equals(contentType) && content.path("text").isTextual()) {
+                            text.append(content.path("text").asText());
+                        } else if (refusal == null
+                                && "refusal".equals(contentType)
+                                && content.path("refusal").isTextual()) {
+                            refusal = content.path("refusal").asText();
+                        }
+                    }
+                }
+            }
+            JsonNode usage = root.path("usage");
+            return new OpenAiResponseProjection(
+                    text.toString(),
+                    refusal,
+                    textOrNull(root, "status"),
+                    root.path("error").isObject(),
+                    root.path("incomplete_details").isObject(),
+                    textOrNull(root, "id"),
+                    textOrNull(root, "model"),
+                    integerOrNull(usage, "input_tokens"),
+                    integerOrNull(usage, "output_tokens"),
+                    integerOrNull(usage.path("input_tokens_details"), "cached_tokens"),
+                    integerOrNull(usage, "total_tokens"));
+        } catch (IOException exception) {
+            throw AiProviderCallException.unknown(
+                    PROVIDER, new IllegalStateException("OpenAI response body could not be decoded", exception));
         }
     }
 
@@ -460,20 +519,20 @@ public class SpringAiOpenAiService implements AiProvider {
                 : PreparedSchema.none();
     }
 
-    private void validateCompletedResponse(Response response) {
-        String status = responseStatus(response);
+    private void validateCompletedResponse(OpenAiResponseProjection response) {
+        String status = response.status() == null ? "unknown" : response.status();
         if (!"completed".equals(status)) {
             throw AiProviderCallException.unknown(
                     PROVIDER,
-                    new IllegalStateException("OpenAI response status=" + status + responseFailureSuffix(response)));
+                    new IllegalStateException("OpenAI response status=" + status + response.failureSuffix()));
         }
-        String refusal = extractRefusal(response);
+        String refusal = response.refusal();
         if (refusal != null) {
             throw AiProviderCallException.unknown(
                     PROVIDER,
                     new IllegalStateException("OpenAI refused the response: " + summarizeErrorBody(refusal)));
         }
-        if (extractResponseText(response).isBlank()) {
+        if (response.text().isBlank()) {
             throw AiProviderCallException.unknown(
                     PROVIDER, new IllegalStateException("OpenAI returned empty response content"));
         }
@@ -558,6 +617,23 @@ public class SpringAiOpenAiService implements AiProvider {
                 usage == null ? null : safeInt(usage.inputTokensDetails().cachedTokens()),
                 null,
                 usage == null ? null : safeInt(usage.totalTokens()));
+    }
+
+    private void captureInvocationMetadata(AiCallConfig config, OpenAiResponseProjection response) {
+        AiProviderInvocationTrace trace = config != null ? config.getInvocationTrace() : null;
+        if (trace == null || response == null) {
+            return;
+        }
+        trace.providerResponse(
+                TRANSPORT,
+                response.id(),
+                response.model(),
+                response.status() == null ? "unknown" : response.status(),
+                response.inputTokens(),
+                response.outputTokens(),
+                response.cachedInputTokens(),
+                null,
+                response.totalTokens());
     }
 
     private ClientLease acquireClient(AiCallConfig config) {
@@ -826,6 +902,11 @@ public class SpringAiOpenAiService implements AiProvider {
         return trimToNull(value.asText());
     }
 
+    private Integer integerOrNull(JsonNode node, String field) {
+        JsonNode value = node == null ? null : node.get(field);
+        return value != null && value.isIntegralNumber() ? safeInt(value.asLong()) : null;
+    }
+
     private String summarizeErrorBody(String body) {
         String trimmed = trimToNull(body);
         return trimmed == null ? null : trimmed.substring(0, Math.min(trimmed.length(), 180));
@@ -850,6 +931,34 @@ public class SpringAiOpenAiService implements AiProvider {
 
         boolean hasSchema() {
             return jsonSchema != null && !jsonSchema.isBlank();
+        }
+    }
+
+    private record OpenAiResponseProjection(
+            String text,
+            String refusal,
+            String status,
+            boolean errorPresent,
+            boolean incompleteDetailsPresent,
+            String id,
+            String model,
+            Integer inputTokens,
+            Integer outputTokens,
+            Integer cachedInputTokens,
+            Integer totalTokens) {
+
+        private OpenAiResponseProjection {
+            text = text == null ? "" : text;
+        }
+
+        String failureSuffix() {
+            if (errorPresent) {
+                return " error=present";
+            }
+            if (incompleteDetailsPresent) {
+                return " incomplete=present";
+            }
+            return "";
         }
     }
 
