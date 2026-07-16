@@ -30,9 +30,11 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -358,6 +360,7 @@ public class SpringAiOpenAiService implements AiProvider {
             if (schemaNode == null || !schemaNode.isObject()) {
                 throw new IllegalArgumentException("Structured output schema must be a JSON object.");
             }
+            validateStrictSchema(schemaNode, "$");
             Map<String, JsonValue> fields = new LinkedHashMap<>();
             schemaNode.fields().forEachRemaining(entry ->
                     fields.put(entry.getKey(), JsonValue.fromJsonNode(entry.getValue())));
@@ -365,8 +368,83 @@ public class SpringAiOpenAiService implements AiProvider {
                     .additionalProperties(fields)
                     .build();
         } catch (Exception exception) {
-            throw AiProviderCallException.fromHttpStatus(PROVIDER, 400, "Invalid structured output schema");
+            String detail = exception instanceof IllegalArgumentException
+                    ? exception.getMessage()
+                    : "schema JSON could not be parsed";
+            log.warn("[SpringAiOpenAiService] Invalid strict structured output schema: {}", detail);
+            throw AiProviderCallException.fromHttpStatus(
+                    PROVIDER,
+                    400,
+                    "Invalid strict structured output schema: " + detail);
         }
+    }
+
+    /**
+     * Validates the subset required by OpenAI strict Structured Outputs before the provider call.
+     * Every object must be closed and every declared property must be required; optional values are
+     * represented by nullable types in the schema itself.
+     */
+    private void validateStrictSchema(JsonNode schema, String path) {
+        if (schema == null || !schema.isObject()) {
+            return;
+        }
+        if (declaresObjectType(schema)) {
+            JsonNode properties = schema.path("properties");
+            if (!properties.isObject()) {
+                throw new IllegalArgumentException(path + " object must declare properties");
+            }
+            if (!schema.path("additionalProperties").isBoolean()
+                    || schema.path("additionalProperties").asBoolean()) {
+                throw new IllegalArgumentException(path + " object must set additionalProperties=false");
+            }
+            Set<String> propertyNames = new LinkedHashSet<>();
+            properties.fieldNames().forEachRemaining(propertyNames::add);
+            Set<String> requiredNames = new LinkedHashSet<>();
+            JsonNode required = schema.path("required");
+            AtomicBoolean invalidRequiredEntry = new AtomicBoolean(false);
+            if (required.isArray()) {
+                required.forEach(value -> {
+                    if (value.isTextual()) {
+                        requiredNames.add(value.asText());
+                    } else {
+                        invalidRequiredEntry.set(true);
+                    }
+                });
+            }
+            if (!required.isArray()
+                    || invalidRequiredEntry.get()
+                    || required.size() != propertyNames.size()
+                    || !requiredNames.equals(propertyNames)) {
+                throw new IllegalArgumentException(
+                        path + " required must contain every declared property exactly once");
+            }
+        }
+        schema.fields().forEachRemaining(entry -> {
+            JsonNode value = entry.getValue();
+            String childPath = path + "." + entry.getKey();
+            if (value.isObject()) {
+                validateStrictSchema(value, childPath);
+            } else if (value.isArray()) {
+                for (int index = 0; index < value.size(); index++) {
+                    validateStrictSchema(value.get(index), childPath + "[" + index + "]");
+                }
+            }
+        });
+    }
+
+    private boolean declaresObjectType(JsonNode schema) {
+        JsonNode type = schema.path("type");
+        if (type.isTextual()) {
+            return "object".equals(type.asText());
+        }
+        if (type.isArray()) {
+            for (JsonNode value : type) {
+                if (value.isTextual() && "object".equals(value.asText())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private PreparedSchema prepareSchema(AiJsonSchema schema) {

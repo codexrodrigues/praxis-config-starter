@@ -1737,10 +1737,18 @@ public class AgenticAuthoringLlmIntentResolverService {
         nullableString(replyProps, "description");
         nullableString(replyProps, "icon");
         nullableString(replyProps, "tone");
-        replyProps.putObject("contextHints").put("type", "object").put("additionalProperties", true);
+        // Provider-authored replies are presentation suggestions. Canonical contextHints,
+        // semanticDecision and value are enriched by the governed backend, not accepted as an
+        // arbitrary open object from the model.
         ArrayNode replyRequired = reply.putArray("required");
-        replyRequired.add("id").add("kind").add("label").add("prompt");
-        reply.put("additionalProperties", true);
+        replyRequired.add("id")
+                .add("kind")
+                .add("label")
+                .add("prompt")
+                .add("description")
+                .add("icon")
+                .add("tone");
+        reply.put("additionalProperties", false);
         properties.putObject("quickReplies")
                 .put("type", "array")
                 .set("items", reply);
@@ -1751,7 +1759,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .add("artifactKind")
                 .add("semanticIntentClass")
                 .add("changeKind")
+                .add("selectedResourcePath")
+                .add("resourceSearchQuery")
                 .add("followUpKind")
+                .add("assistantMessage")
                 .add("requiresGovernedAuthoring")
                 .add("visualizationDecision")
                 .add("consultativeRetrievalPlan")
@@ -1828,6 +1839,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .add("chartType")
                 .add("orientation")
                 .add("metricAggregation")
+                .add("metricField")
                 .add("metricLabel")
                 .add("provenance");
         axis.put("additionalProperties", false);
@@ -1840,6 +1852,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .add("intent")
                 .add("layoutKind")
                 .add("primaryComponent")
+                .add("primaryComponentId")
                 .add("axes")
                 .add("includeSummary")
                 .add("includeDetailTable")
