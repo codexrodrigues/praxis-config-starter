@@ -112,9 +112,10 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 37. [33-spring-ai-openai-modernization-evidence.md](./33-spring-ai-openai-modernization-evidence.md)
 38. [34-openai-responses-sdk-adapter-evidence.md](./34-openai-responses-sdk-adapter-evidence.md)
 39. [35-openai-responses-consistency-baseline-evidence.md](./35-openai-responses-consistency-baseline-evidence.md)
-40. [01-current-state-and-target.md](./01-current-state-and-target.md)
-41. [02-implementation-backlog.md](./02-implementation-backlog.md)
-42. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+40. [36-openai-extended-consistency-and-dashboard-variance-evidence.md](./36-openai-extended-consistency-and-dashboard-variance-evidence.md)
+41. [01-current-state-and-target.md](./01-current-state-and-target.md)
+42. [02-implementation-backlog.md](./02-implementation-backlog.md)
+43. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e

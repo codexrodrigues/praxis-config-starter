@@ -12,8 +12,11 @@ os gates de latencia, tokens e custo ativos.
 Esta evidencia fecha o basico medido pelo corpus atual: orientacao amigavel
 sobre o Page Builder, recomendacao de proximo passo, formulario de
 funcionarios, tela aberta de acompanhamento e tabela de funcionarios. Ela nao
-declara todo o produto pronto para mercado; o perfil estendido, a jornada
-progressiva de Table e a prova visual/browser continuam como proximos gates.
+declara todo o produto pronto para mercado. O perfil estendido e a jornada
+progressiva inicial de Table foram executados posteriormente; os resultados e
+a variancia encontrada estao registrados em
+`36-openai-extended-consistency-and-dashboard-variance-evidence.md`. A jornada
+ampliada de Table e a prova visual/browser continuam como proximos gates.
 
 ## Classificacao e mapa de impacto
 
@@ -109,13 +112,12 @@ A telemetria sanitizada confirmou:
 
 ## Proximos gates
 
-1. Executar o perfil `extended` tres vezes com os mesmos limites de latencia,
-   tokens e custo.
-2. Ampliar a jornada progressiva de Table para reordenacao, visibilidade,
+1. Ampliar a jornada progressiva de Table para reordenacao, visibilidade,
    formato, filtros e recuperacao de schema, preservando action plan
    manifest-backed e lineage de apply.
+2. Reexecutar o perfil `extended x3` no corte que incorporar essa jornada,
+   mantendo os mesmos limites de latencia, tokens e custo.
 3. Revalidar no Page Builder por browser real a qualidade visual, estados de
    loading/review/apply, acessibilidade e responsividade das composicoes.
 4. Somente depois comparar Spring AI 2 / Spring Boot 4 em spike separado,
    usando o mesmo corpus e as mesmas metricas como criterio de decisao.
-
