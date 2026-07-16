@@ -12,6 +12,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.service.AiCallConfig;
+import org.praxisplatform.config.service.AiProviderFailureClassifier;
+import org.praxisplatform.config.service.AiProviderInvocationMetrics;
+import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
+import org.praxisplatform.config.service.AiProviderInvocationTrace;
 import org.praxisplatform.config.service.AiProviderManagementService;
 
 @Slf4j
@@ -47,6 +51,30 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
             String tenantId,
             String userId,
             String environment) {
+        return synthesizeWithTelemetry(
+                request,
+                intentResolution,
+                uiCompositionPlan,
+                valid,
+                failureCodes,
+                warnings,
+                fallbackMessage,
+                tenantId,
+                userId,
+                environment).message();
+    }
+
+    AgenticAuthoringPreviewMessageResult synthesizeWithTelemetry(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            JsonNode uiCompositionPlan,
+            boolean valid,
+            List<String> failureCodes,
+            List<String> warnings,
+            String fallbackMessage,
+            String tenantId,
+            String userId,
+            String environment) {
         boolean localEditorialComposition = isLocalEditorialComposition(request, intentResolution, warnings);
         String fallback = value(fallbackMessage);
         if (localEditorialComposition && fallback.isBlank()) {
@@ -59,7 +87,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
                 warnings,
                 fallback);
         if (!deterministicModificationMessage.isBlank()) {
-            return deterministicModificationMessage;
+            return AgenticAuthoringPreviewMessageResult.deterministic(deterministicModificationMessage);
         }
         String deterministicMessage = deterministicSingleChartMessage(
                 intentResolution,
@@ -67,7 +95,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
                 valid,
                 fallback);
         if (!deterministicMessage.isBlank()) {
-            return deterministicMessage;
+            return AgenticAuthoringPreviewMessageResult.deterministic(deterministicMessage);
         }
         String governedMaterializationMessage = deterministicGovernedMaterializationMessage(
                 request,
@@ -77,11 +105,13 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
                 failureCodes,
                 warnings);
         if (!governedMaterializationMessage.isBlank()) {
-            return governedMaterializationMessage;
+            return AgenticAuthoringPreviewMessageResult.deterministic(governedMaterializationMessage);
         }
         if (request == null || request.userPrompt() == null || request.userPrompt().isBlank()) {
-            return fallback;
+            return AgenticAuthoringPreviewMessageResult.deterministic(fallback);
         }
+        AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
+                "preview_message", 1, request.provider(), request.model());
         try {
             String generated = providerManagementService.generateText(
                     synthesisPrompt(request, intentResolution, uiCompositionPlan, valid, failureCodes, warnings),
@@ -91,19 +121,30 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
                             .apiKey(request.apiKey())
                             .temperature(0.2d)
                             .maxTokens(220)
+                            .invocationTrace(trace)
                             .build(),
                     tenantId,
                     userId,
                     environment);
+            trace.succeeded();
             String message = safeMessage(generated, fallback);
             if (localEditorialComposition && hasResourceSourceClaim(message)) {
-                return localEditorialPreviewMessage(valid);
+                return tracedResult(localEditorialPreviewMessage(valid), trace);
             }
-            return sanitizeTechnicalLanguage(message, intentResolution);
+            return tracedResult(sanitizeTechnicalLanguage(message, intentResolution), trace);
         } catch (Exception ex) {
+            trace.failed(AiProviderFailureClassifier.classify(ex));
             log.debug("[AgenticAuthoring] Preview assistant message synthesis failed: {}", ex.getMessage());
-            return sanitizeTechnicalLanguage(fallback, intentResolution);
+            return tracedResult(sanitizeTechnicalLanguage(fallback, intentResolution), trace);
         }
+    }
+
+    private AgenticAuthoringPreviewMessageResult tracedResult(
+            String message,
+            AiProviderInvocationTrace trace) {
+        AiProviderInvocationTelemetry invocation = trace.snapshot();
+        AiProviderInvocationMetrics.record(invocation);
+        return new AgenticAuthoringPreviewMessageResult(message, List.of(invocation));
     }
 
     private String synthesisPrompt(

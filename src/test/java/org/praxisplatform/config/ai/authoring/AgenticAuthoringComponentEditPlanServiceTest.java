@@ -115,6 +115,10 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 "local");
 
         assertThat(result.valid()).isTrue();
+        assertThat(result.providerInvocations()).singleElement().satisfies(invocation -> {
+            assertThat(invocation.phase()).isEqualTo("component_edit_plan");
+            assertThat(invocation.status()).isEqualTo("success");
+        });
         assertThat(result.compiledPatch().path("proposedConfig").path("chartDocument")
                 .path("events").path("crossFilter").path("target").asText()).isEqualTo("employeesTable");
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
@@ -132,6 +136,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 .contains("crossFilter.configure");
         assertThat(callConfig.getValue().getTemperature()).isZero();
         assertThat(callConfig.getValue().getTimeoutSeconds()).isEqualTo(9);
+        assertThat(callConfig.getValue().getInvocationTrace()).isNotNull();
 
         ArgumentCaptor<AgenticAuthoringManifestEditPlanRequest> compileRequest =
                 ArgumentCaptor.forClass(AgenticAuthoringManifestEditPlanRequest.class);

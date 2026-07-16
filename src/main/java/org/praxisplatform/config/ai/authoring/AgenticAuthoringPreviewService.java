@@ -19,6 +19,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.praxisplatform.config.dto.AiSchemaContext;
+import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.ResourceCapabilitiesFetchResult;
 import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
 import org.praxisplatform.config.service.ResourceSurfaceCatalogFetchResult;
@@ -274,7 +275,10 @@ public class AgenticAuthoringPreviewService {
                             List.copyOf(failureCodes),
                             List.copyOf(warnings),
                             planResult.minimalFormPlan(),
-                            MissingNode.getInstance())
+                            MissingNode.getInstance()),
+                    null,
+                    null,
+                    planResult.providerInvocations()
             );
         }
 
@@ -292,6 +296,17 @@ public class AgenticAuthoringPreviewService {
                 null,
                 valid,
                 List.copyOf(failureCodes));
+        AgenticAuthoringPreviewMessageResult messageResult = previewAssistantMessage(
+                effectiveRequest,
+                intentResolution,
+                null,
+                valid,
+                List.copyOf(failureCodes),
+                List.copyOf(warnings),
+                fallbackMessage,
+                tenantId,
+                userId,
+                environment);
         return new AgenticAuthoringPreviewResult(
                 valid,
                 List.copyOf(failureCodes),
@@ -306,17 +321,8 @@ public class AgenticAuthoringPreviewService {
                         planResult.minimalFormPlan(),
                         compileResult.compiledFormPatch()),
                 null,
-                previewAssistantMessage(
-                        effectiveRequest,
-                        intentResolution,
-                        null,
-                        valid,
-                        List.copyOf(failureCodes),
-                        List.copyOf(warnings),
-                        fallbackMessage,
-                        tenantId,
-                        userId,
-                        environment)
+                messageResult.message(),
+                mergeProviderInvocations(planResult.providerInvocations(), messageResult.providerInvocations())
         );
     }
 
@@ -495,7 +501,8 @@ public class AgenticAuthoringPreviewService {
                     request,
                     result.failureCodes(),
                     result.warnings(),
-                    result.plan()));
+                    result.plan(),
+                    result.providerInvocations()));
         }
 
         JsonNode proposedConfig = result.compiledPatch().path("proposedConfig");
@@ -504,7 +511,8 @@ public class AgenticAuthoringPreviewService {
                     request,
                     List.of("component-edit-plan-proposed-config-missing"),
                     result.warnings(),
-                    result.plan()));
+                    result.plan(),
+                    result.providerInvocations()));
         }
         ObjectNode compiledFormPatch = materializeComponentEditPagePatch(
                 request.currentPage(),
@@ -530,7 +538,8 @@ public class AgenticAuthoringPreviewService {
                         result.plan(),
                         compiledFormPatch),
                 null,
-                deterministicPreviewAssistantMessage(request, intent, null, true, List.of())));
+                deterministicPreviewAssistantMessage(request, intent, null, true, List.of()),
+                result.providerInvocations()));
     }
 
     private List<String> validateComponentEditContext(
@@ -641,6 +650,15 @@ public class AgenticAuthoringPreviewService {
             List<String> failureCodes,
             List<String> warnings,
             JsonNode plan) {
+        return componentEditFailure(request, failureCodes, warnings, plan, List.of());
+    }
+
+    private AgenticAuthoringPreviewResult componentEditFailure(
+            AgenticAuthoringPlanRequest request,
+            List<String> failureCodes,
+            List<String> warnings,
+            JsonNode plan,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
         List<String> failures = failureCodes == null ? List.of() : List.copyOf(failureCodes);
         List<String> safeWarnings = warnings == null ? List.of() : List.copyOf(warnings);
         JsonNode safePlan = plan == null ? MissingNode.getInstance() : plan;
@@ -656,7 +674,10 @@ public class AgenticAuthoringPreviewService {
                         failures,
                         safeWarnings,
                         safePlan,
-                        MissingNode.getInstance()));
+                        MissingNode.getInstance()),
+                null,
+                null,
+                providerInvocations);
     }
 
     private Optional<AgenticAuthoringPreviewResult> previewUiCompositionPlan(
@@ -772,6 +793,17 @@ public class AgenticAuthoringPreviewService {
                     semanticMaterialization,
                     semanticallyValid,
                     List.copyOf(failureCodes));
+            AgenticAuthoringPreviewMessageResult messageResult = previewAssistantMessage(
+                    request,
+                    request.intentResolution(),
+                    semanticMaterialization,
+                    semanticallyValid,
+                    List.copyOf(failureCodes),
+                    List.copyOf(warnings),
+                    fallbackMessage,
+                    tenantId,
+                    userId,
+                    environment);
             return Optional.of(new AgenticAuthoringPreviewResult(
                     technicallyValid && !containsUnverifiedStatsAxes(semanticMaterialization),
                     List.copyOf(failureCodes),
@@ -788,17 +820,8 @@ public class AgenticAuthoringPreviewService {
                                     ? MissingNode.getInstance()
                                     : planResult.compiledFormPatch()),
                     uiCompositionPlan,
-                    previewAssistantMessage(
-                            request,
-                            request.intentResolution(),
-                            semanticMaterialization,
-                            semanticallyValid,
-                            List.copyOf(failureCodes),
-                            List.copyOf(warnings),
-                            fallbackMessage,
-                            tenantId,
-                            userId,
-                            environment)
+                    messageResult.message(),
+                    messageResult.providerInvocations()
             ));
         }
         return Optional.empty();
@@ -833,6 +856,17 @@ public class AgenticAuthoringPreviewService {
                 uiCompositionPlan,
                 false,
                 List.copyOf(failureCodes));
+        AgenticAuthoringPreviewMessageResult messageResult = previewAssistantMessage(
+                request,
+                request == null ? null : request.intentResolution(),
+                uiCompositionPlan,
+                false,
+                List.copyOf(failureCodes),
+                List.copyOf(warnings),
+                fallbackMessage,
+                tenantId,
+                userId,
+                environment);
         return new AgenticAuthoringPreviewResult(
                 false,
                 List.copyOf(failureCodes),
@@ -847,17 +881,8 @@ public class AgenticAuthoringPreviewService {
                         uiCompositionPlan,
                         compiledFormPatch),
                 uiCompositionPlan,
-                previewAssistantMessage(
-                        request,
-                        request == null ? null : request.intentResolution(),
-                        uiCompositionPlan,
-                        false,
-                        List.copyOf(failureCodes),
-                        List.copyOf(warnings),
-                        fallbackMessage,
-                        tenantId,
-                        userId,
-                        environment));
+                messageResult.message(),
+                messageResult.providerInvocations());
     }
 
     private AgenticAuthoringPlanRequest withGovernedAnalyticsContext(
@@ -5189,7 +5214,7 @@ public class AgenticAuthoringPreviewService {
                 : "ui-composition-plan-provider-no-plan";
     }
 
-    private String previewAssistantMessage(
+    private AgenticAuthoringPreviewMessageResult previewAssistantMessage(
             AgenticAuthoringPlanRequest request,
             AgenticAuthoringIntentResolutionResult intentResolution,
             JsonNode uiCompositionPlan,
@@ -5201,9 +5226,9 @@ public class AgenticAuthoringPreviewService {
             String userId,
             String environment) {
         if (messageSynthesizer == null) {
-            return fallbackMessage;
+            return AgenticAuthoringPreviewMessageResult.deterministic(fallbackMessage);
         }
-        return messageSynthesizer.synthesize(
+        return messageSynthesizer.synthesizeWithTelemetry(
                 request,
                 intentResolution,
                 uiCompositionPlan,
@@ -5214,6 +5239,19 @@ public class AgenticAuthoringPreviewService {
                 tenantId,
                 userId,
                 environment);
+    }
+
+    private List<AiProviderInvocationTelemetry> mergeProviderInvocations(
+            List<AiProviderInvocationTelemetry> first,
+            List<AiProviderInvocationTelemetry> second) {
+        List<AiProviderInvocationTelemetry> merged = new ArrayList<>();
+        if (first != null) {
+            merged.addAll(first);
+        }
+        if (second != null) {
+            merged.addAll(second);
+        }
+        return List.copyOf(merged);
     }
 
     private String deterministicPreviewAssistantMessage(

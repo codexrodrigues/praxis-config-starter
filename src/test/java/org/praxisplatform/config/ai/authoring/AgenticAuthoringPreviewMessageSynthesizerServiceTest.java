@@ -72,6 +72,36 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
     }
 
     @Test
+    void synthesizeWithTelemetryReturnsSanitizedProviderInvocation() {
+        when(providerManagementService.generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("Preparei a pre-visualizacao para revisao.");
+
+        AgenticAuthoringPreviewMessageResult result = service().synthesizeWithTelemetry(
+                request(),
+                intent(),
+                uiCompositionPlan(),
+                true,
+                List.of(),
+                List.of("compiled-form-patch-materialized-by-page-builder"),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result.message()).contains("pre-visualizacao");
+        assertThat(result.providerInvocations()).singleElement().satisfies(invocation -> {
+            assertThat(invocation.phase()).isEqualTo("preview_message");
+            assertThat(invocation.status()).isEqualTo("success");
+            assertThat(invocation.responseId()).isNull();
+        });
+    }
+
+    @Test
     void synthesizeReusesGovernedPreIntentDecisionWithoutExtraProviderCall() {
         String result = service().synthesize(
                 governedPreIntentRequest(),

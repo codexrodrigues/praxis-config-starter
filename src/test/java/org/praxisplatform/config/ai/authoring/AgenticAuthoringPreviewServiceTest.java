@@ -4343,7 +4343,7 @@ class AgenticAuthoringPreviewServiceTest {
                 "test-key",
                 null,
                 selectedDashboardIntent());
-        when(messageSynthesizer.synthesize(
+        when(messageSynthesizer.synthesizeWithTelemetry(
                 any(AgenticAuthoringPlanRequest.class),
                 any(AgenticAuthoringIntentResolutionResult.class),
                 any(),
@@ -4354,7 +4354,8 @@ class AgenticAuthoringPreviewServiceTest {
                 eq("tenant"),
                 eq("user"),
                 eq("local")))
-                .thenReturn("Usei a fonte Ranking reputacao para montar a pre-visualizacao. A tabela esta conectada ao recurso e voce ja pode revisar, pedir um grafico ou salvar.");
+                .thenReturn(AgenticAuthoringPreviewMessageResult.deterministic(
+                        "Usei a fonte Ranking reputacao para montar a pre-visualizacao. A tabela esta conectada ao recurso e voce ja pode revisar, pedir um grafico ou salvar."));
 
         AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
                 planService,

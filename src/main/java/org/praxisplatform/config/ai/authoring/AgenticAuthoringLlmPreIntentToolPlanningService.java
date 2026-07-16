@@ -14,6 +14,10 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
+import org.praxisplatform.config.service.AiProviderFailureClassifier;
+import org.praxisplatform.config.service.AiProviderInvocationMetrics;
+import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
+import org.praxisplatform.config.service.AiProviderInvocationTrace;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiProviderCallException;
 import org.praxisplatform.config.service.AiProviderManagementService;
@@ -133,13 +137,20 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         String userId = principalContext == null ? null : principalContext.userId();
         String environment = principalContext == null ? null : principalContext.environment();
         RuntimeException lastFailure = null;
+        List<AiProviderInvocationTelemetry> providerInvocations = new ArrayList<>();
         long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(planningBudgetSeconds);
         for (int attempt = 1; attempt <= providerAttempts; attempt++) {
             int attemptTimeoutSeconds = remainingTimeoutSeconds(deadlineNanos);
             if (attemptTimeoutSeconds <= 0) {
                 break;
             }
-            AiCallConfig callConfig = callConfig(request, attemptTimeoutSeconds);
+            AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
+                    "pre_intent_tool_plan", attempt, request.provider(), request.model());
+            AiCallConfig callConfig = callConfig(request, attemptTimeoutSeconds)
+                    .toBuilder()
+                    .invocationTrace(trace)
+                    .build();
+            boolean traceRecorded = false;
             try {
                 JsonNode result = providerManagementService.generateJson(
                         prompt,
@@ -151,6 +162,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 if (result == null
                         || !result.isObject()
                         || !result.path("shouldRetrieveGovernedResources").isBoolean()) {
+                    trace.failed("invalid_response");
+                    recordInvocation(trace, providerInvocations);
+                    traceRecorded = true;
                     lastFailure = new IllegalStateException(
                             "Provider returned invalid structured pre-intent planning output");
                     if (canRetryWithinBudget(attempt, deadlineNanos)) {
@@ -165,8 +179,12 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     }
                     break;
                 }
-                return toPlan(request, result);
+                trace.succeeded();
+                recordInvocation(trace, providerInvocations);
+                traceRecorded = true;
+                return withProviderInvocations(toPlan(request, result), providerInvocations);
             } catch (RuntimeException ex) {
+                trace.failed(AiProviderFailureClassifier.classify(ex));
                 lastFailure = ex;
                 if (!isRetryableProviderFailure(ex) || !canRetryWithinBudget(attempt, deadlineNanos)) {
                     break;
@@ -179,13 +197,44 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 if (!sleepBeforeRetry()) {
                     break;
                 }
+            } finally {
+                if (!traceRecorded) {
+                    recordInvocation(trace, providerInvocations);
+                }
             }
         }
         log.debug("[AgenticAuthoringPreIntentToolPlanning] LLM planning skipped after provider failure: {}",
                 lastFailure == null ? "" : lastFailure.getMessage());
         return AgenticAuthoringPreIntentToolPlanningResult.failed(
                 "provider-error",
-                lastFailure == null ? "RuntimeException" : lastFailure.getClass().getSimpleName());
+                lastFailure == null ? "RuntimeException" : lastFailure.getClass().getSimpleName(),
+                providerInvocations);
+    }
+
+    private AgenticAuthoringPreIntentToolPlanningResult withProviderInvocations(
+            AgenticAuthoringPreIntentToolPlanningResult result,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+        if (result == null) {
+            return AgenticAuthoringPreIntentToolPlanningResult.failed(
+                    "planner-result-empty", "empty", providerInvocations);
+        }
+        if (result.planned()) {
+            return AgenticAuthoringPreIntentToolPlanningResult.planned(result.plan(), providerInvocations);
+        }
+        if (!result.errorCode().isBlank()) {
+            return AgenticAuthoringPreIntentToolPlanningResult.failed(
+                    result.skipReason(), result.errorCode(), providerInvocations);
+        }
+        return AgenticAuthoringPreIntentToolPlanningResult.skipped(
+                result.skipReason(), providerInvocations);
+    }
+
+    private void recordInvocation(
+            AiProviderInvocationTrace trace,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+        AiProviderInvocationTelemetry invocation = trace.snapshot();
+        providerInvocations.add(invocation);
+        AiProviderInvocationMetrics.record(invocation);
     }
 
     private AiCallConfig callConfig(

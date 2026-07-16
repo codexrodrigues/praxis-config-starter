@@ -17,6 +17,7 @@ import java.util.Optional;
 import org.praxisplatform.config.service.AiProviderCallException;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
+import org.praxisplatform.config.service.AiProviderInvocationMetrics;
 import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.AiProviderInvocationTrace;
 import org.praxisplatform.config.service.AiProviderManagementService;
@@ -185,7 +186,9 @@ public class AgenticAuthoringLlmIntentResolverService {
             trace.failed(providerFailureKind(rootCause(ex)));
             throw ex;
         } finally {
-            providerInvocations.add(trace.snapshot());
+            AiProviderInvocationTelemetry invocation = trace.snapshot();
+            providerInvocations.add(invocation);
+            AiProviderInvocationMetrics.record(invocation);
         }
     }
 

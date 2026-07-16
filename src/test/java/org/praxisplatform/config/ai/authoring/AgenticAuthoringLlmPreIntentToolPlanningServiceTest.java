@@ -63,6 +63,10 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 new AiPrincipalContext("tenant", "user", "local", true));
 
         assertThat(result.planned()).isTrue();
+        assertThat(result.providerInvocations()).singleElement().satisfies(invocation -> {
+            assertThat(invocation.phase()).isEqualTo("pre_intent_tool_plan");
+            assertThat(invocation.status()).isEqualTo("success");
+        });
         assertThat(result.plan().reason()).contains("fonte governada");
         assertThat(result.plan().toolCalls()).hasSize(1);
         AgenticAuthoringToolCall call = result.plan().toolCalls().get(0);
@@ -97,6 +101,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("collection dashboard with filters, charts, and a detail table");
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(7);
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(640);
+        assertThat(configCaptor.getValue().getInvocationTrace()).isNotNull();
     }
 
     @Test

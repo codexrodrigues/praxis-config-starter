@@ -145,4 +145,33 @@ class AiSensitiveDataRedactorTest {
         assertThat(sanitized.path("userPrompt").asText()).isEqualTo("Criar dashboard token=[REDACTED]");
         assertThat(sanitized.path("effectivePrompt").asText()).isEqualTo("Criar dashboard para folha");
     }
+
+    @Test
+    void shouldPreserveOnlyCanonicalNumericTokenCountersInStreamEvents() {
+        ObjectNode payload = objectMapper.createObjectNode();
+        ObjectNode telemetry = payload.putObject("providerTelemetry");
+        telemetry.put("inputTokens", 120);
+        telemetry.put("outputTokens", 18);
+        telemetry.put("cacheReadInputTokens", 80);
+        telemetry.putNull("cacheWriteInputTokens");
+        telemetry.put("totalTokens", 138);
+        telemetry.put("accessToken", "secret-access-token");
+        telemetry.put("token", 123);
+        telemetry.put("inputTokenCount", 120);
+        telemetry.put("outputTokensText", "18");
+        telemetry.put("totalTokensInvalid", -1);
+
+        JsonNode sanitized = redactor.sanitizeEventPayload(payload).path("providerTelemetry");
+
+        assertThat(sanitized.path("inputTokens").asInt()).isEqualTo(120);
+        assertThat(sanitized.path("outputTokens").asInt()).isEqualTo(18);
+        assertThat(sanitized.path("cacheReadInputTokens").asInt()).isEqualTo(80);
+        assertThat(sanitized.path("cacheWriteInputTokens").isNull()).isTrue();
+        assertThat(sanitized.path("totalTokens").asInt()).isEqualTo(138);
+        assertThat(sanitized.path("accessToken").asText()).isEqualTo("[REDACTED]");
+        assertThat(sanitized.path("token").asText()).isEqualTo("[REDACTED]");
+        assertThat(sanitized.path("inputTokenCount").asText()).isEqualTo("[REDACTED]");
+        assertThat(sanitized.path("outputTokensText").asText()).isEqualTo("[REDACTED]");
+        assertThat(sanitized.path("totalTokensInvalid").asText()).isEqualTo("[REDACTED]");
+    }
 }

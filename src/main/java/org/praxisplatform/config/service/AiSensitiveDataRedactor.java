@@ -62,6 +62,12 @@ public class AiSensitiveDataRedactor {
             "sourceprompt",
             "userprompt",
             "content");
+    private static final Set<String> EVENT_OPERATIONAL_TOKEN_COUNTER_FIELDS = Set.of(
+            "inputtokens",
+            "outputtokens",
+            "cachereadinputtokens",
+            "cachewriteinputtokens",
+            "totaltokens");
     private static final Set<String> QUICK_REPLY_CONTEXT_HINT_FIELDS = Set.of(
             "artifactkind",
             "candidateref",
@@ -167,6 +173,10 @@ public class AiSensitiveDataRedactor {
                     objectNode.put(field.getKey(), REDACTED);
                     continue;
                 }
+                if (isOperationalTokenCounter(normalizedKey, field.getValue())) {
+                    objectNode.set(field.getKey(), field.getValue());
+                    continue;
+                }
                 if (isSecretField(normalizedKey)) {
                     objectNode.put(field.getKey(), REDACTED);
                     continue;
@@ -192,6 +202,15 @@ public class AiSensitiveDataRedactor {
             }
         }
         return source;
+    }
+
+    private boolean isOperationalTokenCounter(String normalizedField, JsonNode value) {
+        if (!EVENT_OPERATIONAL_TOKEN_COUNTER_FIELDS.contains(normalizedField)) {
+            return false;
+        }
+        return value == null
+                || value.isNull()
+                || (value.isIntegralNumber() && value.canConvertToLong() && value.asLong() >= 0L);
     }
 
     private boolean isQuickReplyContainer(String fieldName) {

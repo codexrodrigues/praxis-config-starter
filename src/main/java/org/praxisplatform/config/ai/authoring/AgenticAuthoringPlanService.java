@@ -17,6 +17,10 @@ import java.util.Objects;
 import java.util.Set;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
+import org.praxisplatform.config.service.AiProviderFailureClassifier;
+import org.praxisplatform.config.service.AiProviderInvocationMetrics;
+import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
+import org.praxisplatform.config.service.AiProviderInvocationTrace;
 import org.praxisplatform.config.service.AiProviderManagementService;
 
 public class AgenticAuthoringPlanService {
@@ -58,27 +62,40 @@ public class AgenticAuthoringPlanService {
         }
         AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
         effectiveRequest = withEffectivePrompt(effectiveRequest);
-        JsonNode plan = providerManagementService.generateJson(
-                minimalFormPlanPrompt(effectiveRequest),
-                AiJsonSchema.ofSchema(readMinimalFormPlanSchema()),
-                AiCallConfig.builder()
-                        .provider(effectiveRequest.provider())
-                        .model(effectiveRequest.model())
-                        .apiKey(effectiveRequest.apiKey())
-                        .temperature(0.0d)
-                        .maxTokens(2048)
-                        .build(),
-                tenantId,
-                userId,
-                environment
-        );
+        AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
+                "minimal_form_plan", 1, effectiveRequest.provider(), effectiveRequest.model());
+        JsonNode plan;
+        try {
+            plan = providerManagementService.generateJson(
+                    minimalFormPlanPrompt(effectiveRequest),
+                    AiJsonSchema.ofSchema(readMinimalFormPlanSchema()),
+                    AiCallConfig.builder()
+                            .provider(effectiveRequest.provider())
+                            .model(effectiveRequest.model())
+                            .apiKey(effectiveRequest.apiKey())
+                            .temperature(0.0d)
+                            .maxTokens(2048)
+                            .invocationTrace(trace)
+                            .build(),
+                    tenantId,
+                    userId,
+                    environment
+            );
+            trace.succeeded();
+        } catch (RuntimeException ex) {
+            trace.failed(AiProviderFailureClassifier.classify(ex));
+            throw ex;
+        } finally {
+            AiProviderInvocationMetrics.record(trace.snapshot());
+        }
         plan = completeDeterministicEditPlan(plan, effectiveRequest);
         List<String> failures = validator.validate(plan, effectiveRequest.intentResolution());
         return new AgenticAuthoringPlanResult(
                 failures.isEmpty(),
                 failures,
                 warnings(effectiveRequest.intentResolution()),
-                plan
+                plan,
+                List.of(trace.snapshot())
         );
     }
 

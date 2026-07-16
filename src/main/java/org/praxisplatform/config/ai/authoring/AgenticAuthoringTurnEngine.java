@@ -22,6 +22,7 @@ import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.service.AiPrincipalContext;
+import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.SchemaFetchResult;
 import org.praxisplatform.config.service.SchemaRetrievalService;
@@ -247,6 +248,7 @@ public class AgenticAuthoringTurnEngine {
             String schemaBaseUrl) {
         request = withGroundedRuntimeComponentContext(request);
         AgenticAuthoringTurnState state = initialState(request);
+        List<AiProviderInvocationTelemetry> turnProviderInvocations = new ArrayList<>();
         request = withActiveDecisionContext(request, state.activeSemanticDecision());
         boolean compactPlatformGuidanceOpportunity = hasPlatformGuidanceOpportunity(request);
         PreloadedComponentCapabilities componentCapabilitiesFuture =
@@ -271,8 +273,11 @@ public class AgenticAuthoringTurnEngine {
                         "Preparing semantic intent resolution."));
             }
             request = withProjectKnowledgeContext(request, principalContext, eventSink, null);
-            AgenticAuthoringResourceCandidatesResult plannedResourceDiscovery =
+            PreIntentToolPlanExecution preIntentExecution =
                     maybeRunPreIntentToolPlan(request, principalContext, eventSink);
+            AgenticAuthoringResourceCandidatesResult plannedResourceDiscovery =
+                    preIntentExecution.resourceDiscovery();
+            turnProviderInvocations.addAll(preIntentExecution.providerInvocations());
             if (plannedResourceDiscovery != null
                     && plannedResourceDiscovery.candidates() != null
                     && !plannedResourceDiscovery.candidates().isEmpty()) {
@@ -313,6 +318,7 @@ public class AgenticAuthoringTurnEngine {
                     principalContext.tenantId(),
                     principalContext.userId(),
                     principalContext.environment());
+            turnProviderInvocations.addAll(providerInvocations(intentResolution));
             ArtifactReconciliationOutcome artifactReconciliation = reconcilePlannedArtifact(
                     request,
                     principalContext,
@@ -335,7 +341,8 @@ public class AgenticAuthoringTurnEngine {
                     state,
                     intentResolution,
                     route,
-                    compactPlatformGuidanceOpportunity);
+                    compactPlatformGuidanceOpportunity,
+                    turnProviderInvocations);
             if (postIntentConsultativeOutcome != null) {
                 return postIntentConsultativeOutcome;
             }
@@ -385,6 +392,7 @@ public class AgenticAuthoringTurnEngine {
                         principalContext.tenantId(),
                         principalContext.userId(),
                         principalContext.environment());
+                turnProviderInvocations.addAll(providerInvocations(intentResolution));
                 artifactReconciliation = reconcilePlannedArtifact(
                         refinedIntentRequest,
                         principalContext,
@@ -461,6 +469,7 @@ public class AgenticAuthoringTurnEngine {
                                 principalContext.tenantId(),
                                 principalContext.userId(),
                                 principalContext.environment());
+                turnProviderInvocations.addAll(preview.providerInvocations());
                 if (!compactGovernedFastPath) {
                     emitStatus(
                             eventSink,
@@ -476,6 +485,7 @@ public class AgenticAuthoringTurnEngine {
                                 : "A pre-visualizacao precisa de uma revisao de seguranca antes de continuar.",
                         preview.valid() ? "Compiled preview payload." : "Preview requires backend repair classification.",
                         safePreviewDiagnostics(intentResolution, preview, false)));
+                AgenticAuthoringPreviewResult previewBeforeRepair = preview;
                 preview = maybeRepairPreview(
                         previewRequest,
                         principalContext,
@@ -483,6 +493,9 @@ public class AgenticAuthoringTurnEngine {
                         intentResolution,
                         preview,
                         schemaBaseUrl);
+                if (preview != previewBeforeRepair && preview != null) {
+                    turnProviderInvocations.addAll(preview.providerInvocations());
+                }
                 toolLoopResult = runGovernedToolLoop(
                         previewRequest,
                         principalContext,
@@ -498,7 +511,12 @@ public class AgenticAuthoringTurnEngine {
                     resourceDiscovery,
                     businessCatalogDiscovery,
                     schemaBaseUrl);
-            Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, preview, toolLoopResult, request);
+            Map<String, Object> decisionDiagnostics = decisionDiagnostics(
+                    intentResolution,
+                    preview,
+                    toolLoopResult,
+                    request,
+                    turnProviderInvocations);
             if (Boolean.TRUE.equals(decisionDiagnostics.get("semanticDecisionReviewGroundedByPreview"))) {
                 assistantMessage = groundedPreviewAssistantMessage(preview, intentResolution);
             }
@@ -709,7 +727,8 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnState state,
             AgenticAuthoringIntentResolutionResult intentResolution,
             AgenticAuthoringTurnRoute route,
-            boolean compactPlatformGuidanceOpportunity) {
+            boolean compactPlatformGuidanceOpportunity,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
         if (eventSink.terminalReached()) {
             return null;
         }
@@ -724,12 +743,24 @@ public class AgenticAuthoringTurnEngine {
             return null;
         }
         AgenticAuthoringTurnOutcome groundedClarificationOutcome =
-                maybeAnswerGroundedResourceDiscoveryClarification(request, eventSink, state, intentResolution, route);
+                maybeAnswerGroundedResourceDiscoveryClarification(
+                        request,
+                        eventSink,
+                        state,
+                        intentResolution,
+                        route,
+                        providerInvocations);
         if (groundedClarificationOutcome != null) {
             return groundedClarificationOutcome;
         }
         groundedClarificationOutcome =
-                maybeAnswerGroundedDomainDiscoveryClarification(request, eventSink, state, intentResolution, route);
+                maybeAnswerGroundedDomainDiscoveryClarification(
+                        request,
+                        eventSink,
+                        state,
+                        intentResolution,
+                        route,
+                        providerInvocations);
         if (groundedClarificationOutcome != null) {
             return groundedClarificationOutcome;
         }
@@ -738,7 +769,9 @@ public class AgenticAuthoringTurnEngine {
                 state,
                 intentResolution,
                 route,
-                compactPlatformGuidanceOpportunity);
+                compactPlatformGuidanceOpportunity,
+                request,
+                providerInvocations);
         if (resolvedPlatformGuidance != null) {
             return resolvedPlatformGuidance;
         }
@@ -792,7 +825,12 @@ public class AgenticAuthoringTurnEngine {
                         "hasRuntimeConsultableContext", answer.evidenceBundle() != null
                                 && answer.evidenceBundle().path("runtimeConsultableContext").isObject()),
                 "consultative.answer:" + safeText(answer.category())));
-        Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, null, null);
+        Map<String, Object> decisionDiagnostics = decisionDiagnostics(
+                intentResolution,
+                null,
+                null,
+                request,
+                providerInvocations);
         decisionDiagnostics.put("routeClass", safeText(route.routeClass()));
         decisionDiagnostics.put("consultativePostIntent", true);
         Map<String, Object> resultPayload = new LinkedHashMap<>();
@@ -821,7 +859,9 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnState state,
             AgenticAuthoringIntentResolutionResult intentResolution,
             AgenticAuthoringTurnRoute route,
-            boolean compactPlatformGuidanceOpportunity) {
+            boolean compactPlatformGuidanceOpportunity,
+            AgenticAuthoringTurnStreamRequest request,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
         if (eventSink == null
                 || eventSink.terminalReached()
                 || intentResolution == null
@@ -848,7 +888,12 @@ public class AgenticAuthoringTurnEngine {
                             "resolvedIntentAnswerUsed", true),
                     "consultative.answer:platform_guidance:resolved_intent"));
         }
-        Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, null, null);
+        Map<String, Object> decisionDiagnostics = decisionDiagnostics(
+                intentResolution,
+                null,
+                null,
+                request,
+                providerInvocations);
         decisionDiagnostics.put("routeClass", safeText(route == null ? "" : route.routeClass()));
         decisionDiagnostics.put("consultativePostIntent", false);
         decisionDiagnostics.put("resolvedIntentAnswerUsed", true);
@@ -877,7 +922,8 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnEventSink eventSink,
             AgenticAuthoringTurnState state,
             AgenticAuthoringIntentResolutionResult intentResolution,
-            AgenticAuthoringTurnRoute route) {
+            AgenticAuthoringTurnRoute route,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
         if (request == null
                 || eventSink == null
                 || eventSink.terminalReached()
@@ -918,7 +964,12 @@ public class AgenticAuthoringTurnEngine {
                         "domainResourceCount", resources.size(),
                         "providerFailure", true),
                 "consultative.grounded-domain-clarification:domain_discovery"));
-        Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, null, null, request);
+        Map<String, Object> decisionDiagnostics = decisionDiagnostics(
+                intentResolution,
+                null,
+                null,
+                request,
+                providerInvocations);
         decisionDiagnostics.put("routeClass", safeText(route.routeClass()));
         decisionDiagnostics.put("consultativePostIntent", true);
         decisionDiagnostics.put("domainDiscoveryGroundedClarification", true);
@@ -1013,7 +1064,8 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnEventSink eventSink,
             AgenticAuthoringTurnState state,
             AgenticAuthoringIntentResolutionResult intentResolution,
-            AgenticAuthoringTurnRoute route) {
+            AgenticAuthoringTurnRoute route,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
         if (request == null
                 || eventSink == null
                 || eventSink.terminalReached()
@@ -1063,7 +1115,12 @@ public class AgenticAuthoringTurnEngine {
                         "onlyWeakCandidates", onlyWeakCandidates,
                         "providerFailure", providerFailure),
                 "consultative.grounded-clarification:resource_discovery"));
-        Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, null, null, request);
+        Map<String, Object> decisionDiagnostics = decisionDiagnostics(
+                intentResolution,
+                null,
+                null,
+                request,
+                providerInvocations);
         decisionDiagnostics.put("routeClass", safeText(route.routeClass()));
         decisionDiagnostics.put("consultativePostIntent", true);
         decisionDiagnostics.put("resourceDiscoveryGroundedClarification", true);
@@ -1937,28 +1994,28 @@ public class AgenticAuthoringTurnEngine {
         return sanitized;
     }
 
-    private AgenticAuthoringResourceCandidatesResult maybeRunPreIntentToolPlan(
+    private PreIntentToolPlanExecution maybeRunPreIntentToolPlan(
             AgenticAuthoringTurnStreamRequest request,
             AiPrincipalContext principalContext,
             AgenticAuthoringTurnEventSink eventSink) {
         if (eventSink.terminalReached()) {
-            return null;
+            return PreIntentToolPlanExecution.empty();
         }
         if (preIntentToolPlanningService == null) {
             emitPreIntentToolPlanSkipped(eventSink, "planner-bean-unavailable", "");
-            return null;
+            return PreIntentToolPlanExecution.empty();
         }
         if (request == null) {
             emitPreIntentToolPlanSkipped(eventSink, "request-unavailable", "");
-            return null;
+            return PreIntentToolPlanExecution.empty();
         }
         if (hasPlatformGuidanceOpportunity(request)) {
             emitPreIntentToolPlanSkipped(eventSink, "governed-platform-guidance-opportunity", "");
-            return null;
+            return PreIntentToolPlanExecution.empty();
         }
         if (hasResourceDiscoveryContext(request)) {
             emitPreIntentToolPlanSkipped(eventSink, "resource-discovery-context-present", "");
-            return null;
+            return PreIntentToolPlanExecution.empty();
         }
         AgenticAuthoringPreIntentToolPlanningResult planningResult =
                 preIntentToolPlanningService.plan(request, principalContext);
@@ -1967,12 +2024,14 @@ public class AgenticAuthoringTurnEngine {
                     eventSink,
                     planningResult == null ? "planner-result-empty" : planningResult.skipReason(),
                     planningResult == null ? "" : planningResult.errorCode());
-            return null;
+            return new PreIntentToolPlanExecution(
+                    null,
+                    planningResult == null ? List.of() : planningResult.providerInvocations());
         }
         AgenticAuthoringPreIntentToolPlan plan = planningResult.plan();
         if (plan == null || plan.toolCalls().isEmpty()) {
             emitPreIntentToolPlanSkipped(eventSink, "planner-tool-calls-empty", "");
-            return null;
+            return new PreIntentToolPlanExecution(null, planningResult.providerInvocations());
         }
         eventSink.append("thought.step", safeToolProjection(
                 "tool.plan",
@@ -2010,7 +2069,7 @@ public class AgenticAuthoringTurnEngine {
                 break;
             }
         }
-        return resourceDiscovery;
+        return new PreIntentToolPlanExecution(resourceDiscovery, planningResult.providerInvocations());
     }
 
     private ArtifactReconciliationOutcome reconcilePlannedArtifact(
@@ -3405,6 +3464,15 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringPreviewResult preview,
             AgenticAuthoringToolLoopResult toolLoopResult,
             AgenticAuthoringTurnStreamRequest request) {
+        return decisionDiagnostics(intentResolution, preview, toolLoopResult, request, List.of());
+    }
+
+    private Map<String, Object> decisionDiagnostics(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringPreviewResult preview,
+            AgenticAuthoringToolLoopResult toolLoopResult,
+            AgenticAuthoringTurnStreamRequest request,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
         Map<String, Object> diagnostics = new LinkedHashMap<>();
         diagnostics.put("schemaVersion", "praxis-agentic-authoring-decision-diagnostics.v1");
         if (intentResolution == null) {
@@ -3424,6 +3492,7 @@ public class AgenticAuthoringTurnEngine {
             putToolLoopDiagnostics(diagnostics, toolLoopResult);
             putAuthoringEvidenceDiagnostics(diagnostics, request);
             putSemanticAxisDiagnostics(diagnostics, preview);
+            putProviderInvocationDiagnostics(diagnostics, request, providerInvocations);
             diagnostics.put("requiresReview", requiresDecisionReview(diagnostics));
             return diagnostics;
         }
@@ -3491,12 +3560,88 @@ public class AgenticAuthoringTurnEngine {
         putToolLoopDiagnostics(diagnostics, toolLoopResult);
         putAuthoringEvidenceDiagnostics(diagnostics, request);
         putSemanticAxisDiagnostics(diagnostics, preview);
+        putProviderInvocationDiagnostics(diagnostics, request, providerInvocations);
         diagnostics.put("requiresReview", requiresDecisionReview(diagnostics));
         String reviewReason = decisionReviewReason(diagnostics);
         if (!reviewReason.isBlank()) {
             diagnostics.put("reviewReason", reviewReason);
         }
         return diagnostics;
+    }
+
+    private List<AiProviderInvocationTelemetry> providerInvocations(
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        JsonNode items = intentResolution == null || intentResolution.llmDiagnostics() == null
+                ? objectMapper.missingNode()
+                : intentResolution.llmDiagnostics().path("resolutionTelemetry").path("providerInvocations");
+        if (!items.isArray()) {
+            return List.of();
+        }
+        List<AiProviderInvocationTelemetry> invocations = new ArrayList<>();
+        for (JsonNode item : items) {
+            try {
+                invocations.add(objectMapper.treeToValue(item, AiProviderInvocationTelemetry.class));
+            } catch (Exception ignored) {
+                // Detailed diagnostics are best effort and must never affect authoring.
+            }
+        }
+        return List.copyOf(invocations);
+    }
+
+    private void putProviderInvocationDiagnostics(
+            Map<String, Object> diagnostics,
+            AgenticAuthoringTurnStreamRequest request,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+        if (!includeLlmDiagnostics(request)) {
+            return;
+        }
+        List<AiProviderInvocationTelemetry> safeInvocations = providerInvocations == null
+                ? List.of()
+                : providerInvocations.stream().filter(Objects::nonNull).limit(12).toList();
+        Map<String, Object> telemetry = new LinkedHashMap<>();
+        telemetry.put("schemaVersion", "praxis-agentic-authoring-provider-telemetry.v1");
+        telemetry.put("providerInvocations", safeInvocations);
+        telemetry.put("invocationCount", safeInvocations.size());
+        telemetry.put("truncated", providerInvocations != null && providerInvocations.size() > safeInvocations.size());
+        telemetry.put("successCount", safeInvocations.stream()
+                .filter(invocation -> "success".equals(invocation.status()))
+                .count());
+        telemetry.put("failureCount", safeInvocations.stream()
+                .filter(invocation -> "failure".equals(invocation.status()))
+                .count());
+        telemetry.put("latencyMs", safeInvocations.stream()
+                .mapToLong(invocation -> Math.max(0L, invocation.latencyMs()))
+                .sum());
+        telemetry.put("inputTokens", tokenSum(safeInvocations, TokenKind.INPUT));
+        telemetry.put("outputTokens", tokenSum(safeInvocations, TokenKind.OUTPUT));
+        telemetry.put("cacheReadInputTokens", tokenSum(safeInvocations, TokenKind.CACHE_READ));
+        telemetry.put("cacheWriteInputTokens", tokenSum(safeInvocations, TokenKind.CACHE_WRITE));
+        telemetry.put("totalTokens", tokenSum(safeInvocations, TokenKind.TOTAL));
+        telemetry.put("rawPromptCopied", false);
+        telemetry.put("rawResponseCopied", false);
+        telemetry.put("credentialsCopied", false);
+        diagnostics.put("providerTelemetry", telemetry);
+    }
+
+    private boolean includeLlmDiagnostics(AgenticAuthoringTurnStreamRequest request) {
+        return request != null
+                && request.contextHints() != null
+                && request.contextHints().path("includeLlmDiagnostics").asBoolean(false);
+    }
+
+    private long tokenSum(List<AiProviderInvocationTelemetry> invocations, TokenKind kind) {
+        return invocations.stream()
+                .map(invocation -> switch (kind) {
+                    case INPUT -> invocation.inputTokens();
+                    case OUTPUT -> invocation.outputTokens();
+                    case CACHE_READ -> invocation.cacheReadInputTokens();
+                    case CACHE_WRITE -> invocation.cacheWriteInputTokens();
+                    case TOTAL -> invocation.totalTokens();
+                })
+                .filter(Objects::nonNull)
+                .filter(value -> value >= 0)
+                .mapToLong(Integer::longValue)
+                .sum();
     }
 
     private void putToolLoopDiagnostics(
@@ -4908,6 +5053,27 @@ public class AgenticAuthoringTurnEngine {
     private record ArtifactReconciliationOutcome(
             AgenticAuthoringIntentResolutionResult intentResolution,
             boolean attempted) {
+    }
+
+    private record PreIntentToolPlanExecution(
+            AgenticAuthoringResourceCandidatesResult resourceDiscovery,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+
+        private PreIntentToolPlanExecution {
+            providerInvocations = providerInvocations == null ? List.of() : List.copyOf(providerInvocations);
+        }
+
+        private static PreIntentToolPlanExecution empty() {
+            return new PreIntentToolPlanExecution(null, List.of());
+        }
+    }
+
+    private enum TokenKind {
+        INPUT,
+        OUTPUT,
+        CACHE_READ,
+        CACHE_WRITE,
+        TOTAL
     }
 
     private record AgenticAuthoringTurnRoute(String routeClass, boolean allowsPreview) {

@@ -10,6 +10,10 @@ import java.util.List;
 import java.util.Objects;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
+import org.praxisplatform.config.service.AiProviderFailureClassifier;
+import org.praxisplatform.config.service.AiProviderInvocationMetrics;
+import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
+import org.praxisplatform.config.service.AiProviderInvocationTrace;
 import org.praxisplatform.config.service.AiProviderManagementService;
 
 /**
@@ -66,6 +70,8 @@ public class AgenticAuthoringComponentEditPlanService {
                 return failure("component-authoring-manifest-operations-unavailable");
             }
 
+            AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
+                    "component_edit_plan", 1, request.provider(), request.model());
             AiCallConfig callConfig = AiCallConfig.builder()
                     .provider(request.provider())
                     .model(request.model())
@@ -73,14 +79,32 @@ public class AgenticAuthoringComponentEditPlanService {
                     .temperature(0.0d)
                     .maxTokens(MAX_COMPLETION_TOKENS)
                     .timeoutSeconds(timeoutSeconds)
+                    .invocationTrace(trace)
                     .build();
-            JsonNode plan = providerManagementService.generateJson(
-                    prompt(request, componentId, manifest, config, validationContext),
-                    AiJsonSchema.ofSchema(objectMapper.writeValueAsString(outputSchema(componentId, manifest))),
-                    callConfig,
-                    tenantId,
-                    userId,
-                    environment);
+            JsonNode plan;
+            try {
+                plan = providerManagementService.generateJson(
+                        prompt(request, componentId, manifest, config, validationContext),
+                        AiJsonSchema.ofSchema(objectMapper.writeValueAsString(outputSchema(componentId, manifest))),
+                        callConfig,
+                        tenantId,
+                        userId,
+                        environment);
+                trace.succeeded();
+            } catch (Exception ex) {
+                trace.failed(AiProviderFailureClassifier.classify(ex));
+                AiProviderInvocationTelemetry invocation = trace.snapshot();
+                AiProviderInvocationMetrics.record(invocation);
+                return new AgenticAuthoringComponentEditPlanResult(
+                        false,
+                        List.of("component-edit-plan-provider-failed"),
+                        List.of("component-edit-plan-failed-closed"),
+                        missing(),
+                        missing(),
+                        List.of(invocation));
+            }
+            AiProviderInvocationTelemetry invocation = trace.snapshot();
+            AiProviderInvocationMetrics.record(invocation);
             List<String> envelopeFailures = validateProviderEnvelope(componentId, plan);
             if (!envelopeFailures.isEmpty()) {
                 return new AgenticAuthoringComponentEditPlanResult(
@@ -88,7 +112,8 @@ public class AgenticAuthoringComponentEditPlanService {
                         List.copyOf(envelopeFailures),
                         List.of("component-edit-plan-provider-output-rejected"),
                         missing(),
-                        missing());
+                        missing(),
+                        List.of(invocation));
             }
 
             AgenticAuthoringManifestCompileResult compiled = manifestService.compilePatch(
@@ -108,7 +133,8 @@ public class AgenticAuthoringComponentEditPlanService {
                         List.copyOf(failures),
                         compiled.warnings() == null ? List.of() : List.copyOf(compiled.warnings()),
                         plan.deepCopy(),
-                        missing());
+                        missing(),
+                        List.of(invocation));
             }
             List<String> warnings = new ArrayList<>();
             warnings.add("component-edit-plan-provider:semantic-manifest");
@@ -120,7 +146,8 @@ public class AgenticAuthoringComponentEditPlanService {
                     List.of(),
                     List.copyOf(warnings),
                     plan.deepCopy(),
-                    compiled.patch() == null ? missing() : compiled.patch().deepCopy());
+                    compiled.patch() == null ? missing() : compiled.patch().deepCopy(),
+                    List.of(invocation));
         } catch (IllegalArgumentException ex) {
             return failure("component-authoring-manifest-not-found");
         } catch (Exception ex) {

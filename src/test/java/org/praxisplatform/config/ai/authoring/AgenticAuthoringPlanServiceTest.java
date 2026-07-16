@@ -60,9 +60,14 @@ class AgenticAuthoringPlanServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.failureCodes()).isEmpty();
         assertThat(result.minimalFormPlan()).isSameAs(plan);
+        assertThat(result.providerInvocations()).singleElement().satisfies(invocation -> {
+            assertThat(invocation.phase()).isEqualTo("minimal_form_plan");
+            assertThat(invocation.status()).isEqualTo("success");
+        });
         assertThat(configCaptor.getValue().getProvider()).isEqualTo("openai");
         assertThat(configCaptor.getValue().getModel()).isEqualTo("gpt-5.4-mini");
         assertThat(configCaptor.getValue().getApiKey()).isEqualTo("test-key");
+        assertThat(configCaptor.getValue().getInvocationTrace()).isNotNull();
     }
 
     @Test

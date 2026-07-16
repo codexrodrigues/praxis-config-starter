@@ -1,5 +1,6 @@
 package org.praxisplatform.config.ai.authoring;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -40,10 +41,12 @@ import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiPrincipalContext;
+import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.SchemaFetchResult;
 import org.praxisplatform.config.service.SchemaRetrievalService;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 @Tag("unit")
@@ -58,6 +61,51 @@ class AgenticAuthoringTurnEngineTest {
     private Path tempDir;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void projectsBoundedTurnProviderTelemetryOnlyWhenDetailedDiagnosticsAreRequested() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode contextHints = objectMapper.createObjectNode().put("includeLlmDiagnostics", true);
+        AiProviderInvocationTelemetry invocation = new AiProviderInvocationTelemetry(
+                "minimal_form_plan",
+                1,
+                "openai",
+                "gpt-test",
+                "responses-http",
+                "success",
+                null,
+                321L,
+                100,
+                20,
+                40,
+                null,
+                120,
+                "response-id",
+                "stop");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> diagnostics = ReflectionTestUtils.invokeMethod(
+                engine,
+                "decisionDiagnostics",
+                null,
+                null,
+                null,
+                requestWithContextHints("Crie um formulario", contextHints),
+                List.of(invocation));
+        JsonNode projected = objectMapper.valueToTree(diagnostics);
+
+        assertThat(projected.path("providerTelemetry").path("invocationCount").asInt()).isEqualTo(1);
+        assertThat(projected.path("providerTelemetry").path("latencyMs").asLong()).isEqualTo(321L);
+        assertThat(projected.path("providerTelemetry").path("cacheReadInputTokens").asLong()).isEqualTo(40L);
+        assertThat(projected.path("providerTelemetry").path("rawPromptCopied").asBoolean()).isFalse();
+        assertThat(projected.toString()).doesNotContain("Crie um formulario");
+    }
 
     @Test
     void answersConsultativeQuestionAfterSemanticIntentWithoutPreviewPipeline() throws Exception {
@@ -163,6 +211,26 @@ class AgenticAuthoringTurnEngineTest {
                 "dynamic_form",
                 "resource",
                 objectMapper.createObjectNode());
+        AiProviderInvocationTelemetry platformGuidanceInvocation = new AiProviderInvocationTelemetry(
+                "platform_guidance_confirmation",
+                1,
+                "openai",
+                "gpt-test",
+                "responses-http",
+                "success",
+                null,
+                125L,
+                80,
+                20,
+                0,
+                null,
+                100,
+                "response-id",
+                "stop");
+        ObjectNode llmDiagnostics = objectMapper.createObjectNode();
+        llmDiagnostics.putObject("resolutionTelemetry")
+                .putArray("providerInvocations")
+                .add(objectMapper.valueToTree(platformGuidanceInvocation));
         AgenticAuthoringIntentResolutionResult platformGuidanceIntent = new AgenticAuthoringIntentResolutionResult(
                 true,
                 "explain",
@@ -177,11 +245,17 @@ class AgenticAuthoringTurnEngineTest {
                 new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
                 "O que posso fazer aqui?",
                 "Posso explicar os componentes governados disponíveis.",
+                null,
+                null,
                 List.of(createForm),
+                null,
                 List.of(),
                 List.of(),
                 List.of(),
-                objectMapper.createObjectNode());
+                objectMapper.createObjectNode(),
+                llmDiagnostics,
+                null,
+                null);
         when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(platformGuidanceIntent);
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
@@ -199,7 +273,9 @@ class AgenticAuthoringTurnEngineTest {
                 consultativeAnswerService);
 
         AgenticAuthoringTurnOutcome outcome = engine.execute(
-                request("O que posso fazer aqui?"),
+                requestWithContextHints(
+                        "O que posso fazer aqui?",
+                        objectMapper.createObjectNode().put("includeLlmDiagnostics", true)),
                 principalContext,
                 sink);
 
@@ -211,6 +287,13 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
         org.assertj.core.api.Assertions.assertThat(
                 result.path("decisionDiagnostics").path("resolvedIntentAnswerUsed").asBoolean()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(
+                result.path("decisionDiagnostics").path("providerTelemetry").path("invocationCount").asInt())
+                .isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(
+                result.path("decisionDiagnostics").path("providerTelemetry")
+                        .path("providerInvocations").path(0).path("phase").asText())
+                .isEqualTo("platform_guidance_confirmation");
         verify(consultativeAnswerService, never()).answer(
                 any(AgenticAuthoringTurnStreamRequest.class), any(), any(), any(), any());
         verify(previewService, never()).preview(any(), any(), any(), any());

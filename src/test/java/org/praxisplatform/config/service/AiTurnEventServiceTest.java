@@ -243,6 +243,50 @@ class AiTurnEventServiceTest {
     }
 
     @Test
+    void shouldPersistOperationalTokenCountersWithoutExposingCredentials() throws Exception {
+        UUID streamId = UUID.randomUUID();
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        ObjectNode payload = objectMapper.createObjectNode();
+        ObjectNode telemetry = payload.putObject("decisionDiagnostics").putObject("providerTelemetry");
+        telemetry.put("inputTokens", 120);
+        telemetry.put("outputTokens", 18);
+        telemetry.putNull("cacheWriteInputTokens");
+        telemetry.put("totalTokens", 138);
+        telemetry.put("accessToken", "secret-access-token");
+
+        when(turnRepository.findByThreadIdAndTurnIdForUpdate(threadId, turnId))
+                .thenReturn(Optional.of(turn(threadId, turnId)));
+        when(repository.saveAndFlush(any(AiTurnEvent.class))).thenAnswer(invocation -> {
+            AiTurnEvent event = invocation.getArgument(0, AiTurnEvent.class);
+            event.setEventId(eventId);
+            return event;
+        });
+
+        var envelope = service.appendEvent(
+                new AiPrincipalContext("tenant-a", "user-a", "prod", true),
+                streamId,
+                threadId,
+                turnId,
+                "result",
+                payload);
+
+        ArgumentCaptor<AiTurnEvent> persistedEvent = ArgumentCaptor.forClass(AiTurnEvent.class);
+        verify(repository).saveAndFlush(persistedEvent.capture());
+        JsonNode storedTelemetry = objectMapper.readTree(persistedEvent.getValue().getPayload())
+                .path("decisionDiagnostics")
+                .path("providerTelemetry");
+        assertThat(storedTelemetry.path("inputTokens").asInt()).isEqualTo(120);
+        assertThat(storedTelemetry.path("outputTokens").asInt()).isEqualTo(18);
+        assertThat(storedTelemetry.path("cacheWriteInputTokens").isNull()).isTrue();
+        assertThat(storedTelemetry.path("totalTokens").asInt()).isEqualTo(138);
+        assertThat(storedTelemetry.path("accessToken").asText()).isEqualTo("[REDACTED]");
+        assertThat(envelope.getPayload().path("decisionDiagnostics").path("providerTelemetry"))
+                .isEqualTo(storedTelemetry);
+    }
+
+    @Test
     void shouldSanitizeLegacyQuickReplyPayloadAgainDuringReplay() throws Exception {
         UUID streamId = UUID.randomUUID();
         UUID threadId = UUID.randomUUID();
