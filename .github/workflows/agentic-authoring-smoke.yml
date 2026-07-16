@@ -64,6 +64,11 @@ on:
         required: false
         default: true
         type: boolean
+      domain_rule_lifecycle_only:
+        description: 'Run only the deterministic domain-rule HTTP lifecycle, without external LLM or embedding calls.'
+        required: false
+        default: false
+        type: boolean
       run_domain_catalog_v2_smoke:
         description: 'Run the quickstart Domain Catalog v2 HTTP smoke.'
         required: false
@@ -174,10 +179,11 @@ jobs:
             return $Value.Replace("'", "''")
           }
           $provider = '${{ inputs.provider }}'
-          if ($provider -eq 'openai' -and [string]::IsNullOrWhiteSpace($env:PRAXIS_AI_OPENAI_API_KEY)) {
+          $domainRuleLifecycleOnly = '${{ inputs.domain_rule_lifecycle_only }}' -eq 'true'
+          if (-not $domainRuleLifecycleOnly -and $provider -eq 'openai' -and [string]::IsNullOrWhiteSpace($env:PRAXIS_AI_OPENAI_API_KEY)) {
             throw 'Missing required secret PRAXIS_AI_OPENAI_API_KEY for provider=openai.'
           }
-          if ($provider -eq 'gemini' -and [string]::IsNullOrWhiteSpace($env:PRAXIS_AI_GEMINI_API_KEY)) {
+          if (-not $domainRuleLifecycleOnly -and $provider -eq 'gemini' -and [string]::IsNullOrWhiteSpace($env:PRAXIS_AI_GEMINI_API_KEY)) {
             throw 'Missing required secret PRAXIS_AI_GEMINI_API_KEY for provider=gemini.'
           }
           @"
@@ -238,13 +244,18 @@ jobs:
         shell: pwsh
         working-directory: praxis-config-starter
         run: |
-          .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 `
-            -Provider '${{ inputs.provider }}' `
-            -JavaHome "$env:JAVA_HOME" `
-            -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
-            -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
-            -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}') `
-            -StreamProcessingTimeoutSeconds ([int]'${{ inputs.stream_processing_timeout_seconds }}')
+          $smokeArgs = @{
+            Provider = '${{ inputs.provider }}'
+            JavaHome = "$env:JAVA_HOME"
+            QuickstartRoot = "$env:GITHUB_WORKSPACE\praxis-api-quickstart"
+            EnvFile = "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1"
+            StartupTimeoutSec = [int]'${{ inputs.quickstart_startup_timeout_seconds }}'
+            StreamProcessingTimeoutSeconds = [int]'${{ inputs.stream_processing_timeout_seconds }}'
+          }
+          if ('${{ inputs.domain_rule_lifecycle_only }}' -eq 'true') {
+            $smokeArgs.DomainRuleLifecycleOnly = $true
+          }
+          .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 @smokeArgs
 
       - name: Run quickstart Domain Catalog v2 HTTP smoke
         if: inputs.run_domain_catalog_v2_smoke == true

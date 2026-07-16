@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must not be enabled implicitly by host applications.
 
 ### Fixed
+- Added a deterministic domain-rule-only mode to the official HTTP smoke so a
+  rules release gate does not depend on an unrelated external LLM call.
 - Made synchronous OpenAI Responses consumption forward-compatible with output
   union evolution by using the official SDK raw-response surface and projecting
   only the stable fields consumed by Praxis, without retries or raw-payload logs.

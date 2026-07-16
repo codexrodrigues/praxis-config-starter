@@ -14,6 +14,7 @@ param(
     [string] $Environment = "local",
     [int] $StartupTimeoutSec = 180,
     [int] $StreamProcessingTimeoutSeconds = 180,
+    [switch] $DomainRuleLifecycleOnly,
     [switch] $UseExistingQuickstart
 )
 
@@ -95,6 +96,25 @@ $quickstartProcess = $null
 $startedQuickstart = $false
 $logDir = Join-Path $QuickstartRoot "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$governanceAuthorUsername = $UserId
+$governanceReviewerUsername = "$UserId-reviewer"
+$governanceAuthorPassword = [Guid]::NewGuid().ToString("N")
+$governanceReviewerPassword = [Guid]::NewGuid().ToString("N")
+$corporateMode = if ($DomainRuleLifecycleOnly) { "true" } else { "false" }
+$governanceLabEnvironment = if ($DomainRuleLifecycleOnly) {
+@"
+`$env:APP_AUTH_GOVERNANCE_LAB_ENABLED = 'true'
+`$env:APP_AUTH_GOVERNANCE_APPROVER_A_USERNAME = '$governanceReviewerUsername'
+`$env:APP_AUTH_GOVERNANCE_APPROVER_A_PASSWORD = '$governanceReviewerPassword'
+`$env:APP_AUTH_GOVERNANCE_APPROVER_B_USERNAME = '$governanceReviewerUsername-b'
+`$env:APP_AUTH_GOVERNANCE_APPROVER_B_PASSWORD = '$governanceReviewerPassword-b'
+`$env:APP_AUTH_GOVERNANCE_PUBLISHER_USERNAME = '$governanceAuthorUsername'
+`$env:APP_AUTH_GOVERNANCE_PUBLISHER_PASSWORD = '$governanceAuthorPassword'
+`$env:PRAXIS_AI_SECURITY_ALLOW_DEFAULT_TENANT_IN_CORPORATE = 'true'
+`$env:PRAXIS_AI_SECURITY_SERVER_DEFAULT_TENANT = '$TenantId'
+`$env:PRAXIS_AI_SECURITY_SERVER_DEFAULT_ENVIRONMENT = '$Environment'
+"@
+} else { "" }
 
 try {
     if ($null -ne $existingPid) {
@@ -106,8 +126,10 @@ try {
             throw "java.exe not found under JavaHome: $JavaHome"
         }
 
-        $resolvedEmbeddingProvider = if ([string]::IsNullOrWhiteSpace($EmbeddingProvider)) { $Provider } else { $EmbeddingProvider }
-        if ($resolvedEmbeddingProvider -ieq "mock") {
+        $resolvedEmbeddingProvider = if ([string]::IsNullOrWhiteSpace($EmbeddingProvider)) {
+            if ($DomainRuleLifecycleOnly) { "mock" } else { $Provider }
+        } else { $EmbeddingProvider }
+        if ($resolvedEmbeddingProvider -ieq "mock" -and -not $DomainRuleLifecycleOnly) {
             throw "EMBEDDING_PROVIDER=mock is not valid for the live agentic authoring HTTP smoke suite. Use -EmbeddingProvider $Provider, or a documented deterministic non-LLM runner."
         }
 
@@ -130,9 +152,10 @@ Set-Location '$QuickstartRoot'
 `$env:PRAXIS_AI_AUTHORING_ARTIFACTS_DIR = '$authoringRoot\proofs'
 `$env:PRAXIS_AI_AUTHORING_CONTRACTS_DIR = '$authoringRoot\contracts'
 `$env:PRAXIS_AI_STREAM_PROCESSING_TIMEOUT_SECONDS = '$StreamProcessingTimeoutSeconds'
-`$env:PRAXIS_AI_SECURITY_CORPORATE_MODE = 'false'
+`$env:PRAXIS_AI_SECURITY_CORPORATE_MODE = '$corporateMode'
 `$env:PRAXIS_AI_SECURITY_ALLOW_HEADER_IDENTITY_IN_LOCAL = 'true'
 `$env:EMBEDDING_PROVIDER = '$resolvedEmbeddingProvider'
+$governanceLabEnvironment
 if (`$env:PRAXIS_AI_OPENAI_MODEL) {
     `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = `$env:PRAXIS_AI_OPENAI_MODEL
 }
@@ -161,8 +184,38 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         Environment = $Environment
     }
 
+    $domainRuleArgs = @{} + $commonArgs
+    if ($DomainRuleLifecycleOnly) {
+        $domainRuleArgs.AuthorUsername = $governanceAuthorUsername
+        $domainRuleArgs.AuthorPassword = $governanceAuthorPassword
+        $domainRuleArgs.ReviewerUsername = $governanceReviewerUsername
+        $domainRuleArgs.ReviewerPassword = $governanceReviewerPassword
+    }
+    $domainRuleLifecycle = & (Join-Path $PSScriptRoot "Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1") @domainRuleArgs | ConvertFrom-Json
+    if ($DomainRuleLifecycleOnly) {
+        [pscustomobject]@{
+            health = $health.status
+            provider = "not-used"
+            baseUrl = $base
+            quickstartRoot = $QuickstartRoot
+            jarPath = $JarPath
+            startedQuickstart = $startedQuickstart
+            domainRuleLifecycleOnly = $true
+            domainRuleAppliedCreationBlocked = [bool] $domainRuleLifecycle.appliedCreationBlocked
+            domainRuleSelfApprovalBlocked = [bool] $domainRuleLifecycle.selfApprovalBlocked
+            domainRuleAuthenticatedAuthor = [string] $domainRuleLifecycle.authenticatedAuthor
+            domainRuleAuthenticatedReviewer = [string] $domainRuleLifecycle.authenticatedReviewer
+            domainRuleAppliedMaterializationHasAppliedAt = [bool] $domainRuleLifecycle.appliedMaterializationHasAppliedAt
+            domainRuleTerminalDefinitionTransitionBlocked = [bool] $domainRuleLifecycle.terminalDefinitionTransitionBlocked
+            domainRuleTerminalMaterializationTransitionBlocked = [bool] $domainRuleLifecycle.terminalMaterializationTransitionBlocked
+            domainRuleTerminalPublishBlocked = [bool] $domainRuleLifecycle.terminalPublishBlocked
+            domainRuleSemanticSourceHashesDiffer = [bool] $domainRuleLifecycle.semanticSourceHashesDiffer
+            domainRuleBackendValidationSemanticSourceHashesDiffer = [bool] $domainRuleLifecycle.backendValidationSemanticSourceHashesDiffer
+        } | ConvertTo-Json -Depth 8
+        return
+    }
+
     $intentResolution = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringIntentResolutionHttpE2E.ps1") @commonArgs | ConvertFrom-Json
-    $domainRuleLifecycle = & (Join-Path $PSScriptRoot "Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $plan = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringPlanHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $compile = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringCompileHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $preview = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringPreviewHttpE2E.ps1") @commonArgs | ConvertFrom-Json

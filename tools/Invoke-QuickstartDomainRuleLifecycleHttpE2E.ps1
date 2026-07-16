@@ -6,7 +6,11 @@ param(
     [string] $Origin = "http://localhost:4200",
     [string] $TenantId = "agentic-authoring-e2e",
     [string] $UserId = "codex-local",
-    [string] $Environment = "local"
+    [string] $Environment = "local",
+    [string] $AuthorUsername = "",
+    [string] $AuthorPassword = "",
+    [string] $ReviewerUsername = "",
+    [string] $ReviewerPassword = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -283,9 +287,31 @@ $headers = @{
     "X-User-ID" = $UserId
     "X-Env" = $Environment
 }
-$reviewerUserId = "$UserId-reviewer"
+$reviewerUserId = if ([string]::IsNullOrWhiteSpace($ReviewerUsername)) { "$UserId-reviewer" } else { $ReviewerUsername }
 $reviewerHeaders = $headers.Clone()
 $reviewerHeaders["X-User-ID"] = $reviewerUserId
+
+function Add-AuthenticatedCookie(
+    [hashtable] $Headers,
+    [string] $Username,
+    [string] $Password
+) {
+    if ([string]::IsNullOrWhiteSpace($Username) -or [string]::IsNullOrWhiteSpace($Password)) {
+        return $Headers
+    }
+    $null = Invoke-WebRequest `
+        -Method Post `
+        -Uri "$base/auth/login" `
+        -ContentType "application/json" `
+        -Body (@{ username = $Username; password = $Password } | ConvertTo-Json -Compress) `
+        -SessionVariable authenticatedSession
+    $authenticatedHeaders = $Headers.Clone()
+    $authenticatedHeaders["Cookie"] = $authenticatedSession.Cookies.GetCookieHeader($base)
+    return $authenticatedHeaders
+}
+
+$headers = Add-AuthenticatedCookie $headers $AuthorUsername $AuthorPassword
+$reviewerHeaders = Add-AuthenticatedCookie $reviewerHeaders $ReviewerUsername $ReviewerPassword
 
 $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
 if ($health.status -ne "UP") {
@@ -364,6 +390,11 @@ if ($definition.createdByType -ne "authenticated" -or $definition.createdBy -ne 
     throw "Expected server-authenticated author '$UserId', got type='$($definition.createdByType)' actor='$($definition.createdBy)'."
 }
 
+$selfApprovalExpectedMessage = if ([string]::IsNullOrWhiteSpace($AuthorPassword)) {
+    "Rule definition approver must be different from its author"
+} else {
+    "Authenticated principal requires IAM role RULE_DEFINITION_APPROVER."
+}
 $selfApprovalBlocked = Invoke-ExpectedFailure `
     -Method Patch `
     -Uri "$base/api/praxis/config/domain-rules/definitions/$($definition.id)/status" `
@@ -374,7 +405,7 @@ $selfApprovalBlocked = Invoke-ExpectedFailure `
             checks = @("http-lifecycle-self-approval-rejection")
         }
     } `
-    -ExpectedMessage "Rule definition approver must be different from its author"
+    -ExpectedMessage $selfApprovalExpectedMessage
 
 $definition = Set-DefinitionStatus `
     -BaseUrl $base `
@@ -505,7 +536,7 @@ $manualSelectedExistingPublication = Invoke-JsonRequest `
         ruleDefinitionId = $activeDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "procurement-owner"
+        publishedBy = $reviewerUserId
         publicationNotes = @{
             smoke = "domain-rule-selected-existing-diagnostics"
         }
@@ -567,7 +598,7 @@ $terminalPublishBlocked = Invoke-ExpectedFailure `
         materializationIds = @($failedMaterialization.id)
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "procurement-owner"
+        publishedBy = $reviewerUserId
         publicationNotes = @{
             smoke = "domain-rule-lifecycle"
         }
@@ -604,7 +635,7 @@ $blockedPublication = Invoke-JsonRequest `
         ruleDefinitionId = $reviewRequiredDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "procurement-owner"
+        publishedBy = $reviewerUserId
         publicationNotes = @{
             smoke = "domain-rule-blocked-diagnostics"
         }
@@ -719,7 +750,7 @@ $inactivePublication = Invoke-JsonRequest `
         ruleDefinitionId = $inactiveDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "procurement-owner"
+        publishedBy = $reviewerUserId
         publicationNotes = @{
             smoke = "domain-rule-semantic-source-hash"
         }
@@ -733,7 +764,7 @@ $suspendedPublication = Invoke-JsonRequest `
         ruleDefinitionId = $suspendedDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "procurement-owner"
+        publishedBy = $reviewerUserId
         publicationNotes = @{
             smoke = "domain-rule-semantic-source-hash"
         }
@@ -797,7 +828,7 @@ $inactiveRepublish = Invoke-JsonRequest `
         ruleDefinitionId = $inactiveDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "procurement-owner"
+        publishedBy = $reviewerUserId
         publicationNotes = @{
             smoke = "domain-rule-publication-diagnostics"
         }
