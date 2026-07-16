@@ -1498,6 +1498,20 @@ public class AgenticAuthoringLlmIntentResolverService {
             warnings = List.copyOf(normalizedWarnings);
             changeKind = "create_artifact";
         }
+        AgenticAuthoringVisualizationDecision normalizedVisualizationDecision =
+                normalizeVisualizationDecisionForArtifact(
+                        resolved,
+                        operationKind,
+                        artifactKind,
+                        visualizationDecision);
+        if (normalizedVisualizationDecision != visualizationDecision) {
+            ArrayList<String> normalizedWarnings = new ArrayList<>(warnings);
+            if (!normalizedWarnings.contains("llm-visualization-primary-component-normalized")) {
+                normalizedWarnings.add("llm-visualization-primary-component-normalized");
+            }
+            warnings = List.copyOf(normalizedWarnings);
+            visualizationDecision = normalizedVisualizationDecision;
+        }
         if (!resolved
                 && operationKind.isBlank()
                 && artifactKind.isBlank()
@@ -1526,6 +1540,39 @@ public class AgenticAuthoringLlmIntentResolverService {
                 visualizationDecision,
                 requiresGovernedAuthoring,
                 semanticIntentClass));
+    }
+
+    private AgenticAuthoringVisualizationDecision normalizeVisualizationDecisionForArtifact(
+            boolean resolved,
+            String operationKind,
+            String artifactKind,
+            AgenticAuthoringVisualizationDecision decision) {
+        if (!resolved
+                || !"create".equals(operationKind)
+                || !"dashboard".equals(artifactKind)
+                || decision == null
+                || !"praxis-crud".equals(valueOrDefault(decision.primaryComponent(), ""))) {
+            return decision;
+        }
+        boolean hasAnalyticalAxes = decision.axes() != null && !decision.axes().isEmpty();
+        boolean chartExcluded = decision.excludedComponentIds() != null
+                && decision.excludedComponentIds().contains("praxis-chart");
+        String primaryComponent = hasAnalyticalAxes && !chartExcluded
+                ? "praxis-chart"
+                : "praxis-dynamic-page-builder";
+        return new AgenticAuthoringVisualizationDecision(
+                decision.schemaVersion(),
+                decision.intent(),
+                decision.layoutKind(),
+                primaryComponent,
+                decision.axes(),
+                decision.includeSummary(),
+                decision.includeDetailTable(),
+                decision.excludedComponentIds(),
+                decision.includeFilters(),
+                decision.includeKpis(),
+                valueOrDefault(decision.provenance(), "llm-authored-semantic-decision")
+                        + " + canonical-component-alignment");
     }
 
     private String semanticIntentClass(

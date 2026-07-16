@@ -960,6 +960,101 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     }
 
     @Test
+    void dashboardAxesNormalizeCrudPrimaryComponentToChart() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "semanticIntentClass": "component_authoring",
+                  "operationKind": "create",
+                  "artifactKind": "dashboard",
+                  "changeKind": "create_artifact",
+                  "selectedResourcePath": "/api/human-resources/funcionarios",
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
+                  "assistantMessage": "Vou montar um painel de acompanhamento de funcionários.",
+                  "visualizationDecision": {
+                    "schemaVersion": "praxis-visualization-decision.v1",
+                    "intent": "dashboard",
+                    "layoutKind": "dashboard_layout",
+                    "primaryComponent": "praxis-crud",
+                    "axes": [
+                      {
+                        "concept": "funcionários",
+                        "field": "dataAdmissao",
+                        "label": "Data de Admissão",
+                        "chartType": "line",
+                        "orientation": "temporal",
+                        "metricAggregation": "count",
+                        "metricField": "id",
+                        "metricLabel": "Admissões",
+                        "provenance": "semantic_retrieval"
+                      }
+                    ],
+                    "includeSummary": true,
+                    "includeDetailTable": true,
+                    "excludedComponentIds": ["praxis-tabs"],
+                    "includeFilters": true,
+                    "includeKpis": true,
+                    "provenance": "semantic_retrieval + user_prompt"
+                  },
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Crie uma tela bonita para acompanhar funcionários.",
+                        "page-builder",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key"),
+                "Crie uma tela bonita para acompanhar funcionários.",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(),
+                componentCapabilities(),
+                "tenant",
+                "user",
+                "local").orElseThrow();
+
+        assertThat(result.resolved()).isTrue();
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.visualizationDecision()).isNotNull();
+        assertThat(result.visualizationDecision().primaryComponent()).isEqualTo("praxis-chart");
+        assertThat(result.visualizationDecision().axes()).hasSize(1);
+        assertThat(result.visualizationDecision().provenance())
+                .contains("canonical-component-alignment");
+        assertThat(result.warnings())
+                .contains(
+                        "llm-visualization-primary-component-normalized",
+                        "llm-fast-intent-resolution-used");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
     void sharedRuleSemanticClassNormalizesVisualTupleWithoutDiscardingResourceDiscoveryIntent() throws Exception {
         when(providerManagementService.generateJson(
                 any(),

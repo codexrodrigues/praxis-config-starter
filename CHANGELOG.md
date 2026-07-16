@@ -70,8 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   component-authoring capability aliases to canonical artifact creation and by
   recognizing the root POST create operation without mistaking the canonical
   `/schemas/filtered` endpoint for a business filter route. A single governed
-  form-create candidate selected by the LLM-authored pre-intent focus now avoids
-  redundant fast and full intent passes.
+  form-create or table-read candidate selected by the LLM-authored pre-intent
+  focus now avoids redundant fast and full intent passes. Dashboard decisions
+  that contain analytical axes also normalize an incoherent `praxis-crud`
+  primary component to the canonical chart materialization while preserving the
+  governed axes and composite layout.
 - Made manifest-backed action-plan parameters compatible with OpenAI strict
   Structured Outputs through a closed nullable JSON-string boundary that is
   decoded back to canonical `params` before manifest validation.

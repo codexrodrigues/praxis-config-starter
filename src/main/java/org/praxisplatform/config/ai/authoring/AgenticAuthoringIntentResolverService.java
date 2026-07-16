@@ -2538,10 +2538,10 @@ public class AgenticAuthoringIntentResolverService {
         }
         AgenticAuthoringCandidate focusedCandidate =
                 resourceDiscoveryFocusedCandidate(request, prompt, artifactKind, candidates);
-        AgenticAuthoringCandidate singleGovernedFormCreateCandidate =
-                singleGovernedFormCreateCandidate(request, artifactKind, candidates);
-        if (singleGovernedFormCreateCandidate != null) {
-            focusedCandidate = singleGovernedFormCreateCandidate;
+        AgenticAuthoringCandidate singleGovernedArtifactCandidate =
+                singleGovernedArtifactCandidate(request, artifactKind, candidates);
+        if (singleGovernedArtifactCandidate != null) {
+            focusedCandidate = singleGovernedArtifactCandidate;
         }
         AgenticAuthoringCandidate projectionFocusedCandidate =
                 projectionResourceDiscoveryFocusedCandidate(request, prompt, artifactKind, null, candidates);
@@ -2558,7 +2558,7 @@ public class AgenticAuthoringIntentResolverService {
                 || !hasEvidence(focusedCandidate, "tool-search-api-resources")
                 || !hasTrustedSelectionEvidence(focusedCandidate)
                 || isWeakLexicalCandidate(focusedCandidate)
-                || (singleGovernedFormCreateCandidate == null
+                || (singleGovernedArtifactCandidate == null
                         && !hasSafeFocusedResourceDiscoveryLead(
                                 request,
                                 prompt,
@@ -2593,11 +2593,11 @@ public class AgenticAuthoringIntentResolverService {
                 false);
     }
 
-    private AgenticAuthoringCandidate singleGovernedFormCreateCandidate(
+    private AgenticAuthoringCandidate singleGovernedArtifactCandidate(
             AgenticAuthoringIntentResolutionRequest request,
             String artifactKind,
             List<AgenticAuthoringCandidate> candidates) {
-        if (!"form".equals(artifactKind)
+        if (!List.of("form", "table").contains(artifactKind)
                 || request == null
                 || candidates == null
                 || candidates.isEmpty()
@@ -2610,11 +2610,28 @@ public class AgenticAuthoringIntentResolverService {
                 .filter(candidate -> hasEvidence(candidate, "tool-search-api-resources"))
                 .filter(candidate -> hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE))
                 .filter(candidate -> !isDerivedProjectionCandidate(candidate))
-                .filter(this::isCreateEndpointCandidate)
+                .filter(candidate -> isCanonicalArtifactEndpointCandidate(artifactKind, candidate))
                 .filter(this::hasTrustedSelectionEvidence)
                 .filter(candidate -> !isWeakLexicalCandidate(candidate))
                 .toList();
         return eligible.size() == 1 ? eligible.get(0) : null;
+    }
+
+    private boolean isCanonicalArtifactEndpointCandidate(
+            String artifactKind,
+            AgenticAuthoringCandidate candidate) {
+        if ("form".equals(artifactKind)) {
+            return isCreateEndpointCandidate(candidate);
+        }
+        if (!"table".equals(artifactKind) || candidate == null) {
+            return false;
+        }
+        String operation = valueOrDefault(candidate.operation(), candidate.submitMethod());
+        String submitMethod = valueOrDefault(candidate.submitMethod(), operation);
+        String submitUrl = normalizePath(candidate.submitUrl());
+        return "post".equalsIgnoreCase(operation)
+                && "post".equalsIgnoreCase(submitMethod)
+                && (submitUrl.endsWith("/filter") || submitUrl.endsWith("/filter/cursor"));
     }
 
     private AgenticAuthoringCandidate strongLlmAuthoredOperationalResourceDiscoveryLead(

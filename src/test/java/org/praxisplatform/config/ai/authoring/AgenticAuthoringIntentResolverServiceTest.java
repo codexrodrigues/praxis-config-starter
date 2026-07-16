@@ -10388,6 +10388,88 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void singleGovernedTableReadCandidateSkipsRedundantIntentPass() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeTableCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter/cursor",
+                "POST",
+                0.76d,
+                "canonical governed employee collection resource",
+                List.of(
+                        "domain-discovery-resource-focus",
+                        "schema-probe-pending",
+                        "actions-probe-pending",
+                        "capabilities-probe-pending",
+                        "tool-search-api-resources",
+                        "semantic-role:operational-resource"),
+                AgenticAuthoringEvidenceBundle.of("context_hint", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "retrieved_candidate",
+                                "/api/human-resources/funcionarios",
+                                "Governed employee collection resource.",
+                                0.76d,
+                                List.of("funcionarios", "nome", "cargo", "departamento"),
+                                "tenant",
+                                "local",
+                                "release"))));
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(employeeTableCandidate));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "Crie uma tabela para consultar nome, cargo e departamento dos funcionários.",
+                "deterministic-smoke-disabled",
+                resourceDiscoveryContext(
+                        "table",
+                        List.of(employeeTableCandidate),
+                        new AgenticAuthoringResourceSearchFocus(
+                                "human-resources.funcionarios",
+                                List.of("nome", "cargo", "departamento", "tabela de consulta"),
+                                "table for querying employee records",
+                                "",
+                                "foco authorado pela LLM para a tabela solicitada"))));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.selectedCandidate().submitUrl())
+                .isEqualTo("/api/human-resources/funcionarios/filter/cursor");
+        assertThat(result.warnings()).contains(
+                "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                "llm-pre-intent-resource-discovery-used");
+        Mockito.verify(llmIntentResolver, Mockito.never()).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+    }
+
+    @Test
     void llmAuthoredPreIntentResourceDiscoverySkipsProviderWhenSemanticFocusSeparatesCloseOperationalCandidates() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
