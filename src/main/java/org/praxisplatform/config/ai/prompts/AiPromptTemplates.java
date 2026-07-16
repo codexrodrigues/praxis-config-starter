@@ -505,7 +505,7 @@ REGRAS:
 1. Use apenas os operationId/IDs do catalogo. Prefira operationId do authoringManifest quando disponivel.
 2. target deve ser o field da coluna quando a operacao exigir alvo. Se o usuario citar o header, converta para o field correspondente.
 3. Para operacoes que exigem um valor direto, informe value. Use null se nao souber.
-4. Para payload estruturado exigido por inputSchema, use params como objeto JSON, nao como string.
+4. Para payload estruturado exigido por inputSchema, serialize o objeto completo como JSON compacto na string params. Use null quando a operacao nao possuir parametros.
 5. Use os examples da operacao como guia semantico de intencao e formato de params, mas adapte ao pedido e as colunas reais.
 6. Se houver ambiguidade de coluna, preencha "ambiguities" com alias e candidates.
 7. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
@@ -528,7 +528,7 @@ REGRAS:
 SCHEMA DE RESPOSTA (JSON):
 {
   "actions": [
-    { "type": "operationId", "target": "string", "value": "string", "params": { "inputSchemaKey": "value" } }
+    { "type": "operationId", "target": "string", "value": "string", "params": "{\\\"inputSchemaKey\\\":\\\"value\\\"}" }
   ],
   "ambiguities": [
     { "alias": "string", "candidates": ["string"], "reason": "string" }
@@ -557,7 +557,7 @@ REGRAS:
 1. Use apenas os IDs do catalogo de acoes.
 2. Preencha "target" quando a acao exigir um alvo (ex.: campo/aba/seccao).
 3. Preencha "value" quando a acao exigir um valor direto.
-4. Use "params" para valores adicionais exigidos pelo patchTemplate. Se params for complexo, envie params como string JSON.
+4. Use "params" para valores adicionais exigidos pelo patchTemplate, sempre como objeto JSON compacto serializado em string. Use null quando nao houver parametros.
 5. Se houver ambiguidade de alvo, preencha "ambiguities" com alias e candidates.
 6. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
 7. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter. resourcePath é SEMPRE a base (sem /filter).
@@ -571,7 +571,7 @@ REGRAS:
 SCHEMA DE RESPOSTA (JSON):
 {
   "actions": [
-    { "type": "string", "target": "string", "value": "string", "params": { "key": "value" } }
+    { "type": "string", "target": "string", "value": "string", "params": "{\\\"key\\\":\\\"value\\\"}" }
   ],
   "ambiguities": [
     { "alias": "string", "candidates": ["string"], "reason": "string" }

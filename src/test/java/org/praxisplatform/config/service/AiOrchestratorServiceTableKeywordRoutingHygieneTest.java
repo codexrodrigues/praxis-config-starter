@@ -145,14 +145,44 @@ class AiOrchestratorServiceTableKeywordRoutingHygieneTest {
         List<String> operationIds = new ArrayList<>();
         operationEnum.forEach(node -> operationIds.add(node.asText()));
         assertThat(operationIds).containsExactly("column.format.set", "filter.advanced.configure");
-        assertThat(schemaJson
+        JsonNode paramsType = schemaJson
                 .path("properties")
                 .path("actions")
                 .path("items")
                 .path("properties")
                 .path("params")
-                .path("type")
-                .asText()).isEqualTo("object");
+                .path("type");
+        assertThat(paramsType.isArray()).isTrue();
+        assertThat(paramsType.path(0).asText()).isEqualTo("string");
+        assertThat(paramsType.path(1).asText()).isEqualTo("null");
+    }
+
+    @Test
+    void actionPlanProviderParamsRoundTripToCanonicalObject() throws Exception {
+        AiOrchestratorService service = newService();
+        JsonNode providerPlan = objectMapper.readTree("""
+                {
+                  "actions": [
+                    {
+                      "type": "appearance.density.set",
+                      "target": "",
+                      "value": null,
+                      "params": "{\\\"density\\\":\\\"compact\\\"}"
+                    }
+                  ],
+                  "ambiguities": [],
+                  "contextRequest": [],
+                  "message": ""
+                }
+                """);
+
+        JsonNode normalized = ReflectionTestUtils.invokeMethod(service, "decodeActionPlanParams", providerPlan);
+
+        assertThat(normalized.path("actions").path(0).path("params").path("density").asText())
+                .isEqualTo("compact");
+        assertThat(providerPlan.path("actions").path(0).path("params").isTextual())
+                .as("provider response remains immutable while canonical params are decoded")
+                .isTrue();
     }
 
     @Test

@@ -2862,7 +2862,7 @@ public class AiOrchestratorService {
         if (parseContextRequest(json) != null) {
             return null;
         }
-        AiActionPlan plan = objectMapper.convertValue(json, AiActionPlan.class);
+        AiActionPlan plan = objectMapper.convertValue(decodeActionPlanParams(json), AiActionPlan.class);
         normalizeTableBooleanLabelActionsFromPrompt(userPrompt, plan, null);
         return plan;
     }
@@ -3223,7 +3223,43 @@ public class AiOrchestratorService {
         if (parseContextRequest(json) != null) {
             return null;
         }
-        return objectMapper.convertValue(json, AiActionPlan.class);
+        return objectMapper.convertValue(decodeActionPlanParams(json), AiActionPlan.class);
+    }
+
+    private JsonNode decodeActionPlanParams(JsonNode source) {
+        if (source == null || !source.isObject()) {
+            return source;
+        }
+        JsonNode normalized = source.deepCopy();
+        JsonNode actions = normalized.path("actions");
+        if (!actions.isArray()) {
+            return normalized;
+        }
+        for (JsonNode action : actions) {
+            if (!(action instanceof ObjectNode actionObject)) {
+                continue;
+            }
+            JsonNode params = actionObject.get("params");
+            if (params == null || params.isNull() || params.isObject()) {
+                continue;
+            }
+            if (!params.isTextual() || params.asText().isBlank()) {
+                actionObject.putNull("params");
+                continue;
+            }
+            try {
+                JsonNode decoded = objectMapper.readTree(params.asText());
+                if (decoded != null && decoded.isObject()) {
+                    actionObject.set("params", decoded);
+                } else {
+                    actionObject.putNull("params");
+                }
+            } catch (Exception exception) {
+                log.debug("[AiOrchestratorService] Ignoring invalid serialized action params.");
+                actionObject.putNull("params");
+            }
+        }
+        return normalized;
     }
 
     private JsonNode generateActionPlanJson(
@@ -3809,14 +3845,12 @@ public class AiOrchestratorService {
         actionRequired.add("target");
 
         ObjectNode value = actionProps.putObject("value");
-        value.put("type", "string");
-        value.put("nullable", true);
+        value.putArray("type").add("string").add("null");
         actionRequired.add("value");
 
         ObjectNode params = actionProps.putObject("params");
-        params.put("type", "object");
-        params.put("nullable", true);
-        params.put("additionalProperties", true);
+        params.putArray("type").add("string").add("null");
+        params.put("description", "JSON-serialized object validated against the selected operation inputSchema");
         actionRequired.add("params");
 
         ObjectNode ambiguities = properties.putObject("ambiguities");
@@ -3874,13 +3908,12 @@ public class AiOrchestratorService {
         actionRequired.add("target");
 
         ObjectNode value = actionProps.putObject("value");
-        value.put("type", "string");
-        value.put("nullable", true);
+        value.putArray("type").add("string").add("null");
         actionRequired.add("value");
 
         ObjectNode params = actionProps.putObject("params");
-        params.put("type", "string");
-        params.put("nullable", true);
+        params.putArray("type").add("string").add("null");
+        params.put("description", "JSON-serialized object validated against the selected action contract");
         actionRequired.add("params");
 
         ObjectNode ambiguities = properties.putObject("ambiguities");

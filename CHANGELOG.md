@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must not be enabled implicitly by host applications.
 
 ### Fixed
+- Made manifest-backed action-plan parameters compatible with OpenAI strict
+  Structured Outputs through a closed nullable JSON-string boundary that is
+  decoded back to canonical `params` before manifest validation.
 - Migrated the official page-apply HTTP proof from the obsolete synchronous
   preview path to the canonical persisted authoring-turn result, forwarding the
   required `streamId` and `resultEventId` lineage before materialization.
