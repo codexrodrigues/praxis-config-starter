@@ -70,6 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Structured Outputs by closing nested objects, requiring every declared field
   and representing optional values as nullable types. The OpenAI adapter now
   rejects incompatible schemas locally before issuing a provider request.
+- Updated the Quickstart domain-rule HTTP lifecycle proof to derive author and
+  reviewer from distinct server identities, assert self-approval rejection and
+  stop sending the removed caller-supplied definition actor fields.
 - Fixed table runtime operation compilation so selected-record related-surface
   requests can produce `tableRuntimeOperations` with `surfaceId` instead of
   falling back to column clarification.

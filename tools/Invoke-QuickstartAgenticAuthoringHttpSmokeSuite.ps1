@@ -192,6 +192,9 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         domainRuleIntentRoutingSeen = $domainRuleIntentRoutingSeen
         domainRulePagePreviewRouteBlocked = [bool] $intentResolution.pagePreviewSharedRuleRouteBlocked
         domainRuleAppliedCreationBlocked = [bool] $domainRuleLifecycle.appliedCreationBlocked
+        domainRuleSelfApprovalBlocked = [bool] $domainRuleLifecycle.selfApprovalBlocked
+        domainRuleAuthenticatedAuthor = [string] $domainRuleLifecycle.authenticatedAuthor
+        domainRuleAuthenticatedReviewer = [string] $domainRuleLifecycle.authenticatedReviewer
         domainRuleAppliedMaterializationHasAppliedAt = [bool] $domainRuleLifecycle.appliedMaterializationHasAppliedAt
         domainRuleTerminalDefinitionTransitionBlocked = [bool] $domainRuleLifecycle.terminalDefinitionTransitionBlocked
         domainRuleTerminalMaterializationTransitionBlocked = [bool] $domainRuleLifecycle.terminalMaterializationTransitionBlocked

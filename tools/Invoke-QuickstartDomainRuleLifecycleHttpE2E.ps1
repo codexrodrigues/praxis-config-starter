@@ -57,8 +57,7 @@ function Set-DefinitionStatus(
     [hashtable] $Headers,
     [object] $Definition,
     [string] $Status,
-    [string] $Check,
-    [string] $Actor = "procurement-owner"
+    [string] $Check
 ) {
     return Invoke-JsonRequest `
         -Method Patch `
@@ -66,8 +65,6 @@ function Set-DefinitionStatus(
         -Headers $Headers `
         -Body @{
             status = $Status
-            decidedByType = "human"
-            decidedBy = $Actor
             validationResult = @{
                 checks = @($Check)
             }
@@ -286,6 +283,9 @@ $headers = @{
     "X-User-ID" = $UserId
     "X-Env" = $Environment
 }
+$reviewerUserId = "$UserId-reviewer"
+$reviewerHeaders = $headers.Clone()
+$reviewerHeaders["X-User-ID"] = $reviewerUserId
 
 $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
 if ($health.status -ne "UP") {
@@ -314,10 +314,8 @@ $intake = Invoke-JsonRequest `
             optionSourceKey = "supplier"
         }
         governance = @{
-            requiredApprovals = @("procurement-owner")
+            requiredApprovals = @($reviewerUserId)
         }
-        createdByType = "llm"
-        createdBy = "codex-http-smoke"
     }
 
 if ($intake.status -ne "draft") {
@@ -349,10 +347,8 @@ $definitionBody = @{
         optionSourceKey = "supplier"
     }
     governance = @{
-        requiredApprovals = @("procurement-owner")
+        requiredApprovals = @($reviewerUserId)
     }
-    createdByType = "llm"
-    createdBy = "codex-http-smoke"
 }
 
 $definition = Invoke-JsonRequest `
@@ -364,13 +360,32 @@ $definition = Invoke-JsonRequest `
 if ($definition.status -ne "draft") {
     throw "Expected created definition status=draft, got '$($definition.status)'."
 }
+if ($definition.createdByType -ne "authenticated" -or $definition.createdBy -ne $UserId) {
+    throw "Expected server-authenticated author '$UserId', got type='$($definition.createdByType)' actor='$($definition.createdBy)'."
+}
+
+$selfApprovalBlocked = Invoke-ExpectedFailure `
+    -Method Patch `
+    -Uri "$base/api/praxis/config/domain-rules/definitions/$($definition.id)/status" `
+    -Headers $headers `
+    -Body @{
+        status = "approved"
+        validationResult = @{
+            checks = @("http-lifecycle-self-approval-rejection")
+        }
+    } `
+    -ExpectedMessage "Rule definition approver must be different from its author"
 
 $definition = Set-DefinitionStatus `
     -BaseUrl $base `
-    -Headers $headers `
+    -Headers $reviewerHeaders `
     -Definition $definition `
     -Status "approved" `
     -Check "http-lifecycle-review"
+
+if ($definition.approvedBy -ne $reviewerUserId) {
+    throw "Expected server-authenticated reviewer '$reviewerUserId', got '$($definition.approvedBy)'."
+}
 
 $materializationBody = @{
     ruleDefinitionId = $definition.id
@@ -395,7 +410,7 @@ $appliedCreationBlocked = Invoke-ExpectedFailure `
 
 $definition = Set-DefinitionStatus `
     -BaseUrl $base `
-    -Headers $headers `
+    -Headers $reviewerHeaders `
     -Definition $definition `
     -Status "active" `
     -Check "http-lifecycle-smoke"
@@ -407,11 +422,9 @@ if ($definition.status -ne "active") {
 $definition = Invoke-JsonRequest `
     -Method Patch `
     -Uri "$base/api/praxis/config/domain-rules/definitions/$($definition.id)/status" `
-    -Headers $headers `
+    -Headers $reviewerHeaders `
     -Body @{
         status = "retired"
-        decidedByType = "human"
-        decidedBy = "procurement-owner"
         validationResult = @{
             checks = @("http-lifecycle-terminal-definition")
         }
@@ -424,11 +437,9 @@ if ($definition.status -ne "retired") {
 $terminalDefinitionTransitionBlocked = Invoke-ExpectedFailure `
     -Method Patch `
     -Uri "$base/api/praxis/config/domain-rules/definitions/$($definition.id)/status" `
-    -Headers $headers `
+    -Headers $reviewerHeaders `
     -Body @{
         status = "active"
-        decidedByType = "human"
-        decidedBy = "procurement-owner"
         validationResult = @{
             checks = @("http-lifecycle-terminal-definition")
         }
@@ -448,13 +459,13 @@ $activeDefinition = Invoke-JsonRequest `
 
 $activeDefinition = Set-DefinitionStatus `
     -BaseUrl $base `
-    -Headers $headers `
+    -Headers $reviewerHeaders `
     -Definition $activeDefinition `
     -Status "approved" `
     -Check "http-lifecycle-review"
 $activeDefinition = Set-DefinitionStatus `
     -BaseUrl $base `
-    -Headers $headers `
+    -Headers $reviewerHeaders `
     -Definition $activeDefinition `
     -Status "active" `
     -Check "http-lifecycle-smoke"
@@ -581,10 +592,8 @@ $reviewRequiredDefinition = Invoke-JsonRequest `
         parameters = @{}
         governance = @{
             ruleAuthoring = "review_required"
-            requiredApprovals = @("procurement-owner")
+            requiredApprovals = @($reviewerUserId)
         }
-        createdByType = "llm"
-        createdBy = "codex-http-smoke"
     }
 
 $blockedPublication = Invoke-JsonRequest `
@@ -655,10 +664,8 @@ $inactiveDefinition = Invoke-JsonRequest `
             )
         }
         governance = @{
-            requiredApprovals = @("procurement-owner")
+            requiredApprovals = @($reviewerUserId)
         }
-        createdByType = "llm"
-        createdBy = "codex-http-smoke"
     }
 
 $suspendedDefinition = Invoke-JsonRequest `
@@ -687,21 +694,19 @@ $suspendedDefinition = Invoke-JsonRequest `
             )
         }
         governance = @{
-            requiredApprovals = @("procurement-owner")
+            requiredApprovals = @($reviewerUserId)
         }
-        createdByType = "llm"
-        createdBy = "codex-http-smoke"
     }
 
 $inactiveDefinition = Set-DefinitionStatus `
     -BaseUrl $base `
-    -Headers $headers `
+    -Headers $reviewerHeaders `
     -Definition $inactiveDefinition `
     -Status "approved" `
     -Check "http-lifecycle-semantic-hash-review"
 $suspendedDefinition = Set-DefinitionStatus `
     -BaseUrl $base `
-    -Headers $headers `
+    -Headers $reviewerHeaders `
     -Definition $suspendedDefinition `
     -Status "approved" `
     -Check "http-lifecycle-semantic-hash-review"
@@ -815,6 +820,9 @@ if ($reusedHash -ne $inactiveHash) {
     environment = $Environment
     ruleDefinitionId = $activeDefinition.id
     definitionStatus = $activeDefinition.status
+    authenticatedAuthor = $UserId
+    authenticatedReviewer = $reviewerUserId
+    selfApprovalBlocked = [bool] $selfApprovalBlocked
     appliedCreationBlocked = [bool] $appliedCreationBlocked
     appliedMaterializationStatus = $appliedMaterialization.status
     appliedMaterializationHasAppliedAt = -not [string]::IsNullOrWhiteSpace([string] $appliedMaterialization.appliedAt)
