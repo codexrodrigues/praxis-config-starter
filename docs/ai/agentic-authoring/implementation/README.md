@@ -109,9 +109,11 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 34. [30-turn-provider-telemetry-and-metrics-evidence.md](./30-turn-provider-telemetry-and-metrics-evidence.md)
 35. [31-assistant-consistency-efficiency-gates-evidence.md](./31-assistant-consistency-efficiency-gates-evidence.md)
 36. [32-assistant-extended-consistency-evidence.md](./32-assistant-extended-consistency-evidence.md)
-37. [01-current-state-and-target.md](./01-current-state-and-target.md)
-38. [02-implementation-backlog.md](./02-implementation-backlog.md)
-39. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+37. [33-spring-ai-openai-modernization-evidence.md](./33-spring-ai-openai-modernization-evidence.md)
+38. [34-openai-responses-sdk-adapter-evidence.md](./34-openai-responses-sdk-adapter-evidence.md)
+39. [01-current-state-and-target.md](./01-current-state-and-target.md)
+40. [02-implementation-backlog.md](./02-implementation-backlog.md)
+41. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -211,6 +213,11 @@ e registra a prova OpenAI real do pacote atual.
 jornadas bloqueantes e do perfil estendido, registra a variancia encontrada em
 Table e prova a correcao semantica compacta sem keyword routing ou contrato
 publico novo.
+`33-spring-ai-openai-modernization-evidence.md` fecha o upgrade compativel de
+Spring Boot/Spring AI e a matriz de decisao do transporte. O corte seguinte,
+`34-openai-responses-sdk-adapter-evidence.md`, registra a substituicao limpa de
+Chat Completions manual pelo SDK oficial/Responses, os gates locais e a
+revalidacao real ainda pendente por ausencia de credencial no ambiente.
 
 ## Checkpoint 2026-06-18 - pre-intent resource discovery e UX de revisao
 

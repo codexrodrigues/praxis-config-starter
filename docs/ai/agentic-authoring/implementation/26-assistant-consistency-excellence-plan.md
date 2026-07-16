@@ -683,10 +683,12 @@ transacional P0.6 do authoring turn**.
 ### Gate C - SDK e modelo
 
 - [x] versao compativel atualizada;
-- structured output, tools e streaming passam no corpus;
+- [x] adapter OpenAI usa SDK oficial 4.43/Responses, Structured Outputs estrito
+  e streaming tipado em testes contratuais locais;
+- [x] caminho manual de Chat Completions removido sem trilha paralela;
+- [ ] repetir `must-pass` e `extended` contra a API real no novo transporte e
+  comparar assertividade, P95, tokens e custo;
 - policy de modelo/custo observavel esta ativa;
-- caminho manual antigo foi removido, ou existe decisao arquitetural explicita
-  e temporaria com criterio de remocao.
 
 ### Gate D - Produto apresentavel
 
@@ -743,6 +745,13 @@ modernizacao em
 [`33-spring-ai-openai-modernization-evidence.md`](33-spring-ai-openai-modernization-evidence.md).
 Nao houve mudanca de contrato publico; portanto OpenAPI, bindings Angular,
 landing page e corpus HTTP nao exigiram sincronizacao.
+O decimo quarto slice substituiu o transporte manual de Chat Completions pelo
+SDK Java oficial 4.43 e Responses, reutilizando `AiProvider`, `AiCallConfig`,
+`AiJsonSchema`, streaming/cancelamento e telemetria existentes. A evidencia
+esta em
+[`34-openai-responses-sdk-adapter-evidence.md`](34-openai-responses-sdk-adapter-evidence.md).
+Como nao houve mudanca de contrato publico, OpenAPI, bindings Angular, landing,
+manifests e corpus HTTP tambem nao exigiram sincronizacao neste corte.
 Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
 
 - `docs/ai/contracts/**` e OpenAPI do Config Starter;
@@ -788,9 +797,12 @@ repetivel antes de iniciar uma migracao ampla de SDK, nesta ordem:
    [`33-spring-ai-openai-modernization-evidence.md`](33-spring-ai-openai-modernization-evidence.md);
 9. manter Spring AI 2.0 + Boot 4 como spike arquitetural separado, promovendo
    apenas se a evidencia superar o caminho compativel;
-10. implementar o spike focal do adapter OpenAI com SDK oficial/Responses,
-    Structured Outputs e telemetria, substituindo o caminho manual somente
-    depois dos gates de paridade.
+10. [x] implementar o adapter OpenAI com SDK oficial/Responses, Structured
+    Outputs e telemetria, substituindo o caminho manual; evidencia em
+    [`34-openai-responses-sdk-adapter-evidence.md`](34-openai-responses-sdk-adapter-evidence.md);
+11. repetir `must-pass`, `extended` e a jornada progressiva contra a API real
+    no novo transporte, comparando assertividade, P95, tokens e custo antes de
+    fechar operacionalmente o Gate C.
 
 ## Referencias oficiais para a frente de SDK
 

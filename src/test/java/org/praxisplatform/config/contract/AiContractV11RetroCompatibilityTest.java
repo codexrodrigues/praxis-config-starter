@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.TestApplication;
@@ -283,6 +284,7 @@ class AiContractV11RetroCompatibilityTest {
         AiPatchStreamStartResponse start = objectMapper.readValue(
                 startResult.getResponse().getContentAsByteArray(),
                 AiPatchStreamStartResponse.class);
+        awaitTerminalEvent(start.getStreamId());
 
         MvcResult asyncResult = mockMvc.perform(get("/api/praxis/config/ai/patch/stream/{streamId}", start.getStreamId())
                         .requestAttr("tenantId", TENANT)
@@ -309,6 +311,22 @@ class AiContractV11RetroCompatibilityTest {
         });
         assertThat(events.stream().map(AiTurnEventEnvelope::getType).filter(TERMINAL_TYPES::contains))
                 .isNotEmpty();
+    }
+
+    private void awaitTerminalEvent(UUID streamId) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            Integer terminalCount = jdbcTemplate.queryForObject(
+                    "select count(*) from ai_turn_event where stream_id = ? "
+                            + "and event_type in ('result', 'error', 'cancelled')",
+                    Integer.class,
+                    streamId);
+            if (terminalCount != null && terminalCount > 0) {
+                return;
+            }
+            TimeUnit.MILLISECONDS.sleep(25);
+        }
+        throw new AssertionError("Timed out waiting for terminal patch event for stream " + streamId);
     }
 
     private AiOrchestratorRequest basePatchRequest() {

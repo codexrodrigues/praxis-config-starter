@@ -1,370 +1,457 @@
 package org.praxisplatform.config.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.openai.OpenAiChatModel;
-import org.springframework.beans.factory.ObjectProvider;
+import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
-@ExtendWith(MockitoExtension.class)
-@Tag("external")
+@Tag("unit")
 class SpringAiOpenAiServiceTest {
-
-    @Mock
-    private OpenAiChatModel chatClient;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void generateTextReturnsContent() throws Exception {
-        HttpServer server = openAiServer("\"pong\"");
+    void generateTextUsesResponsesApiAndCapturesSanitizedTelemetry() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = responseServer(completedResponse("pong"), capturedRequest);
+        SpringAiOpenAiService service = service(server, "gpt-5.4-mini");
         server.start();
         try {
-        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
-        ReflectionTestUtils.setField(service, "apiKey", "test-key");
-        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-        ReflectionTestUtils.setField(service, "model", "gpt-4o-mini");
-        ReflectionTestUtils.setField(service, "temperature", 0.1d);
-        ReflectionTestUtils.setField(service, "maxTokens", 128);
-
-        String result = service.generateText("ping");
-
-        assertEquals("pong", result);
-        } finally {
-            server.stop(0);
-        }
-    }
-
-    @Test
-    void directCallPreservesSanitizedUsageAndCacheMetadata() throws Exception {
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/v1/chat/completions", exchange -> {
-            exchange.getRequestBody().readAllBytes();
-            byte[] bytes = """
-                    {
-                      "id": "chatcmpl-safe-123",
-                      "model": "gpt-5.4-mini-2026-06-01",
-                      "choices": [{
-                        "finish_reason": "stop",
-                        "message": {"content": "pong"}
-                      }],
-                      "usage": {
-                        "prompt_tokens": 120,
-                        "completion_tokens": 18,
-                        "total_tokens": 138,
-                        "prompt_tokens_details": {"cached_tokens": 80}
-                      }
-                    }
-                    """.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, bytes.length);
-            exchange.getResponseBody().write(bytes);
-            exchange.close();
-        });
-        server.start();
-        try {
-            SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
-            ReflectionTestUtils.setField(service, "apiKey", "test-key");
-            ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-            ReflectionTestUtils.setField(service, "model", "gpt-5.4-mini");
-            ReflectionTestUtils.setField(service, "temperature", 0.1d);
-            ReflectionTestUtils.setField(service, "maxTokens", 128);
-            AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
-                    "intent_full", 1, "openai", "gpt-5.4-mini");
+            AiProviderInvocationTrace trace =
+                    new AiProviderInvocationTrace("intent_full", 1, "openai", "gpt-5.4-mini");
 
             String result = service.generateText(
-                    "ping",
-                    AiCallConfig.builder().model("gpt-5.4-mini").invocationTrace(trace).build());
+                    "ping", AiCallConfig.builder().invocationTrace(trace).build());
             AiProviderInvocationTelemetry telemetry = trace.snapshot();
 
             assertEquals("pong", result);
-            assertEquals("openai-chat-completions-http", telemetry.transport());
+            assertEquals("ping", capturedRequest.get().path("input").asText());
+            assertEquals(128, capturedRequest.get().path("max_output_tokens").asInt());
+            assertFalse(capturedRequest.get().path("store").asBoolean(true));
+            assertTrue(capturedRequest.get().path("temperature").isMissingNode());
+            assertEquals("none", capturedRequest.get().path("reasoning").path("effort").asText());
+            assertEquals("openai-responses-sdk", telemetry.transport());
             assertEquals("gpt-5.4-mini-2026-06-01", telemetry.model());
-            assertEquals("chatcmpl-safe-123", telemetry.responseId());
-            assertEquals("stop", telemetry.finishReason());
+            assertEquals("resp-safe-123", telemetry.responseId());
+            assertEquals("completed", telemetry.finishReason());
             assertEquals(120, telemetry.inputTokens());
             assertEquals(18, telemetry.outputTokens());
             assertEquals(80, telemetry.cacheReadInputTokens());
             assertEquals(138, telemetry.totalTokens());
         } finally {
+            service.closeDefaultClient();
             server.stop(0);
         }
     }
 
     @Test
-    void generateJsonUsesSchemaPrompt() throws Exception {
-        HttpServer server = openAiServer("\"{\\\"value\\\":123}\"");
-        server.start();
-        try {
-        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
-        ReflectionTestUtils.setField(service, "apiKey", "test-key");
-        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-        ReflectionTestUtils.setField(service, "model", "gpt-4o-mini");
-        ReflectionTestUtils.setField(service, "temperature", 0.1d);
-        ReflectionTestUtils.setField(service, "maxTokens", 128);
-
-        JsonNode node = service.generateJson(
-                "prompt",
-                AiJsonSchema.ofSchema("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\"}}}"));
-
-        assertNotNull(node);
-        assertEquals(123, node.get("value").asInt());
-        } finally {
-            server.stop(0);
-        }
-    }
-
-    @Test
-    void gpt5DirectCallUsesMaxCompletionTokens() throws Exception {
+    void generateJsonUsesStrictNativeSchemaWithoutPromptInjection() throws Exception {
         AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
-        HttpServer server = openAiServer("\"pong\"", "gpt-5.4-mini", capturedRequest);
+        HttpServer server = responseServer(completedResponse("{\"value\":123}"), capturedRequest);
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
         server.start();
         try {
-        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
-        ReflectionTestUtils.setField(service, "apiKey", "test-key");
-        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-        ReflectionTestUtils.setField(service, "model", "gpt-5.4-mini");
-        ReflectionTestUtils.setField(service, "temperature", 0.1d);
-        ReflectionTestUtils.setField(service, "maxTokens", 128);
+            JsonNode node = service.generateJson(
+                    "author this decision",
+                    AiJsonSchema.ofSchema("""
+                            {"type":"object","properties":{"value":{"type":"number"}},"required":["value"],"additionalProperties":false}
+                            """));
 
-        String result = service.generateText("ping");
-
-        assertEquals("pong", result);
-        assertEquals(128, capturedRequest.get().path("max_completion_tokens").asInt());
-        assertTrue(capturedRequest.get().path("max_tokens").isMissingNode());
-        assertTrue(capturedRequest.get().path("temperature").isMissingNode());
-        assertEquals("none", capturedRequest.get().path("reasoning_effort").asText());
+            JsonNode format = capturedRequest.get().path("text").path("format");
+            assertNotNull(node);
+            assertEquals(123, node.path("value").asInt());
+            assertEquals("author this decision", capturedRequest.get().path("input").asText());
+            assertEquals("json_schema", format.path("type").asText());
+            assertEquals("praxis_response", format.path("name").asText());
+            assertTrue(format.path("strict").asBoolean());
+            assertEquals("object", format.path("schema").path("type").asText());
         } finally {
+            service.closeDefaultClient();
             server.stop(0);
         }
     }
 
     @Test
-    void gpt5JsonCallRaisesCompletionBudgetForStructuredOutput() throws Exception {
+    void generateJsonWithoutSchemaUsesNativeJsonObjectFormat() throws Exception {
         AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
-        HttpServer server = openAiServer("\"{\\\"value\\\":123}\"", "gpt-5.4-mini", capturedRequest);
+        HttpServer server = responseServer(completedResponse("{\"value\":123}"), capturedRequest);
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
         server.start();
         try {
-        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
-        ReflectionTestUtils.setField(service, "apiKey", "test-key");
-        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-        ReflectionTestUtils.setField(service, "model", "gpt-5.4-mini");
-        ReflectionTestUtils.setField(service, "temperature", 0.1d);
-        ReflectionTestUtils.setField(service, "maxTokens", 128);
-        ReflectionTestUtils.setField(service, "jsonMinCompletionTokens", 8192);
+            JsonNode node = service.generateJson("return an object");
 
-        JsonNode node = service.generateJson(
-                "prompt",
-                AiJsonSchema.ofSchema("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\"}}}"));
-
-        assertNotNull(node);
-        assertEquals(123, node.get("value").asInt());
-        assertEquals(8192, capturedRequest.get().path("max_completion_tokens").asInt());
-        assertTrue(capturedRequest.get().path("max_tokens").isMissingNode());
+            assertEquals(123, node.path("value").asInt());
+            assertEquals(
+                    "json_object",
+                    capturedRequest.get().path("text").path("format").path("type").asText());
         } finally {
+            service.closeDefaultClient();
             server.stop(0);
         }
     }
 
     @Test
-    void gpt5JsonCallHonorsExplicitCompletionBudget() throws Exception {
-        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
-        HttpServer server = openAiServer("\"{\\\"value\\\":123}\"", "gpt-5.4-mini", capturedRequest);
-        server.start();
-        try {
-        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
-        ReflectionTestUtils.setField(service, "apiKey", "test-key");
-        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-        ReflectionTestUtils.setField(service, "model", "gpt-5.4-mini");
-        ReflectionTestUtils.setField(service, "temperature", 0.1d);
-        ReflectionTestUtils.setField(service, "maxTokens", 128);
-        ReflectionTestUtils.setField(service, "jsonMinCompletionTokens", 8192);
-
-        JsonNode node = service.generateJson(
-                "prompt",
-                AiJsonSchema.ofSchema("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\"}}}"),
-                AiCallConfig.builder().maxTokens(2200).build());
-
-        assertNotNull(node);
-        assertEquals(123, node.get("value").asInt());
-        assertEquals(2200, capturedRequest.get().path("max_completion_tokens").asInt());
-        assertTrue(capturedRequest.get().path("max_tokens").isMissingNode());
-        assertTrue(capturedRequest.get().path("reasoning_effort").isMissingNode());
-        } finally {
-            server.stop(0);
-        }
-    }
-
-    @Test
-    void gpt54JsonCallDisablesReasoningForCompactExplicitBudget() throws Exception {
-        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
-        HttpServer server = openAiServer("\"{\\\"value\\\":123}\"", "gpt-5.4-mini", capturedRequest);
-        server.start();
-        try {
-        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
-        ReflectionTestUtils.setField(service, "apiKey", "test-key");
-        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-        ReflectionTestUtils.setField(service, "model", "gpt-5.4-mini");
-        ReflectionTestUtils.setField(service, "temperature", 0.1d);
-        ReflectionTestUtils.setField(service, "maxTokens", 128);
-        ReflectionTestUtils.setField(service, "jsonMinCompletionTokens", 8192);
-
-        JsonNode node = service.generateJson(
-                "prompt",
-                AiJsonSchema.ofSchema("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\"}}}"),
-                AiCallConfig.builder().maxTokens(1800).build());
-
-        assertNotNull(node);
-        assertEquals(123, node.get("value").asInt());
-        assertEquals(1800, capturedRequest.get().path("max_completion_tokens").asInt());
-        assertEquals("none", capturedRequest.get().path("reasoning_effort").asText());
-        } finally {
-            server.stop(0);
-        }
-    }
-
-    @Test
-    void legacyGpt5MiniJsonCallUsesLowReasoningForCompactExplicitBudget() throws Exception {
-        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
-        HttpServer server = openAiServer("\"{\\\"value\\\":123}\"", "gpt-5-mini", capturedRequest);
-        server.start();
-        try {
-        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
-        ReflectionTestUtils.setField(service, "apiKey", "test-key");
-        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-        ReflectionTestUtils.setField(service, "model", "gpt-5-mini");
-        ReflectionTestUtils.setField(service, "temperature", 0.1d);
-        ReflectionTestUtils.setField(service, "maxTokens", 128);
-        ReflectionTestUtils.setField(service, "jsonMinCompletionTokens", 8192);
-
-        JsonNode node = service.generateJson(
-                "prompt",
-                AiJsonSchema.ofSchema("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\"}}}"),
-                AiCallConfig.builder().maxTokens(1800).build());
-
-        assertNotNull(node);
-        assertEquals(123, node.get("value").asInt());
-        assertEquals(1800, capturedRequest.get().path("max_completion_tokens").asInt());
-        assertEquals("low", capturedRequest.get().path("reasoning_effort").asText());
-        } finally {
-            server.stop(0);
-        }
-    }
-
-    @Test
-    void directCallRaisesNormalizedProviderExceptionForEmptyContent() throws Exception {
-        HttpServer server = openAiServer("null");
-        server.start();
-        try {
-        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
-        ReflectionTestUtils.setField(service, "apiKey", "test-key");
-        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-        ReflectionTestUtils.setField(service, "model", "gpt-4o-mini");
-        ReflectionTestUtils.setField(service, "temperature", 0.1d);
-        ReflectionTestUtils.setField(service, "maxTokens", 128);
-
-        AiProviderCallException ex = assertThrows(AiProviderCallException.class, () -> service.generateText("ping"));
-
-        assertEquals("openai", ex.getProvider());
-        assertEquals(AiProviderCallException.Kind.UNKNOWN, ex.getKind());
-        } finally {
-            server.stop(0);
-        }
-    }
-
-    @Test
-    void directCallRaisesNormalizedProviderExceptionForQuotaFailures() throws Exception {
-        HttpServer server = errorServer(429, """
-                {"error":{"type":"insufficient_quota","code":"insufficient_quota","message":"You exceeded your current quota. Check your plan and billing details. request req_secret_123"}}
-                """);
-        server.start();
-        try {
-        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
-        ReflectionTestUtils.setField(service, "apiKey", "test-key");
-        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-        ReflectionTestUtils.setField(service, "model", "gpt-4o-mini");
-        ReflectionTestUtils.setField(service, "temperature", 0.1d);
-        ReflectionTestUtils.setField(service, "maxTokens", 128);
-
-        AiProviderCallException ex = assertThrows(AiProviderCallException.class, () -> service.generateText("ping"));
-
-        assertEquals("openai", ex.getProvider());
-        assertEquals(AiProviderCallException.Kind.QUOTA_EXHAUSTED, ex.getKind());
-        assertEquals(429, ex.getStatusCode());
-        } finally {
-            server.stop(0);
-        }
-    }
-
-    @Test
-    void directCallKeepsRateLimitForTransientHttp429Failures() throws Exception {
-        HttpServer server = errorServer(429, """
-                {"error":{"message":"Rate limit reached for requests per minute."}}
-                """);
-        server.start();
-        try {
-        SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
-        ReflectionTestUtils.setField(service, "apiKey", "test-key");
-        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-        ReflectionTestUtils.setField(service, "model", "gpt-4o-mini");
-        ReflectionTestUtils.setField(service, "temperature", 0.1d);
-        ReflectionTestUtils.setField(service, "maxTokens", 128);
-
-        AiProviderCallException ex = assertThrows(AiProviderCallException.class, () -> service.generateText("ping"));
-
-        assertEquals("openai", ex.getProvider());
-        assertEquals(AiProviderCallException.Kind.RATE_LIMIT, ex.getKind());
-        assertEquals(429, ex.getStatusCode());
-        } finally {
-            server.stop(0);
-        }
-    }
-
-    private HttpServer openAiServer(String contentJsonLiteral) throws Exception {
-        return openAiServer(contentJsonLiteral, "gpt-4o-mini", new AtomicReference<>());
-    }
-
-    private HttpServer openAiServer(
-            String contentJsonLiteral,
-            String expectedModel,
-            AtomicReference<JsonNode> capturedRequest) throws Exception {
+    void gpt5StructuredOutputRaisesDefaultBudgetButHonorsExplicitBudget() throws Exception {
+        List<JsonNode> capturedRequests = new ArrayList<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/v1/chat/completions", exchange -> {
-            byte[] requestBytes = exchange.getRequestBody().readAllBytes();
-            JsonNode request = objectMapper.readTree(requestBytes);
-            capturedRequest.set(request);
-            if (!expectedModel.equals(request.path("model").asText())) {
-                exchange.sendResponseHeaders(400, -1);
+        server.createContext("/v1/responses", exchange -> {
+            capturedRequests.add(objectMapper.readTree(exchange.getRequestBody().readAllBytes()));
+            writeJson(exchange, 200, completedResponse("{\"value\":123}"));
+        });
+        SpringAiOpenAiService service = service(server, "gpt-5.4-mini");
+        server.start();
+        try {
+            AiJsonSchema schema = AiJsonSchema.ofSchema(
+                    "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"number\"}}}");
+
+            service.generateJson("first", schema);
+            service.generateJson("second", schema, AiCallConfig.builder().maxTokens(1800).build());
+
+            assertEquals(8192, capturedRequests.get(0).path("max_output_tokens").asInt());
+            assertTrue(capturedRequests.get(0).path("reasoning").isMissingNode());
+            assertEquals(1800, capturedRequests.get(1).path("max_output_tokens").asInt());
+            assertEquals("none", capturedRequests.get(1).path("reasoning").path("effort").asText());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void completedResponseWithNoTextIsNormalizedAsProviderFailure() throws Exception {
+        HttpServer server = responseServer(completedResponse(""), new AtomicReference<>());
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
+        server.start();
+        try {
+            AiProviderCallException exception =
+                    assertThrows(AiProviderCallException.class, () -> service.generateText("ping"));
+
+            assertEquals("openai", exception.getProvider());
+            assertEquals(AiProviderCallException.Kind.UNKNOWN, exception.getKind());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void incompleteResponseIsNotAcceptedAsSuccessfulGeneration() throws Exception {
+        String response = completedResponse("partial").replace("\"status\":\"completed\"", "\"status\":\"incomplete\"");
+        HttpServer server = responseServer(response, new AtomicReference<>());
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
+        server.start();
+        try {
+            AiProviderCallException exception =
+                    assertThrows(AiProviderCallException.class, () -> service.generateText("ping"));
+
+            assertEquals(AiProviderCallException.Kind.UNKNOWN, exception.getKind());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void explicitRefusalIsNotAcceptedAsEmptySuccess() throws Exception {
+        String response = completedResponse("").replace(
+                "{\"type\":\"output_text\",\"text\":\"\",\"annotations\":[]}",
+                "{\"type\":\"refusal\",\"refusal\":\"policy restriction\"}");
+        HttpServer server = responseServer(response, new AtomicReference<>());
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
+        server.start();
+        try {
+            AiProviderCallException exception =
+                    assertThrows(AiProviderCallException.class, () -> service.generateText("ping"));
+
+            assertEquals(AiProviderCallException.Kind.UNKNOWN, exception.getKind());
+            assertTrue(exception.getCause().getMessage().contains("refused"));
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void invalidStructuredSchemaFailsAsClientErrorBeforeCallingProvider() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = responseServer(completedResponse("{}"), capturedRequest);
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
+        server.start();
+        try {
+            AiProviderCallException exception = assertThrows(
+                    AiProviderCallException.class,
+                    () -> service.generateJson("ping", AiJsonSchema.ofSchema("[\"not-an-object\"]")));
+
+            assertEquals(AiProviderCallException.Kind.CLIENT_ERROR, exception.getKind());
+            assertNull(capturedRequest.get());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void quotaAndTransientRateLimitRemainDistinct() throws Exception {
+        HttpServer quotaServer = errorServer(429, """
+                {"error":{"type":"insufficient_quota","code":"insufficient_quota","message":"You exceeded your current quota."}}
+                """);
+        SpringAiOpenAiService quotaService = service(quotaServer, "gpt-4o-mini");
+        quotaServer.start();
+        try {
+            AiProviderCallException quota =
+                    assertThrows(AiProviderCallException.class, () -> quotaService.generateText("ping"));
+            assertEquals(AiProviderCallException.Kind.QUOTA_EXHAUSTED, quota.getKind());
+            assertEquals(429, quota.getStatusCode());
+        } finally {
+            quotaService.closeDefaultClient();
+            quotaServer.stop(0);
+        }
+
+        HttpServer rateServer = errorServer(429, """
+                {"error":{"type":"rate_limit_error","message":"Rate limit reached for requests per minute."}}
+                """);
+        SpringAiOpenAiService rateService = service(rateServer, "gpt-4o-mini");
+        rateServer.start();
+        try {
+            AiProviderCallException rate =
+                    assertThrows(AiProviderCallException.class, () -> rateService.generateText("ping"));
+            assertEquals(AiProviderCallException.Kind.RATE_LIMIT, rate.getKind());
+            assertEquals(429, rate.getStatusCode());
+        } finally {
+            rateService.closeDefaultClient();
+            rateServer.stop(0);
+        }
+    }
+
+    @Test
+    void streamConsumesTypedDeltasAndCapturesTerminalTelemetry() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = streamServer(capturedRequest);
+        SpringAiOpenAiService service = service(server, "gpt-5.4-mini");
+        server.start();
+        try {
+            List<String> chunks = new ArrayList<>();
+            AiProviderInvocationTrace trace =
+                    new AiProviderInvocationTrace("turn_stream", 1, "openai", "gpt-5.4-mini");
+
+            String result = service.generateTextStream(
+                    "ping",
+                    AiCallConfig.builder().invocationTrace(trace).build(),
+                    chunks::add,
+                    () -> false);
+
+            assertEquals("pong", result);
+            assertEquals(List.of("po", "ng"), chunks);
+            assertTrue(capturedRequest.get().path("stream").asBoolean());
+            assertFalse(capturedRequest.get().path("store").asBoolean(true));
+            assertEquals("openai-responses-sdk", trace.snapshot().transport());
+            assertEquals("resp-safe-123", trace.snapshot().responseId());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void cancellationBeforeStreamStartDoesNotCallProvider() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = streamServer(capturedRequest);
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
+        server.start();
+        try {
+            assertThrows(
+                    java.util.concurrent.CancellationException.class,
+                    () -> service.generateTextStream("ping", null, ignored -> {}, () -> true));
+
+            assertNull(capturedRequest.get());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void missingApiKeyIsNormalizedAsStreamAuthenticationFailure() throws Exception {
+        HttpServer server = streamServer(new AtomicReference<>());
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
+        ReflectionTestUtils.setField(service, "apiKey", null);
+        try {
+            AiProviderStreamException exception = assertThrows(
+                    AiProviderStreamException.class,
+                    () -> service.generateTextStream("ping", null, ignored -> {}, () -> false));
+
+            assertEquals(AiProviderStreamException.Kind.AUTH, exception.getKind());
+            assertEquals(401, exception.getStatusCode());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void emptyTerminalStreamIsNotAcceptedAsSuccess() throws Exception {
+        HttpServer server = terminalOnlyStreamServer("");
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
+        server.start();
+        try {
+            AiProviderStreamException exception = assertThrows(
+                    AiProviderStreamException.class,
+                    () -> service.generateTextStream("ping", null, ignored -> {}, () -> false));
+
+            assertEquals(AiProviderStreamException.Kind.UNKNOWN, exception.getKind());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void cancellationAfterFirstChunkStopsTheSdkStream() throws Exception {
+        HttpServer server = streamServer(new AtomicReference<>());
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        List<String> chunks = new ArrayList<>();
+        server.start();
+        try {
+            assertThrows(
+                    java.util.concurrent.CancellationException.class,
+                    () -> service.generateTextStream(
+                            "ping",
+                            null,
+                            chunk -> {
+                                chunks.add(chunk);
+                                cancelled.set(true);
+                            },
+                            cancelled::get));
+
+            assertEquals(List.of("po"), chunks);
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void timeoutIsNormalizedAndSdkDoesNotRetryGeneration() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/responses", exchange -> {
+            calls.incrementAndGet();
+            exchange.getRequestBody().readAllBytes();
+            try {
+                Thread.sleep(1500);
+                writeJson(exchange, 200, completedResponse("late"));
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
                 exchange.close();
-                return;
+            } catch (IOException exception) {
+                exchange.close();
             }
+        });
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
+        ReflectionTestUtils.setField(service, "timeoutSeconds", 1);
+        server.start();
+        try {
+            AiProviderCallException exception =
+                    assertThrows(AiProviderCallException.class, () -> service.generateText("ping"));
+
+            assertEquals(AiProviderCallException.Kind.TIMEOUT, exception.getKind());
+            assertEquals(1, calls.get());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void sdkRetriesRemainDisabledSoOrchestratorOwnsRetryPolicy() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/responses", exchange -> {
+            calls.incrementAndGet();
+            exchange.getRequestBody().readAllBytes();
+            writeJson(exchange, 500, "{\"error\":{\"message\":\"temporary server failure\"}}");
+        });
+        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
+        server.start();
+        try {
+            AiProviderCallException exception =
+                    assertThrows(AiProviderCallException.class, () -> service.generateText("ping"));
+
+            assertEquals(AiProviderCallException.Kind.SERVER_ERROR, exception.getKind());
+            assertEquals(1, calls.get());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    private SpringAiOpenAiService service(HttpServer server, String model) {
+        SpringAiOpenAiService service = new SpringAiOpenAiService(objectMapper);
+        ReflectionTestUtils.setField(service, "apiKey", "test-key");
+        ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
+        ReflectionTestUtils.setField(service, "model", model);
+        ReflectionTestUtils.setField(service, "temperature", 0.1d);
+        ReflectionTestUtils.setField(service, "maxTokens", 128);
+        ReflectionTestUtils.setField(service, "jsonMinCompletionTokens", 8192);
+        ReflectionTestUtils.setField(service, "timeoutSeconds", 5);
+        return service;
+    }
+
+    private HttpServer responseServer(String response, AtomicReference<JsonNode> capturedRequest) throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/responses", exchange -> {
+            capturedRequest.set(objectMapper.readTree(exchange.getRequestBody().readAllBytes()));
+            writeJson(exchange, 200, response);
+        });
+        return server;
+    }
+
+    private HttpServer errorServer(int status, String response) throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/responses", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            writeJson(exchange, status, response);
+        });
+        return server;
+    }
+
+    private HttpServer streamServer(AtomicReference<JsonNode> capturedRequest) throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/responses", exchange -> {
+            capturedRequest.set(objectMapper.readTree(exchange.getRequestBody().readAllBytes()));
+            String response = objectMapper.writeValueAsString(objectMapper.readTree(completedResponse("pong")));
             String body = """
-                    {
-                      "choices": [
-                        {
-                          "message": {
-                            "content": %s
-                          }
-                        }
-                      ]
-                    }
-                    """.formatted(contentJsonLiteral);
-            byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
+                    event: response.output_text.delta
+                    data: {"type":"response.output_text.delta","sequence_number":1,"item_id":"msg-safe-123","output_index":0,"content_index":0,"delta":"po","logprobs":[]}
+
+                    event: response.output_text.delta
+                    data: {"type":"response.output_text.delta","sequence_number":2,"item_id":"msg-safe-123","output_index":0,"content_index":0,"delta":"ng","logprobs":[]}
+
+                    event: response.completed
+                    data: {"type":"response.completed","sequence_number":3,"response":%s}
+
+                    """.formatted(response);
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
             exchange.sendResponseHeaders(200, bytes.length);
             exchange.getResponseBody().write(bytes);
             exchange.close();
@@ -372,40 +459,64 @@ class SpringAiOpenAiServiceTest {
         return server;
     }
 
-    private HttpServer errorServer(int status, String body) throws Exception {
+    private HttpServer terminalOnlyStreamServer(String text) throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/v1/chat/completions", exchange -> {
+        server.createContext("/v1/responses", exchange -> {
             exchange.getRequestBody().readAllBytes();
-            byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(status, bytes.length);
+            String response = objectMapper.writeValueAsString(objectMapper.readTree(completedResponse(text)));
+            String body = """
+                    event: response.completed
+                    data: {"type":"response.completed","sequence_number":1,"response":%s}
+
+                    """.formatted(response);
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, bytes.length);
             exchange.getResponseBody().write(bytes);
             exchange.close();
         });
         return server;
     }
 
-    private static ObjectProvider<OpenAiChatModel> provider(OpenAiChatModel client) {
-        return new ObjectProvider<>() {
-            @Override
-            public OpenAiChatModel getObject(Object... args) {
-                return client;
-            }
+    private String completedResponse(String text) throws IOException {
+        String escapedText = objectMapper.writeValueAsString(text);
+        return """
+                {
+                  "id":"resp-safe-123",
+                  "object":"response",
+                  "created_at":1,
+                  "status":"completed",
+                  "error":null,
+                  "incomplete_details":null,
+                  "instructions":null,
+                  "max_output_tokens":128,
+                  "model":"gpt-5.4-mini-2026-06-01",
+                  "output":[{
+                    "id":"msg-safe-123",
+                    "type":"message",
+                    "status":"completed",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":%s,"annotations":[]}]
+                  }],
+                  "parallel_tool_calls":true,
+                  "tool_choice":"auto",
+                  "tools":[],
+                  "usage":{
+                    "input_tokens":120,
+                    "input_tokens_details":{"cached_tokens":80},
+                    "output_tokens":18,
+                    "output_tokens_details":{"reasoning_tokens":0},
+                    "total_tokens":138
+                  }
+                }
+                """.formatted(escapedText);
+    }
 
-            @Override
-            public OpenAiChatModel getIfAvailable() {
-                return client;
-            }
-
-            @Override
-            public OpenAiChatModel getIfUnique() {
-                return client;
-            }
-
-            @Override
-            public java.util.Iterator<OpenAiChatModel> iterator() {
-                return List.of(client).iterator();
-            }
-        };
+    private void writeJson(HttpExchange exchange, int status, String response) throws IOException {
+        byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.sendResponseHeaders(status, bytes.length);
+        exchange.getResponseBody().write(bytes);
+        exchange.close();
     }
 }

@@ -18,7 +18,6 @@ import org.praxisplatform.config.service.AiProvider;
 import org.praxisplatform.config.service.SpringAiGeminiService;
 import org.praxisplatform.config.service.SpringAiOpenAiService;
 import org.springframework.ai.google.genai.GoogleGenAiChatModel;
-import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -110,9 +109,7 @@ class AgenticAuthoringLlmShadowIntegrationTest {
 
     private SpringAiOpenAiService createOpenAiProvider() {
         String apiKey = requireEnv("PRAXIS_AI_OPENAI_API_KEY");
-        @SuppressWarnings("unchecked")
-        ObjectProvider<OpenAiChatModel> chatProvider = mock(ObjectProvider.class);
-        SpringAiOpenAiService service = new SpringAiOpenAiService(chatProvider, objectMapper);
+        SpringAiOpenAiService service = new SpringAiOpenAiService(objectMapper);
         ReflectionTestUtils.setField(service, "apiKey", apiKey);
         ReflectionTestUtils.setField(service, "baseUrl", envOrDefault("PRAXIS_AI_OPENAI_BASE_URL", "https://api.openai.com"));
         ReflectionTestUtils.setField(service, "model", envOrDefault("PRAXIS_AI_OPENAI_MODEL", "gpt-4o-mini"));

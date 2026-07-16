@@ -2,20 +2,37 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import java.io.BufferedReader;
+import com.openai.client.OpenAIClient;
+import com.openai.client.okhttp.OpenAIOkHttpClient;
+import com.openai.core.JsonValue;
+import com.openai.core.http.AsyncStreamResponse;
+import com.openai.errors.OpenAIIoException;
+import com.openai.errors.OpenAIServiceException;
+import com.openai.helpers.ResponseAccumulator;
+import com.openai.models.Reasoning;
+import com.openai.models.ReasoningEffort;
+import com.openai.models.ResponseFormatJsonObject;
+import com.openai.models.responses.Response;
+import com.openai.models.responses.ResponseCreateParams;
+import com.openai.models.responses.ResponseFormatTextJsonSchemaConfig;
+import com.openai.models.responses.ResponseOutputItem;
+import com.openai.models.responses.ResponseOutputMessage;
+import com.openai.models.responses.ResponseStreamEvent;
+import com.openai.models.responses.ResponseTextConfig;
+import com.openai.models.responses.ResponseUsage;
+import jakarta.annotation.PreDestroy;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.InterruptedIOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -28,42 +45,28 @@ import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.AiProviderModel;
-import org.praxisplatform.config.rag.RagFilterContext;
-import org.praxisplatform.config.rag.RagFilters;
-import org.praxisplatform.config.rag.RagChatAdvisorService;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
-import org.springframework.ai.chat.client.advisor.api.Advisor;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.openai.OpenAiChatOptions;
-import org.springframework.ai.openai.OpenAiChatModel;
-import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.ai.converter.BeanOutputConverter;
-import org.springframework.ai.vectorstore.filter.Filter;
-
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
- * Adaptador canonico do runtime OpenAI para os contratos de {@link AiProvider}.
+ * Adaptador canônico do provider OpenAI para os contratos internos de {@link AiProvider}.
  *
- * <p>O servico traduz chamadas de texto, JSON estruturado, listagem de modelos e streaming para a
- * stack Spring AI/OpenAI, incluindo opcionalmente advisors RAG e overrides por chamada.
+ * <p>A geração usa o SDK Java oficial e a Responses API. O adapter preserva os contratos Praxis de
+ * configuração por chamada, saída estruturada, streaming, cancelamento e telemetria, sem expor
+ * tipos específicos do fornecedor para os demais runtimes.</p>
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class SpringAiOpenAiService implements AiProvider {
 
-    private final ObjectProvider<OpenAiChatModel> chatClientProvider;
-    private final ObjectMapper objectMapper;
+    private static final String PROVIDER = "openai";
+    private static final String TRANSPORT = "openai-responses-sdk";
+    private static final String STRUCTURED_OUTPUT_NAME = "praxis_response";
 
-    @Autowired(required = false)
-    private ObjectProvider<RagChatAdvisorService> ragChatAdvisorServiceProvider;
+    private final ObjectMapper objectMapper;
+    private final AtomicReference<DefaultClientHolder> defaultClient = new AtomicReference<>();
 
     @Value("${spring.ai.openai.api-key:#{null}}")
     private String apiKey;
@@ -98,17 +101,17 @@ public class SpringAiOpenAiService implements AiProvider {
 
     @Override
     public JsonNode generateJson(String prompt, AiJsonSchema schema, AiCallConfig config) {
-        JsonSchemaResult schemaResult = prepareSchema(prompt, schema);
-        String text = callWithOptions(schemaResult.prompt(), config, true);
+        PreparedSchema preparedSchema = prepareSchema(schema);
+        Response response = callResponses(prompt, config, preparedSchema, true);
+        String text = extractResponseText(response);
         if (text == null || text.isBlank()) {
             return null;
         }
-        if (schemaResult.converter() != null) {
+        if (preparedSchema.converter() != null) {
             try {
-                Object parsed = schemaResult.converter().convert(text);
-                return objectMapper.valueToTree(parsed);
-            } catch (Exception e) {
-                log.warn("[SpringAiOpenAiService] JSON parse failed, returning null.", e);
+                return objectMapper.valueToTree(preparedSchema.converter().convert(text));
+            } catch (Exception exception) {
+                log.warn("[SpringAiOpenAiService] Structured response conversion failed.", exception);
                 return null;
             }
         }
@@ -122,7 +125,7 @@ public class SpringAiOpenAiService implements AiProvider {
 
     @Override
     public String generateText(String prompt, AiCallConfig config) {
-        return callWithOptions(prompt, config, false);
+        return extractResponseText(callResponses(prompt, config, PreparedSchema.none(), false));
     }
 
     @Override
@@ -141,315 +144,389 @@ public class SpringAiOpenAiService implements AiProvider {
             AiCallConfig config,
             Consumer<String> onChunk,
             Supplier<Boolean> cancellationRequested) {
-        return callOpenAiTextStream(prompt, config, onChunk, cancellationRequested);
+        return callResponsesStream(prompt, config, onChunk, cancellationRequested);
     }
 
     @Override
     public List<AiProviderModel> listModels(AiCallConfig config) {
-        String resolvedKey = resolveApiKey(config);
-        if (resolvedKey == null || resolvedKey.isBlank()) {
-            throw new IllegalStateException("OpenAI API key not configured (spring.ai.openai.api-key)");
-        }
+        String resolvedKey = requireApiKey(config);
         HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                .connectTimeout(Duration.ofSeconds(Math.max(1, resolveTimeoutSeconds(config))))
                 .build();
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(buildModelsUrl(resolveBaseUrl(baseUrl))))
-                .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                .timeout(Duration.ofSeconds(Math.max(1, resolveTimeoutSeconds(config))))
                 .header("Authorization", "Bearer " + resolvedKey)
                 .GET()
                 .build();
         try {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 400) {
-                throw new IllegalStateException("OpenAI API HTTP " + response.statusCode() + ": " + response.body());
+                throw AiProviderCallException.fromHttpStatus(
+                        PROVIDER, response.statusCode(), summarizeErrorBody(response.body()));
             }
-            JsonNode root = objectMapper.readTree(response.body());
-            JsonNode data = root.path("data");
+            JsonNode data = objectMapper.readTree(response.body()).path("data");
             if (!data.isArray()) {
                 return List.of();
             }
             List<AiProviderModel> models = new ArrayList<>();
             for (JsonNode node : data) {
                 String id = textOrNull(node, "id");
-                if (id == null) {
-                    continue;
+                if (id != null) {
+                    models.add(AiProviderModel.builder()
+                            .name(id)
+                            .displayName(id)
+                            .description(textOrNull(node, "owned_by"))
+                            .supportedGenerationMethods(List.of("responses"))
+                            .build());
                 }
-                models.add(AiProviderModel.builder()
-                        .name(id)
-                        .displayName(id)
-                        .description(textOrNull(node, "owned_by"))
-                        .supportedGenerationMethods(List.of("chat.completions"))
-                        .build());
             }
             return models;
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to list OpenAI models", e);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw AiProviderCallException.transport(PROVIDER, exception);
+        } catch (AiProviderCallException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw classifyCallFailure(exception);
         }
     }
 
     @Override
     public String getProviderName() {
-        return "openai";
+        return PROVIDER;
     }
 
-    private String callWithOptions(String prompt, AiCallConfig config, boolean jsonMode) {
-        // Temporary compatibility path. Spring AI 1.1.8 fixes the historical extra_body
-        // serialization issue; removal still depends on parity for cancellation, usage telemetry,
-        // structured output and streaming in the canonical consistency corpus.
-        try {
-            return callOpenAiDirectly(prompt, config, jsonMode);
-        } catch (Exception e) {
-            if (e instanceof AiProviderCallException callException) {
-                throw callException;
-            }
-            throw new RuntimeException("Failed to call OpenAI directly", e);
-        }
-    }
-
-    private String callOpenAiDirectly(String prompt, AiCallConfig config, boolean jsonMode) {
-        String resolvedKey = resolveApiKey(config);
-        String resolvedModel = resolveModel(config);
-        double resolvedTemp = resolveTemperature(config);
-        int resolvedMaxTokens = resolveMaxTokens(config);
+    private Response callResponses(
+            String prompt,
+            AiCallConfig config,
+            PreparedSchema preparedSchema,
+            boolean jsonMode) {
         int resolvedTimeoutSeconds = resolveTimeoutSeconds(config);
-        boolean explicitMaxTokens = config != null && config.getMaxTokens() != null;
-        if (jsonMode && requiresMaxCompletionTokens(resolvedModel) && !explicitMaxTokens) {
-            resolvedMaxTokens = Math.max(resolvedMaxTokens, Math.max(1, jsonMinCompletionTokens));
-        }
-        String resolvedUrl = resolveBaseUrl(baseUrl) + "/v1/chat/completions";
-
-        try {
-            ObjectNode root = objectMapper.createObjectNode();
-            root.put("model", resolvedModel);
-            putTemperature(root, resolvedModel, resolvedTemp);
-            putTokenLimit(root, resolvedModel, resolvedMaxTokens);
-            putCompactReasoningEffort(root, resolvedModel, resolvedMaxTokens);
-            if (jsonMode) {
-                ObjectNode fmt = root.putObject("response_format");
-                fmt.put("type", "json_object");
-            }
-            ArrayNode messages = root.putArray("messages");
-            ObjectNode msg = messages.addObject();
-            msg.put("role", "user");
-            msg.put("content", prompt);
-
-            String requestBody = objectMapper.writeValueAsString(root);
-
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(Math.max(1, resolvedTimeoutSeconds)))
-                    .build();
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(resolvedUrl))
-                    .timeout(Duration.ofSeconds(Math.max(1, resolvedTimeoutSeconds)))
-                    .header("Authorization", "Bearer " + resolvedKey)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                    .build();
-
-            CompletableFuture<HttpResponse<String>> responseFuture =
-                    client.sendAsync(request, HttpResponse.BodyHandlers.ofString());
-            HttpResponse<String> response;
+        try (ClientLease lease = acquireClient(config)) {
+            ResponseCreateParams params = buildParams(prompt, config, preparedSchema, jsonMode);
+            CompletableFuture<Response> future = lease.client().async().responses().create(params);
             try {
-                response = responseFuture.get(Math.max(1, resolvedTimeoutSeconds), TimeUnit.SECONDS);
-            } catch (TimeoutException timeoutException) {
-                responseFuture.cancel(true);
-                throw AiProviderCallException.timeout("openai", timeoutException);
-            } catch (ExecutionException executionException) {
-                Throwable cause = executionException.getCause();
-                if (cause instanceof AiProviderCallException callException) {
-                    throw callException;
-                }
-                if (cause instanceof java.net.http.HttpTimeoutException timeoutException) {
-                    throw AiProviderCallException.timeout("openai", timeoutException);
-                }
-                if (cause instanceof Exception exception) {
-                    throw exception;
-                }
-                throw new IllegalStateException(cause);
+                Response response = future.get(Math.max(1, resolvedTimeoutSeconds), TimeUnit.SECONDS);
+                validateCompletedResponse(response);
+                captureInvocationMetadata(config, response);
+                return response;
+            } catch (TimeoutException exception) {
+                future.cancel(true);
+                throw AiProviderCallException.timeout(PROVIDER, exception);
+            } catch (ExecutionException exception) {
+                throw classifyCallFailure(unwrap(exception));
             }
-
-            if (response.statusCode() >= 400) {
-                throw AiProviderCallException.fromHttpStatus(
-                        "openai",
-                        response.statusCode(),
-                        summarizeErrorBody(response.body()));
-            }
-
-            JsonNode resRoot = objectMapper.readTree(response.body());
-            JsonNode contentNode = resRoot.path("choices").get(0).path("message").path("content");
-            String content = contentNode.isMissingNode() || contentNode.isNull() ? "" : contentNode.asText();
-            if (content == null || content.isBlank()) {
-                String finishReason = resRoot.path("choices").get(0).path("finish_reason").asText("");
-                throw AiProviderCallException.unknown(
-                        "openai",
-                        new IllegalStateException("OpenAI returned empty content"
-                                + (finishReason.isBlank() ? "" : " (finish_reason=" + finishReason + ")")));
-            }
-            captureInvocationMetadata(config, resRoot, resolvedModel);
-            return content;
-
-        } catch (InterruptedException interruptedException) {
-            Thread.currentThread().interrupt();
-            throw AiProviderCallException.transport("openai", interruptedException);
-        } catch (java.net.http.HttpTimeoutException timeoutException) {
-            throw AiProviderCallException.timeout("openai", timeoutException);
-        } catch (Exception e) {
-            if (e instanceof AiProviderCallException callException) {
-                throw callException;
-            }
-            if (e instanceof IOException
-                    || e instanceof java.net.ConnectException
-                    || e instanceof java.net.SocketException
-                    || e instanceof java.net.UnknownHostException) {
-                throw AiProviderCallException.transport("openai", e);
-            }
-            throw AiProviderCallException.unknown("openai", e);
+        } catch (AiProviderCallException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw classifyCallFailure(exception);
         }
     }
 
-    private String callOpenAiTextStream(
+    private String callResponsesStream(
             String prompt,
             AiCallConfig config,
             Consumer<String> onChunk,
             Supplier<Boolean> cancellationRequested) {
-        String resolvedKey = resolveApiKey(config);
-        String resolvedModel = resolveModel(config);
-        double resolvedTemp = resolveTemperature(config);
-        int resolvedMaxTokens = resolveMaxTokens(config);
         int resolvedTimeoutSeconds = resolveTimeoutSeconds(config);
-        String resolvedUrl = resolveBaseUrl(baseUrl) + "/v1/chat/completions";
-
-        CompletableFuture<HttpResponse<InputStream>> responseFuture = null;
-        AtomicReference<InputStream> streamRef = new AtomicReference<>();
-        AtomicReference<CompletableFuture<HttpResponse<InputStream>>> responseFutureRef = new AtomicReference<>();
         AtomicBoolean abortRequested = new AtomicBoolean(false);
-        AiStreamExecutionContextHolder.AbortRegistration abortRegistration = null;
-        try {
-            ObjectNode root = objectMapper.createObjectNode();
-            root.put("model", resolvedModel);
-            putTemperature(root, resolvedModel, resolvedTemp);
-            putTokenLimit(root, resolvedModel, resolvedMaxTokens);
-            putCompactReasoningEffort(root, resolvedModel, resolvedMaxTokens);
-            root.put("stream", true);
-            ArrayNode messages = root.putArray("messages");
-            ObjectNode msg = messages.addObject();
-            msg.put("role", "user");
-            msg.put("content", prompt);
+        AtomicReference<AsyncStreamResponse<ResponseStreamEvent>> streamRef = new AtomicReference<>();
+        ResponseAccumulator accumulator = ResponseAccumulator.create();
+        StringBuilder text = new StringBuilder();
+        AiStreamExecutionContextHolder.AbortRegistration registration =
+                AiStreamExecutionContextHolder.registerAbortAction(() -> {
+                    abortRequested.set(true);
+                    closeQuietly(streamRef.get());
+                });
 
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(Math.max(1, resolvedTimeoutSeconds)))
-                    .build();
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(resolvedUrl))
-                    .timeout(Duration.ofSeconds(Math.max(1, resolvedTimeoutSeconds)))
-                    .header("Authorization", "Bearer " + resolvedKey)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(root)))
-                    .build();
-            abortRegistration = AiStreamExecutionContextHolder.registerAbortAction(() -> {
-                abortRequested.set(true);
-                CompletableFuture<HttpResponse<InputStream>> inFlight = responseFutureRef.get();
-                if (inFlight != null) {
-                    inFlight.cancel(true);
-                }
-                closeQuietly(streamRef.get());
-            });
-            responseFuture = client.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
-            responseFutureRef.set(responseFuture);
-            if (abortRequested.get()) {
-                responseFuture.cancel(true);
+        try (ClientLease lease = acquireClient(config)) {
+            if (isCancelled(cancellationRequested)) {
+                throw new CancellationException("OpenAI stream cancelled before start.");
+            }
+            ResponseCreateParams params = buildParams(prompt, config, PreparedSchema.none(), false);
+            AsyncStreamResponse<ResponseStreamEvent> stream =
+                    lease.client().async().responses().createStreaming(params);
+            streamRef.set(stream);
+            if (abortRequested.get() || isCancelled(cancellationRequested)) {
+                stream.close();
                 throw new CancellationException("OpenAI stream cancelled before response.");
             }
-            HttpResponse<InputStream> response = responseFuture.get(Math.max(1, resolvedTimeoutSeconds), TimeUnit.SECONDS);
-            streamRef.set(response.body());
-            if (response.statusCode() >= 400) {
-                String errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
-                throw AiProviderStreamException.fromHttpStatus(
-                        "openai",
-                        response.statusCode(),
-                        summarizeErrorBody(errorBody));
-            }
-            StringBuilder out = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(streamRef.get(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    if (isCancelled(cancellationRequested)) {
-                        throw new CancellationException("OpenAI stream cancelled.");
-                    }
-                    String trimmed = line.trim();
-                    if (trimmed.isEmpty() || !trimmed.startsWith("data:")) {
-                        continue;
-                    }
-                    String data = trimmed.substring(5).trim();
-                    if (data.isEmpty()) {
-                        continue;
-                    }
-                    if ("[DONE]".equals(data)) {
-                        break;
-                    }
-                    String chunk = extractOpenAiDelta(data);
-                    if (chunk == null || chunk.isBlank()) {
-                        continue;
-                    }
-                    out.append(chunk);
-                    if (onChunk != null) {
-                        onChunk.accept(chunk);
+            stream.subscribe(event -> {
+                if (abortRequested.get() || isCancelled(cancellationRequested)) {
+                    throw new CancellationException("OpenAI stream cancelled.");
+                }
+                accumulator.accumulate(event);
+                if (event.isOutputTextDelta()) {
+                    String delta = event.asOutputTextDelta().delta();
+                    if (delta != null && !delta.isEmpty()) {
+                        text.append(delta);
+                        if (onChunk != null) {
+                            onChunk.accept(delta);
+                        }
                     }
                 }
+            });
+            try {
+                stream.onCompleteFuture().get(Math.max(1, resolvedTimeoutSeconds), TimeUnit.SECONDS);
+            } catch (TimeoutException exception) {
+                stream.close();
+                throw AiProviderStreamException.timeout(PROVIDER, exception);
+            } catch (ExecutionException exception) {
+                if (abortRequested.get() || isCancelled(cancellationRequested)) {
+                    throw new CancellationException("OpenAI stream cancelled.");
+                }
+                throw classifyStreamFailure(unwrap(exception));
             }
-            return out.toString();
-        } catch (CancellationException cancelled) {
-            throw cancelled;
-        } catch (InterruptedException interruptedException) {
-            Thread.currentThread().interrupt();
-            throw new CancellationException("OpenAI stream interrupted.");
-        } catch (TimeoutException timeoutException) {
-            if (responseFuture != null) {
-                responseFuture.cancel(true);
-            }
-            throw AiProviderStreamException.timeout("openai", timeoutException);
-        } catch (ExecutionException executionException) {
-            Throwable cause = executionException.getCause() != null
-                    ? executionException.getCause()
-                    : executionException;
-            throw classifyStreamFailure("openai", cause);
-        } catch (Exception ex) {
-            if (isCancelled(cancellationRequested)) {
+            if (abortRequested.get() || isCancelled(cancellationRequested)) {
                 throw new CancellationException("OpenAI stream cancelled.");
             }
-            if (ex instanceof AiProviderStreamException streamException) {
-                throw streamException;
+
+            Response response;
+            try {
+                response = accumulator.response();
+            } catch (IllegalStateException exception) {
+                throw AiProviderStreamException.unknown(
+                        PROVIDER,
+                        new IllegalStateException("OpenAI stream ended without a terminal response.", exception));
             }
-            throw classifyStreamFailure("openai", ex);
+            validateCompletedStreamResponse(response);
+            captureInvocationMetadata(config, response);
+            String accumulated = text.toString();
+            return accumulated.isBlank() ? extractResponseText(response) : accumulated;
+        } catch (CancellationException exception) {
+            throw exception;
+        } catch (AiProviderStreamException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            if (abortRequested.get() || isCancelled(cancellationRequested)) {
+                throw new CancellationException("OpenAI stream cancelled.");
+            }
+            throw classifyStreamFailure(exception);
         } finally {
-            if (abortRegistration != null) {
-                abortRegistration.close();
-            }
+            registration.close();
             closeQuietly(streamRef.getAndSet(null));
         }
     }
 
-    private void putTokenLimit(ObjectNode payload, String modelName, int maxTokens) {
-        if (requiresMaxCompletionTokens(modelName)) {
-            payload.put("max_completion_tokens", maxTokens);
-            return;
+    private ResponseCreateParams buildParams(
+            String prompt,
+            AiCallConfig config,
+            PreparedSchema preparedSchema,
+            boolean jsonMode) {
+        String resolvedModel = resolveModel(config);
+        int resolvedMaxTokens = resolveMaxTokens(config);
+        boolean explicitMaxTokens = config != null && config.getMaxTokens() != null;
+        if (jsonMode && requiresReasoningTokenBudget(resolvedModel) && !explicitMaxTokens) {
+            resolvedMaxTokens = Math.max(resolvedMaxTokens, Math.max(1, jsonMinCompletionTokens));
         }
-        payload.put("max_tokens", maxTokens);
+
+        ResponseCreateParams.Builder builder = ResponseCreateParams.builder()
+                .model(resolvedModel)
+                .input(prompt)
+                .maxOutputTokens(Math.max(1, resolvedMaxTokens))
+                .store(false);
+        if (!usesFixedDefaultTemperature(resolvedModel)) {
+            builder.temperature(resolveTemperature(config));
+        }
+        reasoningEffort(resolvedModel, resolvedMaxTokens)
+                .ifPresent(effort -> builder.reasoning(Reasoning.builder().effort(effort).build()));
+        if (jsonMode) {
+            builder.text(buildTextConfig(preparedSchema));
+        }
+        return builder.build();
     }
 
-    private void putTemperature(ObjectNode payload, String modelName, double resolvedTemp) {
-        if (usesFixedDefaultTemperature(modelName)) {
-            return;
+    private ResponseTextConfig buildTextConfig(PreparedSchema preparedSchema) {
+        if (preparedSchema.hasSchema()) {
+            ResponseFormatTextJsonSchemaConfig.Schema schema = toSdkSchema(preparedSchema.jsonSchema());
+            ResponseFormatTextJsonSchemaConfig format = ResponseFormatTextJsonSchemaConfig.builder()
+                    .name(STRUCTURED_OUTPUT_NAME)
+                    .schema(schema)
+                    .strict(true)
+                    .build();
+            return ResponseTextConfig.builder().format(format).build();
         }
-        payload.put("temperature", resolvedTemp);
+        return ResponseTextConfig.builder()
+                .format(ResponseFormatJsonObject.builder().build())
+                .build();
     }
 
-    private void putCompactReasoningEffort(ObjectNode payload, String modelName, int maxTokens) {
-        if (!supportsCompactReasoningEffort(modelName) || maxTokens > 2048) {
+    private ResponseFormatTextJsonSchemaConfig.Schema toSdkSchema(String jsonSchema) {
+        try {
+            JsonNode schemaNode = objectMapper.readTree(jsonSchema);
+            if (schemaNode == null || !schemaNode.isObject()) {
+                throw new IllegalArgumentException("Structured output schema must be a JSON object.");
+            }
+            Map<String, JsonValue> fields = new LinkedHashMap<>();
+            schemaNode.fields().forEachRemaining(entry ->
+                    fields.put(entry.getKey(), JsonValue.fromJsonNode(entry.getValue())));
+            return ResponseFormatTextJsonSchemaConfig.Schema.builder()
+                    .additionalProperties(fields)
+                    .build();
+        } catch (Exception exception) {
+            throw AiProviderCallException.fromHttpStatus(PROVIDER, 400, "Invalid structured output schema");
+        }
+    }
+
+    private PreparedSchema prepareSchema(AiJsonSchema schema) {
+        if (schema == null) {
+            return PreparedSchema.none();
+        }
+        if (schema.hasTargetClass()) {
+            BeanOutputConverter<?> converter = new BeanOutputConverter<>(schema.targetClass(), objectMapper);
+            return new PreparedSchema(converter.getJsonSchema(), converter);
+        }
+        return schema.hasJsonSchema()
+                ? new PreparedSchema(schema.jsonSchema(), null)
+                : PreparedSchema.none();
+    }
+
+    private void validateCompletedResponse(Response response) {
+        String status = responseStatus(response);
+        if (!"completed".equals(status)) {
+            throw AiProviderCallException.unknown(
+                    PROVIDER,
+                    new IllegalStateException("OpenAI response status=" + status + responseFailureSuffix(response)));
+        }
+        String refusal = extractRefusal(response);
+        if (refusal != null) {
+            throw AiProviderCallException.unknown(
+                    PROVIDER,
+                    new IllegalStateException("OpenAI refused the response: " + summarizeErrorBody(refusal)));
+        }
+        if (extractResponseText(response).isBlank()) {
+            throw AiProviderCallException.unknown(
+                    PROVIDER, new IllegalStateException("OpenAI returned empty response content"));
+        }
+    }
+
+    private void validateCompletedStreamResponse(Response response) {
+        String status = responseStatus(response);
+        if (!"completed".equals(status)) {
+            throw AiProviderStreamException.unknown(
+                    PROVIDER,
+                    new IllegalStateException("OpenAI stream status=" + status + responseFailureSuffix(response)));
+        }
+        String refusal = extractRefusal(response);
+        if (refusal != null) {
+            throw AiProviderStreamException.unknown(
+                    PROVIDER,
+                    new IllegalStateException("OpenAI refused the streamed response: " + summarizeErrorBody(refusal)));
+        }
+        if (extractResponseText(response).isBlank()) {
+            throw AiProviderStreamException.unknown(
+                    PROVIDER, new IllegalStateException("OpenAI returned empty streamed response content"));
+        }
+    }
+
+    private String extractResponseText(Response response) {
+        StringBuilder text = new StringBuilder();
+        for (ResponseOutputItem item : response.output()) {
+            if (!item.isMessage()) {
+                continue;
+            }
+            ResponseOutputMessage message = item.asMessage();
+            for (ResponseOutputMessage.Content content : message.content()) {
+                if (content.isOutputText()) {
+                    text.append(content.asOutputText().text());
+                }
+            }
+        }
+        return text.toString();
+    }
+
+    private String extractRefusal(Response response) {
+        for (ResponseOutputItem item : response.output()) {
+            if (!item.isMessage()) {
+                continue;
+            }
+            for (ResponseOutputMessage.Content content : item.asMessage().content()) {
+                if (content.isRefusal()) {
+                    return content.asRefusal().refusal();
+                }
+            }
+        }
+        return null;
+    }
+
+    private String responseFailureSuffix(Response response) {
+        if (response.error().isPresent()) {
+            return " error=" + summarizeErrorBody(response.error().get().toString());
+        }
+        if (response.incompleteDetails().isPresent()) {
+            return " incomplete=" + summarizeErrorBody(response.incompleteDetails().get().toString());
+        }
+        return "";
+    }
+
+    private String responseStatus(Response response) {
+        return response.status().map(status -> status.asString()).orElse("unknown");
+    }
+
+    private void captureInvocationMetadata(AiCallConfig config, Response response) {
+        AiProviderInvocationTrace trace = config != null ? config.getInvocationTrace() : null;
+        if (trace == null || response == null) {
             return;
         }
-        payload.put("reasoning_effort", supportsNoReasoningEffort(modelName) ? "none" : "low");
+        ResponseUsage usage = response.usage().orElse(null);
+        trace.providerResponse(
+                TRANSPORT,
+                response.id(),
+                response.model().asString(),
+                responseStatus(response),
+                usage == null ? null : safeInt(usage.inputTokens()),
+                usage == null ? null : safeInt(usage.outputTokens()),
+                usage == null ? null : safeInt(usage.inputTokensDetails().cachedTokens()),
+                null,
+                usage == null ? null : safeInt(usage.totalTokens()));
+    }
+
+    private ClientLease acquireClient(AiCallConfig config) {
+        String resolvedKey = requireApiKey(config);
+        int resolvedTimeout = resolveTimeoutSeconds(config);
+        boolean transientClient = config != null
+                && (trimToNull(config.getApiKey()) != null
+                        || (config.getTimeoutSeconds() != null && config.getTimeoutSeconds() > 0));
+        if (transientClient) {
+            return new ClientLease(createClient(resolvedKey, resolvedTimeout), true);
+        }
+        DefaultClientHolder holder = defaultClient.get();
+        if (holder != null) {
+            return new ClientLease(holder.client(), false);
+        }
+        synchronized (defaultClient) {
+            holder = defaultClient.get();
+            if (holder == null) {
+                holder = new DefaultClientHolder(createClient(resolvedKey, resolvedTimeout));
+                defaultClient.set(holder);
+            }
+            return new ClientLease(holder.client(), false);
+        }
+    }
+
+    private OpenAIClient createClient(String resolvedKey, int resolvedTimeoutSeconds) {
+        return OpenAIOkHttpClient.builder()
+                .apiKey(resolvedKey)
+                .baseUrl(resolveSdkBaseUrl(baseUrl))
+                .timeout(Duration.ofSeconds(Math.max(1, resolvedTimeoutSeconds)))
+                .maxRetries(0)
+                .build();
+    }
+
+    @PreDestroy
+    void closeDefaultClient() {
+        DefaultClientHolder holder = defaultClient.getAndSet(null);
+        if (holder != null) {
+            holder.client().close();
+        }
+    }
+
+    private Optional<ReasoningEffort> reasoningEffort(String modelName, int maxOutputTokens) {
+        if (!supportsCompactReasoningEffort(modelName) || maxOutputTokens > 2048) {
+            return Optional.empty();
+        }
+        return Optional.of(supportsNoReasoningEffort(modelName) ? ReasoningEffort.NONE : ReasoningEffort.LOW);
     }
 
     private boolean supportsNoReasoningEffort(String modelName) {
@@ -457,25 +534,25 @@ public class SpringAiOpenAiService implements AiProvider {
             return false;
         }
         String normalized = modelName.trim().toLowerCase();
-        String versionPrefix = "gpt-5.";
-        if (!normalized.startsWith(versionPrefix)) {
+        String prefix = "gpt-5.";
+        if (!normalized.startsWith(prefix)) {
             return false;
         }
-        int end = versionPrefix.length();
+        int end = prefix.length();
         while (end < normalized.length() && Character.isDigit(normalized.charAt(end))) {
             end++;
         }
-        if (end == versionPrefix.length()) {
+        if (end == prefix.length()) {
             return false;
         }
         try {
-            return Integer.parseInt(normalized.substring(versionPrefix.length(), end)) >= 1;
+            return Integer.parseInt(normalized.substring(prefix.length(), end)) >= 1;
         } catch (NumberFormatException ignored) {
             return false;
         }
     }
 
-    private boolean requiresMaxCompletionTokens(String modelName) {
+    private boolean requiresReasoningTokenBudget(String modelName) {
         if (modelName == null) {
             return false;
         }
@@ -487,38 +564,125 @@ public class SpringAiOpenAiService implements AiProvider {
     }
 
     private boolean usesFixedDefaultTemperature(String modelName) {
-        return requiresMaxCompletionTokens(modelName);
+        return requiresReasoningTokenBudget(modelName);
     }
 
     private boolean supportsCompactReasoningEffort(String modelName) {
-        if (modelName == null) {
-            return false;
-        }
-        return modelName.trim().toLowerCase().startsWith("gpt-5");
+        return modelName != null && modelName.trim().toLowerCase().startsWith("gpt-5");
     }
 
-    private String extractOpenAiDelta(String data) {
-        try {
-            JsonNode root = objectMapper.readTree(data);
-            JsonNode choices = root.path("choices");
-            if (!choices.isArray() || choices.isEmpty()) {
-                return null;
-            }
-            JsonNode delta = choices.get(0).path("delta");
-            String content = delta.path("content").asText(null);
-            if (content != null && !content.isBlank()) {
-                return content;
-            }
-            JsonNode message = choices.get(0).path("message");
-            String fallbackContent = message.path("content").asText(null);
-            if (fallbackContent != null && !fallbackContent.isBlank()) {
-                return fallbackContent;
-            }
-            return null;
-        } catch (Exception ex) {
-            log.debug("[SpringAiOpenAiService] Failed to parse OpenAI stream chunk: {}", ex.getMessage());
-            return null;
+    private String resolveModel(AiCallConfig config) {
+        String override = config != null ? trimToNull(config.getModel()) : null;
+        return override != null ? override : model;
+    }
+
+    private double resolveTemperature(AiCallConfig config) {
+        return config != null && config.getTemperature() != null ? config.getTemperature() : temperature;
+    }
+
+    private int resolveMaxTokens(AiCallConfig config) {
+        return config != null && config.getMaxTokens() != null && config.getMaxTokens() > 0
+                ? config.getMaxTokens()
+                : maxTokens;
+    }
+
+    private int resolveTimeoutSeconds(AiCallConfig config) {
+        return config != null && config.getTimeoutSeconds() != null && config.getTimeoutSeconds() > 0
+                ? config.getTimeoutSeconds()
+                : timeoutSeconds;
+    }
+
+    private String requireApiKey(AiCallConfig config) {
+        String key = config != null ? trimToNull(config.getApiKey()) : null;
+        if (key == null) {
+            key = trimToNull(apiKey);
         }
+        if (key == null) {
+            throw AiProviderCallException.fromHttpStatus(PROVIDER, 401, "API key not configured");
+        }
+        return key;
+    }
+
+    private AiProviderCallException classifyCallFailure(Throwable failure) {
+        Throwable root = unwrap(failure);
+        if (root instanceof AiProviderCallException exception) {
+            return exception;
+        }
+        if (root instanceof OpenAIServiceException exception) {
+            return AiProviderCallException.fromHttpStatus(
+                    PROVIDER, exception.statusCode(), summarizeErrorBody(exception.getMessage()));
+        }
+        if (isTimeout(root)) {
+            return AiProviderCallException.timeout(PROVIDER, root);
+        }
+        if (root instanceof OpenAIIoException || isTransport(root)) {
+            return AiProviderCallException.transport(PROVIDER, root);
+        }
+        return AiProviderCallException.unknown(PROVIDER, root);
+    }
+
+    private AiProviderStreamException classifyStreamFailure(Throwable failure) {
+        Throwable root = unwrap(failure);
+        if (root instanceof AiProviderStreamException exception) {
+            return exception;
+        }
+        if (root instanceof AiProviderCallException exception) {
+            if (exception.getStatusCode() != null) {
+                return AiProviderStreamException.fromHttpStatus(
+                        PROVIDER, exception.getStatusCode(), exception.getMessage());
+            }
+            return switch (exception.getKind()) {
+                case TIMEOUT -> AiProviderStreamException.timeout(PROVIDER, exception);
+                case TRANSPORT -> AiProviderStreamException.transport(PROVIDER, exception);
+                default -> AiProviderStreamException.unknown(PROVIDER, exception);
+            };
+        }
+        if (root instanceof OpenAIServiceException exception) {
+            return AiProviderStreamException.fromHttpStatus(
+                    PROVIDER, exception.statusCode(), summarizeErrorBody(exception.getMessage()));
+        }
+        if (isTimeout(root)) {
+            return AiProviderStreamException.timeout(PROVIDER, root);
+        }
+        if (root instanceof OpenAIIoException || isTransport(root)) {
+            return AiProviderStreamException.transport(PROVIDER, root);
+        }
+        return AiProviderStreamException.unknown(PROVIDER, root);
+    }
+
+    private Throwable unwrap(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof ExecutionException || current instanceof java.util.concurrent.CompletionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
+    private boolean isTimeout(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof TimeoutException
+                    || current instanceof java.net.http.HttpTimeoutException
+                    || current instanceof java.net.SocketTimeoutException) {
+                return true;
+            }
+            if (current instanceof InterruptedIOException
+                    && current.getMessage() != null
+                    && current.getMessage().toLowerCase().contains("timeout")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private boolean isTransport(Throwable failure) {
+        return failure instanceof IOException
+                || failure instanceof InterruptedIOException
+                || failure instanceof java.net.ConnectException
+                || failure instanceof java.net.SocketException
+                || failure instanceof java.net.UnknownHostException;
     }
 
     private boolean isCancelled(Supplier<Boolean> cancellationRequested) {
@@ -532,107 +696,21 @@ public class SpringAiOpenAiService implements AiProvider {
         }
     }
 
-    private void closeQuietly(InputStream stream) {
-        if (stream == null) {
-            return;
+    private void closeQuietly(AsyncStreamResponse<?> stream) {
+        if (stream != null) {
+            try {
+                stream.close();
+            } catch (Exception ignored) {
+                // Best-effort SDK resource close.
+            }
         }
-        try {
-            stream.close();
-        } catch (IOException ignored) {
-            // Best-effort close.
-        }
-    }
-
-    private OpenAiChatOptions buildOptions(AiCallConfig config, boolean jsonMode) {
-        OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder()
-                .model(resolveModel(config))
-                .temperature(resolveTemperature(config))
-                .maxTokens(resolveMaxTokens(config));
-        return builder.build();
-    }
-
-    private OpenAiChatModel resolveClient(AiCallConfig config) {
-        String overrideKey = config != null ? trimToNull(config.getApiKey()) : null;
-        if (overrideKey != null && !overrideKey.equals(apiKey)) {
-            OpenAiApi api = OpenAiApi.builder()
-                    .apiKey(overrideKey)
-                    .baseUrl(resolveBaseUrl(baseUrl))
-                    .build();
-            return OpenAiChatModel.builder()
-                    .openAiApi(api)
-                    .defaultOptions(buildOptions(config, false))
-                    .build();
-        }
-        OpenAiChatModel chatClient = chatClientProvider.getIfAvailable();
-        if (chatClient == null) {
-            throw new IllegalStateException("OpenAI chat client not configured. Provide spring.ai.openai.api-key or use the direct API-key request path.");
-        }
-        return chatClient;
-    }
-
-    private List<Advisor> resolveRagAdvisors() {
-        if (ragChatAdvisorServiceProvider == null) {
-            return List.of();
-        }
-        RagChatAdvisorService service = ragChatAdvisorServiceProvider.getIfAvailable();
-        if (service == null) {
-            return List.of();
-        }
-        return service.resolveAdvisors();
-    }
-
-    private String resolveModel(AiCallConfig config) {
-        if (config != null && config.getModel() != null && !config.getModel().isBlank()) {
-            return config.getModel().trim();
-        }
-        return model;
-    }
-
-    private double resolveTemperature(AiCallConfig config) {
-        if (config != null && config.getTemperature() != null) {
-            return config.getTemperature();
-        }
-        return temperature;
-    }
-
-    private int resolveMaxTokens(AiCallConfig config) {
-        if (config != null && config.getMaxTokens() != null && config.getMaxTokens() > 0) {
-            return config.getMaxTokens();
-        }
-        return maxTokens;
-    }
-
-    private int resolveTimeoutSeconds(AiCallConfig config) {
-        if (config != null && config.getTimeoutSeconds() != null && config.getTimeoutSeconds() > 0) {
-            return config.getTimeoutSeconds();
-        }
-        return timeoutSeconds;
-    }
-
-    private JsonSchemaResult prepareSchema(String prompt, AiJsonSchema schema) {
-        if (schema == null) {
-            return new JsonSchemaResult(prompt, null);
-        }
-        if (schema.hasTargetClass()) {
-            BeanOutputConverter<?> converter = new BeanOutputConverter<>(schema.targetClass(), objectMapper);
-            String schemaPrompt = prompt + "\n\n" + converter.getFormat();
-            return new JsonSchemaResult(schemaPrompt, converter);
-        }
-        if (schema.hasJsonSchema()) {
-            String schemaPrompt = prompt
-                    + "\n\nReturn a JSON object that matches this JSON schema:\n"
-                    + schema.jsonSchema();
-            return new JsonSchemaResult(schemaPrompt, null);
-        }
-        return new JsonSchemaResult(prompt, null);
     }
 
     private JsonNode parseJson(String text) {
-        String cleaned = sanitizeJsonText(text);
         try {
-            return objectMapper.readTree(cleaned);
-        } catch (Exception e) {
-            log.warn("[SpringAiOpenAiService] JSON parse failed, returning null.", e);
+            return objectMapper.readTree(sanitizeJsonText(text));
+        } catch (Exception exception) {
+            log.warn("[SpringAiOpenAiService] JSON parse failed.", exception);
             return null;
         }
     }
@@ -641,43 +719,17 @@ public class SpringAiOpenAiService implements AiProvider {
         String cleaned = text.replaceAll("```json\\n?|\\n?```", "").trim();
         int brace = cleaned.indexOf('{');
         int bracket = cleaned.indexOf('[');
-        int firstOpen;
-        if (brace == -1) {
-            firstOpen = bracket;
-        } else if (bracket == -1) {
-            firstOpen = brace;
-        } else {
-            firstOpen = Math.min(brace, bracket);
-        }
-        if (firstOpen > 0) {
-            cleaned = cleaned.substring(firstOpen).trim();
-        }
-        return cleaned;
-    }
-
-    private String extractContent(ChatResponse response) {
-        if (response == null) {
-            return null;
-        }
-        Generation generation = response.getResult();
-        if (generation == null || generation.getOutput() == null) {
-            return null;
-        }
-        String content = generation.getOutput().getText();
-        return content != null && !content.isBlank() ? content : null;
-    }
-
-    private String resolveApiKey(AiCallConfig config) {
-        String overrideKey = config != null ? trimToNull(config.getApiKey()) : null;
-        return overrideKey != null ? overrideKey : trimToNull(apiKey);
+        int firstOpen = brace == -1 ? bracket : bracket == -1 ? brace : Math.min(brace, bracket);
+        return firstOpen > 0 ? cleaned.substring(firstOpen).trim() : cleaned;
     }
 
     private String buildModelsUrl(String base) {
-        String normalized = base;
-        if (normalized.endsWith("/v1")) {
-            return normalized + "/models";
-        }
-        return normalized + "/v1/models";
+        return base.endsWith("/v1") ? base + "/models" : base + "/v1/models";
+    }
+
+    private String resolveSdkBaseUrl(String value) {
+        String resolved = resolveBaseUrl(value);
+        return resolved.endsWith("/v1") ? resolved : resolved + "/v1";
     }
 
     private String resolveBaseUrl(String value) {
@@ -685,89 +737,52 @@ public class SpringAiOpenAiService implements AiProvider {
         if (resolved == null) {
             resolved = "https://api.openai.com";
         }
-        if (resolved.endsWith("/")) {
-            return resolved.substring(0, resolved.length() - 1);
-        }
-        return resolved;
+        return resolved.endsWith("/") ? resolved.substring(0, resolved.length() - 1) : resolved;
     }
 
     private String textOrNull(JsonNode node, String field) {
-        if (node == null || !node.has(field)) {
-            return null;
-        }
-        JsonNode value = node.get(field);
+        JsonNode value = node == null ? null : node.get(field);
         if (value == null || value.isNull()) {
             return null;
         }
-        String text = value.asText();
-        return text == null || text.isBlank() ? null : text;
-    }
-
-    private void captureInvocationMetadata(AiCallConfig config, JsonNode response, String requestedModel) {
-        AiProviderInvocationTrace trace = config != null ? config.getInvocationTrace() : null;
-        if (trace == null || response == null) {
-            return;
-        }
-        JsonNode usage = response.path("usage");
-        JsonNode promptDetails = usage.path("prompt_tokens_details");
-        JsonNode firstChoice = response.path("choices").path(0);
-        trace.providerResponse(
-                "openai-chat-completions-http",
-                textOrNull(response, "id"),
-                valueOrFallback(textOrNull(response, "model"), requestedModel),
-                textOrNull(firstChoice, "finish_reason"),
-                integerOrNull(usage, "prompt_tokens"),
-                integerOrNull(usage, "completion_tokens"),
-                integerOrNull(promptDetails, "cached_tokens"),
-                null,
-                integerOrNull(usage, "total_tokens"));
-    }
-
-    private Integer integerOrNull(JsonNode node, String field) {
-        if (node == null || !node.has(field) || !node.path(field).canConvertToInt()) {
-            return null;
-        }
-        int value = node.path(field).asInt();
-        return value >= 0 ? value : null;
-    }
-
-    private String valueOrFallback(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value;
-    }
-
-    private AiProviderStreamException classifyStreamFailure(String provider, Throwable error) {
-        if (error instanceof AiProviderStreamException streamException) {
-            return streamException;
-        }
-        if (error instanceof java.net.http.HttpTimeoutException) {
-            return AiProviderStreamException.timeout(provider, error);
-        }
-        if (error instanceof IOException
-                || error instanceof java.net.ConnectException
-                || error instanceof java.net.SocketException
-                || error instanceof java.net.UnknownHostException) {
-            return AiProviderStreamException.transport(provider, error);
-        }
-        return AiProviderStreamException.unknown(provider, error);
+        return trimToNull(value.asText());
     }
 
     private String summarizeErrorBody(String body) {
-        if (body == null) {
-            return null;
-        }
-        String trimmed = body.trim();
-        if (trimmed.isEmpty()) {
-            return null;
-        }
-        int max = Math.min(trimmed.length(), 180);
-        return trimmed.substring(0, max);
+        String trimmed = trimToNull(body);
+        return trimmed == null ? null : trimmed.substring(0, Math.min(trimmed.length(), 180));
+    }
+
+    private Integer safeInt(long value) {
+        return value < 0 ? null : value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
     }
 
     private String trimToNull(String value) {
-        if (value == null) return null;
+        if (value == null) {
+            return null;
+        }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private record JsonSchemaResult(String prompt, BeanOutputConverter<?> converter) {}
+    private record PreparedSchema(String jsonSchema, BeanOutputConverter<?> converter) {
+        static PreparedSchema none() {
+            return new PreparedSchema(null, null);
+        }
+
+        boolean hasSchema() {
+            return jsonSchema != null && !jsonSchema.isBlank();
+        }
+    }
+
+    private record DefaultClientHolder(OpenAIClient client) {}
+
+    private record ClientLease(OpenAIClient client, boolean closeAfterUse) implements AutoCloseable {
+        @Override
+        public void close() {
+            if (closeAfterUse) {
+                client.close();
+            }
+        }
+    }
 }
