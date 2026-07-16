@@ -14,6 +14,7 @@ param(
     [string] $Environment = "local",
     [int] $StartupTimeoutSec = 180,
     [int] $StreamProcessingTimeoutSeconds = 180,
+    [switch] $DomainRuleLifecycleOnly,
     [switch] $UseExistingQuickstart
 )
 
@@ -106,8 +107,10 @@ try {
             throw "java.exe not found under JavaHome: $JavaHome"
         }
 
-        $resolvedEmbeddingProvider = if ([string]::IsNullOrWhiteSpace($EmbeddingProvider)) { $Provider } else { $EmbeddingProvider }
-        if ($resolvedEmbeddingProvider -ieq "mock") {
+        $resolvedEmbeddingProvider = if ([string]::IsNullOrWhiteSpace($EmbeddingProvider)) {
+            if ($DomainRuleLifecycleOnly) { "mock" } else { $Provider }
+        } else { $EmbeddingProvider }
+        if ($resolvedEmbeddingProvider -ieq "mock" -and -not $DomainRuleLifecycleOnly) {
             throw "EMBEDDING_PROVIDER=mock is not valid for the live agentic authoring HTTP smoke suite. Use -EmbeddingProvider $Provider, or a documented deterministic non-LLM runner."
         }
 
@@ -161,8 +164,31 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         Environment = $Environment
     }
 
-    $intentResolution = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringIntentResolutionHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $domainRuleLifecycle = & (Join-Path $PSScriptRoot "Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1") @commonArgs | ConvertFrom-Json
+    if ($DomainRuleLifecycleOnly) {
+        [pscustomobject]@{
+            health = $health.status
+            provider = "not-used"
+            baseUrl = $base
+            quickstartRoot = $QuickstartRoot
+            jarPath = $JarPath
+            startedQuickstart = $startedQuickstart
+            domainRuleLifecycleOnly = $true
+            domainRuleAppliedCreationBlocked = [bool] $domainRuleLifecycle.appliedCreationBlocked
+            domainRuleSelfApprovalBlocked = [bool] $domainRuleLifecycle.selfApprovalBlocked
+            domainRuleAuthenticatedAuthor = [string] $domainRuleLifecycle.authenticatedAuthor
+            domainRuleAuthenticatedReviewer = [string] $domainRuleLifecycle.authenticatedReviewer
+            domainRuleAppliedMaterializationHasAppliedAt = [bool] $domainRuleLifecycle.appliedMaterializationHasAppliedAt
+            domainRuleTerminalDefinitionTransitionBlocked = [bool] $domainRuleLifecycle.terminalDefinitionTransitionBlocked
+            domainRuleTerminalMaterializationTransitionBlocked = [bool] $domainRuleLifecycle.terminalMaterializationTransitionBlocked
+            domainRuleTerminalPublishBlocked = [bool] $domainRuleLifecycle.terminalPublishBlocked
+            domainRuleSemanticSourceHashesDiffer = [bool] $domainRuleLifecycle.semanticSourceHashesDiffer
+            domainRuleBackendValidationSemanticSourceHashesDiffer = [bool] $domainRuleLifecycle.backendValidationSemanticSourceHashesDiffer
+        } | ConvertTo-Json -Depth 8
+        return
+    }
+
+    $intentResolution = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringIntentResolutionHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $plan = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringPlanHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $compile = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringCompileHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $preview = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringPreviewHttpE2E.ps1") @commonArgs | ConvertFrom-Json

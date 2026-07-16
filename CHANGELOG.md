@@ -66,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated the Quickstart domain-rule HTTP lifecycle proof to derive author and
   reviewer from distinct server identities, assert self-approval rejection and
   stop sending the removed caller-supplied definition actor fields.
+- Added a deterministic domain-rule-only mode to the official HTTP smoke so a
+  rules release gate does not depend on an unrelated external LLM call.
 - Fixed table runtime operation compilation so selected-record related-surface
   requests can produce `tableRuntimeOperations` with `surfaceId` instead of
   falling back to column clarification.
