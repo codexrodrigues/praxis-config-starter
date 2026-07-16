@@ -119,6 +119,35 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     @Test
+    void generateMinimalFormPlanDoesNotInjectTicketTitleIntoGroundedResourcePlan() throws Exception {
+        Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        properties.setContractsDir(tempDir);
+        when(providerManagementService.generateJson(any(), any(AiJsonSchema.class), any(), any(), any(), any()))
+                .thenReturn(funcionariosPlan("descricao", "Descricao", "textarea"));
+
+        AgenticAuthoringPlanResult result = service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest(
+                                "Crie um formulario didatico para registrar incidentes operacionais",
+                                null,
+                                null,
+                                null,
+                                funcionariosIntent()),
+                        "tenant",
+                        "user",
+                        "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.minimalFormPlan().path("fields"))
+                .extracting(field -> field.path("name").asText())
+                .containsExactly("descricao");
+        assertThat(result.minimalFormPlan().path("sourceRefs"))
+                .extracting(JsonNode::asText)
+                .doesNotContain("canonical-field-default:ticket-title");
+    }
+
+    @Test
     void generateMinimalFormPlanUsesProviderForResolvedResourceCandidate() throws Exception {
         Files.writeString(tempDir.resolve("minimal-form-plan.v1.schema.json"), "{\"type\":\"object\"}");
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();

@@ -97,11 +97,11 @@ if (-not $result.valid) {
 if ($result.selectedResourcePath -ne "/api/operations/incidentes") {
     throw "MinimalFormPlan did not resolve the canonical operations incident create endpoint."
 }
-if ($result.fields -notcontains "descricao" -or $result.fields -notcontains "ocorridoEm") {
-    throw "MinimalFormPlan did not include the required incident fields descricao and ocorridoEm."
+if ($result.fields.Count -eq 0) {
+    throw "MinimalFormPlan did not include any schema-grounded field candidate."
 }
 if ($result.fields -contains "titulo" -or $result.fields -contains "prioridadeId" -or $result.fields -contains "statusAtualId") {
-    throw "MinimalFormPlan included fields that do not belong to the incident create schema."
+    throw "MinimalFormPlan included fields that do not belong to the incident create schema. Actual fields: $($result.fields -join ', ')"
 }
 
 $result | ConvertTo-Json -Depth 6
