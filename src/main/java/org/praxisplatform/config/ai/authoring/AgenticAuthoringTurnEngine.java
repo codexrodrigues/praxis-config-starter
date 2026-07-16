@@ -373,7 +373,7 @@ public class AgenticAuthoringTurnEngine {
                         "Encontrei candidatos no backend e estou pedindo para a LLM revisar a escolha.");
                 eventSink.append("thought.step", safeToolProjection(
                         "intent.resolve.llm",
-                        "Asking the LLM to review backend resource candidates.",
+                        "Estou pedindo para a IA revisar os recursos encontrados antes de continuar.",
                         Map.of(
                                 "tool", resourceDiscoveryResult.tool(),
                                 "candidateCount", resourceDiscovery.candidates().size())));
@@ -2318,7 +2318,7 @@ public class AgenticAuthoringTurnEngine {
                         6));
         eventSink.append("thought.step", safeToolProjection(
                 "tool.start",
-                "Searching business data resources for advisory cards.",
+                        "Estou buscando fontes de negócio governadas para preparar a resposta.",
                 Map.of(
                         "tool", toolCall.name(),
                         "routeClass", safeText(route.routeClass()),
@@ -2327,8 +2327,8 @@ public class AgenticAuthoringTurnEngine {
         eventSink.append("thought.step", safeToolProjection(
                 result.valid() ? "tool.result" : "tool.error",
                 result.valid()
-                        ? "Business data resource search completed."
-                        : "Business data resource search failed.",
+                        ? "A busca de fontes de negócio foi concluída."
+                        : "Não consegui concluir a busca de fontes de negócio.",
                 safeToolDiagnostics(result)));
         return resourceDiscoveryPayload(result);
     }
@@ -2417,7 +2417,7 @@ public class AgenticAuthoringTurnEngine {
                         6));
         eventSink.append("thought.step", safeToolProjection(
                 "authoringEvidence.retrieve",
-                "Retrieving granular component corpus evidence for preview planning.",
+                "Estou consultando as capacidades do componente selecionado para planejar a alteração.",
                 Map.of(
                         "tool", toolCall.name(),
                         "routeClass", safeText(route.routeClass()),
@@ -2427,8 +2427,8 @@ public class AgenticAuthoringTurnEngine {
         eventSink.append("thought.step", safeToolProjection(
                 result.valid() ? "authoringEvidence.result" : "authoringEvidence.error",
                 result.valid()
-                        ? "Granular component corpus evidence retrieved."
-                        : "Granular component corpus evidence retrieval failed.",
+                        ? "As capacidades do componente foram consultadas."
+                        : "Não consegui consultar as capacidades do componente.",
                 safeToolDiagnostics(result)));
         if (!result.valid()) {
             return request;
@@ -3646,7 +3646,7 @@ public class AgenticAuthoringTurnEngine {
         }
         eventSink.append("thought.step", safeToolProjection(
                 "repair.attempt",
-                "Retrying preview generation with backend repair context.",
+                "Estou revisando a proposta com o contexto de segurança antes de tentar novamente.",
                 Map.of(
                         "phase", "preview",
                         "repairClassification", repairClassification,

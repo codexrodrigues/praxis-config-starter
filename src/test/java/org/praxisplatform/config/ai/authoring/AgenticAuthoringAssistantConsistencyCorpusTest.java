@@ -64,6 +64,16 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
     }
 
     @Test
+    void extendedProfileCoversLanguageHumanErrorAndExistingPageRefinement() throws Exception {
+        JsonNode cases = corpus().path("cases");
+
+        assertThat(countExtendedFamily(cases, "platform-discovery")).isGreaterThanOrEqualTo(1);
+        assertThat(countExtendedFamily(cases, "human-error")).isGreaterThanOrEqualTo(1);
+        assertThat(countExtendedFamily(cases, "refinement")).isGreaterThanOrEqualTo(1);
+        assertThat(count(cases, "locale", "en-US")).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
     void guidanceIsNonMutatingAndEveryMutationRequiresPreview() throws Exception {
         for (JsonNode testCase : corpus().path("cases")) {
             JsonNode expected = testCase.path("expected");
@@ -126,6 +136,17 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
         long total = 0;
         for (JsonNode testCase : cases) {
             if ("must-pass".equals(testCase.path("status").asText())
+                    && family.equals(testCase.path("family").asText())) {
+                total++;
+            }
+        }
+        return total;
+    }
+
+    private long countExtendedFamily(JsonNode cases, String family) {
+        long total = 0;
+        for (JsonNode testCase : cases) {
+            if ("extended".equals(testCase.path("status").asText())
                     && family.equals(testCase.path("family").asText())) {
                 total++;
             }

@@ -1659,6 +1659,58 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void addsSchemaGroundedColumnToExistingTableCompositionPlan() {
+        ObjectNode page = objectMapper.createObjectNode();
+        page.put("kind", "praxis.ui-composition-plan");
+        page.put("version", "1.0");
+        page.put("layoutPreset", "single-table-page");
+        ObjectNode table = page.putArray("widgets").addObject();
+        table.put("key", "funcionarios-table");
+        table.put("componentId", "praxis-table");
+        table.putObject("inputs").putObject("config").putArray("columns")
+                .addObject()
+                .put("field", "nomeCompleto")
+                .put("header", "Nome Completo")
+                .put("type", "string");
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ArrayNode schemaFields = contextHints.putArray("schemaFields");
+        schemaFields.addObject()
+                .put("fieldName", "nomeCompleto")
+                .put("label", "Nome Completo")
+                .put("type", "string")
+                .put("source", "schemas.filtered");
+        schemaFields.addObject()
+                .put("fieldName", "email")
+                .put("label", "Email")
+                .put("type", "string")
+                .put("source", "schemas.filtered");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Adicione a coluna e-mail à tabela de funcionários e mantenha as demais colunas.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                page,
+                tableColumnAdditionIntent(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints)).orElseThrow();
+
+        assertThat(result.uiCompositionPlan()).isNotNull();
+        assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-table-column-addition");
+        JsonNode resultingColumns = result.uiCompositionPlan().path("widgets").path(0)
+                .path("inputs").path("config").path("columns");
+        assertThat(resultingColumns).hasSize(2);
+        assertThat(resultingColumns.path(0).path("field").asText()).isEqualTo("nomeCompleto");
+        assertThat(resultingColumns.path(1).path("field").asText()).isEqualTo("email");
+        assertThat(resultingColumns.path(1).path("header").asText()).isEqualTo("Email");
+        assertThat(resultingColumns.path(1).path("type").asText()).isEqualTo("string");
+    }
+
+    @Test
     void modifiesExistingChartTypeFromComponentCapabilityAction() {
         ObjectNode page = objectMapper.createObjectNode();
         ObjectNode widget = page.putArray("widgets").addObject();
@@ -2244,6 +2296,46 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
 
     private AgenticAuthoringIntentResolutionResult chartModificationIntent() {
         return chartModificationIntent("dashboard");
+    }
+
+    private AgenticAuthoringIntentResolutionResult tableColumnAdditionIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "table",
+                "column.add",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget(
+                        "funcionarios-table",
+                        "praxis-table",
+                        "/api/human-resources/funcionarios",
+                        "",
+                        "",
+                        "get"),
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "get",
+                        "",
+                        "/api/human-resources/funcionarios",
+                        "GET",
+                        0.97d,
+                        "resource preserved from existing component target",
+                        List.of("current-page-target-resource")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
     }
 
     private AgenticAuthoringIntentResolutionResult chartModificationIntent(String artifactKind) {

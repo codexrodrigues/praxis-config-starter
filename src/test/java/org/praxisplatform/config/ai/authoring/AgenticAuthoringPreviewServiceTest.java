@@ -1948,6 +1948,62 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewGroundsTableColumnAdditionInCanonicalSchema() throws Exception {
+        ObjectNode page = objectMapper.createObjectNode();
+        page.put("kind", "praxis.ui-composition-plan");
+        page.put("version", "1.0");
+        page.put("layoutPreset", "single-table-page");
+        ObjectNode table = page.putArray("widgets").addObject();
+        table.put("key", "funcionarios-table");
+        table.put("componentId", "praxis-table");
+        table.putObject("inputs").putObject("config").putArray("columns")
+                .addObject()
+                .put("field", "nomeCompleto")
+                .put("header", "Nome Completo")
+                .put("type", "string");
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("nomeCompleto")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Nome Completo");
+        properties.putObject("email")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Email");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(new AgenticAuthoringPlanRequest(
+                        "Adicione a coluna e-mail à tabela de funcionários e mantenha as demais colunas.",
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        page,
+                        tableColumnAdditionIntent()),
+                        "tenant",
+                        "user",
+                        "local",
+                        "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-table-column-addition");
+        JsonNode columns = result.uiCompositionPlan().path("widgets").path(0)
+                .path("inputs").path("config").path("columns");
+        assertThat(columns).hasSize(2);
+        assertThat(columns.path(0).path("field").asText()).isEqualTo("nomeCompleto");
+        assertThat(columns.path(1).path("field").asText()).isEqualTo("email");
+        assertThat(columns.path(1).path("header").asText()).isEqualTo("Email");
+    }
+
+    @Test
     void previewMaterializesDashboardQualityRepairActionsThroughGenericPlanner() throws Exception {
         ObjectNode contextHints = objectMapper.createObjectNode();
         contextHints.put("source", "dashboard-quality-gate");
@@ -4596,6 +4652,46 @@ class AgenticAuthoringPreviewServiceTest {
                 List.of(),
                 List.of(),
                 objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult tableColumnAdditionIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "table",
+                "column.add",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget(
+                        "funcionarios-table",
+                        "praxis-table",
+                        "/api/human-resources/funcionarios",
+                        "",
+                        "",
+                        "get"),
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "get",
+                        "",
+                        "/api/human-resources/funcionarios",
+                        "GET",
+                        0.97d,
+                        "resource preserved from existing component target",
+                        List.of("current-page-target-resource")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
     }
 
     private AgenticAuthoringIntentResolutionResult selectedDashboardIntent() {

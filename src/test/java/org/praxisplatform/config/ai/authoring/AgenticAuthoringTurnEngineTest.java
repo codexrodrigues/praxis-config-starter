@@ -8347,6 +8347,8 @@ class AgenticAuthoringTurnEngineTest {
                     JsonNode node = objectMapper.valueToTree(payload);
                     org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
                             .isEqualTo("authoringEvidence.result");
+                    org.assertj.core.api.Assertions.assertThat(node.path("message").asText())
+                            .isEqualTo("As capacidades do componente foram consultadas.");
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("sourceRefs").toString())
                             .contains("table-toolbar.md");
                 });
@@ -8819,6 +8821,8 @@ class AgenticAuthoringTurnEngineTest {
                     com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
                     org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
                             .isEqualTo("repair.attempt");
+                    org.assertj.core.api.Assertions.assertThat(node.path("message").asText())
+                            .isEqualTo("Estou revisando a proposta com o contexto de segurança antes de tentar novamente.");
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("repairClassification").asText())
                             .isEqualTo("retryable");
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").has("minimalFormPlan"))

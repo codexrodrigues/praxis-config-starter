@@ -2,8 +2,8 @@
 
 Data: 2026-07-15
 
-Status: Gate A `must-pass` verde; plano ativo para cobertura estendida e
-endurecimento de plataforma
+Status: Gate A `must-pass` verde; primeiro slice `extended` verde e plano ativo
+para jornadas multi-turn e endurecimento de plataforma
 
 ## Objetivo
 
@@ -122,6 +122,26 @@ textual residual sem criar contrato novo:
 - falha ou timeout do planner permanece diagnosticado e fail-safe, sem decidir
   intencao, inventar recurso ou promover uma heuristica textual substituta.
 
+O sexto slice P0 iniciou a cobertura `extended` pelo refinamento de uma pagina
+ja materializada, reutilizando contratos existentes:
+
+- o corpus passou a representar uma tabela de funcionarios existente com
+  `currentPage` e `selectedWidgetKey`, sem criar um formato paralelo de pagina;
+- a LLM continua responsavel por resolver a intencao primaria como
+  `modify/table/column.add` e por preservar o recurso/widget selecionados;
+- depois dessa decisao, o preview busca `/schemas/filtered` e publica
+  `schemaFields` governados para o materializador generico;
+- o campo solicitado e ranqueado apenas dentro desse catalogo canonico, com
+  normalizacao de variacoes como `e-mail` e `Email`; esse matching nao decide a
+  intencao nem pode inventar campo ausente no schema;
+- o materializador deriva a operacao `column.add` ja definida no manifesto de
+  `praxis-table`, preserva as colunas existentes e falha fechado quando nao ha
+  alvo de schema unico;
+- composicoes intermediarias continuam como `praxis.ui-composition-plan`,
+  enquanto paginas runtime continuam usando o compiled page patch existente;
+- mensagens tecnicas residuais de busca de evidencia e reparo foram substituidas
+  por progresso humano em portugues, sem alterar fases ou diagnostics internos.
+
 Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
 
 - `platform-what-can-i-do-pt`: 3/3 execucoes consecutivas corretas, sem preview,
@@ -165,6 +185,18 @@ Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
   abaixo do SLO de 12 s, e a mediana terminal global foi 18,549 s;
 - todas as 18 jornadas emitiram primeiro feedback imediatamente segundo a
   resolucao do runner, e nenhuma ficou presa em estado intermediario.
+- o primeiro probe real do refinamento revelou a lacuna com
+  `canApply=false` e
+  `intent-resolution-artifact-requires-ui-composition-plan`; a evidencia foi
+  preservada como baseline negativo antes da correcao;
+- apos a correcao, `employee-table-add-email-column-pt` passou com OpenAI,
+  quickstart e Neon reais: `modify/table/column.add`, recurso
+  `/api/human-resources/funcionarios`, coluna `email` schema-grounded, demais
+  colunas preservadas, preview valido e `canApply=true`;
+- o slice `extended` completo atual passou 3/3: descoberta de plataforma em
+  ingles, formulario com erro humano e refinamento da tabela existente, com
+  100% de acuracia, mediana terminal de 28,975 s e zero mensagem tecnica na
+  auditoria de apresentacao.
 
 ## Classificacao e mapa de impacto
 
@@ -180,6 +212,10 @@ Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
 - Classificacao do quinto slice: `transversal`, restrito a budget/retry interno
   do planner e retirada de fallback textual do turn engine; nenhum endpoint,
   DTO, evento SSE, OpenAPI ou tipo publico novo.
+- Classificacao do sexto slice: `transversal`, restrito a materializacao interna
+  do Page Builder, schema grounding, corpus e UX de progresso; reutiliza
+  `UiCompositionPlan`, `column.add` e `/schemas/filtered` sem alterar endpoint,
+  DTO, evento SSE ou public API.
 - Fonte canonica de orchestration e configuracao: `praxis-config-starter`.
 - Runtime e UX canonicos: `@praxisui/ai` em `praxis-ui-angular`.
 - Primeiros consumidores: Page Builder, Table e Dynamic Form.
@@ -562,15 +598,18 @@ deve explicar indisponibilidade; nao pode simular sucesso.
 
 ### Gate A - Consistencia basica
 
-Status em 2026-07-15: **verde no perfil `must-pass`**.
+Status em 2026-07-15: **verde no perfil `must-pass` e no primeiro slice
+`extended`**.
 
 - corpus e metricas definidos: concluido;
 - as duas verticais P0 passam: 18/18 no gate integral;
 - nenhum stuck turn ou alucinacao de contrato: concluido no corpus basico;
 - Page Builder apresenta proximo passo sempre acionavel: 9/9 orientacoes com
   tres quick replies;
-- pendencia de endurecimento: ampliar o perfil `extended`; a cauda sequencial
-  do planner foi removida e recertificada no gate integral.
+- o primeiro slice `extended` passou 3/3 e agora cobre idioma alternativo, erro
+  humano e refinamento schema-grounded de pagina existente;
+- pendencia de endurecimento: transformar refinamento isolado em jornada
+  multi-turn completa e certificar cancelamento, retomada e schema indisponivel.
 
 ### Gate B - Runtime canonico
 
@@ -610,8 +649,9 @@ Status em 2026-07-15: **verde no perfil `must-pass`**.
 
 O terceiro slice atualizou o schema, corpus e runner internos de consistencia e
 adicionou o executor transacional local. O quarto e o quinto slices alteraram
-apenas services e testes internos do authoring e este plano de excelencia. Nao
-houve mudanca de endpoint, DTO, evento SSE, OpenAPI ou public API; por isso
+services e testes internos do authoring. O sexto atualizou o corpus interno, o
+materializador generico, schema grounding, testes e este plano de excelencia.
+Nao houve mudanca de endpoint, DTO, evento SSE, OpenAPI ou public API; por isso
 bindings, landing page e corpus HTTP nao precisam de sincronizacao neste corte.
 Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
 
@@ -627,11 +667,13 @@ Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
 integral 18/18. O proximo slice recomendado e ampliar margem e cobertura antes
 de iniciar uma migracao ampla de SDK, nesta ordem:
 
-1. adicionar ao perfil `extended` variacoes linguisticas, erros humanos,
-   refinamento multi-turn, cancelamento, retomada e schema indisponivel,
-   mantendo os seis `must-pass` como gate bloqueante;
+1. ampliar o perfil `extended` alem dos tres casos atuais com mais variacoes
+   linguisticas e transformar o refinamento de pagina existente em jornada
+   multi-turn com lineage da decisao, mantendo os seis `must-pass` como gate
+   bloqueante;
 2. formalizar e certificar a state machine de `P0.6`, incluindo timeout,
-   cancelamento, replay SSE e zero side effect duplicado;
+   cancelamento, retomada, schema indisponivel, replay SSE e zero side effect
+   duplicado;
 3. corrigir diagnostics residuais de provenance e registrar P50/P95, retries,
    tokens e custo por caso/modelo;
 4. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote

@@ -51,6 +51,62 @@
           "semanticScope": "platform-capabilities"
         }
       }
+    },
+    "employee-table-existing-page": {
+      "targetApp": "praxis-ui-angular",
+      "targetComponentId": "praxis-dynamic-page-builder",
+      "currentRoute": "/decision-playground",
+      "currentPage": {
+        "kind": "praxis.ui-composition-plan",
+        "version": "1.0",
+        "layoutPreset": "single-table-page",
+        "widgets": [
+          {
+            "key": "funcionarios-table",
+            "componentId": "praxis-table",
+            "role": "main",
+            "inputs": {
+              "resourcePath": "/api/human-resources/funcionarios",
+              "tableId": "funcionarios-table",
+              "config": {
+                "title": "Funcionários",
+                "columns": [
+                  { "field": "nomeCompleto", "header": "Nome Completo", "type": "string" },
+                  { "field": "cargoNome", "header": "Cargo", "type": "string" },
+                  { "field": "departamentoNome", "header": "Departamento", "type": "string" }
+                ]
+              }
+            }
+          }
+        ],
+        "canvas": {
+          "mode": "grid",
+          "columns": 12,
+          "rowUnit": "72px",
+          "gap": "16px",
+          "autoRows": "fixed",
+          "items": {
+            "funcionarios-table": { "col": 1, "row": 1, "colSpan": 12, "rowSpan": 7 }
+          }
+        },
+        "layoutPresetOptions": {
+          "presetFamily": "single-table",
+          "sourceResource": "/api/human-resources/funcionarios",
+          "density": "comfortable",
+          "responsiveStrategy": "canvas-device-layouts"
+        }
+      },
+      "selectedWidgetKey": "funcionarios-table",
+      "contextHints": {
+        "domainDiscovery": [
+          {
+            "resourceKey": "human-resources.funcionarios",
+            "title": "Funcionários",
+            "fields": ["Nome", "E-mail", "Cargo", "Departamento"],
+            "surfaces": ["Cadastrar funcionário", "Obter funcionário", "Perfil 360"]
+          }
+        ]
+      }
     }
   },
   "cases": [
@@ -326,6 +382,39 @@
         "assistantMessage": {
           "minimumCharacters": 60,
           "requiredConceptGroups": [["formulário", "formulario", "form"], ["funcionário", "funcionario", "employee"]],
+          "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+        },
+        "safety": {
+          "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
+          "forbidUnlistedResourcePaths": true,
+          "mutationRequiresPreview": true
+        }
+      }
+    },
+    {
+      "id": "employee-table-add-email-column-pt",
+      "family": "refinement",
+      "status": "extended",
+      "locale": "pt-BR",
+      "contextRef": "employee-table-existing-page",
+      "userPrompt": "Adicione a coluna e-mail à tabela de funcionários e mantenha as demais colunas.",
+      "expected": {
+        "intent": {
+          "operationKinds": ["modify"],
+          "artifactKinds": ["table"],
+          "changeKinds": ["column.add", "add_column"],
+          "resourcePaths": ["/api/human-resources/funcionarios"]
+        },
+        "terminal": {
+          "eventTypes": ["result"],
+          "canApply": true,
+          "preview": "required",
+          "minimumQuickReplies": 0,
+          "forbiddenPhases": []
+        },
+        "assistantMessage": {
+          "minimumCharacters": 50,
+          "requiredConceptGroups": [["coluna", "column"], ["e-mail", "email"]],
           "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
         },
         "safety": {

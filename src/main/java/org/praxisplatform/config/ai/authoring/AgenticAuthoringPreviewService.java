@@ -1442,7 +1442,7 @@ public class AgenticAuthoringPreviewService {
             PreviewSchemaFetchCache schemaFetchCache) {
         if (request == null
                 || schemaRetrievalService == null
-                || !shouldEnrichSchemaFieldsForGenericDashboard(request)
+                || !shouldEnrichSchemaFieldsForGenericMaterialization(request)
                 || hasHostFieldCandidates(request.contextHints())) {
             return request;
         }
@@ -1495,9 +1495,18 @@ public class AgenticAuthoringPreviewService {
                 contextHints);
     }
 
-    private boolean shouldEnrichSchemaFieldsForGenericDashboard(AgenticAuthoringPlanRequest request) {
+    private boolean shouldEnrichSchemaFieldsForGenericMaterialization(AgenticAuthoringPlanRequest request) {
         AgenticAuthoringIntentResolutionResult intent = request == null ? null : request.intentResolution();
-        if (intent == null || intent.visualizationDecision() != null) {
+        if (intent == null) {
+            return false;
+        }
+        if ("modify".equals(value(intent.operationKind()))
+                && "table".equals(value(intent.artifactKind()))
+                && ("column.add".equals(value(intent.changeKind()))
+                || "add_column".equals(value(intent.changeKind())))) {
+            return true;
+        }
+        if (intent.visualizationDecision() != null) {
             return false;
         }
         String artifactKind = value(intent.artifactKind());

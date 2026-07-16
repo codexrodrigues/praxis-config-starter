@@ -38,6 +38,11 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
 
     @Override
     public Optional<AgenticAuthoringUiCompositionPlanResult> plan(AgenticAuthoringPlanRequest request) {
+        Optional<AgenticAuthoringUiCompositionPlanResult> tableColumnModification =
+                tableColumnModification(request);
+        if (tableColumnModification.isPresent()) {
+            return tableColumnModification;
+        }
         Optional<AgenticAuthoringUiCompositionPlanResult> chartModification = chartModification(request);
         if (chartModification.isPresent()) {
             return chartModification;
@@ -2323,12 +2328,174 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         return patch;
     }
 
+    private Optional<AgenticAuthoringUiCompositionPlanResult> tableColumnModification(
+            AgenticAuthoringPlanRequest request) {
+        if (!supportsTableColumnAddition(request)) {
+            return Optional.empty();
+        }
+        ObjectNode page = chartActionPage(request);
+        ObjectNode tableWidget = findWidget(page, targetWidgetKey(request));
+        if (tableWidget == null) {
+            tableWidget = findSingleWidgetByComponent(page, "praxis-table");
+        }
+        if (tableWidget == null || !"praxis-table".equals(widgetComponentId(tableWidget))) {
+            return Optional.empty();
+        }
+        TableSchemaField field = resolveTableColumnField(request, tableWidget);
+        if (field == null) {
+            return Optional.empty();
+        }
+        ArrayNode columns = widgetInputs(tableWidget).with("config").withArray("columns");
+        ObjectNode column = columns.addObject();
+        column.put("field", field.field());
+        column.put("header", field.label());
+        if (!field.type().isBlank()) {
+            column.put("type", field.type());
+        }
+        if (isUiCompositionPlan(page)) {
+            return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                    true,
+                    List.of(),
+                    List.of("ui-composition-plan-provider:generic-table-column-addition"),
+                    page,
+                    emptyCompiledFormPatch()));
+        }
+        return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:generic-table-column-addition"),
+                null,
+                compiledPagePatch(page, "modify-existing-table-column-addition")));
+    }
+
+    private boolean supportsTableColumnAddition(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.intentResolution() == null) {
+            return false;
+        }
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        if (!isMaterializedPage(request.currentPage())
+                && !isMaterializedPage(contextPreviewPage(request))
+                && !isWidgetSnapshot(contextTargetWidgetSnapshot(request))) {
+            return false;
+        }
+        String targetComponentId = intent.target() == null
+                ? ""
+                : valueOrDefault(intent.target().componentId(), "");
+        boolean structurallyTableTarget = targetComponentId.isBlank()
+                || "praxis-table".equals(targetComponentId)
+                || "praxis-dynamic-page-builder".equals(targetComponentId);
+        return "modify".equals(intent.operationKind())
+                && "table".equals(intent.artifactKind())
+                && Set.of("column.add", "add_column").contains(valueOrDefault(intent.changeKind(), ""))
+                && structurallyTableTarget;
+    }
+
+    private TableSchemaField resolveTableColumnField(
+            AgenticAuthoringPlanRequest request,
+            ObjectNode tableWidget) {
+        JsonNode schemaFields = request.contextHints() == null
+                ? MissingNode.getInstance()
+                : request.contextHints().path("schemaFields");
+        if (!schemaFields.isArray() || schemaFields.isEmpty()) {
+            return null;
+        }
+        Set<String> existingFields = new LinkedHashSet<>();
+        JsonNode columns = widgetInputs(tableWidget).path("config").path("columns");
+        if (columns.isArray()) {
+            for (JsonNode column : columns) {
+                String field = canonicalFieldName(column.path("field").asText(""));
+                if (!field.isBlank()) {
+                    existingFields.add(normalize(field));
+                }
+            }
+        }
+        String prompt = normalizedPhrase(request.userPrompt());
+        TableSchemaField selected = null;
+        int selectedScore = 0;
+        boolean ambiguous = false;
+        for (JsonNode fieldNode : schemaFields) {
+            String field = canonicalFieldName(firstNonBlank(
+                    jsonText(fieldNode, "fieldName"),
+                    jsonText(fieldNode, "field"),
+                    jsonText(fieldNode, "name")));
+            if (field.isBlank() || existingFields.contains(normalize(field))) {
+                continue;
+            }
+            String label = firstNonBlank(jsonText(fieldNode, "label"), titleFromResourcePath(field));
+            int score = tableColumnFieldMatchScore(prompt, field, label);
+            if (score <= 0) {
+                continue;
+            }
+            TableSchemaField candidate = new TableSchemaField(field, label, tableColumnType(fieldNode));
+            if (score > selectedScore) {
+                selected = candidate;
+                selectedScore = score;
+                ambiguous = false;
+            } else if (score == selectedScore
+                    && selected != null
+                    && !selected.field().equals(candidate.field())) {
+                ambiguous = true;
+            }
+        }
+        return ambiguous ? null : selected;
+    }
+
+    private int tableColumnFieldMatchScore(String normalizedPrompt, String field, String label) {
+        String normalizedLabel = normalizedPhrase(label);
+        String normalizedField = normalizedPhrase(field);
+        if (!normalizedLabel.isBlank() && containsPhrase(normalizedPrompt, normalizedLabel)) {
+            return 4;
+        }
+        if (!normalizedField.isBlank() && containsPhrase(normalizedPrompt, normalizedField)) {
+            return 3;
+        }
+        String compactPrompt = normalizedPrompt.replace(" ", "");
+        String compactLabel = normalizedLabel.replace(" ", "");
+        String compactField = normalizedField.replace(" ", "");
+        if (compactLabel.length() >= 4 && compactPrompt.contains(compactLabel)) {
+            return 2;
+        }
+        if (compactField.length() >= 4 && compactPrompt.contains(compactField)) {
+            return 1;
+        }
+        return 0;
+    }
+
+    private String tableColumnType(JsonNode fieldNode) {
+        String format = normalize(jsonText(fieldNode, "format"));
+        if ("date".equals(format)) {
+            return "date";
+        }
+        if ("date-time".equals(format) || "datetime".equals(format)) {
+            return "datetime";
+        }
+        return switch (normalize(jsonText(fieldNode, "type"))) {
+            case "integer", "number" -> "number";
+            case "boolean" -> "boolean";
+            case "string" -> "string";
+            default -> "";
+        };
+    }
+
+    private boolean isUiCompositionPlan(ObjectNode page) {
+        return page != null && "praxis.ui-composition-plan".equals(page.path("kind").asText(""));
+    }
+
+    private String normalizedPhrase(String value) {
+        return normalize(value).replaceAll("[^a-z0-9]+", " ").trim();
+    }
+
+    private boolean containsPhrase(String text, String phrase) {
+        return !(text == null || text.isBlank() || phrase == null || phrase.isBlank())
+                && (" " + text + " ").contains(" " + phrase + " ");
+    }
+
     private Optional<AgenticAuthoringUiCompositionPlanResult> chartModification(AgenticAuthoringPlanRequest request) {
         if (!supportsChartModification(request)) {
             return Optional.empty();
         }
         ObjectNode page = chartActionPage(request);
-        ObjectNode chartWidget = findWidget(page, chartTargetWidgetKey(request));
+        ObjectNode chartWidget = findWidget(page, targetWidgetKey(request));
         if (chartWidget == null) {
             chartWidget = findSingleWidgetByComponent(page, "praxis-chart");
         }
@@ -2513,7 +2680,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 && !widgetComponentId((ObjectNode) widget).isBlank();
     }
 
-    private String chartTargetWidgetKey(AgenticAuthoringPlanRequest request) {
+    private String targetWidgetKey(AgenticAuthoringPlanRequest request) {
         AgenticAuthoringTarget target = request.intentResolution() == null
                 ? null
                 : request.intentResolution().target();
@@ -3745,6 +3912,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             boolean categoricalHint,
             boolean optionSourceHint,
             String provenance) {
+    }
+
+    private record TableSchemaField(String field, String label, String type) {
     }
 
     private record ScoredFieldCandidate(
