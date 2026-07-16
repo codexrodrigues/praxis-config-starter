@@ -252,15 +252,12 @@ public class AgenticAuthoringPreviewService {
                     diagnostics(intentResolution, List.copyOf(intentFailures), List.copyOf(warnings))
             );
         }
-        AgenticAuthoringPlanResult planResult = schemaGroundedCreateFormPlan(
+        AgenticAuthoringPlanResult planResult = resolveMinimalFormPlan(
                 effectiveRequest,
                 tenantId,
                 userId,
                 environment,
                 schemaBaseUrl);
-        if (planResult == null) {
-            planResult = planService.generateMinimalFormPlan(effectiveRequest, tenantId, userId, environment);
-        }
         List<String> failureCodes = new ArrayList<>(planResult.failureCodes());
         List<String> warnings = new ArrayList<>(planResult.warnings());
         if (!planResult.valid()) {
@@ -321,6 +318,37 @@ public class AgenticAuthoringPreviewService {
                         userId,
                         environment)
         );
+    }
+
+    public AgenticAuthoringPlanResult generateMinimalFormPlan(
+            AgenticAuthoringPlanRequest request,
+            String tenantId,
+            String userId,
+            String environment,
+            String schemaBaseUrl) throws IOException {
+        return resolveMinimalFormPlan(
+                enrichRequest(request),
+                tenantId,
+                userId,
+                environment,
+                schemaBaseUrl);
+    }
+
+    private AgenticAuthoringPlanResult resolveMinimalFormPlan(
+            AgenticAuthoringPlanRequest request,
+            String tenantId,
+            String userId,
+            String environment,
+            String schemaBaseUrl) throws IOException {
+        AgenticAuthoringPlanResult schemaGroundedPlan = schemaGroundedCreateFormPlan(
+                request,
+                tenantId,
+                userId,
+                environment,
+                schemaBaseUrl);
+        return schemaGroundedPlan != null
+                ? schemaGroundedPlan
+                : planService.generateMinimalFormPlan(request, tenantId, userId, environment);
     }
 
     private AgenticAuthoringPlanResult schemaGroundedCreateFormPlan(
