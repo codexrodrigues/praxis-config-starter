@@ -9299,6 +9299,7 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringGateResult gate,
             String assistantMessage) {
         if (llmIntent == null
+                || "platform_guidance".equals(llmIntent.semanticIntentClass())
                 || llmIntent.quickReplies() == null
                 || !llmIntent.quickReplies().isEmpty()
                 || gate == null

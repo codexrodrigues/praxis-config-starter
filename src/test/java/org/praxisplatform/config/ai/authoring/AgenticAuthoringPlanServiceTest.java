@@ -3,6 +3,7 @@ package org.praxisplatform.config.ai.authoring;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -144,6 +145,69 @@ class AgenticAuthoringPlanServiceTest {
         assertThat(result.minimalFormPlan().path("submitActionRef").asText())
                 .isEqualTo("POST /api/human-resources/funcionarios");
         assertThat(result.minimalFormPlan().path("fields")).extracting(field -> field.path("name").asText()).contains("nome");
+    }
+
+    @Test
+    void materializesCreateFormFromCanonicalRequestSchemaWithoutAnotherLlmCall() {
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.putArray("required").add("nomeCompleto").add("cargoId");
+        ObjectNode propertiesNode = schema.putObject("properties");
+        propertiesNode.putObject("nomeCompleto")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Nome Completo")
+                .put("controlType", "input")
+                .put("editable", true);
+        propertiesNode.putObject("cargoId")
+                .put("type", "integer")
+                .putObject("x-ui")
+                .put("label", "Cargo")
+                .put("controlType", "select")
+                .put("editable", true)
+                .putObject("optionSource")
+                .put("key", "jobRole");
+        propertiesNode.putObject("email")
+                .put("type", "string")
+                .put("format", "email");
+        propertiesNode.putObject("id")
+                .put("type", "integer")
+                .put("readOnly", true);
+        propertiesNode.putObject("internalNote")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("hidden", true);
+
+        AgenticAuthoringPlanResult result = service(properties)
+                .materializeCreateFormPlanFromCanonicalSchema(
+                        new AgenticAuthoringPlanRequest(
+                                "Crie um formulario de funcionarios",
+                                "openai",
+                                "gpt-5.4-mini",
+                                "test-key",
+                                funcionariosIntent("create", "create_artifact")),
+                        schema);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.warnings()).contains(
+                "minimal-form-plan-materialized-from-schemas-filtered",
+                "llm-plan-generation-skipped-canonical-schema-materialization");
+        JsonNode fields = result.minimalFormPlan().path("fields");
+        assertThat(fields).extracting(field -> field.path("name").asText())
+                .containsExactly("nomeCompleto", "cargoId", "email");
+        assertThat(fields.path(0).path("label").asText()).isEqualTo("Nome Completo");
+        assertThat(fields.path(0).path("required").asBoolean()).isTrue();
+        assertThat(fields.path(1).path("controlType").asText()).isEqualTo("select");
+        assertThat(fields.path(1).path("optionSource").asText()).isEqualTo("jobRole");
+        assertThat(fields.path(2).path("controlType").asText()).isEqualTo("email");
+        assertThat(fields.path(2).path("required").asBoolean()).isFalse();
+        assertThat(result.minimalFormPlan().path("sourceRefs"))
+                .extracting(JsonNode::asText)
+                .containsExactly(
+                        "intent-resolution:create",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
+        verifyNoInteractions(providerManagementService);
     }
 
     @Test

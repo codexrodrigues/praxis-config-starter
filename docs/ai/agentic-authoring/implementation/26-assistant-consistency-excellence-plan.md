@@ -2,7 +2,8 @@
 
 Data: 2026-07-15
 
-Status: plano ativo de produto e plataforma
+Status: Gate A `must-pass` verde; plano ativo para cobertura estendida e
+endurecimento de plataforma
 
 ## Objetivo
 
@@ -85,6 +86,25 @@ criar endpoint, DTO ou persistencia paralela:
 - essa propriedade e convergencia de estado sob replay condicional, nao
   idempotencia da operacao HTTP: o replay valido incrementa a versao.
 
+O quarto slice P0 removeu duas causas estruturais de inconsistencia no basico:
+
+- oportunidades estruturadas com `semanticScope=platform-capabilities`
+  recebem confirmacao semantica compacta da LLM, sem keyword routing, sem tool
+  de recurso e sem eventos persistidos redundantes;
+- uma resposta de orientacao confirmada pela LLM nao e mais transformada em
+  clarificacao obrigatoria apenas porque termina com uma pergunta retorica;
+- a criacao de formulario nao faz uma segunda LLM inventar um
+  `MinimalFormPlan` a partir de uma URL de schema que ela nao leu;
+- depois que a LLM resolve `create/form/create_artifact` e o recurso, o plano e
+  materializado deterministicamente pelo request schema canonico de
+  `/schemas/filtered`;
+- labels, `controlType`, obrigatoriedade, `schemaPointer`, defaults e option
+  sources passam a vir da fonte canonica; schema indisponivel falha fechado em
+  vez de produzir campos plausiveis, mas nao confirmados;
+- a materializacao real de funcionarios passou de campos inventados como
+  `nome` e `cargo` para os 12 campos publicados pelo contrato, incluindo
+  `nomeCompleto`, `salario`, `cargoId`, `departamentoId` e seus option sources.
+
 Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
 
 - `platform-what-can-i-do-pt`: 3/3 execucoes consecutivas corretas, sem preview,
@@ -101,22 +121,26 @@ Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
   `/api/human-resources/funcionarios`; formularios usaram
   `POST /api/human-resources/funcionarios` com schema de request, enquanto tela
   e tabela usaram `/filter/cursor` para consulta;
-- o gate da vertical aplicou o limite de 45 s e passou com mediana terminal de
-  28,444 s; formularios ficaram entre 35,0 s e 36,388 s.
+- o gate focal final de formulario passou 3/3 com mediana terminal de 29,437 s,
+  tres materializacoes schema-grounded e tres provas transacionais completas;
 - depois da extensao transacional, a jornada de formulario passou novamente
   3/3 no gate de release com OpenAI e Neon reais: recurso e submit exatos em
   `/api/human-resources/funcionarios`, versao `1 -> 2`, um widget antes e depois
   do replay, tres rejeicoes de `ETag` obsoleto e tres cleanups confirmados;
-- a mediana terminal dessa certificacao foi 35,804 s, com primeira mensagem de
-  progresso imediata e todas as execucoes abaixo do limite de authoring de 45 s;
-  a etapa transacional levou de 2 s a 3 s por repeticao.
-
-O baseline funcional da orientacao melhorou, mas seu SLO de latencia ainda nao:
-a mediana observada nas tres execucoes da pergunta basica foi aproximadamente
-41 s. O trace mostra planning, discovery e resolucao semantica antes de uma
-resposta que nao precisa materializar recurso. A telemetria agora representa
-resolucao por evidencia como `intentResolveLlm=null`, mas a rota consultiva
-ainda deve ser otimizada antes de usar P95 de 12 s como gate global.
+- o gate integral final executou os seis casos `must-pass` tres vezes no mesmo
+  corte e passou 18/18, com 100% de acuracia, zero terminal incorreto, 3/3
+  transacoes e mediana terminal global de 17,5375 s;
+- as nove orientacoes de plataforma terminaram entre 8,386 s e 9,433 s, abaixo
+  do SLO bloqueante de 12 s, sempre sem recurso, preview ou apply e com tres
+  proximas acoes;
+- formulario, tela aberta e tabela terminaram corretamente nas nove execucoes;
+  os formularios ficaram em 28,742 s, 30,191 s e 42,798 s, todos abaixo do
+  limite de authoring de 45 s;
+- a terceira criacao de formulario revelou uma cauda ainda relevante no
+  pre-intent planner (20,943 s por timeout/retry). Ela nao quebrou o gate, mas
+  deve ser eliminada no proximo slice para aumentar a margem operacional;
+- todas as 18 jornadas emitiram primeiro feedback imediatamente segundo a
+  resolucao do runner, e nenhuma ficou presa em estado intermediario.
 
 ## Classificacao e mapa de impacto
 
@@ -126,6 +150,9 @@ ainda deve ser otimizada antes de usar P95 de 12 s como gate global.
 - Classificacao do terceiro slice: `transversal`, restrito ao contrato interno
   de avaliacao e ao runner operacional; reutiliza apply, configuracao, ETag e
   delete publicos sem alterar suas superficies.
+- Classificacao do quarto slice: `transversal`, restrito a orchestration,
+  resolucao semantica e materializacao interna de formulario; nenhum endpoint,
+  DTO, OpenAPI ou tipo publico novo.
 - Fonte canonica de orchestration e configuracao: `praxis-config-starter`.
 - Runtime e UX canonicos: `@praxisui/ai` em `praxis-ui-angular`.
 - Primeiros consumidores: Page Builder, Table e Dynamic Form.
@@ -147,7 +174,7 @@ um bot especial para o Page Builder.
 | --- | --- | --- | --- |
 | Responder "o que posso fazer aqui?" | `ja-suportado-mal-nomeado-ou-mal-materializado` | O prompt canonico classifica orientacao de plataforma, o context bundle publica `platformGuide`, componentes authoraveis e capabilities | Tornar a projecao obrigatoria em todo host e certificar a resposta ponta a ponta |
 | Sugerir o proximo passo | `ja-suportado-so-ux` | `@praxisui/ai` possui `PraxisAssistantOpportunityCatalog`, `PraxisAssistantRecommendedIntent` e empty state; Table ja deriva recomendacoes | Derivar recomendacoes do contexto canonico em todos os hosts, sem listas locais concorrentes |
-| Criar formulario/tela de funcionarios | `suportado-parcialmente` | Preview passou 9/9 e a vertical completa de formulario passou apply/readback/replay/cleanup 3/3 com recurso e operacao canonicos | Acrescentar variacoes linguisticas, refinamento, cancelamento e recuperacao na mesma jornada |
+| Criar formulario/tela de funcionarios | `ja-suportado-mal-nomeado-ou-mal-materializado` | O gate final passou 9/9 criacoes; formulario agora projeta os 12 campos e option sources de `/schemas/filtered`, com apply/readback/replay/cleanup 3/3 | Acrescentar variacoes linguisticas, refinamento, cancelamento e recuperacao na mesma jornada |
 | Criar tabela, grafico e filtros | `suportado-parcialmente` | Manifests, handlers e validadores existem, mas a cobertura de hosts e o caminho de turno nao sao uniformes | Convergir os consumidores para o mesmo turn engine e os mesmos gates |
 | Continuidade e estados terminais | `suportado-parcialmente` | SSE, replay, heartbeat, registry e shell existem | Definir state machine observavel, timeout, retry seguro e zero sessoes presas |
 | Intencao semantica consistente | `suportado-parcialmente` | A LLM ja produz decisao tipada e o keyword fallback legado fica desabilitado por padrao | Remover heuristicas textuais residuais da decisao primaria e limitar matching a grounding pos-intencao |
@@ -210,13 +237,13 @@ Nao deve haver troca cega de versao ou modelo. Cada pista precisa passar pelo
 mesmo corpus de consistencia, custo, latencia, streaming, tool calling e
 structured output.
 
-### 4. Testes extensos ainda nao formam um gate de produto
+### 4. O gate basico existe; cobertura e historico ainda precisam crescer
 
-Ha suites unitarias e matrizes reais valiosas, mas elas validam slices e
-investigacoes diferentes. Para o mercado, o baseline precisa responder uma
-pergunta simples: "as jornadas basicas passaram repetidamente hoje, com esta
-versao, este provider e este modelo?". Isso requer corpus unico, resultado
-comparavel e criterio bloqueante.
+O corpus e o runner agora respondem de forma comparavel se as jornadas basicas
+passaram repetidamente com uma versao, provider e modelo conhecidos. O corte
+`must-pass` fechou 18/18. A lacuna seguinte e expandir o perfil `extended`,
+reter historico por versao/modelo e publicar tendencias de P95, custo, retries,
+clarificacoes e falhas, sem transformar GitHub Actions em loop de desenvolvimento.
 
 ## Principios de excelencia
 
@@ -508,10 +535,14 @@ deve explicar indisponibilidade; nao pode simular sucesso.
 
 ### Gate A - Consistencia basica
 
-- corpus e metricas definidos;
-- as duas verticais P0 passam;
-- nenhum stuck turn ou alucinacao de contrato;
-- Page Builder apresenta proximo passo sempre acionavel.
+Status em 2026-07-15: **verde no perfil `must-pass`**.
+
+- corpus e metricas definidos: concluido;
+- as duas verticais P0 passam: 18/18 no gate integral;
+- nenhum stuck turn ou alucinacao de contrato: concluido no corpus basico;
+- Page Builder apresenta proximo passo sempre acionavel: 9/9 orientacoes com
+  tres quick replies;
+- pendencia de endurecimento: perfil `extended` e reducao da cauda do planner.
 
 ### Gate B - Runtime canonico
 
@@ -550,10 +581,11 @@ deve explicar indisponibilidade; nao pode simular sucesso.
 ## Artefatos derivados
 
 O terceiro slice atualizou o schema, corpus e runner internos de consistencia e
-adicionou o executor transacional local. Nao houve mudanca de endpoint, DTO,
-OpenAPI ou public API; por isso bindings, landing page e corpus HTTP nao precisam
-de sincronizacao neste corte. Quando os proximos slices alterarem contratos
-publicos, revisar no mesmo ciclo:
+adicionou o executor transacional local. O quarto slice alterou apenas services
+e testes internos do authoring e este plano de excelencia. Nao houve mudanca de
+endpoint, DTO, OpenAPI ou public API; por isso bindings, landing page e corpus
+HTTP nao precisam de sincronizacao neste corte. Quando os proximos slices
+alterarem contratos publicos, revisar no mesmo ciclo:
 
 - `docs/ai/contracts/**` e OpenAPI do Config Starter;
 - bindings e public APIs de `@praxisui/ai`;
@@ -563,25 +595,26 @@ publicos, revisar no mesmo ciclo:
 
 ## Proximo slice recomendado
 
-`P0.1 + P0.3` possuem primeiro corte, o grounding de preview de `P0.4` passou
-na vertical 3x e a mesma jornada agora passou apply/readback/replay/cleanup 3x.
-O proximo slice recomendado e fechar o gate P0 integral, nesta ordem:
+`P0.1`, `P0.3` e a vertical basica de `P0.4` estao certificadas pelo gate
+integral 18/18. O proximo slice recomendado e ampliar margem e cobertura antes
+de iniciar uma migracao ampla de SDK, nesta ordem:
 
-1. executar os seis `must-pass` tres vezes consecutivas no mesmo gate, incluindo
-   as tres perguntas consultivas e as tres jornadas de criacao;
-2. tornar falha bloqueante qualquer divergencia de terminal, recurso, operacao,
-   preview ou prova transacional e publicar o resultado comparavel por
-   provider/modelo;
-3. adicionar variacoes de linguagem, erros humanos, refinamento e recuperacao
-   ao perfil `extended`, mantendo o baseline `must-pass` bloqueante;
-4. otimizar a rota consultiva para evitar planning/discovery de recursos e
-   fechar o alvo P95 de 12 s;
-5. corrigir os diagnostics residuais de provenance para que
-   `domain-discovery-resource-focus` apareca como grounding conhecido, sem
-   alterar a decisao funcional;
-6. somente com o gate P0 integral verde iniciar a modernizacao de Spring AI,
-   SDK OpenAI e politica de modelos, comparando o novo caminho com o mesmo
-   corpus.
+1. remover o retry sequencial de timeout do pre-intent planner e definir budget
+   terminal por fase, preservando retry apenas para falhas transientes em que
+   uma nova tentativa caiba no budget do turno;
+2. adicionar ao perfil `extended` variacoes linguisticas, erros humanos,
+   refinamento multi-turn, cancelamento, retomada e schema indisponivel,
+   mantendo os seis `must-pass` como gate bloqueante;
+3. formalizar e certificar a state machine de `P0.6`, incluindo timeout,
+   cancelamento, replay SSE e zero side effect duplicado;
+4. corrigir diagnostics residuais de provenance e registrar P50/P95, retries,
+   tokens e custo por caso/modelo;
+5. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
+   minimo de contexto assistivel;
+6. iniciar a pista compativel Spring AI 1.1.8 e a politica de modelos em slice
+   dedicado, comparando o novo caminho com os perfis `must-pass` e `extended`;
+7. manter Spring AI 2.0 + Boot 4 como spike arquitetural separado, promovendo
+   apenas se a evidencia superar o caminho compativel.
 
 ## Referencias oficiais para a frente de SDK
 

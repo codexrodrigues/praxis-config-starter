@@ -2356,6 +2356,68 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void keepsRhetoricalNextActionInPlatformGuidanceAdvisoryAndMaterializesPlatformQuickReplies() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explain",
+                        "component",
+                        "answer_component_catalog_question",
+                        null,
+                        null,
+                        "none",
+                        "Nesta tela, posso ajudar com formulários, tabelas, gráficos e filtros. "
+                                + "Quer que eu recomende um bom ponto de partida?",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-compact-platform-guidance-confirmation-used"),
+                        null,
+                        null,
+                        false,
+                        "platform_guidance")));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Como você pode me ajudar nesta tela?",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "mock",
+                        null,
+                        null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.pendingClarification()).isNull();
+        assertThat(result.failureCodes()).doesNotContain("assistant-choice-confirmation-required");
+        assertThat(result.warnings()).doesNotContain("llm-assistant-choice-promoted-to-quick-replies");
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::id)
+                .containsExactly(
+                        "platform-create-admin-dashboard",
+                        "platform-create-form",
+                        "platform-explore-components");
+    }
+
+    @Test
     void usesLlmAuthoredQuickRepliesBeforeDeterministicDashboardFallback() {
         ObjectNode llmContextHints = objectMapper.createObjectNode();
         ObjectNode presentation = llmContextHints.putObject("presentation");

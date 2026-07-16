@@ -248,23 +248,28 @@ public class AgenticAuthoringTurnEngine {
         request = withGroundedRuntimeComponentContext(request);
         AgenticAuthoringTurnState state = initialState(request);
         request = withActiveDecisionContext(request, state.activeSemanticDecision());
+        boolean compactPlatformGuidanceOpportunity = hasPlatformGuidanceOpportunity(request);
         PreloadedComponentCapabilities componentCapabilitiesFuture =
                 preloadServerComponentCapabilities(request);
         try {
-            eventSink.append("thought.step", thoughtStepPayload(
-                    "context.bundle",
-                    "Contexto do pedido recebido; vou organizar pagina, historico e evidencias disponiveis.",
-                    "Authoring context received.",
-                    safeDiagnostics(request)));
+            if (!compactPlatformGuidanceOpportunity) {
+                eventSink.append("thought.step", thoughtStepPayload(
+                        "context.bundle",
+                        "Contexto do pedido recebido; vou organizar pagina, historico e evidencias disponiveis.",
+                        "Authoring context received.",
+                        safeDiagnostics(request)));
+            }
             emitRuntimeComponentGroundingStep(request, eventSink);
-            emitStatus(
-                    eventSink,
-                    "intent.resolve",
-                    "Estou organizando o pedido, o contexto da pagina e as restricoes informadas.");
-            eventSink.append("thought.step", thoughtStepPayload(
-                    "intent.resolve",
-                    "Estou identificando a intencao principal do pedido antes de escolher recursos ou componentes.",
-                    "Preparing semantic intent resolution."));
+            if (!compactPlatformGuidanceOpportunity) {
+                emitStatus(
+                        eventSink,
+                        "intent.resolve",
+                        "Estou organizando o pedido, o contexto da pagina e as restricoes informadas.");
+                eventSink.append("thought.step", thoughtStepPayload(
+                        "intent.resolve",
+                        "Estou identificando a intencao principal do pedido antes de escolher recursos ou componentes.",
+                        "Preparing semantic intent resolution."));
+            }
             request = withProjectKnowledgeContext(request, principalContext, eventSink, null);
             AgenticAuthoringResourceCandidatesResult plannedResourceDiscovery =
                     maybeRunPreIntentToolPlan(request, principalContext, eventSink);
@@ -280,28 +285,36 @@ public class AgenticAuthoringTurnEngine {
                     && !earlyResourceDiscovery.candidates().isEmpty()) {
                 request = withResourceDiscoveryContext(request, earlyResourceDiscovery);
             }
-            request = withServerComponentCapabilities(request, eventSink, componentCapabilitiesFuture);
+            request = withServerComponentCapabilities(
+                    request,
+                    eventSink,
+                    componentCapabilitiesFuture,
+                    !compactPlatformGuidanceOpportunity);
             boolean resourceDiscoveryContextPresent = hasResourceDiscoveryContext(request);
-            if (!resourceDiscoveryContextPresent) {
-                emitStatus(
-                        eventSink,
-                        "intent.resolve.llm",
-                        "A LLM esta confirmando a intencao com a evidencia governada antes de materializar a tela.");
+            boolean compactIntentProgress = compactPlatformGuidanceOpportunity
+                    && !resourceDiscoveryContextPresent;
+            if (!compactIntentProgress) {
+                if (!resourceDiscoveryContextPresent) {
+                    emitStatus(
+                            eventSink,
+                            "intent.resolve.llm",
+                            "A LLM esta confirmando a intencao com a evidencia governada antes de materializar a tela.");
+                }
+                String intentResolutionPhase = resourceDiscoveryContextPresent
+                        ? "intent.resolve.evidence"
+                        : "intent.resolve.llm";
+                eventSink.append("thought.step", thoughtStepPayload(
+                        intentResolutionPhase,
+                        resourceDiscoveryContextPresent
+                                ? "Estou avaliando os candidatos governados recuperados antes de materializar."
+                                : "A LLM esta confirmando a intencao com o contexto governado.",
+                        "Resolving the user request against governed context.",
+                        Map.of(
+                                "provider", safeText(request.provider()),
+                                "model", safeText(request.model()),
+                                "hasProjectKnowledge", request.contextHints() != null
+                                        && request.contextHints().path("projectKnowledge").isObject())));
             }
-            String intentResolutionPhase = resourceDiscoveryContextPresent
-                    ? "intent.resolve.evidence"
-                    : "intent.resolve.llm";
-            eventSink.append("thought.step", thoughtStepPayload(
-                    intentResolutionPhase,
-                    resourceDiscoveryContextPresent
-                            ? "Estou avaliando os candidatos governados recuperados antes de materializar."
-                            : "A LLM esta confirmando a intencao com o contexto governado.",
-                    "Resolving the user request against governed context.",
-                    Map.of(
-                            "provider", safeText(request.provider()),
-                            "model", safeText(request.model()),
-                            "hasProjectKnowledge", request.contextHints() != null
-                                    && request.contextHints().path("projectKnowledge").isObject())));
             AgenticAuthoringIntentResolutionResult intentResolution = intentResolverService.resolve(
                     toIntentRequest(request),
                     principalContext.tenantId(),
@@ -328,7 +341,8 @@ public class AgenticAuthoringTurnEngine {
                     eventSink,
                     state,
                     intentResolution,
-                    route);
+                    route,
+                    compactPlatformGuidanceOpportunity);
             if (postIntentConsultativeOutcome != null) {
                 return postIntentConsultativeOutcome;
             }
@@ -693,7 +707,8 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnEventSink eventSink,
             AgenticAuthoringTurnState state,
             AgenticAuthoringIntentResolutionResult intentResolution,
-            AgenticAuthoringTurnRoute route) {
+            AgenticAuthoringTurnRoute route,
+            boolean compactPlatformGuidanceOpportunity) {
         if (eventSink.terminalReached()) {
             return null;
         }
@@ -721,7 +736,8 @@ public class AgenticAuthoringTurnEngine {
                 eventSink,
                 state,
                 intentResolution,
-                route);
+                route,
+                compactPlatformGuidanceOpportunity);
         if (resolvedPlatformGuidance != null) {
             return resolvedPlatformGuidance;
         }
@@ -803,7 +819,8 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnEventSink eventSink,
             AgenticAuthoringTurnState state,
             AgenticAuthoringIntentResolutionResult intentResolution,
-            AgenticAuthoringTurnRoute route) {
+            AgenticAuthoringTurnRoute route,
+            boolean compactPlatformGuidanceOpportunity) {
         if (eventSink == null
                 || eventSink.terminalReached()
                 || intentResolution == null
@@ -816,18 +833,20 @@ public class AgenticAuthoringTurnEngine {
                 || !StringUtils.hasText(intentResolution.assistantMessage())) {
             return null;
         }
-        emitStatus(
-                eventSink,
-                "consultative.intent",
-                "A orientação sobre a plataforma já está pronta com base nas capacidades governadas disponíveis.");
-        eventSink.append("thought.step", streamEventPayload(
-                "consultative.answer",
-                "Completed platform guidance from the resolved semantic intent and governed component capabilities.",
-                Map.of(
-                        "category", "platform_guidance",
-                        "routeClass", safeText(route == null ? "" : route.routeClass()),
-                        "resolvedIntentAnswerUsed", true),
-                "consultative.answer:platform_guidance:resolved_intent"));
+        if (!compactPlatformGuidanceOpportunity) {
+            emitStatus(
+                    eventSink,
+                    "consultative.intent",
+                    "A orientação sobre a plataforma já está pronta com base nas capacidades governadas disponíveis.");
+            eventSink.append("thought.step", streamEventPayload(
+                    "consultative.answer",
+                    "Completed platform guidance from the resolved semantic intent and governed component capabilities.",
+                    Map.of(
+                            "category", "platform_guidance",
+                            "routeClass", safeText(route == null ? "" : route.routeClass()),
+                            "resolvedIntentAnswerUsed", true),
+                    "consultative.answer:platform_guidance:resolved_intent"));
+        }
         Map<String, Object> decisionDiagnostics = decisionDiagnostics(intentResolution, null, null);
         decisionDiagnostics.put("routeClass", safeText(route == null ? "" : route.routeClass()));
         decisionDiagnostics.put("consultativePostIntent", false);
@@ -1674,39 +1693,53 @@ public class AgenticAuthoringTurnEngine {
         return contextHints == null || fieldName == null ? "" : safeText(contextHints.path(fieldName).asText(""));
     }
 
+    private boolean hasPlatformGuidanceOpportunity(AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || request.contextHints() == null) {
+            return false;
+        }
+        JsonNode recommendedIntent = request.contextHints().path("recommendedIntent");
+        return recommendedIntent.isObject()
+                && "platform-capabilities".equals(recommendedIntent.path("semanticScope").asText(""));
+    }
+
     private AgenticAuthoringTurnStreamRequest withServerComponentCapabilities(
             AgenticAuthoringTurnStreamRequest request,
             AgenticAuthoringTurnEventSink eventSink,
-            PreloadedComponentCapabilities preloadedCapabilities) {
+            PreloadedComponentCapabilities preloadedCapabilities,
+            boolean emitProgress) {
         if (request == null
                 || (request.componentCapabilities() != null
                 && request.componentCapabilities().catalogs() != null
                 && !request.componentCapabilities().catalogs().isEmpty())) {
             return request;
         }
-        emitStatus(
-                eventSink,
-                "component.capabilities",
-                "Estou carregando capacidades governadas dos componentes para escolher a materializacao correta.");
+        if (emitProgress) {
+            emitStatus(
+                    eventSink,
+                    "component.capabilities",
+                    "Estou carregando capacidades governadas dos componentes para escolher a materializacao correta.");
+        }
         ComponentCapabilitiesLoadResult componentCapabilitiesLoad =
                 awaitServerComponentCapabilities(preloadedCapabilities);
         AgenticAuthoringComponentCapabilitiesResult componentCapabilities = componentCapabilitiesLoad.result();
-        eventSink.append("thought.step", thoughtStepPayload(
-                "component.capabilities",
-                "Capacidades governadas dos componentes carregadas; vou usar isso na decisao de materializacao.",
-                "Loaded governed component capabilities.",
-                Map.of(
-                        "catalogCount", componentCapabilities != null && componentCapabilities.catalogs() != null
-                                ? componentCapabilities.catalogs().size()
-                                : 0,
-                        "preloaded", componentCapabilitiesLoad.preloaded(),
-                        "preloadCompletedBeforeAwait", componentCapabilitiesLoad.completedBeforeAwait(),
-                        "fallbackSynchronousLoad", componentCapabilitiesLoad.fallbackSynchronousLoad(),
-                        "timedOut", componentCapabilitiesLoad.timedOut(),
-                        "fallbackBuiltIn", componentCapabilitiesLoad.fallbackBuiltIn(),
-                        "awaitElapsedMs", componentCapabilitiesLoad.awaitElapsedMs(),
-                        "preloadAgeMs", componentCapabilitiesLoad.preloadAgeMs(),
-                        "source", componentCapabilitiesService == null ? "built-in" : "service")));
+        if (emitProgress) {
+            eventSink.append("thought.step", thoughtStepPayload(
+                    "component.capabilities",
+                    "Capacidades governadas dos componentes carregadas; vou usar isso na decisao de materializacao.",
+                    "Loaded governed component capabilities.",
+                    Map.of(
+                            "catalogCount", componentCapabilities != null && componentCapabilities.catalogs() != null
+                                    ? componentCapabilities.catalogs().size()
+                                    : 0,
+                            "preloaded", componentCapabilitiesLoad.preloaded(),
+                            "preloadCompletedBeforeAwait", componentCapabilitiesLoad.completedBeforeAwait(),
+                            "fallbackSynchronousLoad", componentCapabilitiesLoad.fallbackSynchronousLoad(),
+                            "timedOut", componentCapabilitiesLoad.timedOut(),
+                            "fallbackBuiltIn", componentCapabilitiesLoad.fallbackBuiltIn(),
+                            "awaitElapsedMs", componentCapabilitiesLoad.awaitElapsedMs(),
+                            "preloadAgeMs", componentCapabilitiesLoad.preloadAgeMs(),
+                            "source", componentCapabilitiesService == null ? "built-in" : "service")));
+        }
         return new AgenticAuthoringTurnStreamRequest(
                 request.userPrompt(),
                 request.targetApp(),
@@ -1952,6 +1985,10 @@ public class AgenticAuthoringTurnEngine {
         }
         if (request == null) {
             emitPreIntentToolPlanSkipped(eventSink, "request-unavailable", "");
+            return null;
+        }
+        if (hasPlatformGuidanceOpportunity(request)) {
+            emitPreIntentToolPlanSkipped(eventSink, "governed-platform-guidance-opportunity", "");
             return null;
         }
         if (hasResourceDiscoveryContext(request)) {

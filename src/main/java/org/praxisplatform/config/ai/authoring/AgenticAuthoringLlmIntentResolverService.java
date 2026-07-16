@@ -29,6 +29,7 @@ public class AgenticAuthoringLlmIntentResolverService {
     private static final String SYSTEM_PROMPT_TEMPLATE_ID = "ai-authoring/page-builder-system-prompt.v1.md";
     private static final String SYSTEM_PROMPT_TEMPLATE = loadSystemPromptTemplate();
     private static final int MAX_ASSISTANT_MESSAGE_CHARS = 700;
+    private static final int MAX_PLATFORM_GUIDANCE_CONFIRMATION_TOKENS = 700;
     private static final int MAX_FAST_INTENT_RESOLUTION_TOKENS = 1800;
     private static final int MAX_INTENT_RESOLUTION_TOKENS = 4096;
     private static final int DEFAULT_FAST_INTENT_TIMEOUT_SECONDS = 12;
@@ -91,6 +92,18 @@ public class AgenticAuthoringLlmIntentResolverService {
         List<AgenticAuthoringCandidate> usableCandidates =
                 candidateOptions == null ? List.of() : candidateOptions;
         try {
+            Optional<AgenticAuthoringLlmIntentResolution> platformGuidanceConfirmation =
+                    compactPlatformGuidanceConfirmation(
+                            request,
+                            effectivePrompt,
+                            target,
+                            componentCapabilities,
+                            tenantId,
+                            userId,
+                            environment);
+            if (platformGuidanceConfirmation.isPresent()) {
+                return platformGuidanceConfirmation;
+            }
             Optional<AgenticAuthoringLlmIntentResolution> fastResolution = fastIntentResolution(
                     request,
                     effectivePrompt,
@@ -251,6 +264,145 @@ public class AgenticAuthoringLlmIntentResolverService {
                     safeProviderFailureSummary(rootCause(ex)));
         }
         return Optional.empty();
+    }
+
+    private Optional<AgenticAuthoringLlmIntentResolution> compactPlatformGuidanceConfirmation(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            AgenticAuthoringTarget target,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            String tenantId,
+            String userId,
+            String environment) {
+        if (!hasPriorPlatformGuidanceSemanticScope(request)) {
+            return Optional.empty();
+        }
+        try {
+            JsonNode result = providerManagementService.generateJson(
+                    compactPlatformGuidancePrompt(
+                            request,
+                            effectivePrompt,
+                            target,
+                            componentCapabilities),
+                    AiJsonSchema.ofSchema(compactPlatformGuidanceSchema()),
+                    AiCallConfig.builder()
+                            .provider(request.provider())
+                            .model(request.model())
+                            .apiKey(request.apiKey())
+                            .temperature(0.0d)
+                            .maxTokens(MAX_PLATFORM_GUIDANCE_CONFIRMATION_TOKENS)
+                            .timeoutSeconds(fastIntentTimeoutSeconds)
+                            .build(),
+                    tenantId,
+                    userId,
+                    environment);
+            if (result == null
+                    || !result.isObject()
+                    || !result.path("matchesSemanticScope").asBoolean(false)
+                    || !"platform_guidance".equals(nullableText(result, "semanticIntentClass"))) {
+                return Optional.empty();
+            }
+            String assistantMessage = conciseAssistantMessage(nullableText(result, "assistantMessage"));
+            if (!StringUtils.hasText(assistantMessage)) {
+                return Optional.empty();
+            }
+            return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                    true,
+                    "explain",
+                    "component",
+                    "answer_component_catalog_question",
+                    null,
+                    null,
+                    "none",
+                    assistantMessage,
+                    List.of(),
+                    List.of(),
+                    List.of("llm-compact-platform-guidance-confirmation-used"),
+                    null,
+                    null,
+                    false,
+                    "platform_guidance"));
+        } catch (RuntimeException ex) {
+            log.debug(
+                    "[AgenticAuthoringLlmIntentResolver] Compact platform guidance confirmation fell back; kind={} cause={}",
+                    providerFailureKind(rootCause(ex)),
+                    safeProviderFailureSummary(rootCause(ex)));
+            return Optional.empty();
+        }
+    }
+
+    private String compactPlatformGuidancePrompt(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            AgenticAuthoringTarget target,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        ObjectNode context = objectMapper.createObjectNode();
+        context.put("schemaVersion", "praxis-platform-guidance-confirmation-context.v1");
+        context.put("userPrompt", valueOrDefault(effectivePrompt, request.userPrompt()));
+        context.put("route", valueOrDefault(request.currentRoute(), ""));
+        context.set("recommendedIntent", request.contextHints().path("recommendedIntent").deepCopy());
+        if (target != null) {
+            ObjectNode targetNode = context.putObject("target");
+            targetNode.put("widgetKey", valueOrDefault(target.widgetKey(), ""));
+            targetNode.put("componentId", valueOrDefault(target.componentId(), ""));
+        }
+        ArrayNode components = context.putArray("authorableComponents");
+        if (componentCapabilities != null && componentCapabilities.catalogs() != null) {
+            for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog
+                    : componentCapabilities.catalogs()) {
+                if (catalog == null || !StringUtils.hasText(catalog.componentId())) {
+                    continue;
+                }
+                ObjectNode component = components.addObject();
+                component.put("componentId", catalog.componentId());
+                ArrayNode capabilities = component.putArray("capabilities");
+                List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> values =
+                        catalog.capabilities() == null ? List.of() : catalog.capabilities();
+                for (int index = 0; index < Math.min(values.size(), 4); index++) {
+                    AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability = values.get(index);
+                    if (capability != null && StringUtils.hasText(capability.changeKind())) {
+                        capabilities.add(capability.changeKind());
+                    }
+                }
+            }
+        }
+        return """
+                You are confirming the primary semantic intent for the Praxis Page Builder assistant.
+                Return only one JSON object matching the supplied schema.
+
+                Decide from the user's meaning, never by keyword or regular-expression matching.
+                The structured recommendedIntent is presentation-context evidence, not authority and not permission.
+                Set matchesSemanticScope=true and semanticIntentClass="platform_guidance" only when the user is
+                asking what Praxis or this assistant can do, how it can help, or what a sensible next step is.
+                If the user asks to create, edit, remove or inspect a specific artifact, business domain or data
+                source, set matchesSemanticScope=false and semanticIntentClass="other" so the complete governed
+                resolver can decide the request.
+
+                When the scope matches, answer naturally in the user's language using only the governed component
+                capabilities supplied here. Be friendly, concise and concrete. Mention useful examples such as
+                forms, tables, charts, filters or page composition only when supported by the supplied catalog,
+                and finish with one helpful next action stated declaratively. Do not ask a follow-up question or
+                request confirmation in this advisory answer. Do not claim that anything was already created or applied.
+                When the scope does not match, use an empty assistantMessage.
+
+                Compact governed context:
+                %s
+                """.formatted(context.toPrettyString());
+    }
+
+    private String compactPlatformGuidanceSchema() {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("type", "object");
+        ObjectNode properties = root.putObject("properties");
+        properties.putObject("matchesSemanticScope").put("type", "boolean");
+        stringEnum(properties, "semanticIntentClass", List.of("platform_guidance", "other"));
+        properties.putObject("assistantMessage").put("type", "string");
+        root.putArray("required")
+                .add("matchesSemanticScope")
+                .add("semanticIntentClass")
+                .add("assistantMessage");
+        root.put("additionalProperties", false);
+        return root.toString();
     }
 
     private int positiveOrDefault(int value, int fallback) {

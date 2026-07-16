@@ -252,8 +252,15 @@ public class AgenticAuthoringPreviewService {
                     diagnostics(intentResolution, List.copyOf(intentFailures), List.copyOf(warnings))
             );
         }
-        AgenticAuthoringPlanResult planResult =
-                planService.generateMinimalFormPlan(effectiveRequest, tenantId, userId, environment);
+        AgenticAuthoringPlanResult planResult = schemaGroundedCreateFormPlan(
+                effectiveRequest,
+                tenantId,
+                userId,
+                environment,
+                schemaBaseUrl);
+        if (planResult == null) {
+            planResult = planService.generateMinimalFormPlan(effectiveRequest, tenantId, userId, environment);
+        }
         List<String> failureCodes = new ArrayList<>(planResult.failureCodes());
         List<String> warnings = new ArrayList<>(planResult.warnings());
         if (!planResult.valid()) {
@@ -314,6 +321,47 @@ public class AgenticAuthoringPreviewService {
                         userId,
                         environment)
         );
+    }
+
+    private AgenticAuthoringPlanResult schemaGroundedCreateFormPlan(
+            AgenticAuthoringPlanRequest request,
+            String tenantId,
+            String userId,
+            String environment,
+            String schemaBaseUrl) {
+        AgenticAuthoringIntentResolutionResult intent = request == null ? null : request.intentResolution();
+        if (schemaRetrievalService == null
+                || intent == null
+                || intent.selectedCandidate() == null
+                || !"create".equals(intent.operationKind())
+                || !"form".equals(intent.artifactKind())
+                || !"create_artifact".equals(intent.changeKind())) {
+            return null;
+        }
+        AiSchemaContext context = schemaContext(intent.selectedCandidate(), MissingNode.getInstance());
+        SchemaFetchResult schemaResult = context == null
+                ? null
+                : schemaRetrievalService.fetchSchemaResult(
+                        context,
+                        schemaBaseUrl,
+                        tenantId,
+                        userId,
+                        environment);
+        if (schemaResult != null && schemaResult.isSuccess()) {
+            return planService.materializeCreateFormPlanFromCanonicalSchema(
+                    request,
+                    schemaResult.getSchema());
+        }
+        List<String> warnings = new ArrayList<>(intent.warnings() == null ? List.of() : intent.warnings());
+        warnings.add("minimal-form-plan-schema-grounding-required");
+        if (schemaResult != null && schemaResult.getCode() != null && !schemaResult.getCode().isBlank()) {
+            warnings.add("minimal-form-plan-schema-fetch:" + schemaResult.getCode());
+        }
+        return new AgenticAuthoringPlanResult(
+                false,
+                List.of("canonical-create-request-schema-unavailable"),
+                List.copyOf(warnings),
+                MissingNode.getInstance());
     }
 
     private Optional<AgenticAuthoringPreviewResult> previewConsultativeAnswer(

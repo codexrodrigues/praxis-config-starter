@@ -11,8 +11,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiProviderManagementService;
@@ -78,6 +80,171 @@ public class AgenticAuthoringPlanService {
                 warnings(effectiveRequest.intentResolution()),
                 plan
         );
+    }
+
+    AgenticAuthoringPlanResult materializeCreateFormPlanFromCanonicalSchema(
+            AgenticAuthoringPlanRequest request,
+            JsonNode requestSchema) {
+        if (request == null) {
+            throw new IllegalArgumentException("request must not be null.");
+        }
+        AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
+        AgenticAuthoringIntentResolutionResult intent = effectiveRequest.intentResolution();
+        if (!isCanonicalCreateFormIntent(intent)) {
+            throw new IllegalArgumentException(
+                    "Canonical schema materialization requires a resolved create-form intent.");
+        }
+
+        ObjectNode plan = canonicalCreateFormPlanEnvelope(intent);
+        ArrayNode fields = plan.putArray("fields");
+        JsonNode properties = requestSchema == null ? null : requestSchema.path("properties");
+        Set<String> requiredFields = requiredSchemaFields(requestSchema);
+        if (properties != null && properties.isObject()) {
+            properties.fields().forEachRemaining(entry -> {
+                String fieldName = valueOrEmpty(entry.getKey());
+                JsonNode property = entry.getValue();
+                if (fieldName.isBlank() || !isCreateFormField(property)) {
+                    return;
+                }
+                ObjectNode field = fields.addObject();
+                JsonNode xUi = property.path("x-ui");
+                field.put("name", fieldName);
+                field.put("label", firstNonBlank(
+                        text(xUi, "label"),
+                        firstNonBlank(text(property, "title"), humanizeFieldName(fieldName))));
+                field.put("controlType", canonicalControlType(property, xUi));
+                field.put("required", requiredFields.contains(fieldName)
+                        || xUi.path("required").asBoolean(false));
+                field.put("schemaPointer", "#/properties/" + escapeJsonPointerToken(fieldName));
+                String optionSource = firstNonBlank(
+                        text(xUi.path("optionSource"), "key"),
+                        text(xUi, "endpoint"));
+                if (!optionSource.isBlank()) {
+                    field.put("optionSource", optionSource);
+                }
+                if (property.has("default")) {
+                    field.set("defaultValue", property.path("default").deepCopy());
+                }
+            });
+        }
+        plan.putArray("sourceRefs")
+                .add("intent-resolution:" + valueOrEmpty(intent.operationKind()))
+                .add(intent.selectedCandidate().schemaUrl());
+        plan.putArray("validationExpectations")
+                .add("fields-materialized-from-canonical-create-request-schema")
+                .add("schema-required-fields-preserved");
+
+        List<String> failures = validator.validate(plan, intent);
+        List<String> planWarnings = new ArrayList<>(warnings(intent));
+        planWarnings.add("minimal-form-plan-materialized-from-schemas-filtered");
+        planWarnings.add("llm-plan-generation-skipped-canonical-schema-materialization");
+        return new AgenticAuthoringPlanResult(
+                failures.isEmpty(),
+                failures,
+                List.copyOf(planWarnings),
+                plan);
+    }
+
+    private boolean isCanonicalCreateFormIntent(AgenticAuthoringIntentResolutionResult intent) {
+        return intent != null
+                && intent.selectedCandidate() != null
+                && "create".equals(intent.operationKind())
+                && "form".equals(intent.artifactKind())
+                && "create_artifact".equals(intent.changeKind());
+    }
+
+    private ObjectNode canonicalCreateFormPlanEnvelope(AgenticAuthoringIntentResolutionResult intent) {
+        AgenticAuthoringCandidate candidate = intent.selectedCandidate();
+        String submitMethod = valueOrEmpty(candidate.submitMethod());
+        if (submitMethod.isBlank()) {
+            submitMethod = valueOrEmpty(candidate.operation());
+        }
+        if (submitMethod.isBlank()) {
+            submitMethod = "POST";
+        }
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0.0");
+        plan.put("profileId", "create-minimal-form");
+        plan.put("targetApp", intent.targetApp());
+        plan.put("targetComponentId", intent.targetComponentId());
+        plan.put("apiUseCaseResolutionRef", candidate.resourcePath());
+        plan.put("fieldSelectionPlanRef", candidate.schemaUrl());
+        plan.put("submitActionRef", submitMethod.toUpperCase(java.util.Locale.ROOT)
+                + " " + candidate.submitUrl());
+        return plan;
+    }
+
+    private Set<String> requiredSchemaFields(JsonNode requestSchema) {
+        Set<String> required = new LinkedHashSet<>();
+        JsonNode requiredNode = requestSchema == null ? null : requestSchema.path("required");
+        if (requiredNode != null && requiredNode.isArray()) {
+            for (JsonNode field : requiredNode) {
+                if (field.isTextual() && !field.asText().isBlank()) {
+                    required.add(field.asText());
+                }
+            }
+        }
+        return Set.copyOf(required);
+    }
+
+    private boolean isCreateFormField(JsonNode property) {
+        if (property == null || !property.isObject() || property.path("readOnly").asBoolean(false)) {
+            return false;
+        }
+        JsonNode xUi = property.path("x-ui");
+        if (xUi.path("hidden").asBoolean(false)) {
+            return false;
+        }
+        return !xUi.path("editable").isBoolean() || xUi.path("editable").asBoolean(true);
+    }
+
+    private String canonicalControlType(JsonNode property, JsonNode xUi) {
+        String configured = firstNonBlank(text(xUi, "controlType"), text(xUi, "type"));
+        if (!configured.isBlank()) {
+            return configured;
+        }
+        if (property.path("enum").isArray() && !property.path("enum").isEmpty()) {
+            return "select";
+        }
+        String type = text(property, "type");
+        String format = text(property, "format");
+        if ("boolean".equals(type)) {
+            return "checkbox";
+        }
+        if ("integer".equals(type) || "number".equals(type)) {
+            return "number";
+        }
+        if ("date".equals(format)) {
+            return "date";
+        }
+        if ("date-time".equals(format)) {
+            return "datetime";
+        }
+        if ("email".equals(format)) {
+            return "email";
+        }
+        return "input";
+    }
+
+    private String humanizeFieldName(String fieldName) {
+        String spaced = valueOrEmpty(fieldName)
+                .replace('_', ' ')
+                .replace('-', ' ')
+                .replaceAll("(?<=[a-z0-9])(?=[A-Z])", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        if (spaced.isBlank()) {
+            return fieldName;
+        }
+        return Character.toUpperCase(spaced.charAt(0)) + spaced.substring(1);
+    }
+
+    private String escapeJsonPointerToken(String value) {
+        return value.replace("~", "~0").replace("/", "~1");
+    }
+
+    private String firstNonBlank(String first, String second) {
+        return first == null || first.isBlank() ? valueOrEmpty(second) : first.trim();
     }
 
     private JsonNode completeDeterministicEditPlan(JsonNode plan, AgenticAuthoringPlanRequest request) {

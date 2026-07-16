@@ -6,6 +6,8 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -163,6 +165,96 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.minimalFormPlan()).isSameAs(plan);
         assertThat(result.compiledFormPatch()).isSameAs(patch);
         assertThat(result.diagnostics().fieldScopeDecision()).isEqualTo("not-evaluated");
+    }
+
+    @Test
+    void previewUsesCanonicalCreateRequestSchemaInsteadOfGeneratingAnotherLlmPlan() throws Exception {
+        AgenticAuthoringIntentResolutionResult intent = createEmployeeFormIntent();
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie um formulario de funcionarios",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent);
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.putObject("properties").putObject("nomeCompleto").put("type", "string");
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("profileId", "create-minimal-form");
+        ObjectNode patch = objectMapper.createObjectNode();
+        patch.put("version", "1.0.0");
+        when(schemaRetrievalService.fetchSchemaResult(
+                any(AiSchemaContext.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+        when(planService.materializeCreateFormPlanFromCanonicalSchema(any(), eq(schema)))
+                .thenReturn(new AgenticAuthoringPlanResult(
+                        true,
+                        List.of(),
+                        List.of("minimal-form-plan-materialized-from-schemas-filtered"),
+                        plan));
+        when(patchCompilerService.compile(any(AgenticAuthoringCompileRequest.class)))
+                .thenReturn(new AgenticAuthoringCompileResult(true, List.of(), List.of(), patch));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.minimalFormPlan()).isSameAs(plan);
+        assertThat(result.compiledFormPatch()).isSameAs(patch);
+        assertThat(result.warnings()).contains("minimal-form-plan-materialized-from-schemas-filtered");
+        verify(planService).materializeCreateFormPlanFromCanonicalSchema(any(), eq(schema));
+        verify(planService, never()).generateMinimalFormPlan(any(), any(), any(), any());
+    }
+
+    @Test
+    void previewFailsClosedWhenCanonicalCreateRequestSchemaIsUnavailable() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie um formulario de funcionarios",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                createEmployeeFormIntent());
+        when(schemaRetrievalService.fetchSchemaResult(
+                any(AiSchemaContext.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(SchemaFetchResult.failure(
+                        SchemaFetchResult.Status.UNAVAILABLE,
+                        503,
+                        "http://localhost/schemas/filtered",
+                        "SCHEMA_UNAVAILABLE",
+                        "temporarily unavailable"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).containsExactly("canonical-create-request-schema-unavailable");
+        assertThat(result.warnings()).contains(
+                "minimal-form-plan-schema-grounding-required",
+                "minimal-form-plan-schema-fetch:SCHEMA_UNAVAILABLE",
+                "compile-skipped-invalid-minimal-form-plan");
+        verify(planService, never()).generateMinimalFormPlan(any(), any(), any(), any());
+        verifyNoInteractions(patchCompilerService);
     }
 
     @Test
@@ -5989,6 +6081,41 @@ class AgenticAuthoringPreviewServiceTest {
                 List.of(),
                 List.of(),
                 objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult createEmployeeFormIntent() {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                "/api/human-resources/funcionarios",
+                "POST",
+                0.95,
+                "matched funcionarios",
+                List.of("tool-search-api-resources", "schema-available"));
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "form",
+                "create_artifact",
+                "create-minimal-form",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie um formulario de funcionarios",
+                "Vou criar o formulario usando a fonte governada de funcionarios.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of("llm-fast-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
     }
 
     private AgenticAuthoringIntentResolutionResult sharedRuleRouteIntent() {

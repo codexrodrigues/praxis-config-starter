@@ -300,6 +300,196 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     }
 
     @Test
+    void confirmsStructuredPlatformGuidanceOpportunityWithCompactSemanticLlmPass() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiJsonSchema> schemaCaptor = ArgumentCaptor.forClass(AiJsonSchema.class);
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                schemaCaptor.capture(),
+                configCaptor.capture(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "matchesSemanticScope": true,
+                  "semanticIntentClass": "platform_guidance",
+                  "assistantMessage": "Posso ajudar a criar gráficos governados e orientar o próximo passo no Page Builder."
+                }
+                """));
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "recommendedIntent": {
+                    "source": "page-builder-assistant-empty-state",
+                    "opportunityId": "page-builder.platform-capabilities.explore",
+                    "semanticScope": "platform-capabilities"
+                  }
+                }
+                """);
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "O que posso fazer aqui?",
+                        "page-builder",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-4.1-mini",
+                        "test-key",
+                        "session-platform-guidance",
+                        "turn-platform-guidance",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints),
+                "O que posso fazer aqui?",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(),
+                componentCapabilities(),
+                "tenant",
+                "user",
+                "local").orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("praxis-platform-guidance-confirmation-context.v1")
+                .contains("Decide from the user's meaning, never by keyword or regular-expression matching.")
+                .contains("presentation-context evidence, not authority and not permission")
+                .contains("Do not ask a follow-up question or")
+                .contains("page-builder.platform-capabilities.explore")
+                .contains("platform-capabilities")
+                .contains("praxis-chart")
+                .doesNotContain("praxis-agentic-authoring-fast-intent-context.v1");
+        assertThat(schemaCaptor.getValue().jsonSchema())
+                .contains("matchesSemanticScope", "semanticIntentClass", "assistantMessage")
+                .contains("additionalProperties");
+        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(700);
+        assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(12);
+        assertThat(result.resolved()).isTrue();
+        assertThat(result.semanticIntentClass()).isEqualTo("platform_guidance");
+        assertThat(result.operationKind()).isEqualTo("explain");
+        assertThat(result.artifactKind()).isEqualTo("component");
+        assertThat(result.changeKind()).isEqualTo("answer_component_catalog_question");
+        assertThat(result.selectedResourcePath()).isNull();
+        assertThat(result.requiresGovernedAuthoring()).isFalse();
+        assertThat(result.warnings()).contains("llm-compact-platform-guidance-confirmation-used");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
+    void fallsThroughToCompleteSemanticResolverWhenStructuredOpportunityDoesNotMatchUserMeaning() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(
+                        objectMapper.readTree("""
+                                {
+                                  "matchesSemanticScope": false,
+                                  "semanticIntentClass": "other",
+                                  "assistantMessage": ""
+                                }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "resolved": true,
+                                  "semanticIntentClass": "component_authoring",
+                                  "operationKind": "create",
+                                  "artifactKind": "table",
+                                  "changeKind": "create_artifact",
+                                  "selectedResourcePath": "/api/human-resources/funcionarios",
+                                  "resourceSearchQuery": null,
+                                  "followUpKind": "none",
+                                  "requiresGovernedAuthoring": false,
+                                  "assistantMessage": "Vou preparar a tabela de funcionários para revisão.",
+                                  "visualizationDecision": null,
+                                  "consultativeRetrievalPlan": null,
+                                  "quickReplies": [],
+                                  "clarificationQuestions": [],
+                                  "warnings": []
+                                }
+                                """));
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "recommendedIntent": {
+                    "source": "page-builder-assistant-empty-state",
+                    "opportunityId": "page-builder.platform-capabilities.explore",
+                    "semanticScope": "platform-capabilities"
+                  }
+                }
+                """);
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Crie uma tabela de funcionários",
+                        "page-builder",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-4.1-mini",
+                        "test-key",
+                        "session-form",
+                        "turn-form",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints),
+                "Crie uma tabela de funcionários",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        "/schemas/filtered/human-resources.funcionarios",
+                        "/api/human-resources/funcionarios",
+                        "POST",
+                        0.98d,
+                        "Fonte governada indicada pelo contexto.",
+                        List.of("context-hint"))),
+                componentCapabilities(),
+                "tenant",
+                "user",
+                "local").orElseThrow();
+
+        assertThat(promptCaptor.getAllValues()).hasSize(2);
+        assertThat(promptCaptor.getAllValues().get(0))
+                .contains("praxis-platform-guidance-confirmation-context.v1");
+        assertThat(promptCaptor.getAllValues().get(1))
+                .contains("praxis-agentic-authoring-fast-intent-context.v1");
+        assertThat(result.semanticIntentClass()).isEqualTo("component_authoring");
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.selectedResourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.warnings())
+                .contains("llm-fast-intent-resolution-used")
+                .doesNotContain("llm-compact-platform-guidance-confirmation-used");
+        Mockito.verify(providerManagementService, Mockito.times(2)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
     void componentAuthoringSemanticClassNormalizesMaterializeComponentTuple() throws Exception {
         when(providerManagementService.generateJson(
                 any(),
