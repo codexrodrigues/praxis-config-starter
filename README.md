@@ -325,6 +325,10 @@ cleanup, but it must not become the authority for schemas, endpoints or business
 Scoped API candidate retrieval fails closed when no tenant/environment result is available; it must
 not retry against an unscoped corpus that could include another tenant's API evidence.
 
+The official Quickstart authoring smoke bootstraps its own scoped `api_metadata` evidence from the
+Quickstart OpenAPI before resolving intent. This keeps the release proof reproducible on an empty
+database and exercises the canonical ingestion endpoint instead of relying on manually seeded rows.
+
 API catalog ingestion persists the canonical `api_metadata` rows before publishing the derived RAG
 corpus. RAG publication is scheduled after the database commit and can be replayed from canonical
 rows with `POST /api/praxis/config/api-catalog/rag/reconcile?releaseId=...`; operators can inspect

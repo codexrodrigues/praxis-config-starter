@@ -42,6 +42,84 @@ if (-not [string]::IsNullOrWhiteSpace($model)) {
 $body = $bodyObject | ConvertTo-Json -Compress -Depth 8
 
 $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
+$openApi = Invoke-RestMethod -Method Get -Uri "$base/v3/api-docs/procurement" -TimeoutSec 30
+$groundingResourcePaths = @(
+    "/api/procurement/suppliers",
+    "/api/procurement/purchase-orders"
+)
+$httpMethods = @("get", "post", "put", "patch", "delete")
+$catalogEndpoints = @()
+
+foreach ($resourcePath in $groundingResourcePaths) {
+    $pathProperty = $openApi.paths.PSObject.Properties[$resourcePath]
+    if ($null -eq $pathProperty) {
+        throw "Required Quickstart OpenAPI resource is missing: $resourcePath"
+    }
+    foreach ($method in $httpMethods) {
+        $operationProperty = $pathProperty.Value.PSObject.Properties[$method]
+        if ($null -eq $operationProperty) {
+            continue
+        }
+        $operation = $operationProperty.Value
+        $requestSchema = $null
+        $requestContent = $operation.requestBody.content.PSObject.Properties["application/json"]
+        if ($null -ne $requestContent) {
+            $requestSchema = $requestContent.Value.schema
+        }
+        $responseSchema = $null
+        $successResponse = $operation.responses.PSObject.Properties |
+            Where-Object { $_.Name -match '^2\d\d$' } |
+            Select-Object -First 1
+        if ($null -ne $successResponse) {
+            $responseContent = $successResponse.Value.content.PSObject.Properties["application/json"]
+            if ($null -ne $responseContent) {
+                $responseSchema = $responseContent.Value.schema
+            }
+        }
+        $catalogEndpoints += [pscustomobject]@{
+            path = $resourcePath
+            method = $method.ToUpperInvariant()
+            tags = @($operation.tags)
+            summary = [string] $operation.summary
+            description = [string] $operation.description
+            operationId = [string] $operation.operationId
+            requestSchema = $requestSchema
+            responseSchema = $responseSchema
+            parameters = @($operation.parameters)
+        }
+    }
+}
+
+if ($catalogEndpoints.Count -lt $groundingResourcePaths.Count) {
+    throw "Quickstart OpenAPI did not expose enough procurement operations for scoped API grounding."
+}
+
+$catalogReleaseId = "v1"
+$catalogBody = @{
+    releaseId = $catalogReleaseId
+    version = if ([string]::IsNullOrWhiteSpace([string] $openApi.info.version)) { "quickstart-e2e" } else { [string] $openApi.info.version }
+    generatedAt = (Get-Date).ToUniversalTime().ToString("o")
+    endpoints = $catalogEndpoints
+} | ConvertTo-Json -Compress -Depth 64
+$catalogIngest = Invoke-WebRequest `
+    -Method Post `
+    -Uri "$base/api/praxis/config/api-catalog/ingest" `
+    -Headers $headers `
+    -Body $catalogBody `
+    -TimeoutSec 120 `
+    -UseBasicParsing
+if ($catalogIngest.StatusCode -ne 202) {
+    throw "Scoped API catalog ingestion returned HTTP $($catalogIngest.StatusCode), expected 202."
+}
+$apiCatalogGrounding = [pscustomobject]@{
+    tenantId = $TenantId
+    environment = $Environment
+    releaseId = $catalogReleaseId
+    endpointCount = $catalogEndpoints.Count
+    resourcePaths = $groundingResourcePaths
+    ingestStatus = $catalogIngest.StatusCode
+}
+
 $intent = Invoke-RestMethod `
     -Method Post `
     -Uri "$base/api/praxis/config/ai/authoring/intent-resolution" `
@@ -119,6 +197,7 @@ $artifactDir = Join-Path $repoRoot "target/agentic-authoring/intent-resolution-h
 New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
 $intent | ConvertTo-Json -Depth 32 | Set-Content -Path (Join-Path $artifactDir "intent-resolution.json") -Encoding UTF8
 $preview | ConvertTo-Json -Depth 32 | Set-Content -Path (Join-Path $artifactDir "page-preview.json") -Encoding UTF8
+$apiCatalogGrounding | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $artifactDir "api-catalog-grounding.json") -Encoding UTF8
 $result | ConvertTo-Json -Depth 16 | Set-Content -Path (Join-Path $artifactDir "result.json") -Encoding UTF8
 Write-Host "Intent resolution smoke artifacts written to $artifactDir"
 
