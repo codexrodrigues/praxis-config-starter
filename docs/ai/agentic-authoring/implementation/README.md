@@ -103,9 +103,10 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 28. [24-runtime-related-surface-demo-operator-playbook.md](./24-runtime-related-surface-demo-operator-playbook.md)
 29. [25-pre-intent-resource-discovery-demo-readiness.md](./25-pre-intent-resource-discovery-demo-readiness.md)
 30. [26-assistant-consistency-excellence-plan.md](./26-assistant-consistency-excellence-plan.md)
-31. [01-current-state-and-target.md](./01-current-state-and-target.md)
-32. [02-implementation-backlog.md](./02-implementation-backlog.md)
-33. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+31. [27-assistant-consistency-p06-evidence.md](./27-assistant-consistency-p06-evidence.md)
+32. [01-current-state-and-target.md](./01-current-state-and-target.md)
+33. [02-implementation-backlog.md](./02-implementation-backlog.md)
+34. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -188,6 +189,10 @@ converter capacidades ja demonstradas em consistencia de produto. Ele prioriza
 um corpus bloqueante do basico, as jornadas "o que posso fazer aqui?" e
 "formulario de funcionarios", a convergencia para um unico turn engine,
 modernizacao disciplinada de Spring AI/OpenAI e gates reproduziveis de mercado.
+`27-assistant-consistency-p06-evidence.md` registra o antes/depois mensuravel,
+o gate deterministico da state machine e a lacuna real de telemetria de
+retries, tokens e custo que precisa ser fechada no boundary canonico de
+provider antes da comparacao de SDK/modelo.
 
 ## Checkpoint 2026-06-18 - pre-intent resource discovery e UX de revisao
 

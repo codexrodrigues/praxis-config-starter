@@ -45,6 +45,55 @@ de ciclo de vida ja governados pelo stream de patch:
 
 A diferenca deve ficar no payload, nao no envelope.
 
+## Maquina de estados canonica
+
+O ciclo de vida possui duas projecoes complementares, com fontes canonicas ja
+existentes:
+
+- `AiTurn.status` governa a reserva transacional (`PROCESSING`, `DONE` ou
+  `CANCELLED`);
+- o ultimo `AiTurnEventEnvelope` governa o estado observavel do stream. Somente
+  `result`, `error` e `cancelled` sao terminais.
+
+O cliente nao deve inferir terminalidade a partir de `status`, `thought.step`,
+`intent.resolved`, heartbeat, fechamento da conexao ou timeout local. A
+transicao observavel termina apenas quando um evento terminal persistido pode
+ser reproduzido por replay.
+
+| Estado observavel | Entrada aceita | Proximo estado | Invariante |
+|---|---|---|---|
+| sem turno | `start` novo, com identidade e capacidade validas | processando | reserva o turno e persiste exatamente um evento inicial |
+| processando | `status`, `thought.step`, `intent.resolved` | processando | `seq` cresce no `configTransactionManager`; heartbeat nao e persistido |
+| processando | `result` | concluido | persiste um unico terminal e conclui a reserva |
+| processando | `error`, inclusive timeout | falhou retomavel | persiste um unico terminal; timeout interrompe trabalho tardio e libera/expira a reserva |
+| processando | `cancel` | cancelado | persiste `cancelled`, interrompe o trabalho e marca a reserva `CANCELLED` |
+| terminal | reconnect com `Last-Event-ID` | mesmo terminal | replay retorna apenas eventos posteriores ao cursor e nunca reexecuta engine, tool ou apply |
+| terminal | novo `start` com o mesmo `clientTurnId` e fingerprint | mesmo terminal | devolve `threadId`, `turnId` e `streamId` existentes sem novo processamento |
+| qualquer | identidade, token, cursor ou fingerprint divergente | rejeitado | falha antes de executar side effect |
+
+Corridas entre `result`, `error`, `cancelled` e timeout sao resolvidas pelo
+marcador terminal e pela sequencia mantidos na linha de `AiTurn`, sob o
+`configTransactionManager`. O primeiro terminal persistido vence; tentativas
+tardias observam o terminal existente ou recebem conflito e nao materializam um
+segundo efeito. Em outra instancia, o event log continua sendo a autoridade e o
+poller reconcilia o terminal persistido.
+
+Retomada de transporte significa reconectar/reproduzir o mesmo turno, mantendo
+`threadId`, `turnId`, evidencia e budget. Uma nova tentativa semantica depois de
+um terminal e um novo turno conversacional e deve receber novo `clientTurnId`;
+reutilizar a identidade anterior nunca autoriza reexecucao.
+
+O gate local reproduzivel dessa maquina e:
+
+```bash
+tools/local-e2e/run-authoring-turn-state-machine-gate-local.sh
+```
+
+Ele certifica, em uma unica matriz, retomada idempotente, replay SSE,
+cancelamento, timeout, schema canonico indisponivel com falha fechada,
+reconciliacao entre instancias, ownership e ausencia de terminal/side effect
+duplicado.
+
 ## Superficie canonica
 
 A superficie de authoring streaming e:

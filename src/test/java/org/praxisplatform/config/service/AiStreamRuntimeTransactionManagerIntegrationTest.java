@@ -25,6 +25,7 @@ import org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoCon
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
@@ -79,6 +80,12 @@ class AiStreamRuntimeTransactionManagerIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @MockBean
+    private DomainFederationQueryService domainFederationQueryService;
+
+    @MockBean
+    private DomainKnowledgeChangeSetService domainKnowledgeChangeSetService;
 
     @BeforeEach
     void setUp() {

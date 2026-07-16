@@ -467,11 +467,14 @@ corpus; nao viram uma matriz de sinonimos decisoria.
 
 ### P0.6 State machine e recuperacao
 
-- Formalizar estados e transicoes aceitas de um turno.
-- Todo erro, cancelamento, timeout ou desconexao deve produzir terminal
-  retomavel.
-- Retry deve preservar idempotencia, `turnId`, evidencia e budget.
-- SSE replay nao pode duplicar apply, tool side effect ou mensagem final.
+- [x] Formalizar estados e transicoes aceitas de um turno, distinguindo reserva
+  transacional e terminalidade observavel do event log.
+- [x] Certificar erro, cancelamento e timeout como terminais persistidos e
+  retomaveis por replay; desconexao nao cria um estado terminal local.
+- [x] Certificar retomada de transporte preservando idempotencia, `turnId`,
+  evidencia e budget, sem reexecutar processamento.
+- [x] Certificar que SSE replay e corridas terminais nao duplicam apply, tool
+  side effect ou mensagem final.
 - A UI deve sempre oferecer a proxima acao segura: responder clarificacao,
   revisar, salvar, tentar novamente, cancelar ou abrir diagnostico.
 
@@ -634,7 +637,8 @@ deve explicar indisponibilidade; nao pode simular sucesso.
 ### Gate A - Consistencia basica
 
 Status em 2026-07-15: **verde no perfil `must-pass`, no refinamento isolado
-`extended` e na jornada multi-turn progressiva de Table**.
+`extended`, na jornada multi-turn progressiva de Table e na matriz
+transacional P0.6 do authoring turn**.
 
 - corpus e metricas definidos: concluido;
 - as duas verticais P0 passam: 18/18 no gate integral;
@@ -649,8 +653,11 @@ Status em 2026-07-15: **verde no perfil `must-pass`, no refinamento isolado
   houve coluna duplicada, timeout ou clarificacao indevida;
 - o gate final registrou 100% de assertividade e mediana terminal de 33,3385 s,
   contra 33% e mediana de aproximadamente 50 s antes deste slice;
-- proxima pendencia bloqueante do Gate A: certificar retomada, replay SSE,
-  cancelamento, timeout e schema indisponivel no mesmo gate transacional.
+- a matriz P0.6 executa 76 testes sem provider externo e certifica retomada,
+  replay SSE, cancelamento, timeout, schema indisponivel fail-closed,
+  ownership, fronteira transacional e terminal unico no mesmo gate local;
+- proxima pendencia bloqueante do Gate A: fechar diagnostics residuais de
+  provenance e provar lineage completo ate preview e materializacao.
 
 ### Gate B - Runtime canonico
 
@@ -700,6 +707,10 @@ resolucao LLM compacta para modificacoes ancoradas no alvo atual, removeu uma
 segunda resolucao redundante e compactou eventos duplicados sem perder replay.
 Tambem moveu a sequencia e o marcador terminal para `ai_turn` pela migracao
 V34, eliminando consultas de `max(seq)` e de terminalidade no caminho feliz.
+O nono slice formalizou a maquina de estados ja suportada, corrigiu a fixture
+do teste de transaction manager e adicionou o gate local P0.6 que agrega 76
+provas de retomada, replay, cancelamento, timeout, schema indisponivel,
+ownership e terminal unico.
 Nao houve mudanca de endpoint, DTO, evento SSE, OpenAPI ou public API; por isso
 bindings, landing page e corpus HTTP nao precisam de sincronizacao neste corte.
 Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
@@ -712,25 +723,26 @@ Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
 
 ## Proximo slice recomendado
 
-`P0.1`, `P0.3`, a vertical basica de `P0.4` e a jornada progressiva de Table
-estao certificadas. O proximo slice recomendado e fechar a state machine e a
-evidencia operacional antes de iniciar uma migracao ampla de SDK, nesta ordem:
+`P0.1`, `P0.3`, a vertical basica de `P0.4`, a jornada progressiva de Table e a
+state machine deterministica de `P0.6` estao certificadas. O proximo slice
+recomendado e fechar lineage/diagnostics antes de iniciar uma migracao ampla de
+SDK, nesta ordem:
 
-1. formalizar e certificar a state machine de `P0.6`, incluindo timeout,
-   cancelamento, retomada, schema indisponivel, replay SSE e zero side effect
-   duplicado;
-2. incorporar ao relatorio versionado a comparacao antes/depois deste slice e
-   registrar P50/P95, retries, tokens e custo por caso/modelo;
-3. corrigir diagnostics residuais de provenance e provar lineage completo da
+1. [x] incorporar ao relatorio versionado a comparacao antes/depois deste slice
+   em
+   [`27-assistant-consistency-p06-evidence.md`](27-assistant-consistency-p06-evidence.md),
+   registrando P50/P95 e classificando a ausencia atual de retries, tokens e
+   custo sem inventar valores;
+2. corrigir diagnostics residuais de provenance e provar lineage completo da
    decisao semantica ate o preview e a materializacao;
-4. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
+3. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
    minimo de contexto assistivel;
-5. ampliar a jornada progressiva com reordenacao, visibilidade, formato,
+4. ampliar a jornada progressiva com reordenacao, visibilidade, formato,
    filtros e recuperacao apos schema temporariamente indisponivel, provando que
    cada capability governada continua semanticamente distinta;
-6. iniciar a pista compativel Spring AI 1.1.8 e a politica de modelos em slice
+5. iniciar a pista compativel Spring AI 1.1.8 e a politica de modelos em slice
    dedicado, comparando o novo caminho com os perfis `must-pass` e `extended`;
-7. manter Spring AI 2.0 + Boot 4 como spike arquitetural separado, promovendo
+6. manter Spring AI 2.0 + Boot 4 como spike arquitetural separado, promovendo
    apenas se a evidencia superar o caminho compativel.
 
 ## Referencias oficiais para a frente de SDK
