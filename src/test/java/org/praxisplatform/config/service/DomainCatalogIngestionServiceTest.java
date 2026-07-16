@@ -13,11 +13,14 @@ import org.praxisplatform.config.domain.DomainCatalogItem;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
 import org.praxisplatform.config.dto.DomainCatalogIngestionResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
+import org.praxisplatform.config.rag.RagDocumentIdentity;
+import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.DomainCatalogItemRepository;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.data.domain.Pageable;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -342,6 +345,102 @@ class DomainCatalogIngestionServiceTest {
         assertThat(documentsCaptor.getAllValues())
                 .extracting(List::size)
                 .containsExactly(4, 4, 4, 1);
+        assertThat(documentsCaptor.getAllValues().stream().flatMap(List::stream).toList())
+                .anySatisfy(document -> assertThat(document.getMetadata())
+                        .containsEntry(RagMetadataKeys.RESOURCE_ID, "human-resources.folhas-pagamento.field.valor-liquido")
+                        .containsEntry(RagMetadataKeys.RESOURCE_KEY, "human-resources.folhas-pagamento")
+                        .containsEntry(RagMetadataKeys.SERVICE_KEY, "praxis-api-quickstart")
+                        .containsEntry(RagMetadataKeys.RELEASE_ID, "praxis-api-quickstart_test")
+                        .containsEntry(RagMetadataKeys.CONTEXT_KEY, "human-resources")
+                        .containsEntry(RagMetadataKeys.NODE_TYPE, "field"));
+    }
+
+    @Test
+    void retrievesLatestTenantScopedDomainContextSemanticallyInVectorRankOrder() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                true,
+                false,
+                100
+        );
+        String releaseKey = "praxis-service:human-resources.vw-analytics-afastamentos:sourcehash";
+        DomainCatalogRelease latestRelease = DomainCatalogRelease.builder()
+                .releaseKey(releaseKey)
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-service")
+                .resourceKey("human-resources.vw-analytics-afastamentos")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .build();
+        DomainCatalogItem absence = DomainCatalogItem.builder()
+                .release(latestRelease)
+                .itemType("node")
+                .itemKey("human-resources.vw-analytics-afastamentos.concept")
+                .contextKey("human-resources")
+                .nodeType("concept")
+                .payload("{\"nodeKey\":\"human-resources.vw-analytics-afastamentos.concept\",\"label\":\"Afastamentos\"}")
+                .searchableText("afastamentos ausencias por departamento")
+                .build();
+        DomainCatalogItem department = DomainCatalogItem.builder()
+                .release(latestRelease)
+                .itemType("node")
+                .itemKey("human-resources.vw-analytics-afastamentos.field.departamento")
+                .contextKey("human-resources")
+                .nodeType("field")
+                .payload("{\"nodeKey\":\"human-resources.vw-analytics-afastamentos.field.departamento\",\"label\":\"Departamento\"}")
+                .searchableText("departamento agrupamento afastamentos")
+                .build();
+        String ragReleaseId = RagDocumentIdentity.resolveReleaseId(releaseKey, null, null);
+        Document departmentDocument = domainCatalogDocument(
+                ragReleaseId,
+                department.getItemType(),
+                department.getItemKey(),
+                department.getSearchableText());
+        Document absenceDocument = domainCatalogDocument(
+                ragReleaseId,
+                absence.getItemType(),
+                absence.getItemKey(),
+                absence.getSearchableText());
+
+        when(releaseRepository.findLatest(
+                eq("praxis-service"),
+                eq("human-resources.vw-analytics-afastamentos"),
+                eq("tenant-a"),
+                eq("dev"),
+                any(Pageable.class))).thenReturn(List.of(latestRelease));
+        when(itemRepository.findByRelease(latestRelease)).thenReturn(List.of(absence, department));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.search(
+                eq("compare afastamentos entre departamentos"),
+                eq(2),
+                any(Filter.Expression.class))).thenReturn(List.of(departmentDocument, absenceDocument));
+
+        var context = service.contextLatestSemantic(
+                "praxis-service",
+                "human-resources.vw-analytics-afastamentos",
+                "tenant-a",
+                "dev",
+                "node",
+                null,
+                null,
+                "compare afastamentos entre departamentos",
+                2);
+
+        assertThat(context.release().releaseKey()).isEqualTo(releaseKey);
+        assertThat(context.items())
+                .extracting(DomainCatalogItemResponse::itemKey)
+                .containsExactly(department.getItemKey(), absence.getItemKey());
+        verify(ragVectorStoreService).search(
+                eq("compare afastamentos entre departamentos"),
+                eq(2),
+                any(Filter.Expression.class));
     }
 
     @Test
@@ -1302,6 +1401,21 @@ class DomainCatalogIngestionServiceTest {
                       "label": "%s"
                     }
                     """.formatted(resourceKey, resourceKey, label))
+                .build();
+    }
+
+    private Document domainCatalogDocument(
+            String releaseKey,
+            String itemType,
+            String itemKey,
+            String text) {
+        return Document.builder()
+                .id(releaseKey + ":" + itemKey)
+                .text(text)
+                .metadata(java.util.Map.of(
+                        RagMetadataKeys.RELEASE_ID, releaseKey,
+                        RagMetadataKeys.DOC_TYPE, itemType,
+                        RagMetadataKeys.RESOURCE_ID, itemKey))
                 .build();
     }
 

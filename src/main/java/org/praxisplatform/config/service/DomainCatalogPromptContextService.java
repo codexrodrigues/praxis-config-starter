@@ -201,7 +201,20 @@ public class DomainCatalogPromptContextService {
 
     private String formatContext(DomainCatalogRequest request, String tenantId, String environment) {
         try {
-            DomainCatalogContextResponse context = StringUtils.hasText(request.resourceKey())
+            DomainCatalogContextResponse context = domainCatalogIngestionService.contextLatestSemantic(
+                    request.serviceKey(),
+                    request.resourceKey(),
+                    tenantId,
+                    environment,
+                    request.itemType(),
+                    request.contextKey(),
+                    request.nodeType(),
+                    request.query(),
+                    request.limit());
+            if (context != null && context.items() != null && !context.items().isEmpty()) {
+                return formatContext(context);
+            }
+            context = StringUtils.hasText(request.resourceKey())
                     ? domainCatalogIngestionService.contextLatest(
                             request.serviceKey(),
                             request.resourceKey(),
@@ -224,8 +237,11 @@ public class DomainCatalogPromptContextService {
             return formatContext(context);
         } catch (RuntimeException ex) {
             log.warn(
-                    "Could not build domain catalog prompt context for serviceKey={}: {}",
+                    "Could not build domain catalog prompt context for serviceKey={}, resourceKey={}, tenant={}, environment={}: {}",
                     request.serviceKey(),
+                    request.resourceKey(),
+                    tenantId,
+                    environment,
                     ex.getMessage());
             return "";
         }

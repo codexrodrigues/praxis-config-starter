@@ -10,10 +10,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.AiSchemaContext;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -24,17 +25,38 @@ import org.springframework.stereotype.Service;
  * orquestracao.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class SchemaRetrievalService {
 
     private final ObjectMapper objectMapper;
+    private final GovernedPlatformRequestAuthorizationProvider authorizationProvider;
 
     @Value("${praxis.ai.schemas.base-url:}")
     private String schemasBaseUrl;
 
     @Value("${praxis.ai.schemas.timeout-ms:15000}")
     private long timeoutMs;
+
+    @Autowired
+    public SchemaRetrievalService(
+            ObjectMapper objectMapper,
+            ObjectProvider<GovernedPlatformRequestAuthorizationProvider> authorizationProviders) {
+        this(objectMapper, authorizationProviders.getIfAvailable(
+                GovernedPlatformRequestAuthorizationProvider::none));
+    }
+
+    public SchemaRetrievalService(ObjectMapper objectMapper) {
+        this(objectMapper, GovernedPlatformRequestAuthorizationProvider.none());
+    }
+
+    public SchemaRetrievalService(
+            ObjectMapper objectMapper,
+            GovernedPlatformRequestAuthorizationProvider authorizationProvider) {
+        this.objectMapper = objectMapper;
+        this.authorizationProvider = authorizationProvider == null
+                ? GovernedPlatformRequestAuthorizationProvider.none()
+                : authorizationProvider;
+    }
 
     public JsonNode fetchSchema(AiSchemaContext context, String requestBaseUrl) {
         SchemaFetchResult result = fetchSchemaResult(context, requestBaseUrl);
@@ -75,13 +97,24 @@ public class SchemaRetrievalService {
             HttpClient client = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofMillis(Math.max(1000, timeoutMs)))
                     .build();
+            URI targetUri = URI.create(url);
             HttpRequest.Builder request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
+                    .uri(targetUri)
                     .timeout(Duration.ofMillis(Math.max(1000, timeoutMs)))
                     .GET();
             addHeader(request, "X-Tenant-ID", tenantId);
             addHeader(request, "X-User-ID", userId);
             addHeader(request, "X-Env", environment);
+            GovernedPlatformRequestAuthorization.apply(
+                    request,
+                    authorizationProvider,
+                    new GovernedPlatformRequest(
+                            GovernedPlatformRequest.Surface.SCHEMA_FILTERED,
+                            GovernedPlatformRequest.parseOptionalBaseUri(requestBaseUrl),
+                            targetUri,
+                            tenantId,
+                            userId,
+                            environment));
             HttpResponse<String> response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 400) {
                 return failure(

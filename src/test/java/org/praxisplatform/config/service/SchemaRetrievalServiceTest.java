@@ -15,6 +15,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -96,6 +97,45 @@ class SchemaRetrievalServiceTest {
         assertEquals(List.of("tenant-a"), tenantHeaders);
         assertEquals(List.of("user-a"), userHeaders);
         assertEquals(List.of("production"), environmentHeaders);
+    }
+
+    @Test
+    void fetchSchemaUsesHostAuthorizationWithoutAddingItToTheSchemaContext() throws Exception {
+        List<String> authorizations = new ArrayList<>();
+        List<GovernedPlatformRequest> contexts = new ArrayList<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/schemas/filtered", exchange -> {
+            authorizations.add(exchange.getRequestHeaders().getFirst("Authorization"));
+            writeJson(exchange, 200, "{\"type\":\"object\"}");
+        });
+        server.start();
+        String baseUrl = "http://localhost:" + server.getAddress().getPort();
+
+        SchemaRetrievalService service = new SchemaRetrievalService(
+                new ObjectMapper(),
+                context -> {
+                    contexts.add(context);
+                    return Optional.of("Bearer schema-test-token");
+                });
+        ReflectionTestUtils.setField(service, "schemasBaseUrl", baseUrl);
+        ReflectionTestUtils.setField(service, "timeoutMs", 5_000L);
+
+        SchemaFetchResult result = service.fetchSchemaResult(
+                org.praxisplatform.config.dto.AiSchemaContext.builder()
+                        .path("/api/human-resources/vw-analytics-afastamentos/stats/comparison")
+                        .operation("post")
+                        .schemaType("response")
+                        .build(),
+                baseUrl,
+                "tenant-a",
+                "admin",
+                "local");
+
+        assertTrue(result.isSuccess());
+        assertEquals(List.of("Bearer schema-test-token"), authorizations);
+        assertEquals(1, contexts.size());
+        assertEquals(GovernedPlatformRequest.Surface.SCHEMA_FILTERED, contexts.get(0).surface());
+        assertTrue(contexts.get(0).isSameOrigin());
     }
 
     @Test

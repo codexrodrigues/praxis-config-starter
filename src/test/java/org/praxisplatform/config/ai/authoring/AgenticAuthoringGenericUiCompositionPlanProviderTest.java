@@ -2169,6 +2169,65 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
     }
 
+    @Test
+    void materializesVerifiedAggregateOnlyComparisonWithoutNominalReferences() {
+        ObjectNode contextHints = governedComparisonContext("verified");
+        ObjectNode governed = (ObjectNode) contextHints.path("governedAnalytics");
+        governed.putObject("nominalOperationAvailability")
+                .put("operationId", "filter")
+                .put("allowed", false)
+                .put("reason", "missing-authority");
+        ObjectNode projection = (ObjectNode) governed.path("projection");
+        ((ObjectNode) projection.path("interactions"))
+                .put("crossFilter", false)
+                .remove("recordOpen");
+        ((ObjectNode) projection.path("bindings").path("primaryDimension"))
+                .remove("keyFilterField");
+        governed.remove("recordOpenResolution");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Materialize a leitura analitica autorizada para este recurso.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                objectMapper.createObjectNode(),
+                dashboardIntent(
+                        "/api/human-resources/vw-analytics-afastamentos",
+                        List.of(axis("department", "departamento", "Departamento", "bar", "vertical"))),
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints)).orElseThrow();
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .contains("praxis-chart")
+                .doesNotContain("praxis-list", "praxis-table");
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("role"))
+                .doesNotContain("kpi-band");
+        assertThat(result.uiCompositionPlan().path("layoutPresetOptions").path("detailStrategy").asText())
+                .isEqualTo("aggregate-only");
+        assertThat(result.uiCompositionPlan().path("bindings").toString())
+                .doesNotContain("surface.open", ".crossFilter->", "dashboardKpis", "-list", "-table");
+        assertThat(result.uiCompositionPlan().path("slotAssignments").toString())
+                .doesNotContain("-list", "-table");
+        assertThat(result.uiCompositionPlan().path("canvas").path("items").toString())
+                .doesNotContain("-list", "-table");
+        assertThat(result.uiCompositionPlan().path("grouping").toString())
+                .doesNotContain("-list", "-table");
+        assertThat(result.uiCompositionPlan().path("deviceLayouts").toString())
+                .doesNotContain("-list", "-table");
+        JsonNode summary = result.uiCompositionPlan().path("widgets").findParents("role").stream()
+                .filter(widget -> "supporting".equals(widget.path("role").asText()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(summary.toString())
+                .contains("Visão agregada", "superfície autorizada")
+                .doesNotContain("lista e tabela", "exploração contextual em modal");
+    }
+
     private ObjectNode governedComparisonContext(String status) {
         ObjectNode contextHints = objectMapper.createObjectNode();
         ObjectNode governed = contextHints.putObject("governedAnalytics");

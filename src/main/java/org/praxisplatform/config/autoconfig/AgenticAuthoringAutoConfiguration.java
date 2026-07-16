@@ -53,6 +53,7 @@ import org.praxisplatform.config.service.AiTurnService;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
+import org.praxisplatform.config.service.GovernedPlatformRequestAuthorizationProvider;
 import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
 import org.praxisplatform.config.service.ResourceSurfaceCatalogRetrievalService;
 import org.praxisplatform.config.service.SchemaRetrievalService;
@@ -392,32 +393,42 @@ public class AgenticAuthoringAutoConfiguration {
     @ConditionalOnBean(AiProviderManagementService.class)
     public AgenticAuthoringPreIntentToolPlanningService agenticAuthoringPreIntentToolPlanningService(
             AiProviderManagementService providerManagementService,
-            ObjectMapper objectMapper) {
-        return new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+            ObjectMapper objectMapper,
+            ObjectProvider<DomainCatalogPromptContextService> domainCatalogPromptContextService) {
+        return new AgenticAuthoringLlmPreIntentToolPlanningService(
+                providerManagementService,
+                objectMapper,
+                domainCatalogPromptContextService.getIfAvailable());
     }
 
     @Bean
     @ConditionalOnMissingBean
     public ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService(
             ObjectMapper objectMapper,
+            ObjectProvider<GovernedPlatformRequestAuthorizationProvider> authorizationProviders,
             @Value("${praxis.ai.capabilities.base-url:}") String capabilitiesBaseUrl,
             @Value("${praxis.ai.capabilities.timeout-ms:15000}") long capabilitiesTimeoutMs) {
         return new ResourceCapabilitiesRetrievalService(
                 objectMapper,
                 capabilitiesBaseUrl,
-                capabilitiesTimeoutMs);
+                capabilitiesTimeoutMs,
+                authorizationProviders.getIfAvailable(
+                        GovernedPlatformRequestAuthorizationProvider::none));
     }
 
     @Bean
     @ConditionalOnMissingBean
     public ResourceSurfaceCatalogRetrievalService resourceSurfaceCatalogRetrievalService(
             ObjectMapper objectMapper,
+            ObjectProvider<GovernedPlatformRequestAuthorizationProvider> authorizationProviders,
             @Value("${praxis.ai.capabilities.base-url:}") String metadataBaseUrl,
             @Value("${praxis.ai.capabilities.timeout-ms:15000}") long metadataTimeoutMs) {
         return new ResourceSurfaceCatalogRetrievalService(
                 objectMapper,
                 metadataBaseUrl,
-                metadataTimeoutMs);
+                metadataTimeoutMs,
+                authorizationProviders.getIfAvailable(
+                        GovernedPlatformRequestAuthorizationProvider::none));
     }
 
     @Bean

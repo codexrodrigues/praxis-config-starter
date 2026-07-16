@@ -30,8 +30,9 @@ class DomainCatalogPromptContextServiceTest {
         DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
         DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);
 
-        when(ingestionService.contextLatest(
+        when(ingestionService.contextLatestSemantic(
                 eq("praxis-service"),
+                eq(null),
                 eq("tenant-a"),
                 eq("dev"),
                 eq("node"),

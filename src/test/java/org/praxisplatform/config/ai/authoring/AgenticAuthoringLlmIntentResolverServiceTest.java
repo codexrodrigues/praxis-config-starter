@@ -1669,7 +1669,9 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 objectMapper.createObjectNode().put("widgetCount", 1),
                 null,
                 List.of(),
-                componentCapabilities());
+                componentCapabilities(),
+                "tenant",
+                "local");
 
         assertThat(diagnostics.path("schemaVersion").asText())
                 .isEqualTo("praxis-agentic-authoring-llm-diagnostics.v1");

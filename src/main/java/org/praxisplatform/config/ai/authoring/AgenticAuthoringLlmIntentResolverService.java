@@ -988,7 +988,9 @@ public class AgenticAuthoringLlmIntentResolverService {
             JsonNode currentPageSummary,
             AgenticAuthoringTarget target,
             List<AgenticAuthoringCandidate> candidateOptions,
-            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            String tenantId,
+            String environment) {
         PromptInput promptInput = promptInput(
                 request,
                 effectivePrompt,
@@ -996,8 +998,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 target,
                 candidateOptions,
                 componentCapabilities,
-                null,
-                null);
+                tenantId,
+                environment);
         ObjectNode diagnostics = objectMapper.createObjectNode();
         diagnostics.put("schemaVersion", "praxis-agentic-authoring-llm-diagnostics.v1");
         diagnostics.put("promptTemplateId", SYSTEM_PROMPT_TEMPLATE_ID);

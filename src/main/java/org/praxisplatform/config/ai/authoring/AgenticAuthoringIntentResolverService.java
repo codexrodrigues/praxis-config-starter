@@ -297,7 +297,9 @@ public class AgenticAuthoringIntentResolverService {
                 currentPageSummary,
                 target,
                 llmCandidateOptions,
-                componentCapabilities);
+                componentCapabilities,
+                tenantId,
+                environment);
         boolean llmTreatsPendingAsContinuation = turn.answeredPendingClarification()
                 && (isLlmFollowUpKind(llmIntent, "clarification_answer")
                 || isLlmFollowUpKind(llmIntent, "refinement"));
@@ -3109,7 +3111,9 @@ public class AgenticAuthoringIntentResolverService {
             JsonNode currentPageSummary,
             AgenticAuthoringTarget target,
             List<AgenticAuthoringCandidate> candidates,
-            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            String tenantId,
+            String environment) {
         if (!includeLlmDiagnostics(request)) {
             return null;
         }
@@ -3126,7 +3130,9 @@ public class AgenticAuthoringIntentResolverService {
                 currentPageSummary,
                 target,
                 candidates,
-                componentCapabilities));
+                componentCapabilities,
+                tenantId,
+                environment));
         return diagnostics;
     }
 

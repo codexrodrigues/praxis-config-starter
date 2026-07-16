@@ -11,6 +11,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -70,6 +71,49 @@ class ResourceSurfaceCatalogRetrievalServiceTest {
         assertThat(tenants).containsExactly("tenant-a");
         assertThat(users).containsExactly("user-a");
         assertThat(environments).containsExactly("local");
+    }
+
+    @Test
+    void appliesHostAuthorizationToCanonicalSurfaceDiscovery() throws Exception {
+        List<String> authorizations = new ArrayList<>();
+        List<GovernedPlatformRequest> contexts = new ArrayList<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/schemas/surfaces", exchange -> {
+            authorizations.add(exchange.getRequestHeaders().getFirst("Authorization"));
+            writeJson(exchange, 200, """
+                    {
+                      "resourceKey": "human-resources.funcionarios",
+                      "resourcePath": "/api/human-resources/funcionarios",
+                      "surfaces": [{ "id": "hero-profile", "scope": "ITEM" }]
+                    }
+                    """);
+        });
+        server.start();
+        String baseUrl = "http://localhost:" + server.getAddress().getPort();
+
+        ResourceSurfaceCatalogRetrievalService service = new ResourceSurfaceCatalogRetrievalService(
+                new ObjectMapper(),
+                baseUrl,
+                5_000L,
+                context -> {
+                    contexts.add(context);
+                    return Optional.of("Bearer surface-test-token");
+                });
+
+        ResourceSurfaceCatalogFetchResult result = service.fetchCatalogResult(
+                "human-resources.funcionarios",
+                baseUrl,
+                "tenant-a",
+                "admin",
+                "local");
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(authorizations).containsExactly("Bearer surface-test-token");
+        assertThat(contexts).singleElement().satisfies(context -> {
+            assertThat(context.surface())
+                    .isEqualTo(GovernedPlatformRequest.Surface.RESOURCE_SURFACE_CATALOG);
+            assertThat(context.isSameOrigin()).isTrue();
+        });
     }
 
     @Test

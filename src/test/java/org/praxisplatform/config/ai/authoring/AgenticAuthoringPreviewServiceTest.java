@@ -1572,6 +1572,20 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(statsRequest.path("metrics")).hasSize(2);
         assertThat(statsRequest.path("periodField").asText()).isEqualTo("competencia");
         assertThat(config.path("series")).hasSize(4);
+        assertThat(query.path("metrics").findValuesAsText("field")).containsExactly(
+                "__praxisComparison_funcionarioId_current",
+                "__praxisComparison_funcionarioId_previous",
+                "__praxisComparison_diasAfastado_current",
+                "__praxisComparison_diasAfastado_previous");
+        assertThat(config.path("series").findValuesAsText("field")).containsExactly(
+                "__praxisComparison_funcionarioId_current",
+                "__praxisComparison_funcionarioId_previous",
+                "__praxisComparison_diasAfastado_current",
+                "__praxisComparison_diasAfastado_previous");
+        assertThat(query.path("metrics").findValuesAsText("schemaProbeStatus"))
+                .containsOnly("verified-derived-comparison-output");
+        assertThat(statsRequest.path("metrics").findValuesAsText("field"))
+                .containsExactly("funcionarioId", "diasAfastado");
         assertThat(config.path("analyticsProjection").path("governance").path("policyRefs").path(0)
                 .path("policyId").asText()).isEqualTo("absence-criticality-policy");
         assertThat(config.path("analyticsProjection").path("governance").path("policyRefs").path(0)
@@ -1666,7 +1680,7 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
-    void previewRejectsComparisonWhenCurrentPrincipalCannotReadNominalRows() throws Exception {
+    void previewMaterializesAggregateOnlyComparisonWhenCurrentPrincipalCannotReadNominalRows() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Materialize a leitura analitica autorizada para este recurso.",
                 "openai",
@@ -1679,6 +1693,10 @@ class AgenticAuthoringPreviewServiceTest {
                 .path("filter").path("availability");
         nominalAvailability.put("allowed", false);
         nominalAvailability.put("reason", "missing-authority");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), eq("http://localhost")))
+                .thenReturn(SchemaFetchResult.success(
+                        comparisonResourceSchema(),
+                        "http://localhost/schemas/filtered"));
         when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
                 eq("/api/human-resources/vw-analytics-afastamentos"),
                 eq("http://localhost"),
@@ -1709,10 +1727,21 @@ class AgenticAuthoringPreviewServiceTest {
                 resourceSurfaceCatalogRetrievalService)
                 .preview(request, "tenant", "user", "local", "http://localhost");
 
-        assertThat(result.valid()).isFalse();
-        assertThat(result.failureCodes())
-                .containsExactly("governed-analytics-comparison-nominal-operation-unavailable-missing-authority");
-        assertThat(result.uiCompositionPlan().isEmpty()).isTrue();
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .contains("praxis-chart")
+                .doesNotContain("praxis-list", "praxis-table");
+        assertThat(result.uiCompositionPlan().path("layoutPresetOptions").path("detailStrategy").asText())
+                .isEqualTo("aggregate-only");
+        assertThat(result.uiCompositionPlan().path("bindings").toString())
+                .doesNotContain("surface.open", ".crossFilter->", "-list", "-table");
+        assertThat(result.uiCompositionPlan().path("canvas").path("items").toString())
+                .doesNotContain("-list", "-table");
+        assertThat(result.uiCompositionPlan().path("grouping").toString())
+                .doesNotContain("-list", "-table");
+        assertThat(result.uiCompositionPlan().path("deviceLayouts").toString())
+                .doesNotContain("-list", "-table");
         verifyNoInteractions(resourceSurfaceCatalogRetrievalService);
     }
 
