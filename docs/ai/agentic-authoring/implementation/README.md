@@ -113,9 +113,10 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 38. [34-openai-responses-sdk-adapter-evidence.md](./34-openai-responses-sdk-adapter-evidence.md)
 39. [35-openai-responses-consistency-baseline-evidence.md](./35-openai-responses-consistency-baseline-evidence.md)
 40. [36-openai-extended-consistency-and-dashboard-variance-evidence.md](./36-openai-extended-consistency-and-dashboard-variance-evidence.md)
-41. [01-current-state-and-target.md](./01-current-state-and-target.md)
-42. [02-implementation-backlog.md](./02-implementation-backlog.md)
-43. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+41. [37-assistant-consistency-provider-variance-closure-evidence.md](./37-assistant-consistency-provider-variance-closure-evidence.md)
+42. [01-current-state-and-target.md](./01-current-state-and-target.md)
+43. [02-implementation-backlog.md](./02-implementation-backlog.md)
+44. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e

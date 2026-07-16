@@ -789,9 +789,12 @@ repetivel antes de iniciar uma migracao ampla de SDK, nesta ordem:
    [`32-assistant-extended-consistency-evidence.md`](32-assistant-extended-consistency-evidence.md);
 6. [x] certificar a mesma shell/orchestration em Table e Dynamic Form com o
    pacote minimo de contexto assistivel;
-7. ampliar a jornada progressiva com reordenacao, visibilidade, formato,
-   filtros e recuperacao apos schema temporariamente indisponivel, provando que
-   cada capability governada continua semanticamente distinta;
+7. ampliar a jornada progressiva provando que cada capability governada
+   continua semanticamente distinta:
+   - [x] reordenacao, visibilidade, formato e filtros; fechamento de
+     consistencia em
+     [`37-assistant-consistency-provider-variance-closure-evidence.md`](37-assistant-consistency-provider-variance-closure-evidence.md);
+   - [ ] recuperacao apos schema temporariamente indisponivel;
 8. [x] atualizar a pista compativel para Boot 3.5.15/Spring AI 1.1.8 e provar a
    correcao de `extra_body`; evidencia em
    [`33-spring-ai-openai-modernization-evidence.md`](33-spring-ai-openai-modernization-evidence.md);
@@ -800,9 +803,10 @@ repetivel antes de iniciar uma migracao ampla de SDK, nesta ordem:
 10. [x] implementar o adapter OpenAI com SDK oficial/Responses, Structured
     Outputs e telemetria, substituindo o caminho manual; evidencia em
     [`34-openai-responses-sdk-adapter-evidence.md`](34-openai-responses-sdk-adapter-evidence.md);
-11. repetir `must-pass`, `extended` e a jornada progressiva contra a API real
+11. [x] repetir `must-pass`, `extended` e a jornada progressiva contra a API real
     no novo transporte, comparando assertividade, P95, tokens e custo antes de
-    fechar operacionalmente o Gate C.
+    fechar operacionalmente o Gate C; o gate oficial fechou `42/42` no workflow
+    `29541634715`.
 
 ## Referencias oficiais para a frente de SDK
 
