@@ -133,4 +133,14 @@ class DomainRuleMigrationConstraintTest {
         assertThat(migration).contains("CHECK (role = 'RULE_DEFINITION_APPROVER')");
         assertThat(migration).contains("BEFORE UPDATE OR DELETE");
     }
+
+    @Test
+    void authenticatedDefinitionActorsCanBePersistedInSafeTimelineEvents() throws IOException {
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/V37__allow_authenticated_domain_rule_event_actors.sql"));
+
+        assertThat(migration).contains("DROP CONSTRAINT ck_domain_rule_event_actor_type");
+        assertThat(migration).contains("'authenticated'");
+        assertThat(migration).contains("actor_type IS NULL");
+    }
 }
