@@ -225,7 +225,7 @@ public class AgenticAuthoringPreviewService {
             return consultativeAnswer.get();
         }
         Optional<AgenticAuthoringPreviewResult> componentEditPreview =
-                previewComponentEditPlan(effectiveRequest, tenantId, userId, environment);
+                previewComponentEditPlan(effectiveRequest, tenantId, userId, environment, schemaBaseUrl);
         if (componentEditPreview.isPresent()) {
             return componentEditPreview.get();
         }
@@ -446,7 +446,8 @@ public class AgenticAuthoringPreviewService {
             AgenticAuthoringPlanRequest request,
             String tenantId,
             String userId,
-            String environment) {
+            String environment,
+            String schemaBaseUrl) {
         JsonNode contextHints = request == null ? null : request.contextHints();
         JsonNode manifestRef = contextHints == null
                 ? MissingNode.getInstance()
@@ -466,6 +467,12 @@ public class AgenticAuthoringPreviewService {
         if (!"modify".equals(operationKind)) {
             return Optional.empty();
         }
+        request = withSchemaFieldContext(
+                request,
+                schemaBaseUrl,
+                new PreviewSchemaFetchCache(schemaRetrievalService));
+        contextHints = request.contextHints();
+        manifestRef = contextHints.path("authoringManifestRef");
 
         List<String> contextFailures = validateComponentEditContext(request, manifestRef);
         if (!contextFailures.isEmpty()) {
@@ -487,7 +494,15 @@ public class AgenticAuthoringPreviewService {
         String componentId = manifestRef.path("componentId").asText("").trim();
         JsonNode selectedWidget = selectedComponentWidget(request.currentPage(), selectedWidgetKey);
         JsonNode config = selectedWidget.path("definition").path("inputs");
-        JsonNode validationContext = contextHints.path("validationContext");
+        ObjectNode validationContext = contextHints.path("validationContext").isObject()
+                ? contextHints.path("validationContext").deepCopy()
+                : objectMapper.createObjectNode();
+        if (contextHints.path("schemaFields").isArray()) {
+            validationContext.set("schemaFields", contextHints.path("schemaFields").deepCopy());
+        }
+        if (contextHints.path("schemaFieldContext").isObject()) {
+            validationContext.set("schemaFieldContext", contextHints.path("schemaFieldContext").deepCopy());
+        }
         AgenticAuthoringComponentEditPlanResult result = componentEditPlanService.generateAndCompile(
                 request,
                 componentId,
@@ -524,6 +539,10 @@ public class AgenticAuthoringPreviewService {
         List<String> warnings = new ArrayList<>(
                 result.warnings() == null ? List.of() : result.warnings());
         warnings.add("compiled-from-component-authoring-manifest");
+        if (validationContext.path("schemaFields").isArray()
+                && !validationContext.path("schemaFields").isEmpty()) {
+            warnings.add("component-edit-plan-schema-fields-grounded");
+        }
         return Optional.of(new AgenticAuthoringPreviewResult(
                 true,
                 List.of(),
@@ -538,8 +557,27 @@ public class AgenticAuthoringPreviewService {
                         result.plan(),
                         compiledFormPatch),
                 null,
-                deterministicPreviewAssistantMessage(request, intent, null, true, List.of()),
+                componentEditAssistantMessage(request, intent),
                 result.providerInvocations()));
+    }
+
+    /**
+     * Preserves the natural-language understanding produced by semantic intent resolution for a
+     * manifest-backed edit. The compiled plan remains the source of truth for materialization; this
+     * projection only prevents the final UX from discarding the specific edit in favor of a generic
+     * table message.
+     */
+    private String componentEditAssistantMessage(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringIntentResolutionResult intent) {
+        String message = intent == null ? "" : value(intent.assistantMessage());
+        if (message.isBlank() && request != null) {
+            message = value(request.userPrompt());
+        }
+        if (!message.isBlank()) {
+            return AgenticAuthoringPresentationText.assistantReply(message);
+        }
+        return deterministicPreviewAssistantMessage(request, intent, null, true, List.of());
     }
 
     private List<String> validateComponentEditContext(

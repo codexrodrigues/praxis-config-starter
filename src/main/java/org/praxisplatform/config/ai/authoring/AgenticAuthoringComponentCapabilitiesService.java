@@ -34,7 +34,7 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private static final String COMPONENT_DEF_COMPONENT_TYPE = "component-definition";
     private static final String SYSTEM_SCOPE_KEY = "GLOBAL";
     private static final int MAX_TRIGGER_TERMS = 18;
-    private static final int MAX_OPERATION_CAPABILITIES = 16;
+    private static final int MAX_OPERATION_CAPABILITIES = 128;
     private static final long DEFAULT_CACHE_TTL_MS = 300_000L;
     private static final long DEFAULT_REGISTRY_LOAD_TIMEOUT_MS = 5_000L;
     private static final int REGISTRY_LOAD_QUEUE_CAPACITY = 1;
@@ -250,7 +250,7 @@ public class AgenticAuthoringComponentCapabilitiesService {
                 continue;
             }
             AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability =
-                    operationCapability(componentId, operation);
+                    operationCapability(componentId, operation, manifest.path("examples"));
             if (capability != null) {
                 capabilities.add(capability);
                 operationCount++;
@@ -284,7 +284,8 @@ public class AgenticAuthoringComponentCapabilitiesService {
 
     private AgenticAuthoringComponentCapabilitiesResult.ComponentCapability operationCapability(
             String componentId,
-            JsonNode operation) {
+            JsonNode operation,
+            JsonNode manifestExamples) {
         String operationId = text(operation, "operationId");
         if (!StringUtils.hasText(operationId)) {
             return null;
@@ -299,12 +300,63 @@ public class AgenticAuthoringComponentCapabilitiesService {
         addTerms(terms, operation.path("effects"), "kind");
         addTerms(terms, operation.path("effects"), "handler");
         operation.path("inputSchema").path("properties").fieldNames().forEachRemaining(terms::add);
+        List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample> semanticExamples =
+                operationExamples(operationId, operation, manifestExamples);
         return new AgenticAuthoringComponentCapabilitiesResult.ComponentCapability(
                 operationId,
                 operationId,
                 limit(terms, MAX_TRIGGER_TERMS),
                 List.of(),
-                List.of());
+                semanticExamples);
+    }
+
+    private List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample> operationExamples(
+            String operationId,
+            JsonNode operation,
+            JsonNode manifestExamples) {
+        if (!manifestExamples.isArray()) {
+            return List.of();
+        }
+        List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample> examples = new ArrayList<>();
+        for (JsonNode example : manifestExamples) {
+            if (examples.size() >= 2
+                    || !example.path("isPositive").asBoolean(false)
+                    || !operationId.equals(text(example, "operationId"))) {
+                continue;
+            }
+            String request = text(example, "request");
+            if (!StringUtils.hasText(request)) {
+                continue;
+            }
+            String semanticEffect = firstText(
+                    operation,
+                    "description",
+                    firstText(operation, "title", operationId));
+            List<String> constraints = new ArrayList<>();
+            constraints.add("operationId=" + operationId);
+            addConstraint(constraints, operation.path("affectedPaths"), "affectedPaths=");
+            addConstraint(constraints, operation.path("validators"), "validators=");
+            examples.add(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample(
+                    request,
+                    semanticEffect,
+                    List.copyOf(constraints)));
+        }
+        return List.copyOf(examples);
+    }
+
+    private void addConstraint(List<String> constraints, JsonNode values, String prefix) {
+        if (!values.isArray() || values.isEmpty()) {
+            return;
+        }
+        List<String> normalized = new ArrayList<>();
+        values.forEach(value -> {
+            if (value.isTextual() && StringUtils.hasText(value.asText())) {
+                normalized.add(value.asText().trim());
+            }
+        });
+        if (!normalized.isEmpty()) {
+            constraints.add(prefix + String.join(",", normalized));
+        }
     }
 
     private JsonNode readPayload(String payload) {

@@ -208,7 +208,7 @@ final class AgenticAuthoringContextBundle {
         return compact;
     }
 
-    private static List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> promptRelevantCapabilities(
+    static List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> promptRelevantCapabilities(
             String effectivePrompt,
             List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> capabilities) {
         if (capabilities == null || capabilities.isEmpty()) {

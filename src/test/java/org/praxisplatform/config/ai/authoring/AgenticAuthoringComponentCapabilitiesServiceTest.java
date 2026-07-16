@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -118,6 +119,56 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
                 .contains("component.author", "tab.add");
         assertThat(tabsCatalog.capabilities().get(0).triggerTerms())
                 .contains("praxis-tabs", "Praxis Tabs", "tabs");
+    }
+
+    @Test
+    void keepsLateCanonicalManifestOperationsAvailableToSemanticIntentResolution() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectNode payload = objectMapper.createObjectNode();
+        ObjectNode manifest = payload.putObject("componentDefinition")
+                .putObject("jsonSchema")
+                .putObject("authoringManifest");
+        manifest.put("manifestVersion", "2.0.0");
+        manifest.put("componentId", "praxis-table");
+        var operations = manifest.putArray("operations");
+        for (int index = 0; index < 24; index++) {
+            operations.addObject().put("operationId", "table.operation." + index);
+        }
+        operations.addObject()
+                .put("operationId", "filter.advanced.configure")
+                .put("title", "Configurar filtros avançados");
+        manifest.putArray("examples").addObject()
+                .put("operationId", "filter.advanced.configure")
+                .put("request", "Ative os filtros avançados desta tabela")
+                .put("isPositive", true);
+
+        AiRegistryRepository repository = mock(AiRegistryRepository.class);
+        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                "component_definition",
+                "component-definition",
+                Scope.SYSTEM,
+                "GLOBAL"))
+                .thenReturn(List.of(AiRegistry.builder()
+                        .registryType("component_definition")
+                        .registryKey("praxis-table")
+                        .componentType("component-definition")
+                        .scope(Scope.SYSTEM)
+                        .scopeKey("GLOBAL")
+                        .payload(payload.toString())
+                        .build()));
+
+        AgenticAuthoringComponentCapabilitiesResult result =
+                new AgenticAuthoringComponentCapabilitiesService(repository, objectMapper).listCapabilities();
+
+        AgenticAuthoringComponentCapabilitiesResult.ComponentCapability advancedFilters = result.catalogs().stream()
+                .filter(catalog -> "praxis-table".equals(catalog.componentId()))
+                .flatMap(catalog -> catalog.capabilities().stream())
+                .filter(capability -> "filter.advanced.configure".equals(capability.changeKind()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(advancedFilters.examples())
+                .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample::prompt)
+                .contains("Ative os filtros avançados desta tabela");
     }
 
     @Test

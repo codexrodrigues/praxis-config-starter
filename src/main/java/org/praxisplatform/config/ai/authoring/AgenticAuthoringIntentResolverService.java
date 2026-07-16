@@ -1723,6 +1723,9 @@ public class AgenticAuthoringIntentResolverService {
         if (activeDecision == null || activeDecision.selectedResource() == null) {
             return AgenticAuthoringSemanticRefinement.none();
         }
+        if (isResolvedComponentAuthoringIntent(llmIntent)) {
+            return AgenticAuthoringSemanticRefinement.none();
+        }
         String normalized = normalize(prompt);
         String followUpKind = llmIntent == null ? "" : valueOrDefault(llmIntent.followUpKind(), "");
         boolean refinementLanguage = containsAny(normalized,
@@ -1790,6 +1793,13 @@ public class AgenticAuthoringIntentResolverService {
                 List.copyOf(remove),
                 "Semantic refinement applies a governed diff to the active decision.",
                 explicitPreserve ? 0.90d : 0.86d);
+    }
+
+    private boolean isResolvedComponentAuthoringIntent(AgenticAuthoringLlmIntentResolution llmIntent) {
+        return llmIntent != null
+                && llmIntent.resolved()
+                && "component_authoring".equals(valueOrDefault(llmIntent.semanticIntentClass(), ""))
+                && "modify".equals(valueOrDefault(llmIntent.operationKind(), ""));
     }
 
     private AgenticAuthoringSemanticRefinement visualProjectionRefinement(String prompt) {

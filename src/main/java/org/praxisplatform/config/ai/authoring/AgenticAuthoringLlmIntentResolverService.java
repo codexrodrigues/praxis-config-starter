@@ -520,7 +520,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             String environment,
             List<AiProviderInvocationTelemetry> providerInvocations) {
         List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> capabilities =
-                targetedComponentCapabilities(target, componentCapabilities);
+                targetedComponentCapabilities(target, componentCapabilities, effectivePrompt);
         if (!shouldTryCompactTargetedComponentIntent(request, target, capabilities)) {
             return Optional.empty();
         }
@@ -575,14 +575,16 @@ public class AgenticAuthoringLlmIntentResolverService {
 
     private List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> targetedComponentCapabilities(
             AgenticAuthoringTarget target,
-            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            String effectivePrompt) {
         if (target == null
                 || !StringUtils.hasText(target.componentId())
                 || componentCapabilities == null
                 || componentCapabilities.catalogs() == null) {
             return List.of();
         }
-        return componentCapabilities.catalogs().stream()
+        List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> declaredCapabilities =
+                componentCapabilities.catalogs().stream()
                 .filter(Objects::nonNull)
                 .filter(catalog -> target.componentId().equals(catalog.componentId()))
                 .flatMap(catalog -> (catalog.capabilities() == null
@@ -591,6 +593,12 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .filter(Objects::nonNull)
                 .filter(capability -> StringUtils.hasText(capability.changeKind()))
                 .toList();
+        // The target component is already pinned by governed page context. Textual similarity only
+        // ranks canonical operations inside that scope; the LLM still decides whether the request
+        // edits the component and which semantic capability applies.
+        return AgenticAuthoringContextBundle.promptRelevantCapabilities(
+                effectivePrompt,
+                declaredCapabilities);
     }
 
     private String compactTargetedComponentIntentPrompt(

@@ -1,6 +1,7 @@
 package org.praxisplatform.config.autoconfig;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
 import org.praxisplatform.config.registry.AiRegistryBootstrapProperties;
 import org.praxisplatform.config.registry.AiRegistryBootstrapService;
 import org.praxisplatform.config.registry.AiRegistryBootstrapState;
@@ -9,6 +10,7 @@ import org.praxisplatform.config.registry.AiRegistryStatusService;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.service.RegistryIngestionService;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -71,8 +73,14 @@ public class AiRegistryBootstrapAutoConfiguration {
             havingValue = "true",
             matchIfMissing = true
     )
-    public ApplicationRunner aiRegistryBootstrapRunner(AiRegistryBootstrapService bootstrapService) {
-        return args -> bootstrapService.bootstrapIfNeeded();
+    public ApplicationRunner aiRegistryBootstrapRunner(
+            AiRegistryBootstrapService bootstrapService,
+            ObjectProvider<AgenticAuthoringComponentCapabilitiesService> componentCapabilitiesService) {
+        return args -> {
+            bootstrapService.bootstrapIfNeeded();
+            componentCapabilitiesService.ifAvailable(
+                    AgenticAuthoringComponentCapabilitiesService::invalidateCapabilitiesCache);
+        };
     }
 
 }
