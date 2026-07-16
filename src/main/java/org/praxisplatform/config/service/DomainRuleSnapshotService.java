@@ -622,12 +622,16 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
   }
 
   private PublishedRuleSnapshot readSnapshotForSupersession(DomainRuleSnapshot stored) {
-    if (isPreManifestSnapshot(stored)) {
-      PublishedRuleSnapshot legacy = readSnapshot(stored);
-      verifyStoredEnvelope(stored, legacy);
-      return legacy;
+    PublishedRuleSnapshot previous = readSnapshot(stored);
+    verifyStoredEnvelope(stored, previous);
+    String canonicalHash = PraxisCanonicalJson.sha256(objectMapper.valueToTree(previous));
+    if (!stored.getContentHash().equals(canonicalHash)) {
+      throw new IllegalStateException("Persisted RuleSet snapshot content hash verification failed");
     }
-    return readVerifiedSnapshot(stored);
+    if (!isPreManifestSnapshot(stored)) {
+      verifyStoredComposition(stored, previous);
+    }
+    return previous;
   }
 
   private PublishedRuleSnapshot readEnvelopeAndVerifyContent(DomainRuleSnapshot stored) {

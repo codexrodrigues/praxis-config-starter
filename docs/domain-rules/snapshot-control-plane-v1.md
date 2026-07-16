@@ -34,6 +34,14 @@ head.
 RuleSet key. Changed content must use a new RuleSet version. Reusing prior
 content is an activation/rollback operation, not a second publication.
 
+Publication of a higher immutable version may supersede a snapshot produced by
+an older engine compatibility baseline. The control plane verifies the prior
+envelope identity, canonical stored snapshot hash and persisted composition
+approvals without asking the current engine to compile obsolete executable
+content. The new candidate is still compiled strictly by the current engine and
+host admission catalog before activation. Runtime reads and rollback continue to
+fail closed for an old snapshot that the current engine cannot verify.
+
 ## HTTP contract
 
 - `POST /api/praxis/config/domain-rules/snapshots`
