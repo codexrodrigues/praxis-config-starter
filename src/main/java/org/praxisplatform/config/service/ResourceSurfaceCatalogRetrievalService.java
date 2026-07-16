@@ -27,14 +27,26 @@ public class ResourceSurfaceCatalogRetrievalService {
     private final ObjectMapper objectMapper;
     private final String configuredBaseUrl;
     private final long timeoutMs;
+    private final GovernedPlatformRequestAuthorizationProvider authorizationProvider;
 
     public ResourceSurfaceCatalogRetrievalService(
             ObjectMapper objectMapper,
             String configuredBaseUrl,
             long timeoutMs) {
+        this(objectMapper, configuredBaseUrl, timeoutMs, GovernedPlatformRequestAuthorizationProvider.none());
+    }
+
+    public ResourceSurfaceCatalogRetrievalService(
+            ObjectMapper objectMapper,
+            String configuredBaseUrl,
+            long timeoutMs,
+            GovernedPlatformRequestAuthorizationProvider authorizationProvider) {
         this.objectMapper = objectMapper;
         this.configuredBaseUrl = configuredBaseUrl;
         this.timeoutMs = timeoutMs;
+        this.authorizationProvider = authorizationProvider == null
+                ? GovernedPlatformRequestAuthorizationProvider.none()
+                : authorizationProvider;
     }
 
     public ResourceSurfaceCatalogFetchResult fetchCatalogResult(
@@ -68,13 +80,24 @@ public class ResourceSurfaceCatalogRetrievalService {
             HttpClient client = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofMillis(Math.max(1000, timeoutMs)))
                     .build();
+            URI targetUri = URI.create(url);
             HttpRequest.Builder request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
+                    .uri(targetUri)
                     .timeout(Duration.ofMillis(Math.max(1000, timeoutMs)))
                     .GET();
             addHeader(request, "X-Tenant-ID", tenantId);
             addHeader(request, "X-User-ID", userId);
             addHeader(request, "X-Env", environment);
+            GovernedPlatformRequestAuthorization.apply(
+                    request,
+                    authorizationProvider,
+                    new GovernedPlatformRequest(
+                            GovernedPlatformRequest.Surface.RESOURCE_SURFACE_CATALOG,
+                            GovernedPlatformRequest.parseOptionalBaseUri(requestBaseUrl),
+                            targetUri,
+                            tenantId,
+                            userId,
+                            environment));
             HttpResponse<String> response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 400) {
                 return failure(

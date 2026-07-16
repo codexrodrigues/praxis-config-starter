@@ -983,9 +983,9 @@ public class AgenticAuthoringPreviewService {
             publishedNominalAvailability.put("allowed", nominalAvailability.path("allowed").asBoolean());
             putText(publishedNominalAvailability, "reason", nominalAvailability.path("reason").asText(""));
             if (!nominalAvailability.path("allowed").asBoolean()) {
-                grounding.put("status", "nominal-operation-unavailable");
-                putText(grounding, "availabilityReason", nominalAvailability.path("reason").asText(""));
-                return copyWithContextHints(request, contextHints);
+                removeNominalInteractions(sanitizedProjection);
+                crossFilterEnabled = false;
+                recordOpen = MissingNode.getInstance();
             }
         }
         if (crossFilterEnabled) {
@@ -1125,6 +1125,18 @@ public class AgenticAuthoringPreviewService {
         grounding.put("schemaEndpointUrl", value(schemaResult.getEndpointUrl()));
         grounding.set("projection", sanitizedProjection);
         return copyWithContextHints(request, contextHints);
+    }
+
+    private void removeNominalInteractions(ObjectNode projection) {
+        JsonNode interactions = projection.path("interactions");
+        if (interactions instanceof ObjectNode interactionObject) {
+            interactionObject.put("crossFilter", false);
+            interactionObject.remove("recordOpen");
+        }
+        JsonNode primaryDimension = projection.path("bindings").path("primaryDimension");
+        if (primaryDimension instanceof ObjectNode primaryDimensionObject) {
+            primaryDimensionObject.remove("keyFilterField");
+        }
     }
 
     private String requestedGovernedAnalyticsOperation(AgenticAuthoringPlanRequest request) {
@@ -4635,6 +4647,16 @@ public class AgenticAuthoringPreviewService {
         if (requestedField.isBlank() || "total".equals(normalize(requestedField))) {
             return;
         }
+        Optional<ComparisonOutputMetric> comparisonOutput = comparisonOutputMetric(requestedField);
+        if (comparisonOutput.isPresent()) {
+            alignComparisonOutputMetric(
+                    metric,
+                    comparisonOutput.get(),
+                    schemaFields,
+                    schemaResult,
+                    warnings);
+            return;
+        }
         Optional<SchemaFieldDescriptor> schemaField = resolveSchemaField(axisProbe(requestedField), schemaFields);
         if (schemaField.isEmpty()) {
             metric.put("schemaVerified", false);
@@ -4659,6 +4681,57 @@ public class AgenticAuthoringPreviewService {
         metric.put("schemaProbeStatus", "verified");
         metric.put("schemaEvidenceSource", "schemas.filtered");
         metric.put("schemaEvidenceUrl", schemaResult == null ? "" : value(schemaResult.getEndpointUrl()));
+    }
+
+    private void alignComparisonOutputMetric(
+            ObjectNode metric,
+            ComparisonOutputMetric output,
+            Map<String, SchemaFieldDescriptor> schemaFields,
+            SchemaFetchResult schemaResult,
+            List<String> warnings) {
+        Optional<SchemaFieldDescriptor> schemaField = schemaFields.values().stream()
+                .filter(field -> normalize(field.name()).equals(normalize(output.sourceField())))
+                .findFirst()
+                .or(() -> resolveSchemaField(axisProbe(output.sourceField()), schemaFields));
+        if (schemaField.isEmpty()) {
+            metric.put("schemaVerified", false);
+            metric.put("schemaProbeStatus", "unsupported-derived-comparison-output");
+            addWarningOnce(warnings, "semantic-chart-metric-schema-verification-unsupported-field");
+            return;
+        }
+
+        String requestedField = metric.path("field").asText("");
+        String canonicalField = "__praxisComparison_"
+                + schemaField.get().name()
+                + "_"
+                + output.period();
+        if (!requestedField.equals(canonicalField)) {
+            metric.put("requestedField", requestedField);
+            metric.put("field", canonicalField);
+            if (normalize(metric.path("alias").asText("")).equals(normalize(requestedField))) {
+                metric.put("alias", canonicalField);
+            }
+        }
+        metric.put("schemaVerified", true);
+        metric.put("schemaProbeStatus", "verified-derived-comparison-output");
+        metric.put("schemaEvidenceSource", "schemas.filtered");
+        metric.put("schemaEvidenceUrl", schemaResult == null ? "" : value(schemaResult.getEndpointUrl()));
+    }
+
+    private Optional<ComparisonOutputMetric> comparisonOutputMetric(String field) {
+        String prefix = "__praxisComparison_";
+        if (field == null || !field.startsWith(prefix)) {
+            return Optional.empty();
+        }
+        for (String period : List.of("current", "previous")) {
+            String suffix = "_" + period;
+            if (field.endsWith(suffix) && field.length() > prefix.length() + suffix.length()) {
+                return Optional.of(new ComparisonOutputMetric(
+                        field.substring(prefix.length(), field.length() - suffix.length()),
+                        period));
+            }
+        }
+        return Optional.empty();
     }
 
     private void repairCountAggregationForNumericMetric(
@@ -5968,6 +6041,9 @@ public class AgenticAuthoringPreviewService {
             boolean distributionHistogramEligible,
             boolean metricFieldEligible,
             boolean keyAndLabelDistinct) {
+    }
+
+    private record ComparisonOutputMetric(String sourceField, String period) {
     }
 
     private enum ChartInteractionValueShape {

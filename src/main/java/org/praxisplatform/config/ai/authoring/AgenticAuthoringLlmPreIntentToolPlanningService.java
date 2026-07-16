@@ -17,6 +17,7 @@ import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiProviderCallException;
 import org.praxisplatform.config.service.AiProviderManagementService;
+import org.praxisplatform.config.service.DomainCatalogPromptContextService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.StringUtils;
@@ -36,6 +37,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
 
     private final AiProviderManagementService providerManagementService;
     private final ObjectMapper objectMapper;
+    private final DomainCatalogPromptContextService domainCatalogPromptContextService;
     private final int planningBudgetSeconds;
     private final int providerAttempts;
     private final long providerRetryDelayMs;
@@ -43,14 +45,32 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     public AgenticAuthoringLlmPreIntentToolPlanningService(
             AiProviderManagementService providerManagementService,
             ObjectMapper objectMapper) {
-        this(providerManagementService, objectMapper, DEFAULT_PLANNING_BUDGET_SECONDS);
+        this(providerManagementService, objectMapper, null);
+    }
+
+    public AgenticAuthoringLlmPreIntentToolPlanningService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            DomainCatalogPromptContextService domainCatalogPromptContextService) {
+        this(
+                providerManagementService,
+                objectMapper,
+                domainCatalogPromptContextService,
+                DEFAULT_PLANNING_BUDGET_SECONDS,
+                DEFAULT_PROVIDER_ATTEMPTS,
+                DEFAULT_PROVIDER_RETRY_DELAY_MS);
     }
 
     AgenticAuthoringLlmPreIntentToolPlanningService(
             AiProviderManagementService providerManagementService,
             ObjectMapper objectMapper,
             int planningBudgetSeconds) {
-        this(providerManagementService, objectMapper, planningBudgetSeconds, DEFAULT_PROVIDER_ATTEMPTS,
+        this(
+                providerManagementService,
+                objectMapper,
+                null,
+                planningBudgetSeconds,
+                DEFAULT_PROVIDER_ATTEMPTS,
                 DEFAULT_PROVIDER_RETRY_DELAY_MS);
     }
 
@@ -60,10 +80,27 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             int planningBudgetSeconds,
             int providerAttempts,
             long providerRetryDelayMs) {
+        this(
+                providerManagementService,
+                objectMapper,
+                null,
+                planningBudgetSeconds,
+                providerAttempts,
+                providerRetryDelayMs);
+    }
+
+    AgenticAuthoringLlmPreIntentToolPlanningService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            DomainCatalogPromptContextService domainCatalogPromptContextService,
+            int planningBudgetSeconds,
+            int providerAttempts,
+            long providerRetryDelayMs) {
         this.providerManagementService = Objects.requireNonNull(
                 providerManagementService,
                 "providerManagementService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.domainCatalogPromptContextService = domainCatalogPromptContextService;
         this.planningBudgetSeconds = planningBudgetSeconds > 0
                 ? planningBudgetSeconds
                 : DEFAULT_PLANNING_BUDGET_SECONDS;
@@ -90,7 +127,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         if (hasResourceDiscoveryContext(request)) {
             return AgenticAuthoringPreIntentToolPlanningResult.skipped("resource-discovery-context-present");
         }
-        String prompt = prompt(request);
+        String prompt = prompt(request, principalContext);
         AiJsonSchema jsonSchema = AiJsonSchema.ofSchema(schema());
         String tenantId = principalContext == null ? null : principalContext.tenantId();
         String userId = principalContext == null ? null : principalContext.userId();
@@ -283,7 +320,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         return error == null ? "RuntimeException" : error.getClass().getSimpleName();
     }
 
-    private String prompt(AgenticAuthoringTurnStreamRequest request) {
+    private String prompt(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext) {
         ObjectNode context = objectMapper.createObjectNode();
         context.put("schemaVersion", "praxis-agentic-authoring-pre-intent-planning-context.v1");
         putProjectedUserPrompt(context, request.userPrompt());
@@ -292,6 +331,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         context.put("currentRoute", valueOrEmpty(request.currentRoute()));
         context.set("currentPage", compactCurrentPage(request.currentPage()));
         context.set("contextHints", compactContextHints(request.contextHints()));
+        String governedDomainContext = governedDomainContext(request, principalContext);
         return """
                 Praxis pre-intent tool planner. Decide semantically and without keyword routing whether to run
                 searchApiResources before authoring. Use the tool when governed resources, fields, datasets or
@@ -317,7 +357,45 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 regions such as filters, KPIs, multiple charts and a detail/list/table surface. Use artifactKind page
                 for general layout or content composition where analytics are not the dominant requested outcome.
                 Context JSON: %s
-                """.formatted(context.toString());
+                %s
+                """.formatted(context.toString(), governedDomainContext);
+    }
+
+    private String governedDomainContext(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext) {
+        if (domainCatalogPromptContextService == null
+                || request == null
+                || principalContext == null
+                || !StringUtils.hasText(principalContext.tenantId())
+                || !StringUtils.hasText(principalContext.environment())) {
+            return "";
+        }
+        try {
+            return domainCatalogPromptContextService.buildPromptContext(
+                    request.userPrompt(),
+                    preIntentDomainCatalogContextHints(request.contextHints()),
+                    principalContext.tenantId(),
+                    principalContext.environment());
+        } catch (RuntimeException ex) {
+            log.debug(
+                    "[AgenticAuthoringPreIntentToolPlanning] Governed domain context unavailable; tenant={} environment={} failure={}",
+                    principalContext.tenantId(),
+                    principalContext.environment(),
+                    ex.getClass().getSimpleName());
+            return "";
+        }
+    }
+
+    private JsonNode preIntentDomainCatalogContextHints(JsonNode contextHints) {
+        ObjectNode governedHints = contextHints != null && contextHints.isObject()
+                ? ((ObjectNode) contextHints).deepCopy()
+                : objectMapper.createObjectNode();
+        if (!governedHints.path("domainCatalog").isObject()
+                && !hasText(governedHints, "domainCatalogServiceKey")) {
+            governedHints.putObject("domainCatalog").put("enabled", true);
+        }
+        return governedHints;
     }
 
     private void putProjectedUserPrompt(ObjectNode context, String userPrompt) {

@@ -4659,7 +4659,9 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.any(),
                 Mockito.any(),
                 Mockito.anyList(),
-                Mockito.any()))
+                Mockito.any(),
+                Mockito.eq("tenant"),
+                Mockito.eq("local")))
                 .thenReturn(diagnosticSnapshot);
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
@@ -4669,22 +4671,26 @@ class AgenticAuthoringIntentResolverServiceTest {
         ObjectNode contextHints = objectMapper.createObjectNode();
         contextHints.put("includeLlmDiagnostics", true);
 
-        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
-                "Crie um dashboard executivo de folha de pagamento por departamento",
-                "praxis-ui-angular",
-                "praxis-dynamic-page-builder",
-                "/page-builder-ia",
-                objectMapper.createObjectNode(),
-                null,
-                "mock",
-                null,
-                null,
-                "session-1",
-                "turn-1",
-                List.of(),
-                null,
-                List.of(),
-                contextHints));
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Crie um dashboard executivo de folha de pagamento por departamento",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "mock",
+                        null,
+                        null,
+                        "session-1",
+                        "turn-1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints),
+                "tenant",
+                "user",
+                "local");
 
         assertThat(result.llmDiagnostics()).isNotNull();
         assertThat(result.llmDiagnostics().path("enabled").asBoolean()).isTrue();

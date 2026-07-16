@@ -3,6 +3,8 @@ package org.praxisplatform.config.rag;
 public final class RagMetadataKeys {
     public static final String RESOURCE_TYPE = "resourceType";
     public static final String RESOURCE_ID = "resourceId";
+    public static final String RESOURCE_KEY = "resourceKey";
+    public static final String SERVICE_KEY = "serviceKey";
     public static final String VERSION = "version";
     public static final String TENANT_ID = "tenantId";
     public static final String ENVIRONMENT = "environment";
@@ -42,7 +44,7 @@ public final class RagMetadataKeys {
     public static final String DOMAIN_KNOWLEDGE_EVIDENCE_STATUS = "domainKnowledgeEvidenceStatus";
     public static final String AI_VISIBILITY = "aiVisibility";
     public static final String CONTEXT_KEY = "contextKey";
-    public static final String RESOURCE_KEY = "resourceKey";
+    public static final String NODE_TYPE = "nodeType";
 
     private RagMetadataKeys() {
     }

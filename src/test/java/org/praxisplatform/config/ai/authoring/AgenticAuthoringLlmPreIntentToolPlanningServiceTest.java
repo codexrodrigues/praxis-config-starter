@@ -21,6 +21,7 @@ import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiProviderCallException;
 import org.praxisplatform.config.service.AiProviderManagementService;
+import org.praxisplatform.config.service.DomainCatalogPromptContextService;
 
 @ExtendWith(MockitoExtension.class)
 @Tag("unit")
@@ -28,6 +29,9 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
 
     @Mock
     private AiProviderManagementService providerManagementService;
+
+    @Mock
+    private DomainCatalogPromptContextService domainCatalogPromptContextService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -93,6 +97,103 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("collection dashboard with filters, charts, and a detail table");
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(7);
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(640);
+    }
+
+    @Test
+    void includesTenantScopedGovernedDomainContextBeforePreIntentPlanning() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<JsonNode> contextHintsCaptor = ArgumentCaptor.forClass(JsonNode.class);
+        AgenticAuthoringTurnStreamRequest request = request(
+                "crie um painel de afastamentos",
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode().put("source", "page-builder"));
+        when(domainCatalogPromptContextService.buildPromptContext(
+                eq("crie um painel de afastamentos"),
+                contextHintsCaptor.capture(),
+                eq("tenant"),
+                eq("local")))
+                .thenReturn("""
+                        DOMAIN_CATALOG_CONTEXT
+                        schemaVersion: praxis.domain-catalog.context.v1
+                        serviceKey: praxis-service
+                        """);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                          "shouldRetrieveGovernedResources": true,
+                          "artifactKind": "dashboard",
+                          "retrievalQuery": "afastamentos por departamento",
+                          "reason": "O painel depende de dados governados de afastamentos."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        domainCatalogPromptContextService);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request,
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(promptCaptor.getValue())
+                .contains("praxis-agentic-authoring-pre-intent-planning-context.v1")
+                .contains("DOMAIN_CATALOG_CONTEXT")
+                .contains("serviceKey: praxis-service");
+        assertThat(contextHintsCaptor.getValue().path("source").asText()).isEqualTo("page-builder");
+        assertThat(contextHintsCaptor.getValue().path("domainCatalog").path("enabled").asBoolean()).isTrue();
+        assertThat(request.contextHints().has("domainCatalog")).isFalse();
+    }
+
+    @Test
+    void preservesExplicitDomainCatalogOptOutBeforePreIntentPlanning() throws Exception {
+        ArgumentCaptor<JsonNode> contextHintsCaptor = ArgumentCaptor.forClass(JsonNode.class);
+        AgenticAuthoringTurnStreamRequest request = request(
+                "ajuste apenas o espaçamento visual",
+                objectMapper.createObjectNode(),
+                objectMapper.readTree("""
+                        {
+                          "domainCatalog": {
+                            "enabled": false
+                          }
+                        }
+                        """));
+        when(domainCatalogPromptContextService.buildPromptContext(
+                eq("ajuste apenas o espaçamento visual"),
+                contextHintsCaptor.capture(),
+                eq("tenant"),
+                eq("local"))).thenReturn("");
+        when(providerManagementService.generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                          "shouldRetrieveGovernedResources": false,
+                          "artifactKind": "page",
+                          "reason": "A mudança é apenas visual."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        domainCatalogPromptContextService);
+
+        service.plan(request, new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(contextHintsCaptor.getValue().path("domainCatalog").path("enabled").asBoolean()).isFalse();
     }
 
     @Test

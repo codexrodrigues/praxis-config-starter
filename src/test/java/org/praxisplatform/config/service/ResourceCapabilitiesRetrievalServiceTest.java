@@ -11,6 +11,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -61,6 +62,44 @@ class ResourceCapabilitiesRetrievalServiceTest {
                 .isEqualTo("departamento");
         assertThat(requests).containsExactly("/api/human-resources/funcionarios/capabilities");
         assertThat(tenants).containsExactly("tenant-a");
+    }
+
+    @Test
+    void appliesOpaqueAuthorizationFromTheHostProvider() throws Exception {
+        List<String> authorizations = new ArrayList<>();
+        List<GovernedPlatformRequest> contexts = new ArrayList<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/human-resources/vw-analytics-afastamentos/capabilities", exchange -> {
+            authorizations.add(exchange.getRequestHeaders().getFirst("Authorization"));
+            writeJson(exchange, 200, "{\"resourcePath\":\"/api/human-resources/vw-analytics-afastamentos\"}");
+        });
+        server.start();
+        String baseUrl = "http://localhost:" + server.getAddress().getPort();
+
+        ResourceCapabilitiesRetrievalService service = new ResourceCapabilitiesRetrievalService(
+                new ObjectMapper(),
+                baseUrl,
+                5_000L,
+                context -> {
+                    contexts.add(context);
+                    return Optional.of("Bearer governed-test-token");
+                });
+
+        ResourceCapabilitiesFetchResult result = service.fetchCapabilitiesResult(
+                "/api/human-resources/vw-analytics-afastamentos",
+                baseUrl,
+                "tenant-a",
+                "admin",
+                "local");
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(authorizations).containsExactly("Bearer governed-test-token");
+        assertThat(contexts).singleElement().satisfies(context -> {
+            assertThat(context.surface())
+                    .isEqualTo(GovernedPlatformRequest.Surface.RESOURCE_CAPABILITIES);
+            assertThat(context.isSameOrigin()).isTrue();
+            assertThat(context.userId()).isEqualTo("admin");
+        });
     }
 
     @Test

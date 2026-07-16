@@ -29,6 +29,7 @@ import org.praxisplatform.config.dto.DomainCatalogRagStatusResponse;
 import org.praxisplatform.config.dto.DomainCatalogReleaseResponse;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.rag.RagDocumentIdentity;
+import org.praxisplatform.config.rag.RagFilters;
 import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
@@ -36,6 +37,8 @@ import org.praxisplatform.config.repository.DomainCatalogItemRepository;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.vectorstore.filter.Filter;
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -453,6 +456,44 @@ public class DomainCatalogIngestionService {
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public DomainCatalogContextResponse contextLatestSemantic(
+            String serviceKey,
+            String resourceKey,
+            String tenantId,
+            String environment,
+            String itemType,
+            String contextKey,
+            String nodeType,
+            String query,
+            int limit) {
+        int resolvedLimit = Math.min(Math.max(limit, 1), 200);
+        List<DomainCatalogRelease> releases = latestReleasesForScope(
+                serviceKey,
+                tenantId,
+                environment,
+                resourceKey);
+        List<DomainCatalogItemResponse> items = semanticContextItems(
+                releases,
+                tenantId,
+                environment,
+                itemType,
+                contextKey,
+                nodeType,
+                query,
+                resolvedLimit);
+        boolean scopedSingleRelease = StringUtils.hasText(normalize(serviceKey)) && releases.size() == 1;
+        return new DomainCatalogContextResponse(
+                "praxis.domain-catalog-context/v0.1",
+                scopedSingleRelease ? toReleaseResponse(releases.get(0)) : null,
+                normalize(query),
+                normalize(itemType),
+                normalize(contextKey),
+                normalize(nodeType),
+                retrievalGuidance(!scopedSingleRelease),
+                governedContextItems(items));
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<DomainCatalogItemResponse> relationshipsLatest(
             String serviceKey,
             String tenantId,
@@ -572,9 +613,13 @@ public class DomainCatalogIngestionService {
             Map<String, Object> metadata = new LinkedHashMap<>();
             metadata.put(RagMetadataKeys.RESOURCE_TYPE, RagResourceTypes.DOMAIN_CATALOG);
             metadata.put(RagMetadataKeys.RESOURCE_ID, item.getItemKey());
+            metadata.put(RagMetadataKeys.RESOURCE_KEY, release.getResourceKey());
+            metadata.put(RagMetadataKeys.SERVICE_KEY, release.getServiceKey());
             metadata.put(RagMetadataKeys.COMPONENT_ID, item.getItemKey());
             metadata.put(RagMetadataKeys.DOC_TYPE, item.getItemType());
-            metadata.put(RagMetadataKeys.RELEASE_ID, release.getReleaseKey());
+            metadata.put(RagMetadataKeys.CONTEXT_KEY, item.getContextKey());
+            metadata.put(RagMetadataKeys.NODE_TYPE, item.getNodeType());
+            metadata.put(RagMetadataKeys.RELEASE_ID, ragReleaseId(release));
             metadata.put(RagMetadataKeys.CONTENT_HASH, contentHash);
             metadata.put(RagMetadataKeys.CHUNK_INDEX, 0);
             metadata.put(RagMetadataKeys.TENANT_ID, release.getTenantId());
@@ -649,6 +694,151 @@ public class DomainCatalogIngestionService {
             asyncTask.run();
         }
         log.debug("Scheduled asynchronous domain catalog RAG publication for release {}", release.getReleaseKey());
+    }
+
+    private List<DomainCatalogItemResponse> semanticContextItems(
+            List<DomainCatalogRelease> releases,
+            String tenantId,
+            String environment,
+            String itemType,
+            String contextKey,
+            String nodeType,
+            String query,
+            int limit) {
+        if (!domainCatalogRagPublicationEnabled
+                || !ragVectorStoreService.isAvailable()
+                || !StringUtils.hasText(query)
+                || releases == null
+                || releases.isEmpty()) {
+            return List.of();
+        }
+        try {
+            Filter.Expression filter = semanticContextFilter(
+                    releases,
+                    tenantId,
+                    environment,
+                    itemType,
+                    contextKey,
+                    nodeType);
+            List<Document> documents = ragVectorStoreService.search(query, limit, filter);
+            if (documents == null || documents.isEmpty()) {
+                return List.of();
+            }
+            Map<String, DomainCatalogItemResponse> itemsByDocumentIdentity = new LinkedHashMap<>();
+            for (DomainCatalogRelease release : releases) {
+                for (DomainCatalogItem item : itemRepository.findByRelease(release)) {
+                    if (matchesSemanticContextItem(item, itemType, contextKey, nodeType)) {
+                        DomainCatalogItemResponse response = toResponse(item);
+                        itemsByDocumentIdentity.put(
+                                semanticDocumentIdentity(
+                                        ragReleaseId(release),
+                                        item.getItemType(),
+                                        item.getItemKey()),
+                                response);
+                    }
+                }
+            }
+            List<DomainCatalogItemResponse> rankedItems = new ArrayList<>();
+            for (Document document : documents) {
+                DomainCatalogItemResponse item = itemsByDocumentIdentity.get(semanticDocumentIdentity(
+                        documentMetadata(document, RagMetadataKeys.RELEASE_ID),
+                        documentMetadata(document, RagMetadataKeys.DOC_TYPE),
+                        documentMetadata(document, RagMetadataKeys.RESOURCE_ID)));
+                if (item != null) {
+                    rankedItems.add(item);
+                }
+            }
+            return rankedItems.stream().limit(limit).toList();
+        } catch (RuntimeException ex) {
+            log.warn(
+                    "Could not retrieve semantic domain catalog context for tenant={}, environment={}: {}",
+                    normalize(tenantId),
+                    normalize(environment),
+                    ex.getClass().getSimpleName());
+            return List.of();
+        }
+    }
+
+    private Filter.Expression semanticContextFilter(
+            List<DomainCatalogRelease> releases,
+            String tenantId,
+            String environment,
+            String itemType,
+            String contextKey,
+            String nodeType) {
+        FilterExpressionBuilder builder = new FilterExpressionBuilder();
+        FilterExpressionBuilder.Op filter = builder.eq(
+                RagMetadataKeys.RESOURCE_TYPE,
+                RagResourceTypes.DOMAIN_CATALOG);
+        FilterExpressionBuilder.Op scope = RagFilters.buildTenantEnvironmentFilter(
+                builder,
+                tenantId,
+                environment);
+        if (scope != null) {
+            filter = builder.and(filter, scope);
+        }
+        FilterExpressionBuilder.Op releaseFilter = null;
+        for (DomainCatalogRelease release : releases) {
+            FilterExpressionBuilder.Op candidate = builder.eq(
+                    RagMetadataKeys.RELEASE_ID,
+                    ragReleaseId(release));
+            releaseFilter = releaseFilter == null
+                    ? candidate
+                    : builder.or(releaseFilter, candidate);
+        }
+        filter = builder.and(filter, releaseFilter);
+        if (StringUtils.hasText(normalize(itemType))) {
+            filter = builder.and(filter, builder.eq(RagMetadataKeys.DOC_TYPE, normalize(itemType)));
+        }
+        if (StringUtils.hasText(normalize(contextKey))) {
+            filter = builder.and(filter, builder.eq(RagMetadataKeys.CONTEXT_KEY, normalize(contextKey)));
+        }
+        if (StringUtils.hasText(normalize(nodeType))) {
+            filter = builder.and(filter, builder.eq(RagMetadataKeys.NODE_TYPE, normalize(nodeType)));
+        }
+        return filter.build();
+    }
+
+    private boolean matchesSemanticContextItem(
+            DomainCatalogItem item,
+            String itemType,
+            String contextKey,
+            String nodeType) {
+        return item != null
+                && isRagIndexable(item)
+                && matchesOptionalValue(item.getItemType(), itemType)
+                && matchesOptionalValue(item.getContextKey(), contextKey)
+                && matchesOptionalValue(item.getNodeType(), nodeType);
+    }
+
+    private boolean matchesOptionalValue(String value, String expected) {
+        String normalizedExpected = normalize(expected);
+        return !StringUtils.hasText(normalizedExpected)
+                || Objects.equals(normalize(value), normalizedExpected);
+    }
+
+    private String semanticDocumentIdentity(String releaseKey, String itemType, String itemKey) {
+        return String.join(
+                "\u0000",
+                Objects.toString(releaseKey, ""),
+                Objects.toString(itemType, ""),
+                Objects.toString(itemKey, ""));
+    }
+
+    private String documentMetadata(Document document, String key) {
+        if (document == null || document.getMetadata() == null) {
+            return "";
+        }
+        return Objects.toString(document.getMetadata().get(key), "");
+    }
+
+    private String ragReleaseId(DomainCatalogRelease release) {
+        return RagDocumentIdentity.resolveReleaseId(
+                release == null ? null : release.getReleaseKey(),
+                release == null ? null : release.getSchemaVersion(),
+                release == null || release.getGeneratedAt() == null
+                        ? null
+                        : release.getGeneratedAt().toString());
     }
 
     private ExecutorService createRagPublicationExecutor() {
