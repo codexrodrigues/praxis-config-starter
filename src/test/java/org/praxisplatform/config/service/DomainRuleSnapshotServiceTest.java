@@ -22,12 +22,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
+import org.praxisplatform.config.domain.DomainRuleCompositionApproval;
 import org.praxisplatform.config.domain.DomainRuleSnapshot;
 import org.praxisplatform.config.domain.DomainRuleSnapshotHead;
 import org.praxisplatform.config.dto.DomainRuleSnapshotPublicationRequest;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestRequest;
 import org.praxisplatform.config.exception.DomainRuleSnapshotControlPlaneException;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.praxisplatform.config.repository.DomainRuleCompositionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
@@ -61,6 +63,8 @@ class DomainRuleSnapshotServiceTest {
   private final DomainRuleSnapshotRepository snapshotRepository = mock(DomainRuleSnapshotRepository.class);
   private final DomainRuleSnapshotHeadRepository headRepository = mock(DomainRuleSnapshotHeadRepository.class);
   private final DomainRuleSnapshotEventRepository eventRepository = mock(DomainRuleSnapshotEventRepository.class);
+  private final DomainRuleCompositionApprovalRepository compositionApprovalRepository =
+      mock(DomainRuleCompositionApprovalRepository.class);
   private final ObjectMapper objectMapper = new ObjectMapper();
   private final DomainRuleImplementationCatalog implementationCatalog = mock(
       DomainRuleImplementationCatalog.class);
@@ -73,6 +77,7 @@ class DomainRuleSnapshotServiceTest {
         snapshotRepository,
         headRepository,
         eventRepository,
+        compositionApprovalRepository,
         objectMapper,
         implementationCatalog);
     when(implementationCatalog.allowedImplementations(any())).thenReturn(List.of(
@@ -163,7 +168,12 @@ class DomainRuleSnapshotServiceTest {
   @Test
   void javaPublicationFailsClosedWhenHostProvidesNoExternalCatalog() {
     service = new DomainRuleSnapshotService(
-        definitionRepository, snapshotRepository, headRepository, eventRepository, objectMapper);
+        definitionRepository,
+        snapshotRepository,
+        headRepository,
+        eventRepository,
+        compositionApprovalRepository,
+        objectMapper);
     UUID firstId = UUID.randomUUID();
     UUID secondId = UUID.randomUUID();
     prepareFirstPublication(firstId, secondId);
@@ -497,8 +507,7 @@ class DomainRuleSnapshotServiceTest {
     DomainRuleSnapshotPublicationRequest approved = publicationRequest(ruleSet(), ids);
     DomainRuleSnapshotPublicationRequest drifted = new DomainRuleSnapshotPublicationRequest(
         javaRuleSet(), ids, approved.ownerServiceKey(), approved.requiredHostContractVersion(),
-        approved.validFromUtc(), approved.validUntilUtc(), approved.compositionDigest(),
-        approved.compositionApprovals(), approved.publishedBy());
+        approved.validFromUtc(), approved.validUntilUtc(), approved.compositionDigest());
 
     assertThatThrownBy(() -> service.publish(drifted, "tenant-a", "prod", null, "*"))
         .isInstanceOf(DomainRuleSnapshotControlPlaneException.class)
@@ -599,10 +608,10 @@ class DomainRuleSnapshotServiceTest {
     DomainRuleSnapshotPublicationRequest approved = publicationRequest(ruleSet(), ids);
     DomainRuleSnapshotPublicationRequest conflicted = new DomainRuleSnapshotPublicationRequest(
         approved.ruleSet(), ids, approved.ownerServiceKey(), approved.requiredHostContractVersion(),
-        approved.validFromUtc(), approved.validUntilUtc(), approved.compositionDigest(),
-        approved.compositionApprovals(), "composition-approver-a");
+        approved.validFromUtc(), approved.validUntilUtc(), approved.compositionDigest());
 
-    assertThatThrownBy(() -> service.publish(conflicted, "tenant-a", "prod", null, "*"))
+    assertThatThrownBy(() -> service.publish(
+        conflicted, "tenant-a", "prod", null, "*", "composition-approver-a"))
         .isInstanceOf(DomainRuleSnapshotControlPlaneException.class)
         .hasMessageContaining("publisher cannot approve");
   }
@@ -633,23 +642,74 @@ class DomainRuleSnapshotServiceTest {
     var manifest = service.prepareCompositionManifest(new DomainRuleCompositionManifestRequest(
         definition, sourceIds, "quickstart", "quickstart/1.0",
         "2026-07-13T20:00:00Z", null), "tenant-a", "prod");
-    String decidedAt = Instant.now().minusSeconds(1).toString();
+    Instant decidedAt = Instant.now().minusSeconds(1);
+    when(compositionApprovalRepository
+        .findByTenantIdAndEnvironmentAndCompositionDigestOrderByApprovedAtAsc(
+            "tenant-a", "prod", manifest.compositionDigest()))
+        .thenReturn(List.of(
+            compositionApproval("composition-approver-a", manifest.compositionDigest(), decidedAt),
+            compositionApproval("composition-approver-b", manifest.compositionDigest(), decidedAt)));
     return new DomainRuleSnapshotPublicationRequest(
         definition, sourceIds, "quickstart", "quickstart/1.0",
-        "2026-07-13T20:00:00Z", null, manifest.compositionDigest(),
-        List.of(
-            new RuleSnapshotApproval("composition-a", "RULE_COMPOSITION_APPROVER",
-                "composition-approver-a", decidedAt, manifest.compositionDigest()),
-            new RuleSnapshotApproval("composition-b", "RULE_COMPOSITION_APPROVER",
-                "composition-approver-b", decidedAt, manifest.compositionDigest())),
-        "release-manager");
+        "2026-07-13T20:00:00Z", null, manifest.compositionDigest());
   }
 
   private DomainRuleSnapshotPublicationRequest unapprovedRequest(
       RuleSetDefinition definition, List<UUID> sourceIds) {
     return new DomainRuleSnapshotPublicationRequest(
         definition, sourceIds, "quickstart", "quickstart/1.0",
-        "2026-07-13T20:00:00Z", null, "0".repeat(64), List.of(), "release-manager");
+        "2026-07-13T20:00:00Z", null, "0".repeat(64));
+  }
+
+  @Test
+  void compositionApprovalIsServerTimedIamBoundAndIdempotentPerActor() {
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    List<UUID> ids = List.of(firstId, secondId);
+    when(definitionRepository.findAllById(ids)).thenReturn(List.of(
+        approvedDefinition(firstId, "grant:eligibility", "approver-a"),
+        approvedDefinition(secondId, "grant:amount", "approver-b")));
+    DomainRuleCompositionManifestRequest request = new DomainRuleCompositionManifestRequest(
+        ruleSet(), ids, "quickstart", "quickstart/1.0",
+        "2026-07-13T20:00:00Z", null);
+    when(compositionApprovalRepository
+        .findByTenantIdAndEnvironmentAndCompositionDigestAndActorRef(
+            any(), any(), any(), any()))
+        .thenReturn(Optional.empty())
+        .thenAnswer(invocation -> Optional.of(compositionApproval(
+            invocation.getArgument(3), invocation.getArgument(2), Instant.now())));
+
+    var first = service.approveComposition(request, "tenant-a", "prod", "iam-approver-a");
+    DomainRuleCompositionApproval stored = compositionApproval(
+        first.actorRef(), first.evidenceHash(), Instant.parse(first.decidedAtUtc()));
+    stored.setId(UUID.fromString(first.approvalKey()));
+    when(compositionApprovalRepository
+        .findByTenantIdAndEnvironmentAndCompositionDigestAndActorRef(
+            "tenant-a", "prod", first.evidenceHash(), "iam-approver-a"))
+        .thenReturn(Optional.of(stored));
+
+    var repeated = service.approveComposition(request, "tenant-a", "prod", "iam-approver-a");
+
+    assertThat(first.actorRef()).isEqualTo("iam-approver-a");
+    assertThat(first.role()).isEqualTo("RULE_COMPOSITION_APPROVER");
+    assertThat(first.evidenceHash()).matches("[A-F0-9]{64}");
+    assertThat(repeated).isEqualTo(first);
+    verify(compositionApprovalRepository, times(1)).insertIfAbsent(
+        any(), any(), any(), any(), any(), any(), any());
+  }
+
+  private DomainRuleCompositionApproval compositionApproval(
+      String actor, String digest, Instant approvedAt) {
+    return DomainRuleCompositionApproval.builder()
+        .id(UUID.randomUUID())
+        .tenantId("tenant-a")
+        .environment("prod")
+        .compositionDigest(digest)
+        .actorRef(actor)
+        .role("RULE_COMPOSITION_APPROVER")
+        .manifest("{}")
+        .approvedAt(approvedAt)
+        .build();
   }
 
   private DomainRuleDefinition approvedDefinition(UUID id, String ruleKey, String approver) {

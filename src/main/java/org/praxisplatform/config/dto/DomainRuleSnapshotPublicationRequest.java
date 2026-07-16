@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.UUID;
 import io.swagger.v3.oas.annotations.media.Schema;
 import org.praxisplatform.rules.contract.RuleSetDefinition;
-import org.praxisplatform.rules.contract.RuleSnapshotApproval;
 
 /** Deliberate request to publish and activate an immutable governed RuleSet snapshot. */
 @Schema(description = "Governed request that composes approved rule definitions into one immutable executable RuleSet snapshot.")
@@ -22,8 +21,4 @@ public record DomainRuleSnapshotPublicationRequest(
     @Schema(description = "Optional exclusive UTC instant after which the snapshot is no longer eligible for evaluation.", example = "2027-01-01T00:00:00Z")
     String validUntilUtc,
     @Schema(description = "Exact SHA-256 returned by the composition-manifest endpoint for this unchanged candidate.", requiredMode = Schema.RequiredMode.REQUIRED)
-    String compositionDigest,
-    @Schema(description = "At least two distinct composition approvals whose evidenceHash equals compositionDigest.", requiredMode = Schema.RequiredMode.REQUIRED)
-    List<RuleSnapshotApproval> compositionApprovals,
-    @Schema(description = "Safe actor reference accountable for the publication; credentials and raw principal payloads are forbidden.", example = "release-manager", requiredMode = Schema.RequiredMode.REQUIRED)
-    String publishedBy) {}
+    String compositionDigest) {}

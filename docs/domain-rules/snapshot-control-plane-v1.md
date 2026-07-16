@@ -37,8 +37,10 @@ content is an activation/rollback operation, not a second publication.
 ## HTTP contract
 
 - `POST /api/praxis/config/domain-rules/snapshots`
-  - requires the exact server-generated `compositionDigest` and at least two
-    distinct `RULE_COMPOSITION_APPROVER` decisions over that digest;
+  - requires the exact server-generated `compositionDigest` and loads at least
+    two distinct persisted `RULE_COMPOSITION_APPROVER` decisions over it;
+  - resolves the publisher from server authentication and requires
+    `RULE_SNAPSHOT_PUBLISHER`; publisher identity is not a payload field;
   - rejects source, RuleSet, validity, host-contract or planning-catalog drift;
   - initial publication requires `If-None-Match: *`;
   - later publications require a strong `If-Match` with the current head ETag.
@@ -46,6 +48,13 @@ content is an activation/rollback operation, not a second publication.
   - resolves approved source hashes and the host admission catalog;
   - validates the candidate and returns the canonical manifest and SHA-256 to
     present to composition approvers.
+- `POST /api/praxis/config/domain-rules/snapshots/composition-approvals`
+  - receives the complete candidate, recomputes its canonical manifest and
+    appends one approval for the authenticated `RULE_COMPOSITION_APPROVER`;
+  - assigns actor and timestamp server-side and is idempotent for the same
+    tenant, environment, digest and actor;
+  - must be called independently by each approver. A publication payload cannot
+    declare or aggregate approver identities.
 - `GET /api/praxis/config/domain-rules/snapshots/head?ruleSetKey=...`
   - returns `Cache-Control: no-cache` and the mutable head ETag;
   - accepts `If-None-Match` and may return `304`.
@@ -59,12 +68,17 @@ content is an activation/rollback operation, not a second publication.
   - is private-cacheable and immutable.
 - `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/rollback`
   - requires a strong current-head `If-Match`;
+  - resolves the actor from server authentication and requires
+    `RULE_SNAPSHOT_OPERATOR`;
   - selects an older, currently valid immutable publication, rotates the head
     ETag and appends an audit event. It never rewrites or republishes the target
     snapshot. Selecting a newer publication is a roll-forward and is rejected by
     this rollback endpoint.
 
-All operations require explicit `X-Tenant-ID` and `X-Env`. Publication requires
+Read operations require explicit `X-Tenant-ID` and `X-Env`. In corporate mode,
+approval, publication and rollback derive tenant, environment and actor from the
+server principal; header values are only hints and cannot replace authenticated
+scope. Publication requires
 approved source definitions with approval timestamps and at least two distinct
 approvers. Source hashes and safe approval evidence become part of the immutable
 snapshot envelope.
@@ -74,8 +88,9 @@ snapshot envelope.
 The selected design is an explicit canonical composition manifest. Its digest
 covers tenant/environment, owner and host contract, validity, approved source
 hashes, the complete RuleSet and the host-governed admission catalog. Publication
-rebuilds that manifest in the same transaction and requires two distinct
-composition approvers; the publisher cannot be one of them.
+rebuilds that manifest in the same transaction and loads two distinct,
+append-only approvals created in independent authenticated calls; the
+authenticated publisher cannot be one of them.
 
 The manifest JSON and digest are persisted beside the immutable snapshot and
 verified on read and rollback. Pre-existing beta snapshots are retained for audit by migration V33
@@ -85,9 +100,12 @@ itself is never promoted, rewritten or accepted as governed content. Supersessio
 preserved envelope identity but does not require the current engine to compile an obsolete runtime
 baseline; complete compilation, composition and hash checks apply to the new candidate.
 
-This closes structural approval-to-composition binding. Corporate authority
-still requires actor identities and roles to come from authenticated IAM claims,
-not request-body references; that remains a separate security gate.
+This closes composition maker-checker identity: approval, publication and
+rollback actors come from server authentication, and corporate mode fails closed
+unless the request has the required IAM role. Host security remains responsible
+for mapping its authorities to the three role names. The older shared-definition
+authoring lifecycle is a separate contract and must complete the same IAM
+binding before its source approvals can be classified as a full corporate proof.
 
 ## Compatibility and ownership
 

@@ -375,11 +375,16 @@ Start with these repository documents:
 - [Memory and PII guidance](docs/ai/memory-and-pii.md)
 - [Rule snapshot control plane v1](docs/domain-rules/snapshot-control-plane-v1.md)
 
-RuleSet publication is a two-step governed flow: first request
+RuleSet publication is a governed maker-checker flow: first request
 `POST /api/praxis/config/domain-rules/snapshots/composition-manifest`, obtain two
-segregated approvals over the returned digest, then publish the unchanged
-candidate with that digest. The Config Starter rejects composition or catalog
-drift and never treats caller-declared Java coordinates as an admission catalog.
+segregated approvals by having each authenticated approver call
+`POST /api/praxis/config/domain-rules/snapshots/composition-approvals`, then have
+a different authenticated publisher submit the unchanged candidate with that
+digest. In corporate mode the host must map the IAM roles
+`RULE_COMPOSITION_APPROVER`, `RULE_SNAPSHOT_PUBLISHER` and
+`RULE_SNAPSHOT_OPERATOR`; actor names sent in request bodies are not accepted.
+The Config Starter rejects composition or catalog drift and never treats
+caller-declared Java coordinates as an admission catalog.
 - [Runtime enforcement release checklist](docs/ai/runtime-enforcement-consumer-release-checklist-2026-05-02.md)
 - [Domain catalog contract](docs/domain-catalog/domain-catalog-contract-v0.2.md)
 - [Release process](RELEASING.md)
