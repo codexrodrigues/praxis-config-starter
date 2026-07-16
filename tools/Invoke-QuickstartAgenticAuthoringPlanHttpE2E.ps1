@@ -72,6 +72,11 @@ $plan = Invoke-RestMethod `
     -Body $bodyWithIntent `
     -TimeoutSec 90
 
+$artifactDir = Join-Path $root "target/agentic-authoring/minimal-form-plan-http-e2e"
+New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+$intent | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath (Join-Path $artifactDir "intent-resolution.json") -Encoding UTF8
+$plan | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath (Join-Path $artifactDir "minimal-form-plan.json") -Encoding UTF8
+
 $fields = @($plan.minimalFormPlan.fields)
 $result = [pscustomobject]@{
     health = $health.status
@@ -84,6 +89,7 @@ $result = [pscustomobject]@{
     failureCodes = @($intent.failureCodes + $plan.failureCodes)
     warningCount = @($plan.warnings).Count
 }
+$result | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $artifactDir "result.json") -Encoding UTF8
 
 if ($result.health -ne "UP") {
     throw "Quickstart health is not UP."
