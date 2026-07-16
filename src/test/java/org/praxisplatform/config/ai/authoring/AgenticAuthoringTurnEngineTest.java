@@ -8045,6 +8045,24 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(diagnostics.path("requiresReview").asBoolean()).isTrue();
         org.assertj.core.api.Assertions.assertThat(diagnostics.path("reviewReason").asText())
                 .isEqualTo("resource-schema-grounding-required");
+        com.fasterxml.jackson.databind.JsonNode repairReply = java.util.stream.StreamSupport
+                .stream(result.path("quickReplies").spliterator(), false)
+                .filter(reply -> "governed-review-revise".equals(reply.path("id").asText()))
+                .findFirst()
+                .orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(repairReply.path("id").asText())
+                .isEqualTo("governed-review-revise");
+        org.assertj.core.api.Assertions.assertThat(repairReply.path("kind").asText())
+                .isEqualTo("revise");
+        org.assertj.core.api.Assertions.assertThat(repairReply.path("contextHints").path("source").asText())
+                .isEqualTo("governed-review-gate");
+        org.assertj.core.api.Assertions.assertThat(repairReply.path("contextHints").path("kind").asText())
+                .isEqualTo("governed-review-repair");
+        org.assertj.core.api.Assertions.assertThat(repairReply.path("contextHints").path("reviewReason").asText())
+                .isEqualTo("resource-schema-grounding-required");
+        org.assertj.core.api.Assertions.assertThat(repairReply.path("contextHints").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
+        org.assertj.core.api.Assertions.assertThat(repairReply.path("semanticDecision").isObject()).isTrue();
     }
 
     @Test

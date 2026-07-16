@@ -71,7 +71,11 @@ Os testes focais bloqueiam:
 | Build `@praxisui/page-builder` | verde |
 | Build de desenvolvimento do workspace Angular | verde, apenas warnings preexistentes de template |
 | Sintaxe dos runners shell alterados | verde |
-| Matriz Playwright completa, OpenAI + Neon reais | 5 de 10 jornadas verdes; 5 bloqueadas pelo host antes do apply |
+| Primeira matriz Playwright, JAR incremental contaminado | 5 de 10 jornadas verdes; 5 bloqueadas pelo host antes do apply |
+| Matriz Playwright repetida com Quickstart limpo, OpenAI + Neon reais | 6 de 10 jornadas verdes; cockpit real aplicou o change-set com lineage terminal |
+| `AgenticAuthoringTurnEngineTest` apos o gate | 148 testes verdes |
+| Fluxo agentic do Page Builder apos o gate | 93 testes verdes |
+| Fluxo 2 focal, formulario de funcionarios com LLM real | 1 de 1 verde em 2,7 min |
 
 O gate Playwright foi executado contra backend `8088`, Angular `4003`, OpenAI e
 Neon reais. Passaram as quatro provas deterministicas de shared-rule e a
@@ -82,26 +86,42 @@ bloqueadas antes do `page-apply`: o host retornou `500` em
 `404` para um schema request nao publicado pelo host.
 
 Consequentemente, a matriz nao certifica ainda a persistencia browser-to-database
-do novo contrato. Ela certifica que o transporte e as provas independentes
-continuam operacionais e evidencia um drift de dependencias do Quickstart que
-precisa ser corrigido na fonte canonica do metadata/runtime antes de repetir a
-prova completa. O helper Playwright ja exige UUIDs validos de stream e evento no
-body de `page-apply`, portanto a repeticao falhara se o navegador tentar aplicar
-um preview sem a linhagem terminal.
+do novo contrato. A investigacao posterior descartou drift de contrato: fonte,
+metadata `8.0.0-rc.112` e Config `0.1.0-rc.81` usam os enums separados
+`AiVisibilityMode`, `AiTrainingUseMode` e `AiControlledUseMode`; nao existe
+referencia atual ao enum antigo. O JAR do primeiro gate havia sido empacotado
+incrementalmente sobre um `target` de outra revisao. Depois de `mvn clean
+package`, as cinco provas isoladas de metadata/OpenAPI/AI/SSE passaram, incluindo
+as operacoes de `/schemas/filtered` que falharam no browser.
+
+O helper Playwright exige UUIDs validos de stream e evento no body de
+`page-apply`. Na repeticao limpa, o cenario `Project Knowledge — cockpit aplica
+change-set governado via backend real` passou e certificou o apply real com a
+linhagem terminal. A matriz terminou em 6/10: os quatro cenarios deterministas,
+o cockpit Project Knowledge e a auditoria estatica passaram.
+
+As quatro falhas restantes nao sao mais falhas estruturais do host:
+
+- a fixture revertida de Project Knowledge nao apareceu no audit do turno;
+- o PR7 materializou tabela e contexto, mas nao chegou a uma revisao aplicavel;
+- o Fluxo 1 terminou com resposta segura generica antes de materializar o resumo
+  de fonte governada;
+- o Fluxo 2 gerou formulario e contexto governado, mas terminou bloqueado sem
+  quick reply de reparo.
+
+O ultimo item revelou semantica ja existente mal materializada. O backend ja
+publicava `canApply=false`, `reviewReason`, decisao semantica e contrato de quick
+reply, mas nao compunha uma continuacao terminal quando o preview ficava
+bloqueado. O Turn Engine agora inclui `governed-review-revise`, com fonte,
+artifact, recurso, `reviewReason` e `semanticDecision`; o Page Builder preserva
+esse payload e deixou de fabricar a mesma acao localmente. O Fluxo 2 focal passou
+contra OpenAI e Neon reais depois da correcao.
 
 ## Proximo passo recomendado
 
-Remover primeiro o bloqueio operacional do host e repetir a matriz completa:
-
-1. alinhar no Quickstart as versoes publicadas do metadata starter e do contrato
-   `praxis-uischema` que declara `AiUsageMode`;
-2. provar `200` para as operacoes de `/schemas/filtered` usadas pelas jornadas;
-3. repetir Project Knowledge, PR7 e Fluxos 1/2 e exigir um `page-apply` com
-   `streamId`/`resultEventId` seguido de readback do `ui_user_config`;
-4. manter a falha fechada se a linhagem ou o payload terminal divergir.
-
-Depois desse gate, fechar a telemetria canonica de provider antes do spike de
-SDK:
+Fechar a telemetria canonica de provider antes do spike de SDK, porque as duas
+respostas genericas restantes ainda nao informam com precisao em qual passe a
+assertividade foi perdida:
 
 1. preservar `attempt`, provider/modelo e latencia por fase;
 2. manter `ChatResponse`/usage no boundary do adapter em vez de reduzi-lo a
@@ -111,3 +131,12 @@ SDK:
 5. provar redacao, tenant isolation e ausencia de prompts/payloads sensiveis;
 6. publicar as metricas no gate de consistencia e somente entao comparar
    Spring AI 1.1.8 com o baseline atual.
+
+Em paralelo, manter dois gaps explicitamente separados da telemetria de
+provider:
+
+1. corrigir a projecao/auditoria de Project Knowledge revertido na fonte
+   canonica, sem inferir ausencia por texto;
+2. migrar as quick replies especializadas de qualidade de dashboard que ainda
+   sao materializadas no Page Builder para o backend governado, removendo a
+   ultima semantica de reparo local desse fluxo.

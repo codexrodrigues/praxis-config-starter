@@ -504,6 +504,10 @@ public class AgenticAuthoringTurnEngine {
             }
             AgenticAuthoringIntentResolutionResult terminalIntentResolution =
                     terminalIntentResolution(intentResolution, decisionDiagnostics);
+            boolean canApply = preview != null
+                    && preview.valid()
+                    && !requiresDecisionReview(decisionDiagnostics)
+                    && (toolLoopResult == null || toolLoopResult.completed());
             Map<String, Object> resultPayload = new LinkedHashMap<>();
             resultPayload.put("intentResolution", terminalIntentResolution);
             resultPayload.put("preview", preview != null ? preview : objectMapper.createObjectNode());
@@ -514,11 +518,14 @@ public class AgenticAuthoringTurnEngine {
                     resourceDiscovery));
             resultPayload.put(
                     "quickReplies",
-                    terminalQuickReplies(request, intentResolution, businessCatalogDiscovery, preview));
-            resultPayload.put("canApply", preview != null
-                    && preview.valid()
-                    && !requiresDecisionReview(decisionDiagnostics)
-                    && (toolLoopResult == null || toolLoopResult.completed()));
+                    terminalQuickReplies(
+                            request,
+                            terminalIntentResolution,
+                            businessCatalogDiscovery,
+                            preview,
+                            canApply,
+                            decisionDiagnostics));
+            resultPayload.put("canApply", canApply);
             resultPayload.put("decisionDiagnostics", decisionDiagnostics);
             if (toolLoopResult != null) {
                 resultPayload.put("toolLoopTrace", safeToolLoopTrace(toolLoopResult));
@@ -2647,10 +2654,15 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnStreamRequest request,
             AgenticAuthoringIntentResolutionResult intentResolution,
             AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery,
-            AgenticAuthoringPreviewResult preview) {
+            AgenticAuthoringPreviewResult preview,
+            boolean canApply,
+            Map<String, Object> decisionDiagnostics) {
         List<AgenticAuthoringQuickReply> replies = terminalQuickReplies(intentResolution, businessCatalogDiscovery);
         List<AgenticAuthoringQuickReply> contextual = contextualPreviewQuickReplies(request, intentResolution, preview);
-        if (contextual.isEmpty()) {
+        boolean requiresGovernedRepair = preview != null
+                && !canApply
+                && !isAdvisoryCatalogIntent(intentResolution);
+        if (contextual.isEmpty() && !requiresGovernedRepair) {
             return replies;
         }
         Map<String, AgenticAuthoringQuickReply> merged = new LinkedHashMap<>();
@@ -2664,7 +2676,70 @@ public class AgenticAuthoringTurnEngine {
                 merged.putIfAbsent(reply.id(), reply);
             }
         });
+        if (requiresGovernedRepair && !hasGovernedReviewRepair(merged.values())) {
+            AgenticAuthoringQuickReply repairReply = governedReviewRepairQuickReply(
+                    intentResolution,
+                    decisionDiagnostics);
+            merged.putIfAbsent(repairReply.id(), repairReply);
+        }
         return List.copyOf(merged.values());
+    }
+
+    private boolean hasGovernedReviewRepair(Iterable<AgenticAuthoringQuickReply> replies) {
+        if (replies == null) {
+            return false;
+        }
+        for (AgenticAuthoringQuickReply reply : replies) {
+            JsonNode hints = reply == null ? null : reply.contextHints();
+            if (hints != null
+                    && hints.isObject()
+                    && "governed-review-repair".equals(hints.path("kind").asText(""))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private AgenticAuthoringQuickReply governedReviewRepairQuickReply(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            Map<String, Object> decisionDiagnostics) {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("source", "governed-review-gate");
+        contextHints.put("kind", "governed-review-repair");
+        contextHints.put("requiresReview", true);
+        if (intentResolution != null) {
+            contextHints.put("artifactKind", safeText(intentResolution.artifactKind()));
+            AgenticAuthoringCandidate selectedCandidate = intentResolution.selectedCandidate();
+            String resourcePath = selectedCandidate == null
+                    ? ""
+                    : safeText(selectedCandidate.resourcePath());
+            if (resourcePath.isBlank() && intentResolution.target() != null) {
+                resourcePath = safeText(intentResolution.target().resourcePath());
+            }
+            if (!resourcePath.isBlank()) {
+                contextHints.put("resourcePath", resourcePath);
+            }
+        }
+        String reviewReason = decisionDiagnostics == null
+                ? ""
+                : safeText((String) decisionDiagnostics.get("reviewReason"));
+        if (!reviewReason.isBlank()) {
+            contextHints.put("reviewReason", reviewReason);
+        }
+        JsonNode semanticDecision = intentResolution == null || intentResolution.semanticDecision() == null
+                ? null
+                : objectMapper.valueToTree(intentResolution.semanticDecision());
+        return new AgenticAuthoringQuickReply(
+                "governed-review-revise",
+                "revise",
+                "Revisar pontos pendentes",
+                "Revise a previa bloqueada, explique os pontos que ainda precisam de decisao e proponha um ajuste seguro antes de salvar.",
+                "Continua a revisao usando a decisao e as evidencias governadas deste turno.",
+                "rate_review",
+                "primary",
+                contextHints,
+                semanticDecision,
+                null);
     }
 
     private List<AgenticAuthoringQuickReply> contextualPreviewQuickReplies(
