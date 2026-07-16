@@ -207,6 +207,137 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     }
 
     @Test
+    void resolveUsesRankedCompactCapabilitiesForAGovernedSelectedComponentRefinement() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                configCaptor.capture(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "operationKind": "modify",
+                  "artifactKind": "table",
+                  "changeKind": "column.add",
+                  "selectedResourcePath": "/api/human-resources/funcionarios",
+                  "resourceSearchQuery": null,
+                  "followUpKind": "refinement",
+                  "requiresGovernedAuthoring": false,
+                  "semanticIntentClass": "component_authoring",
+                  "assistantMessage": "Adicionei a coluna salário mantendo as colunas atuais.",
+                  "visualizationDecision": null,
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringSemanticDecision activeDecision = new AgenticAuthoringSemanticDecision(
+                AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                "decision-add-email",
+                "modify",
+                "table",
+                "column.add",
+                new AgenticAuthoringSemanticDecision.SelectedResource(
+                        "/api/human-resources/funcionarios",
+                        "get",
+                        "",
+                        "/api/human-resources/funcionarios",
+                        "get"),
+                null,
+                new AgenticAuthoringSemanticDecision.RetrievalEvidence(
+                        "current_page",
+                        List.of("current-page-target-resource"),
+                        1),
+                false,
+                "",
+                "",
+                "");
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "Agora adicione também a coluna salário sem remover nenhuma das anteriores.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                "funcionarios-table",
+                "openai",
+                "gpt-4.1-mini",
+                "test-key",
+                "session-1",
+                "turn-2",
+                List.of(
+                        new AgenticAuthoringConversationMessage(
+                                "user-1",
+                                "user",
+                                "Adicione a coluna e-mail à tabela de funcionários.",
+                                "2026-07-15T20:00:00Z"),
+                        new AgenticAuthoringConversationMessage(
+                                "assistant-1",
+                                "assistant",
+                                "A coluna e-mail foi adicionada.",
+                                "2026-07-15T20:00:01Z")),
+                null,
+                List.of(),
+                objectMapper.createObjectNode(),
+                activeDecision);
+        AgenticAuthoringComponentCapabilitiesResult capabilities =
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities();
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        request,
+                        request.userPrompt(),
+                        objectMapper.createObjectNode(),
+                        new AgenticAuthoringTarget(
+                                "funcionarios-table",
+                                "praxis-table",
+                                "/api/human-resources/funcionarios",
+                                "",
+                                "/api/human-resources/funcionarios",
+                                "get"),
+                        List.of(new AgenticAuthoringCandidate(
+                                "/api/human-resources/funcionarios",
+                                "get",
+                                "",
+                                "/api/human-resources/funcionarios",
+                                "get",
+                                0.97d,
+                                "resource preserved from existing component target",
+                                List.of("current-page-target-resource"))),
+                        capabilities,
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("praxis-agentic-authoring-fast-intent-context.v1")
+                .contains("\"activeSemanticDecision\"")
+                .contains("\"recentConversation\"")
+                .contains("\"rankedComponentCapabilities\"")
+                .contains("\"changeKind\" : \"column.add\"")
+                .contains("nova coluna schema-backed")
+                .contains("set_column_order apenas reposicionam");
+        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(1800);
+        assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(12);
+        assertThat(result.changeKind()).isEqualTo("column.add");
+        assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
     void platformGuidanceSemanticClassNormalizesAnInconsistentTechnicalTuple() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<AiJsonSchema> schemaCaptor = ArgumentCaptor.forClass(AiJsonSchema.class);

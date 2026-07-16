@@ -2936,6 +2936,14 @@ public class AgenticAuthoringIntentResolverService {
         if (isApiCatalogQuestion(operationKind, artifactKind, changeKind)) {
             return false;
         }
+        if (hasGovernedCurrentTargetForFastModification(
+                llmIntent,
+                operationKind,
+                artifactKind,
+                changeKind,
+                candidates)) {
+            return false;
+        }
         if (hasGovernedToolCandidateForMaterializableAuthoring(
                 prompt,
                 operationKind,
@@ -2958,6 +2966,30 @@ public class AgenticAuthoringIntentResolverService {
                     && !"answer_component_capability_question".equals(changeKind);
         }
         return true;
+    }
+
+    private boolean hasGovernedCurrentTargetForFastModification(
+            AgenticAuthoringLlmIntentResolution llmIntent,
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (!hasLlmWarning(llmIntent, "llm-fast-intent-resolution-used")
+                || !"modify".equals(operationKind)
+                || !isMaterializableAuthoringIntent(operationKind, artifactKind, changeKind)
+                || llmIntent.selectedResourcePath() == null
+                || llmIntent.selectedResourcePath().isBlank()
+                || candidates == null
+                || candidates.isEmpty()) {
+            return false;
+        }
+        String selectedPath = normalizePath(llmIntent.selectedResourcePath());
+        return candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> selectedPath.equals(normalizePath(candidate.resourcePath())))
+                .filter(candidate -> hasEvidence(candidate, "current-page-target-resource")
+                        || hasEvidence(candidate, "current-page"))
+                .anyMatch(candidate -> !isDerivedProjectionCandidate(candidate));
     }
 
     private boolean hasGovernedToolCandidateForMaterializableAuthoring(

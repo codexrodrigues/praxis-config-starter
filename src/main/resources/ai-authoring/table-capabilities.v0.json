@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "praxis.ai-authoring.component-capability-catalog",
   "componentId": "praxis-table",
   "capabilities": [
@@ -13,6 +13,23 @@
           "prompt": "Renomeie a tabela para Resultados da consulta.",
           "intent": "Alterar o titulo visivel da tabela sem trocar fonte de dados.",
           "configHints": ["inputs.title=Resultados da consulta", "preservar columns e resourcePath"]
+        }
+      ]
+    },
+    {
+      "id": "praxis-table.column.add@0.2.0",
+      "changeKind": "column.add",
+      "triggerTerms": ["column.add", "add_column"],
+      "fieldAliases": [],
+      "examples": [
+        {
+          "prompt": "Adicione a coluna e-mail à tabela e mantenha todas as colunas existentes.",
+          "intent": "Introduzir uma nova coluna schema-backed que ainda não existe na configuração da tabela, preservando as colunas atuais.",
+          "configHints": [
+            "operationId=column.add",
+            "effect=append-unique columns[] by field",
+            "column.order.set e set_column_order apenas reposicionam uma coluna já existente e exigem uma ordem explícita"
+          ]
         }
       ]
     },

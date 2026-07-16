@@ -5335,6 +5335,83 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void fastTableModificationKeepsGovernedCurrentTargetWithoutRedundantSecondLlmPass() {
+        ObjectNode page = payrollTablePage();
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of());
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.nullable(String.class),
+                        Mockito.nullable(String.class),
+                        Mockito.nullable(String.class)))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "modify",
+                        "table",
+                        "column.add",
+                        "/api/human-resources/folhas-pagamento",
+                        "folhas pagamento",
+                        "refinement",
+                        "Vou adicionar a coluna sem remover as anteriores.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used", "llm-fast-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService serviceWithLlm = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = serviceWithLlm.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Adicione a coluna centro de custo sem remover nenhuma das anteriores.",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        page,
+                        "payroll-table",
+                        null,
+                        null,
+                        null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("column.add");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/folhas-pagamento");
+        assertThat(result.selectedCandidate().evidence()).contains("current-page-target-resource");
+        assertThat(result.warnings())
+                .contains("llm-fast-intent-resolution-used")
+                .doesNotContain("llm-intent-resolution-second-pass-used");
+        Mockito.verify(llmIntentResolver, Mockito.times(1)).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class));
+    }
+
+    @Test
     void resolvesSelectedChartTypeModificationAgainstExistingPage() {
         ObjectNode page = payrollChartPage();
 

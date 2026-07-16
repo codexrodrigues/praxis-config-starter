@@ -633,8 +633,8 @@ deve explicar indisponibilidade; nao pode simular sucesso.
 
 ### Gate A - Consistencia basica
 
-Status em 2026-07-15: **verde no perfil `must-pass` e no refinamento isolado
-`extended`; vermelho na nova jornada multi-turn**.
+Status em 2026-07-15: **verde no perfil `must-pass`, no refinamento isolado
+`extended` e na jornada multi-turn progressiva de Table**.
 
 - corpus e metricas definidos: concluido;
 - as duas verticais P0 passam: 18/18 no gate integral;
@@ -643,12 +643,14 @@ Status em 2026-07-15: **verde no perfil `must-pass` e no refinamento isolado
   tres quick replies;
 - o primeiro slice `extended` passou 3/3 e cobre idioma alternativo, erro
   humano e refinamento schema-grounded de pagina existente;
-- a jornada multi-turn esta materializada, a continuidade de thread foi
-  corrigida e provada, mas duas execucoes falharam na selecao semantica
-  `column.add` antes do segundo passo;
-- pendencia bloqueante: estabilizar a operacao semantica basica e obter tres
-  jornadas completas consecutivas; depois certificar retomada, replay SSE e
-  schema indisponivel no mesmo gate.
+- `employee-table-progressive-columns-pt` passou 6/6 turnos reais em tres
+  repeticoes consecutivas com OpenAI `gpt-4.1-mini`: `column.add` foi resolvido
+  em todos os turnos, `email` foi preservado, `salario` foi acrescentado e nao
+  houve coluna duplicada, timeout ou clarificacao indevida;
+- o gate final registrou 100% de assertividade e mediana terminal de 33,3385 s,
+  contra 33% e mediana de aproximadamente 50 s antes deste slice;
+- proxima pendencia bloqueante do Gate A: certificar retomada, replay SSE,
+  cancelamento, timeout e schema indisponivel no mesmo gate transacional.
 
 ### Gate B - Runtime canonico
 
@@ -691,7 +693,13 @@ adicionou o executor transacional local. O quarto e o quinto slices alteraram
 services e testes internos do authoring. O sexto atualizou o corpus interno, o
 materializador generico, schema grounding, testes e este plano de excelencia.
 O setimo atualizou novamente schema, corpus, runner, stream service, testes e
-este plano para certificar continuidade multi-turn.
+este plano para certificar continuidade multi-turn. O oitavo promoveu
+`column.add` ao catalogo fallback canonico de Table, passou a ranquear
+capabilities semanticamente depois da escolha do componente, habilitou a
+resolucao LLM compacta para modificacoes ancoradas no alvo atual, removeu uma
+segunda resolucao redundante e compactou eventos duplicados sem perder replay.
+Tambem moveu a sequencia e o marcador terminal para `ai_turn` pela migracao
+V34, eliminando consultas de `max(seq)` e de terminalidade no caminho feliz.
 Nao houve mudanca de endpoint, DTO, evento SSE, OpenAPI ou public API; por isso
 bindings, landing page e corpus HTTP nao precisam de sincronizacao neste corte.
 Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
@@ -704,24 +712,22 @@ Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
 
 ## Proximo slice recomendado
 
-`P0.1`, `P0.3` e a vertical basica de `P0.4` estao certificadas pelo gate
-integral 18/18. O proximo slice recomendado e ampliar margem e cobertura antes
-de iniciar uma migracao ampla de SDK, nesta ordem:
+`P0.1`, `P0.3`, a vertical basica de `P0.4` e a jornada progressiva de Table
+estao certificadas. O proximo slice recomendado e fechar a state machine e a
+evidencia operacional antes de iniciar uma migracao ampla de SDK, nesta ordem:
 
-1. estabilizar a selecao semantica entre as operacoes governadas de Table,
-   especialmente `column.add` versus `set_column_order`, oferecendo a LLM o
-   catalogo/definicoes canonicas e rejeitando ou reparando output incoerente
-   pelo contrato sem introduzir keyword routing;
-2. executar a jornada `employee-table-progressive-columns-pt` tres vezes
-   consecutivas, exigindo lineage, preservacao de `email`, adicao de `salario`
-   e zero coluna duplicada;
-3. formalizar e certificar a state machine de `P0.6`, incluindo timeout,
+1. formalizar e certificar a state machine de `P0.6`, incluindo timeout,
    cancelamento, retomada, schema indisponivel, replay SSE e zero side effect
    duplicado;
-4. corrigir diagnostics residuais de provenance e registrar P50/P95, retries,
-   tokens e custo por caso/modelo;
-5. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
+2. incorporar ao relatorio versionado a comparacao antes/depois deste slice e
+   registrar P50/P95, retries, tokens e custo por caso/modelo;
+3. corrigir diagnostics residuais de provenance e provar lineage completo da
+   decisao semantica ate o preview e a materializacao;
+4. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
    minimo de contexto assistivel;
+5. ampliar a jornada progressiva com reordenacao, visibilidade, formato,
+   filtros e recuperacao apos schema temporariamente indisponivel, provando que
+   cada capability governada continua semanticamente distinta;
 6. iniciar a pista compativel Spring AI 1.1.8 e a politica de modelos em slice
    dedicado, comparando o novo caminho com os perfis `must-pass` e `extended`;
 7. manter Spring AI 2.0 + Boot 4 como spike arquitetural separado, promovendo

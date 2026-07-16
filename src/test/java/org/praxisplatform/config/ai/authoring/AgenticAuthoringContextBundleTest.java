@@ -50,6 +50,66 @@ class AgenticAuthoringContextBundleTest {
                 .contains("component target and data type");
     }
 
+    @Test
+    void ranksAddingANewTableColumnAheadOfExistingColumnOperationsAsLlmGrounding() {
+        JsonNode componentContext = tableComponentContext(
+                "Adicione a coluna e-mail à tabela de funcionários e mantenha as demais colunas.");
+        JsonNode tableCatalog = componentContext.path("componentCapabilities").path("catalogs").get(0);
+
+        assertThat(tableCatalog.path("componentId").asText()).isEqualTo("praxis-table");
+        assertThat(tableCatalog.path("capabilities").get(0).path("changeKind").asText())
+                .isEqualTo("column.add");
+        assertThat(tableCatalog.path("capabilities").get(0).path("examples").get(0).path("intent").asText())
+                .contains("nova coluna schema-backed");
+        assertThat(tableCatalog.path("capabilities").get(0).path("examples").get(0).path("configHints"))
+                .anySatisfy(hint -> assertThat(hint.asText()).contains("set_column_order apenas reposicionam"));
+        assertThat(componentContext.path("operationSelectionRule").asText())
+                .contains("ranked governed operation candidates, not an intent decision", "LLM must select");
+        assertThat(componentContext.path("componentCapabilities").path("detailPolicy").asText())
+                .contains("only ranks governed candidates", "LLM still decides semantic intent");
+    }
+
+    @Test
+    void keepsReorderingAnExistingTableColumnAheadForAnExplicitMoveRequest() {
+        JsonNode componentContext = tableComponentContext(
+                "Mova a coluna salário líquido para a primeira posição da tabela.");
+        JsonNode tableCatalog = componentContext.path("componentCapabilities").path("catalogs").get(0);
+
+        assertThat(tableCatalog.path("componentId").asText()).isEqualTo("praxis-table");
+        assertThat(tableCatalog.path("capabilities").get(0).path("changeKind").asText())
+                .isEqualTo("set_column_order");
+    }
+
+    private JsonNode tableComponentContext(String prompt) {
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                prompt,
+                "page-builder-ia",
+                "praxis-table",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-5-mini",
+                "test-key");
+
+        JsonNode bundle = AgenticAuthoringContextBundle.create(
+                objectMapper,
+                request,
+                request.userPrompt(),
+                objectMapper.createObjectNode(),
+                new AgenticAuthoringTarget(
+                        "employees-table",
+                        "praxis-table",
+                        "/api/employees",
+                        "/schemas/filtered?resource=employees",
+                        null,
+                        null),
+                List.of(),
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                "");
+        return bundle.path("componentContext");
+    }
+
     private List<String> componentIds(JsonNode catalogs) {
         return catalogs.findValuesAsText("componentId");
     }

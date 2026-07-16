@@ -339,7 +339,8 @@ public class AgenticAuthoringTurnEngine {
             if (postIntentConsultativeOutcome != null) {
                 return postIntentConsultativeOutcome;
             }
-            boolean compactGovernedFastPath = resolvedByPreIntentGovernedEvidence(intentResolution);
+            boolean compactGovernedFastPath = resolvedByPreIntentGovernedEvidence(intentResolution)
+                    || resolvedByFastGovernedCurrentTarget(intentResolution);
             if (!compactGovernedFastPath) {
                 emitStatus(
                         eventSink,
@@ -2464,6 +2465,21 @@ public class AgenticAuthoringTurnEngine {
                 && containsWarning(
                         intentResolution.warnings(),
                         "llm-pre-intent-resource-discovery-used");
+    }
+
+    private boolean resolvedByFastGovernedCurrentTarget(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null
+                || !"modify".equals(intentResolution.operationKind())
+                || !containsWarning(intentResolution.warnings(), "llm-fast-intent-resolution-used")
+                || intentResolution.target() == null
+                || intentResolution.selectedCandidate() == null
+                || !StringUtils.hasText(intentResolution.target().componentId())
+                || !hasEvidence(intentResolution.selectedCandidate(), "current-page-target-resource")) {
+            return false;
+        }
+        return Objects.equals(
+                safeText(intentResolution.target().resourcePath()),
+                safeText(intentResolution.selectedCandidate().resourcePath()));
     }
 
     private boolean containsWarning(List<String> warnings, String expected) {

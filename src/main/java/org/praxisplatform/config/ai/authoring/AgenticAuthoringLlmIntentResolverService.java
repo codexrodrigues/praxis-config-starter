@@ -244,7 +244,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                     environment);
             Optional<AgenticAuthoringLlmIntentResolution> resolution =
                     toResolution(result).map(value -> withFastCandidateResourceWhenUnambiguous(value, fastCandidates));
-            if (resolution.isPresent() && fastIntentResolutionComplete(resolution.get())) {
+            if (resolution.isPresent() && fastIntentResolutionComplete(
+                    resolution.get(),
+                    target,
+                    componentCapabilities)) {
                 return resolution.map(this::withFastIntentWarning);
             }
             resolution.ifPresent(value -> log.debug(
@@ -452,12 +455,16 @@ public class AgenticAuthoringLlmIntentResolverService {
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
         if (request == null
                 || request.pendingClarification() != null
-                || request.activeSemanticDecision() != null
-                || forceFullIntentResolution(request)
-                || hasConversationHistoryBeyondCurrentPrompt(request, effectivePrompt)) {
+                || forceFullIntentResolution(request)) {
             return false;
         }
-        if (target != null && StringUtils.hasText(target.widgetKey())) {
+        boolean targetedComponentEdit = hasTargetedComponentCapabilities(target, componentCapabilities);
+        if (!targetedComponentEdit
+                && (request.activeSemanticDecision() != null
+                || hasConversationHistoryBeyondCurrentPrompt(request, effectivePrompt))) {
+            return false;
+        }
+        if (!targetedComponentEdit && target != null && StringUtils.hasText(target.widgetKey())) {
             return false;
         }
         if (!isEmpty(componentCapabilities)) {
@@ -570,12 +577,23 @@ public class AgenticAuthoringLlmIntentResolverService {
         return List.copyOf(distinct);
     }
 
-    private boolean fastIntentResolutionComplete(AgenticAuthoringLlmIntentResolution resolution) {
+    private boolean fastIntentResolutionComplete(
+            AgenticAuthoringLlmIntentResolution resolution,
+            AgenticAuthoringTarget target,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
         if (resolution == null || !resolution.resolved()) {
             return false;
         }
         if (fastConsultativeResolutionComplete(resolution)) {
             return true;
+        }
+        if ("modify".equals(valueOrDefault(resolution.operationKind(), ""))) {
+            return StringUtils.hasText(resolution.selectedResourcePath())
+                    && hasTargetedComponentCapabilities(target, componentCapabilities)
+                    && declaredChangeKind(
+                            target.componentId(),
+                            resolution.changeKind(),
+                            componentCapabilities);
         }
         if (!"create".equals(valueOrDefault(resolution.operationKind(), ""))) {
             return false;
@@ -706,6 +724,35 @@ public class AgenticAuthoringLlmIntentResolverService {
             ObjectNode targetNode = context.putObject("target");
             targetNode.put("widgetKey", valueOrDefault(target.widgetKey(), ""));
             targetNode.put("componentId", valueOrDefault(target.componentId(), ""));
+            targetNode.put("resourcePath", valueOrDefault(target.resourcePath(), ""));
+        }
+        if (request.activeSemanticDecision() != null) {
+            AgenticAuthoringSemanticDecision activeDecision = request.activeSemanticDecision();
+            ObjectNode active = context.putObject("activeSemanticDecision");
+            active.put("decisionId", valueOrDefault(activeDecision.decisionId(), ""));
+            active.put("operationKind", valueOrDefault(activeDecision.operationKind(), ""));
+            active.put("artifactKind", valueOrDefault(activeDecision.artifactKind(), ""));
+            active.put("changeKind", valueOrDefault(activeDecision.changeKind(), ""));
+            active.put("activeObjective", valueOrDefault(activeDecision.activeObjective(), ""));
+            active.put("visualIntent", valueOrDefault(activeDecision.visualIntent(), ""));
+            if (activeDecision.selectedResource() != null) {
+                active.put("selectedResourcePath", valueOrDefault(
+                        activeDecision.selectedResource().resourcePath(), ""));
+            }
+        }
+        if (request.conversationMessages() != null && !request.conversationMessages().isEmpty()) {
+            ArrayNode conversation = context.putArray("recentConversation");
+            List<AgenticAuthoringConversationMessage> messages = request.conversationMessages();
+            int start = Math.max(0, messages.size() - 4);
+            for (int index = start; index < messages.size(); index++) {
+                AgenticAuthoringConversationMessage message = messages.get(index);
+                if (message == null || !StringUtils.hasText(message.text())) {
+                    continue;
+                }
+                ObjectNode item = conversation.addObject();
+                item.put("role", valueOrDefault(message.role(), ""));
+                item.put("text", message.text());
+            }
         }
         ArrayNode resources = context.putArray("candidateResources");
         for (AgenticAuthoringCandidate candidate : candidateOptions == null ? List.<AgenticAuthoringCandidate>of() : candidateOptions) {
@@ -766,6 +813,18 @@ public class AgenticAuthoringLlmIntentResolverService {
                 }
             }
         }
+        JsonNode rankedCapabilities = AgenticAuthoringContextBundle.create(
+                        objectMapper,
+                        request,
+                        effectivePrompt,
+                        currentPageSummary,
+                        target,
+                        candidateOptions,
+                        componentCapabilities,
+                        "")
+                .path("componentContext")
+                .path("componentCapabilities");
+        context.set("rankedComponentCapabilities", rankedCapabilities.deepCopy());
         return """
                 You are the fast semantic intent resolver for Praxis governed page authoring.
                 Return only one JSON object matching the supplied schema.
@@ -773,9 +832,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Decide from the user's meaning, not from backend keywords.
                 Set semanticIntentClass to the primary AI-authored semantic decision: platform_guidance, api_catalog_guidance, component_authoring, shared_rule_authoring, out_of_scope, or unknown.
                 Treat semanticRetrievalIntent as prior AI-authored semantic evidence; reconcile it rather than silently replacing a concrete artifact with an unrelated container.
+                Treat activeSemanticDecision and recentConversation as prior governed lineage for the current refinement, not as permission to ignore the new user request.
                 Select selectedResourcePath only from candidateResources.
                 When exactly one candidateResource is supplied and it matches the requested source, copy its resourcePath into selectedResourcePath.
                 Select visualizationDecision.primaryComponent only from authorableComponents.
+                For an edit to an existing selected component, choose changeKind from its governed capability candidates. Compare their semantic examples before deciding; candidate order is grounding only. Do not use an operation that only changes a property of an existing target when the requested outcome introduces a new schema-backed item.
                 For a single requested chart, use artifactKind "chart", operationKind "create", layoutKind "single_chart", primaryComponent "praxis-chart", includeSummary=false, includeDetailTable=false, includeFilters=false, includeKpis=false, and excludedComponentIds for rejected components.
                 For an analytical composition whose meaning depends on multiple coordinated analytical regions, such as filters, KPIs, multiple charts and a detail/list/table surface, use artifactKind "dashboard" rather than a generic page.
                 Preserve the explicitly requested analytical regions in visualizationDecision; do not downgrade a coordinated dashboard to page or accordion merely because a page can host those regions.
@@ -802,6 +863,41 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Compact context:
                 %s
                 """.formatted(context.toPrettyString());
+    }
+
+    private boolean hasTargetedComponentCapabilities(
+            AgenticAuthoringTarget target,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        return target != null
+                && StringUtils.hasText(target.widgetKey())
+                && StringUtils.hasText(target.componentId())
+                && componentCapabilities != null
+                && componentCapabilities.catalogs() != null
+                && componentCapabilities.catalogs().stream()
+                        .filter(Objects::nonNull)
+                        .anyMatch(catalog -> target.componentId().equals(catalog.componentId())
+                                && catalog.capabilities() != null
+                                && !catalog.capabilities().isEmpty());
+    }
+
+    private boolean declaredChangeKind(
+            String componentId,
+            String changeKind,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        if (!StringUtils.hasText(componentId)
+                || !StringUtils.hasText(changeKind)
+                || componentCapabilities == null
+                || componentCapabilities.catalogs() == null) {
+            return false;
+        }
+        return componentCapabilities.catalogs().stream()
+                .filter(Objects::nonNull)
+                .filter(catalog -> componentId.equals(catalog.componentId()))
+                .flatMap(catalog -> (catalog.capabilities() == null
+                        ? List.<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability>of()
+                        : catalog.capabilities()).stream())
+                .filter(Objects::nonNull)
+                .anyMatch(capability -> changeKind.equals(capability.changeKind()));
     }
 
     private boolean forceFullIntentResolution(AgenticAuthoringIntentResolutionRequest request) {
@@ -1255,7 +1351,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 "shared_rule_authoring",
                 "out_of_scope",
                 "unknown"));
-        properties.putObject("changeKind").put("type", "string");
+        properties.putObject("changeKind")
+                .put("type", "string")
+                .put("description", "Canonical governed materialization change selected from the matching component capability when available. Distinguish adding a new item from changing a property such as the position, format, visibility, or label of an existing target.");
         nullableString(properties, "selectedResourcePath");
         nullableString(properties, "resourceSearchQuery");
         stringEnum(properties, "followUpKind", List.of(

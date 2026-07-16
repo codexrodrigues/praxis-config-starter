@@ -41,7 +41,7 @@ class AgenticAuthoringTableCapabilityCatalogTest {
 
     @Test
     void declaresSupportedTableModificationChangeKinds() {
-        assertThat(catalog.version()).isEqualTo("0.1.0");
+        assertThat(catalog.version()).isEqualTo("0.2.0");
         assertThat(catalog.componentId()).isEqualTo("praxis-table");
         assertThat(catalog.capabilities().stream()
                 .map(AgenticAuthoringComponentCapabilityCatalog.ComponentCapability::changeKind)
@@ -49,6 +49,7 @@ class AgenticAuthoringTableCapabilityCatalogTest {
                 .toList())
                 .containsExactly(
                         "rename_or_relabel",
+                        "column.add",
                         "set_column_format",
                         "set_column_presentation",
                         "set_column_visibility",
@@ -89,6 +90,26 @@ class AgenticAuthoringTableCapabilityCatalogTest {
                 .contains("set_column_order");
         assertThat(catalog.resolveChangeKind("habilite exportacao apenas para linhas selecionadas"))
                 .contains("configure_export");
+    }
+
+    @Test
+    void describesAddingANewColumnWithoutTurningNaturalLanguageIntoKeywordRouting() {
+        AgenticAuthoringComponentCapabilityCatalog.ComponentCapability addColumn = catalog.capabilities().stream()
+                .filter(capability -> "column.add".equals(capability.changeKind()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(addColumn.triggerTerms()).containsExactly("column.add", "add_column");
+        assertThat(addColumn.examples().getFirst().intent())
+                .contains("nova coluna schema-backed", "preservando as colunas atuais");
+        assertThat(addColumn.examples().getFirst().configHints())
+                .contains(
+                        "operationId=column.add",
+                        "effect=append-unique columns[] by field")
+                .anyMatch(hint -> hint.contains("set_column_order apenas reposicionam"));
+        assertThat(catalog.resolveChangeKind("adicione a coluna email"))
+                .as("semantic intent remains an LLM decision; the declarative matcher is not a new primary route")
+                .isEmpty();
     }
 
     @Test

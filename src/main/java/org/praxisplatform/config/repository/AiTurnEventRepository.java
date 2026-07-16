@@ -37,6 +37,4 @@ public interface AiTurnEventRepository extends JpaRepository<AiTurnEvent, AiTurn
             """)
     List<AiTurnEvent> findResultEventsByThreadIdOrderByNewest(@Param("threadId") UUID threadId);
 
-    @Query("select max(e.seq) from AiTurnEvent e where e.threadId = :threadId and e.turnId = :turnId")
-    Long findMaxSeq(@Param("threadId") UUID threadId, @Param("turnId") UUID turnId);
 }

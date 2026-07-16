@@ -523,20 +523,28 @@ public class AgenticAuthoringTurnStreamService {
             UUID turnId,
             String type,
             Object payload) {
-        AiTurnEventEnvelope lastEvent = latestEvent(streamId, true);
+        // This service owns the active producer for a locally started stream and updates the
+        // cache after every committed append. Re-reading the persisted tail before every
+        // progress event adds one remote database round-trip per UX step. The event store remains
+        // the cross-instance authority: appendEvent locks the turn and rejects any append after a
+        // terminal marker, while explicit terminal/replay checks still reconcile persisted state.
+        AiTurnEventEnvelope lastEvent = latestEvent(streamId, false);
+        if (lastEvent == null && !isLocalActiveStream(streamId)) {
+            lastEvent = latestEvent(streamId, true);
+        }
         if (lastEvent != null && turnEventService.isTerminalType(lastEvent.getType())) {
             terminalByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean(false)).set(true);
             return new StreamAppendResult(lastEvent, false);
         }
         AtomicBoolean terminal = terminalByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean(false));
         if (terminal.get()) {
-            return new StreamAppendResult(latestEvent(streamId, true), false);
+            return new StreamAppendResult(latestEvent(streamId, false), false);
         }
         if (isStaleProcessingProgress(payload, lastEvent)) {
             return new StreamAppendResult(lastEvent, false);
         }
         if (turnEventService.isTerminalType(type) && !terminal.compareAndSet(false, true)) {
-            return new StreamAppendResult(latestEvent(streamId, true), false);
+            return new StreamAppendResult(latestEvent(streamId, false), false);
         }
         AiTurnEventEnvelope event = turnEventService.appendEvent(principalContext, streamId, threadId, turnId, type, payload);
         rememberLatestEvent(streamId, event);
@@ -1020,7 +1028,7 @@ public class AgenticAuthoringTurnStreamService {
             return null;
         }
         AiTurnEventEnvelope cached = latestEventByStream.get(streamId);
-        if (cached != null && !reconcilePersisted) {
+        if (!reconcilePersisted) {
             return cached;
         }
         AiTurnEventEnvelope persisted = turnEventService.findLastEvent(streamId).orElse(null);

@@ -152,6 +152,7 @@ final class AgenticAuthoringContextBundle {
         component.put("formAuthoringPolicy", "Users can describe forms naturally, including fields and process goals. Praxis should ground final form materialization in governed domain resources, schemas, actions, and component capabilities; when grounding is incomplete, keep the form as a reviewable local/editorial draft instead of inventing business rules.");
         component.put("selectionRule", "Select visualizationDecision.primaryComponent from authorableComponents[].componentId when the user asks for a governed component. Do not invent component ids.");
         component.put("exampleRule", "Prefer examples[].prompt, examples[].intent, and examples[].configHints from the matching component capability when inferring UI configuration.");
+        component.put("operationSelectionRule", "For edits to an already selected component, componentCapabilities.catalogs[].capabilities are ranked governed operation candidates, not an intent decision. The LLM must select the final changeKind from the user's meaning and compare examples[].intent plus configHints. Do not substitute an operation that only changes an existing target property when the requested outcome introduces a new schema-backed item.");
         return component;
     }
 
@@ -167,7 +168,7 @@ final class AgenticAuthoringContextBundle {
                 ? 0
                 : componentCapabilities.catalogs().size();
         compact.put("totalCatalogs", totalCatalogs);
-        compact.put("detailPolicy", "Detailed capabilities are scoped to the current prompt and target to keep LLM latency low. Use authorableComponents and platformGuide for global discovery, then request or infer details for the selected component.");
+        compact.put("detailPolicy", "Detailed capabilities are scoped to the current prompt and target to keep LLM latency low. Capability scoring only ranks governed candidates inside the selected component; the LLM still decides semantic intent. Use authorableComponents and platformGuide for global discovery, then request or infer details for the selected component.");
         ArrayNode catalogs = compact.putArray("catalogs");
         if (componentCapabilities != null && componentCapabilities.catalogs() != null) {
             List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> selectedCatalogs =
@@ -185,7 +186,9 @@ final class AgenticAuthoringContextBundle {
                     continue;
                 }
                 int count = 0;
-                for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : catalog.capabilities()) {
+                List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> selectedCapabilities =
+                        promptRelevantCapabilities(effectivePrompt, catalog.capabilities());
+                for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : selectedCapabilities) {
                     if (capability == null || count >= MAX_COMPACT_CAPABILITIES_PER_COMPONENT) {
                         continue;
                     }
@@ -203,6 +206,75 @@ final class AgenticAuthoringContextBundle {
             }
         }
         return compact;
+    }
+
+    private static List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> promptRelevantCapabilities(
+            String effectivePrompt,
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> capabilities) {
+        if (capabilities == null || capabilities.isEmpty()) {
+            return List.of();
+        }
+        String prompt = normalizedSearchText(effectivePrompt);
+        List<ScoredCapability> scored = new ArrayList<>();
+        for (int index = 0; index < capabilities.size(); index++) {
+            AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability = capabilities.get(index);
+            if (capability != null) {
+                scored.add(new ScoredCapability(
+                        capability,
+                        capabilityRelevanceScore(capability, prompt),
+                        index));
+            }
+        }
+        return scored.stream()
+                .sorted(Comparator
+                        .comparingInt(ScoredCapability::score).reversed()
+                        .thenComparingInt(ScoredCapability::index))
+                .limit(MAX_COMPACT_CAPABILITIES_PER_COMPONENT)
+                .map(ScoredCapability::capability)
+                .toList();
+    }
+
+    private static int capabilityRelevanceScore(
+            AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability,
+            String prompt) {
+        if (!StringUtils.hasText(prompt) || capability == null) {
+            return 0;
+        }
+        int score = matchingTokenScore(prompt, capability.changeKind(), 10);
+        if (capability.triggerTerms() != null) {
+            for (String term : capability.triggerTerms()) {
+                String normalizedTerm = normalizedSearchText(term);
+                if (StringUtils.hasText(normalizedTerm) && prompt.contains(normalizedTerm)) {
+                    score += 14;
+                }
+            }
+        }
+        if (capability.examples() != null) {
+            for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample example : capability.examples()) {
+                if (example == null) {
+                    continue;
+                }
+                score += matchingTokenScore(prompt, example.prompt(), 8);
+                score += matchingTokenScore(prompt, example.intent(), 3);
+            }
+        }
+        return score;
+    }
+
+    private static int matchingTokenScore(String prompt, String evidence, int weight) {
+        int score = 0;
+        for (String token : searchTokens(normalizedSearchText(evidence))) {
+            if (containsToken(prompt, token)) {
+                score += weight;
+            }
+        }
+        return score;
+    }
+
+    private record ScoredCapability(
+            AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability,
+            int score,
+            int index) {
     }
 
     private static List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> promptRelevantCatalogs(

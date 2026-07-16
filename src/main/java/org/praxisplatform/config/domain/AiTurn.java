@@ -53,6 +53,21 @@ public class AiTurn {
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
 
+    /**
+     * Proxima sequencia persistivel do turno. A linha de {@code ai_turn} e bloqueada durante a
+     * reserva para manter ordenacao monotônica e segura entre instancias sem consultar
+     * {@code max(seq)} a cada evento de progresso.
+     */
+    @Column(name = "next_event_seq", nullable = false)
+    private long nextEventSeq;
+
+    /**
+     * Tipo terminal que venceu a corrida do turno, ou {@code null} enquanto novos eventos podem
+     * ser anexados. O payload terminal continua pertencendo a {@code ai_turn_event}.
+     */
+    @Column(name = "terminal_event_type", length = 64)
+    private String terminalEventType;
+
     @PrePersist
     public void onInsert() {
         Instant now = Instant.now();
@@ -61,6 +76,9 @@ public class AiTurn {
         }
         if (this.updatedAt == null) {
             this.updatedAt = now;
+        }
+        if (this.nextEventSeq < 1L) {
+            this.nextEventSeq = 1L;
         }
     }
 

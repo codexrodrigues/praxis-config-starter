@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringSemanticDecision;
+import org.praxisplatform.config.domain.AiTurn;
 import org.praxisplatform.config.domain.AiTurnEvent;
 import org.praxisplatform.config.dto.AiTurnEventEnvelope;
 import org.praxisplatform.config.repository.AiTurnRepository;
@@ -75,10 +76,8 @@ public class AiTurnEventService {
         ReentrantLock lock = turnLocks.computeIfAbsent(key, k -> new ReentrantLock());
         lock.lock();
         try {
-            lockTurnForAppend(threadId, turnId);
-            AiTurnEvent terminalEvent = turnEventRepository.findFirstByThreadIdAndTurnIdOrderBySeqDesc(threadId, turnId)
-                    .filter(existing -> isTerminalType(existing.getEventType()))
-                    .orElse(null);
+            AiTurn turn = lockTurnForAppend(threadId, turnId);
+            AiTurnEvent terminalEvent = terminalEvent(turn, threadId, turnId);
             boolean terminal = isTerminalType(eventType);
             if (terminalEvent != null) {
                 if (terminal
@@ -88,8 +87,7 @@ public class AiTurnEventService {
                 }
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Turn already reached terminal state.");
             }
-            Long maxSeq = turnEventRepository.findMaxSeq(threadId, turnId);
-            long nextSeq = maxSeq != null ? maxSeq + 1 : 1L;
+            long nextSeq = reserveNextSequence(turn, eventType);
             UUID resolvedEventId = eventId != null ? eventId : UUID.randomUUID();
             JsonNode payloadNode = toPayloadNode(payload);
             AiTurnEvent entity = AiTurnEvent.builder()
@@ -139,11 +137,14 @@ public class AiTurnEventService {
         ReentrantLock lock = turnLocks.computeIfAbsent(key, k -> new ReentrantLock());
         lock.lock();
         try {
-            lockTurnForAppend(threadId, turnId);
-            Optional<AiTurnEvent> existingStart =
-                    turnEventRepository.findFirstByThreadIdAndTurnIdOrderBySeqAsc(threadId, turnId);
-            if (existingStart.isPresent()) {
-                return new StreamStartAppendResult(toEnvelope(existingStart.get()), false);
+            AiTurn turn = lockTurnForAppend(threadId, turnId);
+            if (turn.getNextEventSeq() > 1L) {
+                AiTurnEvent existingStart = turnEventRepository
+                        .findFirstByThreadIdAndTurnIdOrderBySeqAsc(threadId, turnId)
+                        .orElseThrow(() -> new ResponseStatusException(
+                                HttpStatus.INTERNAL_SERVER_ERROR,
+                                "Turn event sequence exists without a persisted start event."));
+                return new StreamStartAppendResult(toEnvelope(existingStart), false);
             }
             JsonNode payloadNode = toPayloadNode(payload);
             AiTurnEvent entity = AiTurnEvent.builder()
@@ -153,7 +154,7 @@ public class AiTurnEventService {
                     .streamId(streamId)
                     .threadId(threadId)
                     .turnId(turnId)
-                    .seq(1L)
+                    .seq(reserveNextSequence(turn, "status"))
                     .eventId(UUID.randomUUID())
                     .eventType("status")
                     .payload(serializePayload(payloadNode))
@@ -412,13 +413,31 @@ public class AiTurnEventService {
                 ex);
     }
 
-    private void lockTurnForAppend(UUID threadId, UUID turnId) {
-        boolean exists = turnRepository.findByThreadIdAndTurnIdForUpdate(threadId, turnId).isPresent();
-        if (!exists) {
-            throw new ResponseStatusException(
-                    HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Turn reservation is missing before appending stream events.");
+    private AiTurn lockTurnForAppend(UUID threadId, UUID turnId) {
+        return turnRepository.findByThreadIdAndTurnIdForUpdate(threadId, turnId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "Turn reservation is missing before appending stream events."));
+    }
+
+    private AiTurnEvent terminalEvent(AiTurn turn, UUID threadId, UUID turnId) {
+        if (turn == null || !isTerminalType(turn.getTerminalEventType())) {
+            return null;
         }
+        return turnEventRepository.findFirstByThreadIdAndTurnIdOrderBySeqDesc(threadId, turnId)
+                .filter(existing -> isTerminalType(existing.getEventType()))
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "Turn terminal marker exists without a persisted terminal event."));
+    }
+
+    private long reserveNextSequence(AiTurn turn, String eventType) {
+        long nextSeq = Math.max(1L, turn.getNextEventSeq());
+        turn.setNextEventSeq(nextSeq + 1L);
+        if (isTerminalType(eventType)) {
+            turn.setTerminalEventType(eventType.trim().toLowerCase());
+        }
+        return nextSeq;
     }
 
     private boolean safeEquals(String left, String right) {

@@ -123,6 +123,8 @@ CREATE TABLE IF NOT EXISTS ai_turn (
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     expires_at TIMESTAMP NOT NULL,
+    next_event_seq BIGINT NOT NULL DEFAULT 1,
+    terminal_event_type VARCHAR(64),
     PRIMARY KEY (thread_id, turn_id),
     CONSTRAINT fk_ai_turn_thread FOREIGN KEY (thread_id) REFERENCES ai_thread(thread_id)
 );

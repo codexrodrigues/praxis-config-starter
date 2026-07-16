@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -1001,6 +1002,51 @@ class AgenticAuthoringTurnStreamServiceTest {
 
         org.assertj.core.api.Assertions.assertThat(terminalSeenByEngine.get()).isTrue();
         verify(turnEventService, atLeastOnce()).findLastEvent(any(UUID.class));
+    }
+
+    @Test
+    void locallyOwnedStreamDoesNotReadPersistedTailBeforeEveryCommittedAppend() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringTurnEngine turnEngine = org.mockito.Mockito.mock(AgenticAuthoringTurnEngine.class);
+        AtomicLong seq = new AtomicLong(1L);
+        CountDownLatch processed = new CountDownLatch(1);
+
+        stubSuccessfulStreamStart(threadId, principalContext);
+        when(turnEventService.isTerminalType(anyString()))
+                .thenAnswer(invocation -> isTerminal(invocation.getArgument(0, String.class)));
+        when(turnEventService.appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), any()))
+                .thenAnswer(invocation -> AiTurnEventEnvelope.builder()
+                        .eventId(UUID.randomUUID())
+                        .streamId(invocation.getArgument(1, UUID.class))
+                        .threadId(invocation.getArgument(2, UUID.class))
+                        .turnId(invocation.getArgument(3, UUID.class))
+                        .seq(seq.incrementAndGet())
+                        .type(invocation.getArgument(4, String.class))
+                        .timestamp(Instant.now())
+                        .payload(objectMapper.valueToTree(invocation.getArgument(5)))
+                        .build());
+        when(turnEngine.execute(any(), eq(principalContext), any(), eq("http://localhost")))
+                .thenAnswer(invocation -> {
+                    AgenticAuthoringTurnEventSink sink = invocation.getArgument(2, AgenticAuthoringTurnEventSink.class);
+                    sink.append("thought.step", Map.of("phase", "intent.resolve", "message", "Resolving."));
+                    sink.append("result", Map.of("assistantMessage", "Done."));
+                    processed.countDown();
+                    return AgenticAuthoringTurnEngine.AgenticAuthoringTurnOutcome.completed(
+                            new AgenticAuthoringTurnEngine.AgenticAuthoringTurnState("completed", null, null));
+                });
+
+        AgenticAuthoringTurnStreamService service = service(turnEngine);
+        try {
+            service.start(request(), "http://localhost", principalContext);
+            org.assertj.core.api.Assertions.assertThat(processed.await(2, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            service.shutdown();
+        }
+
+        verify(turnEventService, times(2))
+                .appendEvent(any(), any(UUID.class), eq(threadId), any(UUID.class), anyString(), any());
+        verify(turnEventService, never()).findLastEvent(any(UUID.class));
     }
 
     @Test

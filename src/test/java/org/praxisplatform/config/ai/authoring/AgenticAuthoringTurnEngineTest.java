@@ -7287,6 +7287,34 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void fastGovernedCurrentTargetModificationKeepsThoughtTimelineWithoutDuplicatePreviewStatuses() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringPreviewResult preview = new AgenticAuthoringPreviewResult(
+                true,
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                "Preview ready.");
+        CapturingSink sink = new CapturingSink();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(fastGovernedTableModificationIntent());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(preview);
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(request(), principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        assertThoughtStepHasUserFacingMessage(sink, "preview.plan");
+        assertThoughtStepHasUserFacingMessage(sink, "preview.compile");
+        org.assertj.core.api.Assertions.assertThat(phasesForType(sink, "status"))
+                .doesNotContain("intent.resolve.grounding", "preview.plan", "preview.compile");
+    }
+
+    @Test
     void emitsCuratedGovernedResourceLabelInIntentResolvedProgress() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
@@ -11295,6 +11323,47 @@ class AgenticAuthoringTurnEngineTest {
                 objectMapper.createObjectNode());
     }
 
+    private AgenticAuthoringIntentResolutionResult fastGovernedTableModificationIntent() {
+        String resourcePath = "/api/human-resources/funcionarios";
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                resourcePath,
+                "get",
+                "",
+                resourcePath,
+                "GET",
+                0.97,
+                "resource preserved from existing component target",
+                List.of("current-page-target-resource"));
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "table",
+                "column.add",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget(
+                        "funcionarios-table",
+                        "praxis-table",
+                        resourcePath,
+                        "",
+                        resourcePath,
+                        "get"),
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
+                "Adicione a coluna email sem remover as anteriores.",
+                "Vou adicionar a coluna email.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of("llm-intent-resolution-used", "llm-fast-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode());
+    }
+
     private AgenticAuthoringIntentResolutionResult intentWithDiagnostics(
             AgenticAuthoringCandidate selectedCandidate,
             com.fasterxml.jackson.databind.JsonNode llmDiagnostics) {
@@ -11948,6 +12017,20 @@ class AgenticAuthoringTurnEngineTest {
                 .map(payload -> objectMapper.valueToTree(payload).path("phase").asText(""))
                 .filter(phase -> !phase.isBlank())
                 .toList();
+    }
+
+    private List<String> phasesForType(CapturingSink sink, String type) {
+        List<String> values = new ArrayList<>();
+        for (int index = 0; index < sink.types.size(); index++) {
+            if (!type.equals(sink.types.get(index))) {
+                continue;
+            }
+            String phase = objectMapper.valueToTree(sink.payloads.get(index)).path("phase").asText("");
+            if (!phase.isBlank()) {
+                values.add(phase);
+            }
+        }
+        return values;
     }
 
     private void assertPhaseBeforeEventType(CapturingSink sink, String phase, String eventType) {

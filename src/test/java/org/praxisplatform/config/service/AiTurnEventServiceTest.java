@@ -136,9 +136,12 @@ class AiTurnEventServiceTest {
         UUID turnId = UUID.randomUUID();
         AiTurnEvent terminal = event(streamId, threadId, turnId, 3L, UUID.randomUUID(), "tenant-a", "user-a", "prod");
         terminal.setEventType("cancelled");
+        AiTurn reservedTurn = turn(threadId, turnId);
+        reservedTurn.setNextEventSeq(4L);
+        reservedTurn.setTerminalEventType("cancelled");
 
         when(turnRepository.findByThreadIdAndTurnIdForUpdate(threadId, turnId))
-                .thenReturn(Optional.of(turn(threadId, turnId)));
+                .thenReturn(Optional.of(reservedTurn));
         when(repository.findFirstByThreadIdAndTurnIdOrderBySeqDesc(threadId, turnId)).thenReturn(Optional.of(terminal));
 
         assertThatThrownBy(() -> service.appendEvent(
@@ -180,10 +183,9 @@ class AiTurnEventServiceTest {
         UUID turnId = UUID.randomUUID();
         UUID eventId = UUID.randomUUID();
 
+        AiTurn reservedTurn = turn(threadId, turnId);
         when(turnRepository.findByThreadIdAndTurnIdForUpdate(threadId, turnId))
-                .thenReturn(Optional.of(turn(threadId, turnId)));
-        when(repository.findFirstByThreadIdAndTurnIdOrderBySeqDesc(threadId, turnId)).thenReturn(Optional.empty());
-        when(repository.findMaxSeq(threadId, turnId)).thenReturn(null);
+                .thenReturn(Optional.of(reservedTurn));
         when(repository.saveAndFlush(any(AiTurnEvent.class))).thenAnswer(invocation -> {
             AiTurnEvent event = invocation.getArgument(0, AiTurnEvent.class);
             event.setEventId(eventId);
@@ -193,13 +195,16 @@ class AiTurnEventServiceTest {
             return event;
         });
 
-        service.appendEvent(
+        var envelope = service.appendEvent(
                 new AiPrincipalContext("tenant-a", "user-a", "prod", true),
                 streamId,
                 threadId,
                 turnId,
                 "status",
                 Map.of("state", "in_progress"));
+
+        assertThat(envelope.getSeq()).isEqualTo(1L);
+        assertThat(reservedTurn.getNextEventSeq()).isEqualTo(2L);
 
         var locks = (java.util.Map<String, ?>) ReflectionTestUtils.getField(service, "turnLocks");
         assertThat(locks).isNotNull();
@@ -216,9 +221,6 @@ class AiTurnEventServiceTest {
 
         when(turnRepository.findByThreadIdAndTurnIdForUpdate(threadId, turnId))
                 .thenReturn(Optional.of(turn(threadId, turnId)));
-        when(repository.findFirstByThreadIdAndTurnIdOrderBySeqDesc(threadId, turnId))
-                .thenReturn(Optional.empty());
-        when(repository.findMaxSeq(threadId, turnId)).thenReturn(null);
         when(repository.saveAndFlush(any(AiTurnEvent.class))).thenAnswer(invocation -> {
             AiTurnEvent event = invocation.getArgument(0, AiTurnEvent.class);
             event.setEventId(eventId);
@@ -283,7 +285,6 @@ class AiTurnEventServiceTest {
 
         when(turnRepository.findByThreadIdAndTurnIdForUpdate(threadId, turnId))
                 .thenReturn(Optional.of(turn(threadId, turnId)));
-        when(repository.findFirstByThreadIdAndTurnIdOrderBySeqAsc(threadId, turnId)).thenReturn(Optional.empty());
         when(repository.saveAndFlush(any(AiTurnEvent.class))).thenAnswer(invocation -> {
             AiTurnEvent event = invocation.getArgument(0, AiTurnEvent.class);
             event.setEventId(eventId);
@@ -317,9 +318,11 @@ class AiTurnEventServiceTest {
         UUID turnId = UUID.randomUUID();
         UUID eventId = UUID.randomUUID();
         AiTurnEvent existingStart = event(existingStreamId, threadId, turnId, 1L, eventId, "tenant-a", "user-a", "prod");
+        AiTurn reservedTurn = turn(threadId, turnId);
+        reservedTurn.setNextEventSeq(2L);
 
         when(turnRepository.findByThreadIdAndTurnIdForUpdate(threadId, turnId))
-                .thenReturn(Optional.of(turn(threadId, turnId)));
+                .thenReturn(Optional.of(reservedTurn));
         when(repository.findFirstByThreadIdAndTurnIdOrderBySeqAsc(threadId, turnId))
                 .thenReturn(Optional.of(existingStart));
 
@@ -347,6 +350,7 @@ class AiTurnEventServiceTest {
                 .createdAt(Instant.now())
                 .updatedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(60))
+                .nextEventSeq(1L)
                 .build();
     }
 
