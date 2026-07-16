@@ -4,7 +4,7 @@
   "title": "Praxis assistant consistency corpus",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "kind", "contexts", "cases"],
+  "required": ["version", "kind", "contexts", "cases", "journeys"],
   "properties": {
     "version": { "const": "1.0.0" },
     "kind": { "const": "praxis.ai-authoring.assistant-consistency-corpus" },
@@ -18,6 +18,11 @@
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/$defs/case" }
+    },
+    "journeys": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/journey" }
     }
   },
   "$defs": {
@@ -55,6 +60,55 @@
         "contextRef": { "type": "string", "minLength": 1 },
         "userPrompt": { "type": "string", "minLength": 1 },
         "expected": { "$ref": "#/$defs/expected" }
+      }
+    },
+    "journey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "family", "status", "locale", "contextRef", "turns"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "family": { "const": "refinement" },
+        "status": { "enum": ["must-pass", "extended"] },
+        "locale": { "enum": ["pt-BR", "en-US"] },
+        "contextRef": { "type": "string", "minLength": 1 },
+        "turns": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/journeyTurn" }
+        }
+      }
+    },
+    "journeyTurn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "userPrompt", "currentPageSource", "expected", "pageAssertions"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "userPrompt": { "type": "string", "minLength": 1 },
+        "currentPageSource": { "enum": ["context", "previous-preview"] },
+        "expected": { "$ref": "#/$defs/expected" },
+        "lineage": { "$ref": "#/$defs/lineage" },
+        "pageAssertions": { "$ref": "#/$defs/pageAssertions" }
+      }
+    },
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sameThread", "distinctTurn", "activeDecisionFromPreviousTurn"],
+      "properties": {
+        "sameThread": { "const": true },
+        "distinctTurn": { "const": true },
+        "activeDecisionFromPreviousTurn": { "const": true }
+      }
+    },
+    "pageAssertions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiredColumnFields", "uniqueColumnFields"],
+      "properties": {
+        "requiredColumnFields": { "$ref": "#/$defs/nonEmptyStrings" },
+        "uniqueColumnFields": { "type": "boolean" }
       }
     },
     "expected": {

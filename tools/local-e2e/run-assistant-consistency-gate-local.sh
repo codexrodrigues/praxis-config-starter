@@ -90,9 +90,23 @@ for case in corpus.get("cases") or []:
         continue
     if requested_ids and case_id not in requested_ids:
         continue
-    selected.append(case)
+    selected.append(("case", case))
 
-missing_requested = requested_ids - {case["id"] for case in selected}
+for journey in corpus.get("journeys") or []:
+    journey_id = journey.get("id") or ""
+    if not journey_id or journey_id in seen:
+        raise SystemExit(f"Missing or duplicated corpus unit id: {journey_id!r}")
+    seen.add(journey_id)
+    context_ref = journey.get("contextRef")
+    if context_ref not in contexts:
+        raise SystemExit(f"Unknown contextRef {context_ref!r} in {journey_id}")
+    if journey.get("status") not in statuses:
+        continue
+    if requested_ids and journey_id not in requested_ids:
+        continue
+    selected.append(("journey", journey))
+
+missing_requested = requested_ids - {unit["id"] for _, unit in selected}
 if missing_requested:
     raise SystemExit(f"Requested cases not selected by profile or absent: {sorted(missing_requested)}")
 if not selected:
@@ -100,26 +114,56 @@ if not selected:
 
 runs = []
 for repetition in range(1, repetitions + 1):
-    for case in selected:
-        relative = pathlib.Path(f"run-{repetition:02d}") / case["id"]
-        case_dir = artifacts_dir / relative
-        case_dir.mkdir(parents=True, exist_ok=True)
-        context = contexts[case["contextRef"]]
-        (case_dir / "case.json").write_text(
-            json.dumps(case, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        (case_dir / "context.json").write_text(
-            json.dumps(context, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        runs.append({
-            "repetition": repetition,
-            "caseId": case["id"],
-            "family": case["family"],
-            "status": case["status"],
-            "directory": str(relative),
-        })
+    for kind, unit in selected:
+        context = contexts[unit["contextRef"]]
+        turns = unit.get("turns") if kind == "journey" else [unit]
+        previous_relative = None
+        for turn_index, turn in enumerate(turns, start=1):
+            if kind == "journey":
+                relative = (
+                    pathlib.Path(f"run-{repetition:02d}")
+                    / unit["id"]
+                    / f"turn-{turn_index:02d}-{turn['id']}"
+                )
+                case = {
+                    "id": f"{unit['id']}#{turn['id']}",
+                    "family": unit["family"],
+                    "status": unit["status"],
+                    "locale": unit["locale"],
+                    "contextRef": unit["contextRef"],
+                    "userPrompt": turn["userPrompt"],
+                    "expected": turn["expected"],
+                    "currentPageSource": turn["currentPageSource"],
+                    "pageAssertions": turn["pageAssertions"],
+                }
+                if "lineage" in turn:
+                    case["lineage"] = turn["lineage"]
+            else:
+                relative = pathlib.Path(f"run-{repetition:02d}") / unit["id"]
+                case = unit
+
+            case_dir = artifacts_dir / relative
+            case_dir.mkdir(parents=True, exist_ok=True)
+            (case_dir / "case.json").write_text(
+                json.dumps(case, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            (case_dir / "context.json").write_text(
+                json.dumps(context, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            runs.append({
+                "kind": kind,
+                "repetition": repetition,
+                "caseId": unit["id"],
+                "turnId": turn.get("id") if kind == "journey" else None,
+                "turnIndex": turn_index if kind == "journey" else None,
+                "family": unit["family"],
+                "status": unit["status"],
+                "directory": str(relative),
+                "previousDirectory": str(previous_relative) if previous_relative else None,
+            })
+            previous_relative = relative
 
 plan = {
     "version": "1.0.0",
@@ -146,7 +190,40 @@ if [[ "$REUSE_EXISTING_ARTIFACTS" != "true" ]]; then
   while IFS= read -r relative_dir; do
     case_dir="$ARTIFACTS_DIR/$relative_dir"
     case_id="$(jq -r '.id' "$case_dir/case.json")"
-    repetition="$(basename "$(dirname "$relative_dir")" | sed 's/run-//')"
+    repetition="$(jq -r --arg directory "$relative_dir" '.runs[] | select(.directory == $directory) | .repetition' "$ARTIFACTS_DIR/execution-plan.json")"
+    run_kind="$(jq -r --arg directory "$relative_dir" '.runs[] | select(.directory == $directory) | .kind' "$ARTIFACTS_DIR/execution-plan.json")"
+    previous_relative="$(jq -r --arg directory "$relative_dir" '.runs[] | select(.directory == $directory) | .previousDirectory // empty' "$ARTIFACTS_DIR/execution-plan.json")"
+    current_page_json="$(jq -c '.currentPage' "$case_dir/context.json")"
+    conversation_messages_json='[]'
+    session_id="assistant-consistency-$repetition-$case_id"
+    if [[ "$run_kind" == "journey" && -n "$previous_relative" ]]; then
+      previous_dir="$ARTIFACTS_DIR/$previous_relative"
+      session_id="$(jq -r '.threadId // empty' "$previous_dir/turn.start.response.json")"
+      current_page_json="$(jq -s -c '[.[] | select(.type == "result")][-1].payload.preview.uiCompositionPlan // empty' "$previous_dir/turn.events.jsonl")"
+      if [[ -z "$session_id" || -z "$current_page_json" ]]; then
+        echo "Previous journey turn did not expose a thread and materialized preview." | tee "$case_dir/journey-precondition-error.txt" >&2
+        printf '%s\n' '1' > "$case_dir/runner-exit-code.txt"
+        continue
+      fi
+      previous_conversation='[]'
+      if [[ -f "$previous_dir/input-conversation.json" ]]; then
+        previous_conversation="$(jq -c '.' "$previous_dir/input-conversation.json")"
+      fi
+      previous_prompt="$(jq -r '.userPrompt' "$previous_dir/case.json")"
+      previous_assistant_message="$(jq -s -r '[.[] | select(.type == "result")][-1].payload.assistantMessage // empty' "$previous_dir/turn.events.jsonl")"
+      timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      conversation_messages_json="$(jq -cn \
+        --argjson previous "$previous_conversation" \
+        --arg prompt "$previous_prompt" \
+        --arg assistant "$previous_assistant_message" \
+        --arg timestamp "$timestamp" \
+        '$previous + [
+          {id: ("journey-user-" + (($previous | length) | tostring)), role: "user", text: $prompt, createdAt: $timestamp},
+          {id: ("journey-assistant-" + (($previous | length) | tostring)), role: "assistant", text: $assistant, createdAt: $timestamp}
+        ]')"
+    fi
+    printf '%s\n' "$current_page_json" | jq '.' > "$case_dir/input-current-page.json"
+    printf '%s\n' "$conversation_messages_json" | jq '.' > "$case_dir/input-conversation.json"
     echo
     echo "=== repetition $repetition | $case_id ==="
     set +e
@@ -154,10 +231,11 @@ if [[ "$REUSE_EXISTING_ARTIFACTS" != "true" ]]; then
       TARGET_APP="$(jq -r '.targetApp' "$case_dir/context.json")" \
       TARGET_COMPONENT_ID="$(jq -r '.targetComponentId' "$case_dir/context.json")" \
       CURRENT_ROUTE="$(jq -r '.currentRoute' "$case_dir/context.json")" \
-      CURRENT_PAGE_JSON="$(jq -c '.currentPage' "$case_dir/context.json")" \
+      CURRENT_PAGE_JSON="$current_page_json" \
       SELECTED_WIDGET_KEY_JSON="$(jq -c '.selectedWidgetKey' "$case_dir/context.json")" \
       CONTEXT_HINTS_JSON="$(jq -c '.contextHints' "$case_dir/context.json")" \
-      SESSION_ID="assistant-consistency-$repetition-$case_id" \
+      CONVERSATION_MESSAGES_JSON="$conversation_messages_json" \
+      SESSION_ID="$session_id" \
       ARTIFACTS_DIR="$case_dir" \
       BASE_URL="$BASE_URL" \
       ORIGIN="$ORIGIN" \
@@ -372,6 +450,74 @@ for run in plan["runs"]:
     if preview_expectation == "forbidden" and has_preview:
         failures.append("preview forbidden but present")
 
+    column_fields = []
+    if has_preview:
+        composition = preview.get("uiCompositionPlan")
+        composition = composition if isinstance(composition, dict) else {}
+        for widget in composition.get("widgets") or []:
+            if not isinstance(widget, dict):
+                continue
+            inputs = widget.get("inputs") if isinstance(widget.get("inputs"), dict) else {}
+            config = inputs.get("config") if isinstance(inputs.get("config"), dict) else {}
+            for column in config.get("columns") or []:
+                if isinstance(column, dict) and isinstance(column.get("field"), str):
+                    column_fields.append(column["field"])
+    page_assertions = case.get("pageAssertions")
+    if isinstance(page_assertions, dict):
+        missing_columns = [
+            field for field in page_assertions.get("requiredColumnFields", [])
+            if field not in column_fields
+        ]
+        if missing_columns:
+            failures.append(f"preview missing required columns: {missing_columns}")
+        if page_assertions.get("uniqueColumnFields") is True and len(column_fields) != len(set(column_fields)):
+            failures.append(f"preview contains duplicated column fields: {column_fields}")
+
+    start_response_path = case_dir / "turn.start.response.json"
+    start_response = (
+        json.loads(start_response_path.read_text(encoding="utf-8"))
+        if start_response_path.exists()
+        else {}
+    )
+    thread_id = start_response.get("threadId")
+    turn_id = start_response.get("turnId")
+    active_decision_id = event_payload(events[0]).get("activeSemanticDecisionId")
+    lineage = case.get("lineage")
+    if isinstance(lineage, dict):
+        previous_directory = run.get("previousDirectory")
+        previous_dir = base / previous_directory if previous_directory else None
+        previous_start_path = previous_dir / "turn.start.response.json" if previous_dir else None
+        previous_events_path = previous_dir / "turn.events.jsonl" if previous_dir else None
+        if not previous_start_path or not previous_start_path.exists() or not previous_events_path.exists():
+            failures.append("previous journey evidence absent")
+        else:
+            previous_start = json.loads(previous_start_path.read_text(encoding="utf-8"))
+            previous_events = [
+                json.loads(line)
+                for line in previous_events_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            previous_terminal = next(
+                (event for event in previous_events if event.get("type") in {"result", "error", "cancelled"}),
+                {},
+            )
+            previous_decision_id = event_payload(previous_terminal).get("decisionDiagnostics", {}).get(
+                "semanticDecisionId"
+            )
+            if lineage.get("sameThread") is True and thread_id != previous_start.get("threadId"):
+                failures.append(
+                    f"thread lineage changed {previous_start.get('threadId')!r}->{thread_id!r}"
+                )
+            if lineage.get("distinctTurn") is True and turn_id == previous_start.get("turnId"):
+                failures.append(f"turn lineage reused turnId {turn_id!r}")
+            if (
+                lineage.get("activeDecisionFromPreviousTurn") is True
+                and active_decision_id != previous_decision_id
+            ):
+                failures.append(
+                    f"active decision {active_decision_id!r} does not continue {previous_decision_id!r}"
+                )
+
     quick_replies = terminal_payload.get("quickReplies")
     quick_replies = quick_replies if isinstance(quick_replies, list) else []
     if len(quick_replies) < terminal_expected["minimumQuickReplies"]:
@@ -450,6 +596,10 @@ for run in plan["runs"]:
             "quickReplyCount": len(quick_replies),
             "assistantMessage": message,
             "groundedResourcePaths": grounded_paths,
+            "threadId": thread_id,
+            "turnId": turn_id,
+            "activeSemanticDecisionId": active_decision_id,
+            "columnFields": column_fields,
             "persistence": transaction,
         },
         "timingSeconds": {
@@ -527,8 +677,8 @@ lines = [
     f"- Must-pass accuracy: `{must_pass_accuracy:.1%}`",
     f"- Gate: `{'PASS' if not gate_failures else 'FAIL'}`",
     "",
-    "| Run | Case | Family | Result | Terminal | Transaction | Seconds |",
-    "| --- | --- | --- | --- | --- | --- | ---: |",
+    "| Run | Case | Turn | Family | Result | Terminal | Transaction | Seconds |",
+    "| --- | --- | --- | --- | --- | --- | --- | ---: |",
 ]
 for row in rows:
     timing = row.get("timingSeconds", {}).get("terminal")
@@ -544,7 +694,7 @@ for row in rows:
     else:
         transaction_text = "—"
     lines.append(
-        f"| {row['repetition']} | {row['caseId']} | {row['family']} | "
+        f"| {row['repetition']} | {row['caseId']} | {row.get('turnId') or '—'} | {row['family']} | "
         f"{'PASS' if row['passed'] else 'FAIL'} | {actual.get('terminalType', '')} | "
         f"{transaction_text} | {timing_text} |"
     )

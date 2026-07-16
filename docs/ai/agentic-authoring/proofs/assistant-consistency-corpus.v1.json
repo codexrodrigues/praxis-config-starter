@@ -390,15 +390,21 @@
           "mutationRequiresPreview": true
         }
       }
-    },
+    }
+  ],
+  "journeys": [
     {
-      "id": "employee-table-add-email-column-pt",
+      "id": "employee-table-progressive-columns-pt",
       "family": "refinement",
       "status": "extended",
       "locale": "pt-BR",
       "contextRef": "employee-table-existing-page",
-      "userPrompt": "Adicione a coluna e-mail à tabela de funcionários e mantenha as demais colunas.",
-      "expected": {
+      "turns": [
+        {
+          "id": "add-email",
+          "userPrompt": "Adicione a coluna e-mail à tabela de funcionários e mantenha as demais colunas.",
+          "currentPageSource": "context",
+          "expected": {
         "intent": {
           "operationKinds": ["modify"],
           "artifactKinds": ["table"],
@@ -422,7 +428,52 @@
           "forbidUnlistedResourcePaths": true,
           "mutationRequiresPreview": true
         }
-      }
+          },
+          "pageAssertions": {
+            "requiredColumnFields": ["nomeCompleto", "cargoNome", "departamentoNome", "email"],
+            "uniqueColumnFields": true
+          }
+        },
+        {
+          "id": "add-salary",
+          "userPrompt": "Agora adicione também a coluna salário sem remover nenhuma das anteriores.",
+          "currentPageSource": "previous-preview",
+          "expected": {
+            "intent": {
+              "operationKinds": ["modify"],
+              "artifactKinds": ["table"],
+              "changeKinds": ["column.add", "add_column"],
+              "resourcePaths": ["/api/human-resources/funcionarios"]
+            },
+            "terminal": {
+              "eventTypes": ["result"],
+              "canApply": true,
+              "preview": "required",
+              "minimumQuickReplies": 0,
+              "forbiddenPhases": []
+            },
+            "assistantMessage": {
+              "minimumCharacters": 50,
+              "requiredConceptGroups": [["coluna", "column"], ["salário", "salario", "salary"]],
+              "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+            },
+            "safety": {
+              "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
+              "forbidUnlistedResourcePaths": true,
+              "mutationRequiresPreview": true
+            }
+          },
+          "lineage": {
+            "sameThread": true,
+            "distinctTurn": true,
+            "activeDecisionFromPreviousTurn": true
+          },
+          "pageAssertions": {
+            "requiredColumnFields": ["nomeCompleto", "cargoNome", "departamentoNome", "email", "salario"],
+            "uniqueColumnFields": true
+          }
+        }
+      ]
     }
   ]
 }

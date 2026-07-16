@@ -2,8 +2,8 @@
 
 Data: 2026-07-15
 
-Status: Gate A `must-pass` verde; primeiro slice `extended` verde e plano ativo
-para jornadas multi-turn e endurecimento de plataforma
+Status: Gate A `must-pass` verde; refinamento isolado `extended` verde, jornada
+multi-turn materializada e atualmente vermelha por inconsistencia semantica
 
 ## Objetivo
 
@@ -142,6 +142,27 @@ ja materializada, reutilizando contratos existentes:
 - mensagens tecnicas residuais de busca de evidencia e reparo foram substituidas
   por progresso humano em portugues, sem alterar fases ou diagnostics internos.
 
+O setimo slice P0 transformou esse refinamento em uma prova multi-turn e
+corrigiu a identidade canonica da conversa:
+
+- o inventario classificou replay, cancelamento e idempotencia como ja
+  suportados, mas lineage multi-turn como `suportado-parcialmente`;
+- `sessionId` ja existia no contrato HTTP e no cliente Angular, mas o stream
+  backend nao o repassava a `AiThreadService` e forcava `mode=new` em todos os
+  turnos;
+- UUIDs validos agora materializam `mode=continue` no thread existente;
+  session ausente ou invalida continua abrindo uma conversa nova;
+- depois da resolucao, o request efetivo recebe o `threadId` canonico como
+  identidade de sessao, evitando que decisoes novas persistam apenas o rotulo
+  local usado antes do primeiro start;
+- o corpus interno ganhou jornadas ordenadas sem criar endpoint ou DTO novo;
+  cada passo pode derivar `currentPage` da preview anterior e acumular o
+  historico conversacional;
+- o runner verifica mesmo `threadId`, novo `turnId`, decisao ativa herdada,
+  colunas obrigatorias e ausencia de duplicatas;
+- uma falha anterior agora bloqueia somente os passos dependentes e aparece no
+  relatorio completo, em vez de encerrar o gate sem diagnostico.
+
 Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
 
 - `platform-what-can-i-do-pt`: 3/3 execucoes consecutivas corretas, sem preview,
@@ -197,6 +218,17 @@ Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
   ingles, formulario com erro humano e refinamento da tabela existente, com
   100% de acuracia, mediana terminal de 28,975 s e zero mensagem tecnica na
   auditoria de apresentacao.
+- a prova direta posterior ao reempacotamento confirmou continuidade real:
+  o segundo start preservou `threadId=9ec46509-723e-3eae-87f9-dc06feadb544`,
+  criou outro `turnId` e o cancelamento terminou nesse mesmo par canonico;
+- a jornada completa de colunas revelou a inconsistencia que o novo gate deve
+  impedir: em duas amostras consecutivas com `gpt-4.1-mini`, "adicionar coluna
+  e-mail" foi resolvido como `set_column_order`, gerou preview invalida e
+  `canApply=false`; cada rodada terminou em 0/2 porque o segundo passo depende
+  corretamente da materializacao anterior;
+- o resultado negativo permanece como evidencia: o transporte multi-turn esta
+  corrigido, mas a selecao semantica da operacao basica ainda nao tem a
+  consistencia necessaria para declarar a jornada verde.
 
 ## Classificacao e mapa de impacto
 
@@ -216,6 +248,9 @@ Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
   do Page Builder, schema grounding, corpus e UX de progresso; reutiliza
   `UiCompositionPlan`, `column.add` e `/schemas/filtered` sem alterar endpoint,
   DTO, evento SSE ou public API.
+- Classificacao do setimo slice: `transversal`, com correcao interna de
+  materializacao de `sessionId` e extensao do corpus/runner; cumpre o contrato
+  HTTP existente sem alterar endpoint, DTO, evento SSE, OpenAPI ou public API.
 - Fonte canonica de orchestration e configuracao: `praxis-config-starter`.
 - Runtime e UX canonicos: `@praxisui/ai` em `praxis-ui-angular`.
 - Primeiros consumidores: Page Builder, Table e Dynamic Form.
@@ -598,18 +633,22 @@ deve explicar indisponibilidade; nao pode simular sucesso.
 
 ### Gate A - Consistencia basica
 
-Status em 2026-07-15: **verde no perfil `must-pass` e no primeiro slice
-`extended`**.
+Status em 2026-07-15: **verde no perfil `must-pass` e no refinamento isolado
+`extended`; vermelho na nova jornada multi-turn**.
 
 - corpus e metricas definidos: concluido;
 - as duas verticais P0 passam: 18/18 no gate integral;
 - nenhum stuck turn ou alucinacao de contrato: concluido no corpus basico;
 - Page Builder apresenta proximo passo sempre acionavel: 9/9 orientacoes com
   tres quick replies;
-- o primeiro slice `extended` passou 3/3 e agora cobre idioma alternativo, erro
+- o primeiro slice `extended` passou 3/3 e cobre idioma alternativo, erro
   humano e refinamento schema-grounded de pagina existente;
-- pendencia de endurecimento: transformar refinamento isolado em jornada
-  multi-turn completa e certificar cancelamento, retomada e schema indisponivel.
+- a jornada multi-turn esta materializada, a continuidade de thread foi
+  corrigida e provada, mas duas execucoes falharam na selecao semantica
+  `column.add` antes do segundo passo;
+- pendencia bloqueante: estabilizar a operacao semantica basica e obter tres
+  jornadas completas consecutivas; depois certificar retomada, replay SSE e
+  schema indisponivel no mesmo gate.
 
 ### Gate B - Runtime canonico
 
@@ -651,6 +690,8 @@ O terceiro slice atualizou o schema, corpus e runner internos de consistencia e
 adicionou o executor transacional local. O quarto e o quinto slices alteraram
 services e testes internos do authoring. O sexto atualizou o corpus interno, o
 materializador generico, schema grounding, testes e este plano de excelencia.
+O setimo atualizou novamente schema, corpus, runner, stream service, testes e
+este plano para certificar continuidade multi-turn.
 Nao houve mudanca de endpoint, DTO, evento SSE, OpenAPI ou public API; por isso
 bindings, landing page e corpus HTTP nao precisam de sincronizacao neste corte.
 Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
@@ -667,20 +708,23 @@ Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
 integral 18/18. O proximo slice recomendado e ampliar margem e cobertura antes
 de iniciar uma migracao ampla de SDK, nesta ordem:
 
-1. ampliar o perfil `extended` alem dos tres casos atuais com mais variacoes
-   linguisticas e transformar o refinamento de pagina existente em jornada
-   multi-turn com lineage da decisao, mantendo os seis `must-pass` como gate
-   bloqueante;
-2. formalizar e certificar a state machine de `P0.6`, incluindo timeout,
+1. estabilizar a selecao semantica entre as operacoes governadas de Table,
+   especialmente `column.add` versus `set_column_order`, oferecendo a LLM o
+   catalogo/definicoes canonicas e rejeitando ou reparando output incoerente
+   pelo contrato sem introduzir keyword routing;
+2. executar a jornada `employee-table-progressive-columns-pt` tres vezes
+   consecutivas, exigindo lineage, preservacao de `email`, adicao de `salario`
+   e zero coluna duplicada;
+3. formalizar e certificar a state machine de `P0.6`, incluindo timeout,
    cancelamento, retomada, schema indisponivel, replay SSE e zero side effect
    duplicado;
-3. corrigir diagnostics residuais de provenance e registrar P50/P95, retries,
+4. corrigir diagnostics residuais de provenance e registrar P50/P95, retries,
    tokens e custo por caso/modelo;
-4. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
+5. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
    minimo de contexto assistivel;
-5. iniciar a pista compativel Spring AI 1.1.8 e a politica de modelos em slice
+6. iniciar a pista compativel Spring AI 1.1.8 e a politica de modelos em slice
    dedicado, comparando o novo caminho com os perfis `must-pass` e `extended`;
-6. manter Spring AI 2.0 + Boot 4 como spike arquitetural separado, promovendo
+7. manter Spring AI 2.0 + Boot 4 como spike arquitetural separado, promovendo
    apenas se a evidencia superar o caminho compativel.
 
 ## Referencias oficiais para a frente de SDK

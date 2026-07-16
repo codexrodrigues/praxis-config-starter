@@ -46,6 +46,31 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
                     .as("missing context %s referenced by %s", contextRef, id)
                     .isTrue();
         }
+        for (JsonNode journey : corpus.path("journeys")) {
+            String id = journey.path("id").asText();
+            String contextRef = journey.path("contextRef").asText();
+            assertThat(ids.add(id)).as("duplicated corpus unit id %s", id).isTrue();
+            assertThat(corpus.path("contexts").has(contextRef))
+                    .as("missing context %s referenced by %s", contextRef, id)
+                    .isTrue();
+
+            Set<String> turnIds = new HashSet<>();
+            int index = 0;
+            for (JsonNode turn : journey.path("turns")) {
+                String turnId = turn.path("id").asText();
+                assertThat(turnIds.add(turnId)).as("duplicated turn id %s in %s", turnId, id).isTrue();
+                if (index == 0) {
+                    assertThat(turn.path("currentPageSource").asText()).isEqualTo("context");
+                    assertThat(turn.has("lineage")).isFalse();
+                } else {
+                    assertThat(turn.path("currentPageSource").asText()).isEqualTo("previous-preview");
+                    assertThat(turn.path("lineage").path("sameThread").asBoolean()).isTrue();
+                    assertThat(turn.path("lineage").path("distinctTurn").asBoolean()).isTrue();
+                    assertThat(turn.path("lineage").path("activeDecisionFromPreviousTurn").asBoolean()).isTrue();
+                }
+                index++;
+            }
+        }
     }
 
     @Test
@@ -69,27 +94,23 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
 
         assertThat(countExtendedFamily(cases, "platform-discovery")).isGreaterThanOrEqualTo(1);
         assertThat(countExtendedFamily(cases, "human-error")).isGreaterThanOrEqualTo(1);
-        assertThat(countExtendedFamily(cases, "refinement")).isGreaterThanOrEqualTo(1);
+        assertThat(countExtendedFamily(cases, "refinement")
+                        + countExtendedFamily(corpus().path("journeys"), "refinement"))
+                .isGreaterThanOrEqualTo(1);
         assertThat(count(cases, "locale", "en-US")).isGreaterThanOrEqualTo(1);
     }
 
     @Test
     void guidanceIsNonMutatingAndEveryMutationRequiresPreview() throws Exception {
         for (JsonNode testCase : corpus().path("cases")) {
-            JsonNode expected = testCase.path("expected");
-            JsonNode terminal = expected.path("terminal");
-            boolean guidance = "platform-discovery".equals(testCase.path("family").asText());
-
-            if (guidance) {
-                assertThat(terminal.path("canApply").asBoolean()).as(testCase.path("id").asText()).isFalse();
-                assertThat(terminal.path("preview").asText()).as(testCase.path("id").asText()).isEqualTo("forbidden");
-                assertThat(terminal.path("minimumQuickReplies").asInt()).as(testCase.path("id").asText()).isPositive();
-            }
-            if (terminal.path("canApply").asBoolean()) {
-                assertThat(terminal.path("preview").asText()).as(testCase.path("id").asText()).isEqualTo("required");
-                assertThat(expected.path("safety").path("mutationRequiresPreview").asBoolean())
-                        .as(testCase.path("id").asText())
-                        .isTrue();
+            assertSafeExpectation(testCase.path("id").asText(), testCase.path("family").asText(), testCase.path("expected"));
+        }
+        for (JsonNode journey : corpus().path("journeys")) {
+            for (JsonNode turn : journey.path("turns")) {
+                assertSafeExpectation(
+                        journey.path("id").asText() + "#" + turn.path("id").asText(),
+                        journey.path("family").asText(),
+                        turn.path("expected"));
             }
         }
     }
@@ -120,6 +141,19 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
 
     private JsonNode corpus() throws Exception {
         return objectMapper.readTree(AgenticAuthoringTestPaths.proof(CORPUS_FILE).toFile());
+    }
+
+    private void assertSafeExpectation(String id, String family, JsonNode expected) {
+        JsonNode terminal = expected.path("terminal");
+        if ("platform-discovery".equals(family)) {
+            assertThat(terminal.path("canApply").asBoolean()).as(id).isFalse();
+            assertThat(terminal.path("preview").asText()).as(id).isEqualTo("forbidden");
+            assertThat(terminal.path("minimumQuickReplies").asInt()).as(id).isPositive();
+        }
+        if (terminal.path("canApply").asBoolean()) {
+            assertThat(terminal.path("preview").asText()).as(id).isEqualTo("required");
+            assertThat(expected.path("safety").path("mutationRequiresPreview").asBoolean()).as(id).isTrue();
+        }
     }
 
     private long count(JsonNode cases, String field, String value) {

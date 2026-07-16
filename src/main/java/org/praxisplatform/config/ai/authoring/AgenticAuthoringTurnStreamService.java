@@ -146,14 +146,16 @@ public class AgenticAuthoringTurnStreamService {
         request = withGroundedRuntimeComponentContext(request);
         request = withRequestBaseUrl(request, baseUrl);
         UUID turnId = stableUuid("agentic-authoring-turn", request.clientTurnId());
+        UUID requestedThreadId = parseUuid(request.sessionId());
         AiOrchestratorRequest threadRequest = AiOrchestratorRequest.builder()
                 .componentId(nonBlank(request.targetComponentId(), "praxis-dynamic-page-builder"))
                 .componentType("page-builder")
                 .userPrompt(request.userPrompt())
+                .sessionId(requestedThreadId)
                 .clientTurnId(turnId)
                 .currentState(request.currentPage())
                 .contextHints(request.contextHints())
-                .mode("new")
+                .mode(requestedThreadId == null ? "new" : "continue")
                 .build();
         AiThread thread = threadService.resolveThread(
                 threadRequest,
@@ -162,6 +164,7 @@ public class AgenticAuthoringTurnStreamService {
                 principalContext.environment(),
                 request.userPrompt());
         UUID threadId = thread.getThreadId();
+        request = withCanonicalSessionId(request, threadId);
         AgenticAuthoringSemanticDecision activeSemanticDecision = request.activeSemanticDecision() != null
                 ? request.activeSemanticDecision()
                 : turnEventService.findLatestSemanticDecision(threadId, principalContext).orElse(null);
@@ -289,6 +292,35 @@ public class AgenticAuthoringTurnStreamService {
                 request.contextHints(),
                 request.componentCapabilities(),
                 activeSemanticDecision,
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
+    }
+
+    private AgenticAuthoringTurnStreamRequest withCanonicalSessionId(
+            AgenticAuthoringTurnStreamRequest request,
+            UUID threadId) {
+        if (request == null || threadId == null || threadId.toString().equals(request.sessionId())) {
+            return request;
+        }
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                threadId.toString(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                request.contextHints(),
+                request.componentCapabilities(),
+                request.activeSemanticDecision(),
                 request.diagnostics(),
                 request.runtimeComponentObservations(),
                 request.runtimeComponentObservationTrustBoundary());
@@ -1384,6 +1416,17 @@ public class AgenticAuthoringTurnStreamService {
 
     private UUID stableUuid(String namespace, String value) {
         return UUID.nameUUIDFromBytes((namespace + ":" + nonBlank(value, "")).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private UUID parseUuid(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return UUID.fromString(value.trim());
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private String nonBlank(String value, String fallback) {
