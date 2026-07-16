@@ -375,7 +375,6 @@ public class AgenticAuthoringIntentResolverService {
             operationKind = valueOrUnknown(llmIntent.operationKind());
             artifactKind = valueOrUnknown(llmIntent.artifactKind());
             changeKind = valueOrUnknown(llmIntent.changeKind());
-            changeKind = normalizeTargetlessCreationChangeKind(prompt, operationKind, artifactKind, changeKind, target);
             boolean llmCandidateBundleHasExplicitSource = hasExplicitSourceCandidate(llmCandidateOptions);
             String llmResourceSearchQuery = llmCandidateBundleHasExplicitSource
                     ? ""
@@ -441,12 +440,6 @@ public class AgenticAuthoringIntentResolverService {
                         operationKind = valueOrUnknown(llmIntent.operationKind());
                         artifactKind = valueOrUnknown(llmIntent.artifactKind());
                         changeKind = valueOrUnknown(llmIntent.changeKind());
-                        changeKind = normalizeTargetlessCreationChangeKind(
-                                prompt,
-                                operationKind,
-                                artifactKind,
-                                changeKind,
-                                target);
                     }
                 }
             } else if (candidates.isEmpty() && !postIntentApiCatalogCandidateDiscoverySkipped) {
@@ -1094,6 +1087,11 @@ public class AgenticAuthoringIntentResolverService {
             changeKind = "provider_error";
             selectedCandidate = null;
         }
+        changeKind = normalizeTargetlessCreationChangeKind(
+                operationKind,
+                artifactKind,
+                changeKind,
+                target);
         AgenticAuthoringGateResult gate = eligibilityGate.evaluate(
                 operationKind,
                 artifactKind,
@@ -7875,7 +7873,6 @@ public class AgenticAuthoringIntentResolverService {
     }
 
     private String normalizeTargetlessCreationChangeKind(
-            String prompt,
             String operationKind,
             String artifactKind,
             String changeKind,
@@ -7883,8 +7880,8 @@ public class AgenticAuthoringIntentResolverService {
         if (target != null || !"create".equals(operationKind) || !isCreatableArtifactKind(artifactKind)) {
             return changeKind;
         }
-        if (!containsAny(prompt, "crie", "criar", "monte", "montar", "gere", "gerar", "build", "create", "make")) {
-            return changeKind;
+        if ("form".equals(artifactKind)) {
+            return "create_artifact";
         }
         if (containsAny(changeKind, "add_field", "add_column", "add_filter", "modify_field", "update_field")) {
             return "create_artifact";

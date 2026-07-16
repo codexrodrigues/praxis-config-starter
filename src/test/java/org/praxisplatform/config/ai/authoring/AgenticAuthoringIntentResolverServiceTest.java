@@ -1540,7 +1540,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("form");
-        assertThat(result.changeKind()).isEqualTo("create_minimal_form");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.selectedCandidate().schemaUrl())
                 .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request");
@@ -1593,7 +1593,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("form");
-        assertThat(result.changeKind()).isEqualTo("create_minimal_form");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.candidates())
                 .anySatisfy(candidate -> {
                     assertThat(candidate.resourcePath()).isEqualTo("/api/human-resources/funcionarios");
@@ -3342,7 +3342,7 @@ class AgenticAuthoringIntentResolverServiceTest {
 
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("form");
-        assertThat(result.changeKind()).isEqualTo("create_minimal_form");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.warnings()).contains(
                 "llm-intent-resolution-used",
@@ -3495,6 +3495,7 @@ class AgenticAuthoringIntentResolverServiceTest {
 
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.selectedCandidate()).isEqualTo(benefitsCandidate);
         assertThat(result.warnings()).contains("llm-resource-search-query");
         Mockito.verify(candidateCatalog).discover(
@@ -3586,6 +3587,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
 
         assertThat(result.valid()).isTrue();
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.selectedCandidate()).isEqualTo(benefitsCandidate);
         assertThat(result.assistantMessage())
                 .isEqualTo("Encontrei beneficios e vou usar esse recurso para o formulario.");
@@ -7378,7 +7380,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.valid()).isFalse();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("form");
-        assertThat(result.changeKind()).isEqualTo("create_minimal_form");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.selectedCandidate()).isNull();
         assertThat(result.candidates())
                 .extracting(AgenticAuthoringCandidate::resourcePath)
@@ -7493,7 +7495,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(result.artifactKind()).isEqualTo("form");
-        assertThat(result.changeKind()).isEqualTo("create_minimal_form");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/operations/incidentes");
         assertThat(result.selectedCandidate().submitUrl()).isEqualTo("/api/operations/incidentes");
