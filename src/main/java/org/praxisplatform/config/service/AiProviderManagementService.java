@@ -187,7 +187,11 @@ public class AiProviderManagementService {
                 .tenantId(tenantId)
                 .environment(environment)
                 .ragReleaseId(requestConfig != null ? requestConfig.getRagReleaseId() : null)
+                .invocationTrace(requestConfig != null ? requestConfig.getInvocationTrace() : null)
                 .build();
+        if (config.getInvocationTrace() != null) {
+            config.getInvocationTrace().providerSelected(provider, config.getModel());
+        }
         return selectedProvider.generateJson(prompt, schema, config);
     }
 
@@ -219,7 +223,11 @@ public class AiProviderManagementService {
                 .tenantId(tenantId)
                 .environment(environment)
                 .ragReleaseId(requestConfig != null ? requestConfig.getRagReleaseId() : null)
+                .invocationTrace(requestConfig != null ? requestConfig.getInvocationTrace() : null)
                 .build();
+        if (config.getInvocationTrace() != null) {
+            config.getInvocationTrace().providerSelected(provider, config.getModel());
+        }
         return selectedProvider.generateText(prompt, config);
     }
 

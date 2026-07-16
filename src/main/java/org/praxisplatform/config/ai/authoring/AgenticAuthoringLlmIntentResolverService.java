@@ -17,6 +17,8 @@ import java.util.Optional;
 import org.praxisplatform.config.service.AiProviderCallException;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
+import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
+import org.praxisplatform.config.service.AiProviderInvocationTrace;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
 import org.slf4j.Logger;
@@ -91,6 +93,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         }
         List<AgenticAuthoringCandidate> usableCandidates =
                 candidateOptions == null ? List.of() : candidateOptions;
+        List<AiProviderInvocationTelemetry> providerInvocations = new ArrayList<>();
         try {
             Optional<AgenticAuthoringLlmIntentResolution> platformGuidanceConfirmation =
                     compactPlatformGuidanceConfirmation(
@@ -100,9 +103,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                             componentCapabilities,
                             tenantId,
                             userId,
-                            environment);
+                            environment,
+                            providerInvocations);
             if (platformGuidanceConfirmation.isPresent()) {
-                return platformGuidanceConfirmation;
+                return platformGuidanceConfirmation.map(value -> withProviderInvocations(value, providerInvocations));
             }
             Optional<AgenticAuthoringLlmIntentResolution> fastResolution = fastIntentResolution(
                     request,
@@ -113,9 +117,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                     componentCapabilities,
                     tenantId,
                     userId,
-                    environment);
+                    environment,
+                    providerInvocations);
             if (fastResolution.isPresent()) {
-                return fastResolution;
+                return fastResolution.map(value -> withProviderInvocations(value, providerInvocations));
             }
             PromptInput promptInput = promptInput(
                     request,
@@ -126,7 +131,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                     componentCapabilities,
                     tenantId,
                     environment);
-            JsonNode result = providerManagementService.generateJson(
+            JsonNode result = invokeJson(
+                    "intent_full",
                     promptInput.prompt(),
                     AiJsonSchema.ofSchema(schema()),
                     AiCallConfig.builder()
@@ -139,11 +145,84 @@ public class AgenticAuthoringLlmIntentResolverService {
                             .build(),
                     tenantId,
                     userId,
-                    environment);
-            return toResolution(result);
+                    environment,
+                    providerInvocations);
+            return toResolution(result).map(value -> withProviderInvocations(value, providerInvocations));
         } catch (RuntimeException ex) {
-            return Optional.of(failedResolution(ex, request));
+            return Optional.of(withProviderInvocations(failedResolution(ex, request), providerInvocations));
         }
+    }
+
+    private JsonNode invokeJson(
+            String phase,
+            String prompt,
+            AiJsonSchema schema,
+            AiCallConfig callConfig,
+            String tenantId,
+            String userId,
+            String environment,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+        int attempt = nextAttempt(providerInvocations, phase);
+        AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
+                phase,
+                attempt,
+                callConfig != null ? callConfig.getProvider() : null,
+                callConfig != null ? callConfig.getModel() : null);
+        AiCallConfig tracedConfig = callConfig == null
+                ? AiCallConfig.builder().invocationTrace(trace).build()
+                : callConfig.toBuilder().invocationTrace(trace).build();
+        try {
+            JsonNode result = providerManagementService.generateJson(
+                    prompt,
+                    schema,
+                    tracedConfig,
+                    tenantId,
+                    userId,
+                    environment);
+            trace.succeeded();
+            return result;
+        } catch (RuntimeException ex) {
+            trace.failed(providerFailureKind(rootCause(ex)));
+            throw ex;
+        } finally {
+            providerInvocations.add(trace.snapshot());
+        }
+    }
+
+    private int nextAttempt(List<AiProviderInvocationTelemetry> providerInvocations, String phase) {
+        if (providerInvocations == null || providerInvocations.isEmpty()) {
+            return 1;
+        }
+        long priorAttempts = providerInvocations.stream()
+                .filter(Objects::nonNull)
+                .filter(invocation -> Objects.equals(phase, invocation.phase()))
+                .count();
+        return Math.toIntExact(Math.min(Integer.MAX_VALUE - 1L, priorAttempts) + 1L);
+    }
+
+    private AgenticAuthoringLlmIntentResolution withProviderInvocations(
+            AgenticAuthoringLlmIntentResolution resolution,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+        if (resolution == null) {
+            return null;
+        }
+        return new AgenticAuthoringLlmIntentResolution(
+                resolution.resolved(),
+                resolution.operationKind(),
+                resolution.artifactKind(),
+                resolution.changeKind(),
+                resolution.selectedResourcePath(),
+                resolution.resourceSearchQuery(),
+                resolution.followUpKind(),
+                resolution.assistantMessage(),
+                resolution.quickReplies(),
+                resolution.clarificationQuestions(),
+                resolution.warnings(),
+                resolution.consultativeRetrievalPlan(),
+                resolution.visualizationDecision(),
+                resolution.requiresGovernedAuthoring(),
+                resolution.semanticIntentClass(),
+                providerInvocations == null ? List.of() : List.copyOf(providerInvocations));
     }
 
     private AgenticAuthoringLlmIntentResolution failedResolution(
@@ -216,13 +295,15 @@ public class AgenticAuthoringLlmIntentResolverService {
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
             String tenantId,
             String userId,
-            String environment) {
+            String environment,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
         List<AgenticAuthoringCandidate> fastCandidates = fastIntentCandidateOptions(candidateOptions);
         if (!shouldTryFastIntentResolution(request, effectivePrompt, target, fastCandidates, componentCapabilities)) {
             return Optional.empty();
         }
         try {
-            JsonNode result = providerManagementService.generateJson(
+            JsonNode result = invokeJson(
+                    "intent_fast",
                     fastIntentPrompt(
                             request,
                             effectivePrompt,
@@ -241,7 +322,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                             .build(),
                     tenantId,
                     userId,
-                    environment);
+                    environment,
+                    providerInvocations);
             Optional<AgenticAuthoringLlmIntentResolution> resolution =
                     toResolution(result).map(value -> withFastCandidateResourceWhenUnambiguous(value, fastCandidates));
             if (resolution.isPresent() && fastIntentResolutionComplete(
@@ -276,12 +358,14 @@ public class AgenticAuthoringLlmIntentResolverService {
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
             String tenantId,
             String userId,
-            String environment) {
+            String environment,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
         if (!hasPriorPlatformGuidanceSemanticScope(request)) {
             return Optional.empty();
         }
         try {
-            JsonNode result = providerManagementService.generateJson(
+            JsonNode result = invokeJson(
+                    "platform_guidance_confirmation",
                     compactPlatformGuidancePrompt(
                             request,
                             effectivePrompt,
@@ -298,7 +382,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                             .build(),
                     tenantId,
                     userId,
-                    environment);
+                    environment,
+                    providerInvocations);
             if (result == null
                     || !result.isObject()
                     || !result.path("matchesSemanticScope").asBoolean(false)

@@ -18,6 +18,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 
 public class AgenticAuthoringIntentResolverService {
 
@@ -5474,6 +5475,9 @@ public class AgenticAuthoringIntentResolverService {
             boolean semanticPolicyCorrectedAnalyticalDashboardIntent,
             AgenticAuthoringCandidate selectedCandidate,
             List<AgenticAuthoringCandidate> candidates) {
+        boolean detailedDiagnosticsEnabled = diagnostics != null
+                && diagnostics.isObject()
+                && diagnostics.path("enabled").asBoolean(false);
         ObjectNode root = diagnostics != null && diagnostics.isObject()
                 ? (ObjectNode) diagnostics.deepCopy()
                 : objectMapper.createObjectNode();
@@ -5507,7 +5511,93 @@ public class AgenticAuthoringIntentResolverService {
             telemetry.set("selectedCandidateEvidence",
                     objectMapper.valueToTree(selectedCandidate.evidence() == null ? List.of() : selectedCandidate.evidence()));
         }
+        if (detailedDiagnosticsEnabled) {
+            appendProviderInvocationTelemetry(
+                    telemetry,
+                    llmIntent == null ? List.of() : llmIntent.providerInvocations());
+        }
         return root;
+    }
+
+    private void appendProviderInvocationTelemetry(
+            ObjectNode telemetry,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+        List<AiProviderInvocationTelemetry> invocations = providerInvocations == null
+                ? List.of()
+                : providerInvocations.stream().filter(Objects::nonNull).limit(12).toList();
+        var items = telemetry.putArray("providerInvocations");
+        long totalLatencyMs = 0L;
+        int successCount = 0;
+        int failureCount = 0;
+        long inputTokens = 0L;
+        long outputTokens = 0L;
+        long cacheReadInputTokens = 0L;
+        long cacheWriteInputTokens = 0L;
+        long totalTokens = 0L;
+        boolean usageAvailable = false;
+        for (AiProviderInvocationTelemetry invocation : invocations) {
+            ObjectNode item = items.addObject();
+            item.put("phase", valueOrDefault(invocation.phase(), "unknown"));
+            item.put("attempt", Math.max(1, invocation.attempt()));
+            item.put("provider", valueOrDefault(invocation.provider(), "unknown"));
+            item.put("model", valueOrDefault(invocation.model(), "unknown"));
+            putNonBlank(item, "transport", invocation.transport());
+            item.put("status", valueOrDefault(invocation.status(), "unknown"));
+            putNonBlank(item, "failureKind", invocation.failureKind());
+            item.put("latencyMs", Math.max(0L, invocation.latencyMs()));
+            putNonNegative(item, "inputTokens", invocation.inputTokens());
+            putNonNegative(item, "outputTokens", invocation.outputTokens());
+            putNonNegative(item, "cacheReadInputTokens", invocation.cacheReadInputTokens());
+            putNonNegative(item, "cacheWriteInputTokens", invocation.cacheWriteInputTokens());
+            putNonNegative(item, "totalTokens", invocation.totalTokens());
+            putNonBlank(item, "responseId", invocation.responseId());
+            putNonBlank(item, "finishReason", invocation.finishReason());
+
+            totalLatencyMs += Math.max(0L, invocation.latencyMs());
+            successCount += "success".equals(invocation.status()) ? 1 : 0;
+            failureCount += "failure".equals(invocation.status()) ? 1 : 0;
+            inputTokens += nonNegativeOrZero(invocation.inputTokens());
+            outputTokens += nonNegativeOrZero(invocation.outputTokens());
+            cacheReadInputTokens += nonNegativeOrZero(invocation.cacheReadInputTokens());
+            cacheWriteInputTokens += nonNegativeOrZero(invocation.cacheWriteInputTokens());
+            totalTokens += nonNegativeOrZero(invocation.totalTokens());
+            usageAvailable = usageAvailable
+                    || invocation.inputTokens() != null
+                    || invocation.outputTokens() != null
+                    || invocation.totalTokens() != null;
+        }
+        ObjectNode aggregate = telemetry.putObject("providerInvocationAggregate");
+        aggregate.put("invocationCount", invocations.size());
+        aggregate.put("successCount", successCount);
+        aggregate.put("failureCount", failureCount);
+        aggregate.put("latencyMs", totalLatencyMs);
+        aggregate.put("usageAvailable", usageAvailable);
+        if (usageAvailable) {
+            aggregate.put("inputTokens", inputTokens);
+            aggregate.put("outputTokens", outputTokens);
+            aggregate.put("cacheReadInputTokens", cacheReadInputTokens);
+            aggregate.put("cacheWriteInputTokens", cacheWriteInputTokens);
+            aggregate.put("totalTokens", totalTokens);
+        }
+        aggregate.put("rawPromptCopied", false);
+        aggregate.put("rawResponseCopied", false);
+        aggregate.put("credentialsCopied", false);
+    }
+
+    private void putNonBlank(ObjectNode node, String field, String value) {
+        if (value != null && !value.isBlank()) {
+            node.put(field, value);
+        }
+    }
+
+    private void putNonNegative(ObjectNode node, String field, Integer value) {
+        if (value != null && value >= 0) {
+            node.put(field, value);
+        }
+    }
+
+    private long nonNegativeOrZero(Integer value) {
+        return value != null && value >= 0 ? value.longValue() : 0L;
     }
 
     private boolean hasEvidence(AgenticAuthoringCandidate candidate, String evidence) {

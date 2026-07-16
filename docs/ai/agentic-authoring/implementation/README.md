@@ -104,9 +104,11 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 29. [25-pre-intent-resource-discovery-demo-readiness.md](./25-pre-intent-resource-discovery-demo-readiness.md)
 30. [26-assistant-consistency-excellence-plan.md](./26-assistant-consistency-excellence-plan.md)
 31. [27-assistant-consistency-p06-evidence.md](./27-assistant-consistency-p06-evidence.md)
-32. [01-current-state-and-target.md](./01-current-state-and-target.md)
-33. [02-implementation-backlog.md](./02-implementation-backlog.md)
-34. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+32. [28-assistant-consistency-apply-lineage-evidence.md](./28-assistant-consistency-apply-lineage-evidence.md)
+33. [29-provider-phase-telemetry-evidence.md](./29-provider-phase-telemetry-evidence.md)
+34. [01-current-state-and-target.md](./01-current-state-and-target.md)
+35. [02-implementation-backlog.md](./02-implementation-backlog.md)
+36. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e

@@ -22,6 +22,21 @@ O fluxo agentic authoring do Page Builder possui endpoints sincronicos:
 O diagnostico `llmDiagnostics` e opt-in e serve para auditoria/debug do prompt,
 context bundle e tool catalog de um turno ja concluido. Ele nao substitui stream.
 
+Quando `contextHints.includeLlmDiagnostics=true`,
+`llmDiagnostics.resolutionTelemetry` tambem projeta a telemetria sanitizada das
+invocacoes de provider realizadas durante a resolucao semantica:
+
+- `providerInvocations[]`: fase, tentativa, provider/modelo efetivos,
+  transporte, status, classe de falha e latencia;
+- tokens de entrada, saida, cache read/write e total somente quando retornados
+  pelo provider;
+- `providerInvocationAggregate`: contagens e totais limitados ao turno.
+
+A projecao e limitada a 12 invocacoes e nunca inclui prompt, completion, API
+key, headers ou payload nativo. `rawPromptCopied=false`,
+`rawResponseCopied=false` e `credentialsCopied=false` tornam essa fronteira
+auditavel. O envelope SSE e seus eventos terminais permanecem inalterados.
+
 O backend tambem expõe o primeiro incremento canonico de stream para turnos de
 authoring em:
 

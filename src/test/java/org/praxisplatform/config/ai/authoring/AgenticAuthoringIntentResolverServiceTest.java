@@ -15,6 +15,7 @@ import org.mockito.Mockito;
 import org.praxisplatform.config.dto.ApiSearchResult;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
+import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.ContextRetrievalService;
 
 @Tag("unit")
@@ -4654,7 +4655,27 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "Vou usar folha de pagamento como base.",
                         List.of(),
                         List.of(),
-                        List.of())));
+                        List.of(),
+                        null,
+                        null,
+                        false,
+                        "ui_composition",
+                        List.of(new AiProviderInvocationTelemetry(
+                                "intent_full",
+                                1,
+                                "openai",
+                                "gpt-5.4-mini",
+                                "openai-chat-completions-http",
+                                "success",
+                                null,
+                                420,
+                                100,
+                                20,
+                                60,
+                                null,
+                                120,
+                                "chatcmpl-safe-123",
+                                "stop")))));
         Mockito.when(llmIntentResolver.diagnosticSnapshot(
                 Mockito.any(),
                 Mockito.anyString(),
@@ -4700,6 +4721,48 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isEqualTo("ai-authoring/page-builder-system-prompt.v1.md");
         assertThat(result.llmDiagnostics().path("request").path("contextBundle").path("schemaVersion").asText())
                 .isEqualTo("praxis-agentic-authoring-context-bundle.v1");
+        JsonNode providerInvocation = result.llmDiagnostics()
+                .path("resolutionTelemetry")
+                .path("providerInvocations")
+                .path(0);
+        assertThat(providerInvocation.path("phase").asText()).isEqualTo("intent_full");
+        assertThat(providerInvocation.path("provider").asText()).isEqualTo("openai");
+        assertThat(providerInvocation.path("cacheReadInputTokens").asInt()).isEqualTo(60);
+        assertThat(providerInvocation.has("prompt")).isFalse();
+        assertThat(providerInvocation.has("response")).isFalse();
+        JsonNode aggregate = result.llmDiagnostics()
+                .path("resolutionTelemetry")
+                .path("providerInvocationAggregate");
+        assertThat(aggregate.path("invocationCount").asInt()).isEqualTo(1);
+        assertThat(aggregate.path("totalTokens").asInt()).isEqualTo(120);
+        assertThat(aggregate.path("rawPromptCopied").asBoolean()).isFalse();
+        assertThat(aggregate.path("rawResponseCopied").asBoolean()).isFalse();
+        assertThat(aggregate.path("credentialsCopied").asBoolean()).isFalse();
+
+        AgenticAuthoringIntentResolutionResult resultWithoutDiagnostics = llmFirstService.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Crie um dashboard executivo de folha de pagamento por departamento",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "mock",
+                        null,
+                        null,
+                        "session-2",
+                        "turn-2",
+                        List.of(),
+                        null,
+                        List.of(),
+                        objectMapper.createObjectNode()),
+                "tenant",
+                "user",
+                "local");
+        assertThat(resultWithoutDiagnostics.llmDiagnostics()
+                .path("resolutionTelemetry")
+                .path("providerInvocations")
+                .isMissingNode()).isTrue();
     }
 
     @Test

@@ -611,6 +611,13 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(result.warnings())
                 .contains("llm-fast-intent-resolution-used")
                 .doesNotContain("llm-compact-platform-guidance-confirmation-used");
+        assertThat(result.providerInvocations())
+                .extracting(
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::phase,
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::status)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("platform_guidance_confirmation", "success"),
+                        org.assertj.core.groups.Tuple.tuple("intent_fast", "success"));
         Mockito.verify(providerManagementService, Mockito.times(2)).generateJson(
                 any(),
                 any(AiJsonSchema.class),
@@ -1866,6 +1873,14 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .doesNotContain("provider quota exhausted");
         assertThat(resolution.clarificationQuestions())
                 .contains("Você quer consultar dados disponíveis ou já quer criar uma tabela, formulário, gráfico ou painel?");
+        assertThat(resolution.providerInvocations())
+                .extracting(
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::phase,
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::status,
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::failureKind)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("intent_fast", "failure", "quota-exhausted"),
+                        org.assertj.core.groups.Tuple.tuple("intent_full", "failure", "quota-exhausted"));
     }
 
     @Test

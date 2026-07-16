@@ -119,6 +119,11 @@ contra OpenAI e Neon reais depois da correcao.
 
 ## Proximo passo recomendado
 
+Status em 2026-07-16: o primeiro corte foi concluido para
+`platform_guidance_confirmation`, `intent_fast` e `intent_full`; a evidencia e
+o backlog atualizado estao em
+[29-provider-phase-telemetry-evidence.md](./29-provider-phase-telemetry-evidence.md).
+
 Fechar a telemetria canonica de provider antes do spike de SDK, porque as duas
 respostas genericas restantes ainda nao informam com precisao em qual passe a
 assertividade foi perdida:

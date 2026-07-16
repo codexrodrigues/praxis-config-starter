@@ -16,6 +16,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.metadata.ChatResponseMetadata;
+import org.springframework.ai.chat.metadata.DefaultUsage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -44,6 +46,74 @@ class SpringAiGeminiServiceTest {
         String result = service.generateText("ping");
 
         assertEquals("pong", result);
+    }
+
+    @Test
+    void sdkCallPreservesChatResponseUsageMetadata() {
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
+        ReflectionTestUtils.setField(service, "model", "gemini-2.5-flash");
+        ReflectionTestUtils.setField(service, "temperature", 0.1d);
+        ReflectionTestUtils.setField(service, "maxTokens", 128);
+        ReflectionTestUtils.setField(service, "preferGenaiApi", false);
+        when(chatClient.call(any(Prompt.class))).thenReturn(new ChatResponse(
+                List.of(new Generation(new AssistantMessage("pong"))),
+                ChatResponseMetadata.builder()
+                        .id("gemini-safe-123")
+                        .model("gemini-2.5-flash-001")
+                        .usage(new DefaultUsage(90, 12, 102))
+                        .build()));
+        AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
+                "intent_fast", 1, "gemini", "gemini-2.5-flash");
+
+        String result = service.generateText(
+                "ping",
+                AiCallConfig.builder().model("gemini-2.5-flash").invocationTrace(trace).build());
+        AiProviderInvocationTelemetry telemetry = trace.snapshot();
+
+        assertEquals("pong", result);
+        assertEquals("spring-ai-google-genai", telemetry.transport());
+        assertEquals("gemini-2.5-flash-001", telemetry.model());
+        assertEquals("gemini-safe-123", telemetry.responseId());
+        assertEquals(90, telemetry.inputTokens());
+        assertEquals(12, telemetry.outputTokens());
+        assertEquals(102, telemetry.totalTokens());
+    }
+
+    @Test
+    void directMetadataPreservesGeminiCacheUsage() throws Exception {
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
+        AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
+                "intent_full", 1, "gemini", "gemini-2.5-flash");
+        JsonNode response = objectMapper.readTree("""
+                {
+                  "responseId": "gemini-safe-456",
+                  "modelVersion": "gemini-2.5-flash-002",
+                  "candidates": [{"finishReason": "STOP"}],
+                  "usageMetadata": {
+                    "promptTokenCount": 140,
+                    "candidatesTokenCount": 22,
+                    "cachedContentTokenCount": 100,
+                    "totalTokenCount": 162
+                  }
+                }
+                """);
+
+        ReflectionTestUtils.invokeMethod(
+                service,
+                "captureDirectInvocationMetadata",
+                AiCallConfig.builder().invocationTrace(trace).build(),
+                response,
+                "gemini-2.5-flash");
+        AiProviderInvocationTelemetry telemetry = trace.snapshot();
+
+        assertEquals("google-genai-http", telemetry.transport());
+        assertEquals("gemini-2.5-flash-002", telemetry.model());
+        assertEquals("gemini-safe-456", telemetry.responseId());
+        assertEquals("STOP", telemetry.finishReason());
+        assertEquals(140, telemetry.inputTokens());
+        assertEquals(22, telemetry.outputTokens());
+        assertEquals(100, telemetry.cacheReadInputTokens());
+        assertEquals(162, telemetry.totalTokens());
     }
 
     @Test

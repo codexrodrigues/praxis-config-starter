@@ -284,6 +284,7 @@ public class SpringAiOpenAiService implements AiProvider {
                         new IllegalStateException("OpenAI returned empty content"
                                 + (finishReason.isBlank() ? "" : " (finish_reason=" + finishReason + ")")));
             }
+            captureInvocationMetadata(config, resRoot, resolvedModel);
             return content;
 
         } catch (InterruptedException interruptedException) {
@@ -698,6 +699,38 @@ public class SpringAiOpenAiService implements AiProvider {
         }
         String text = value.asText();
         return text == null || text.isBlank() ? null : text;
+    }
+
+    private void captureInvocationMetadata(AiCallConfig config, JsonNode response, String requestedModel) {
+        AiProviderInvocationTrace trace = config != null ? config.getInvocationTrace() : null;
+        if (trace == null || response == null) {
+            return;
+        }
+        JsonNode usage = response.path("usage");
+        JsonNode promptDetails = usage.path("prompt_tokens_details");
+        JsonNode firstChoice = response.path("choices").path(0);
+        trace.providerResponse(
+                "openai-chat-completions-http",
+                textOrNull(response, "id"),
+                valueOrFallback(textOrNull(response, "model"), requestedModel),
+                textOrNull(firstChoice, "finish_reason"),
+                integerOrNull(usage, "prompt_tokens"),
+                integerOrNull(usage, "completion_tokens"),
+                integerOrNull(promptDetails, "cached_tokens"),
+                null,
+                integerOrNull(usage, "total_tokens"));
+    }
+
+    private Integer integerOrNull(JsonNode node, String field) {
+        if (node == null || !node.has(field) || !node.path(field).canConvertToInt()) {
+            return null;
+        }
+        int value = node.path(field).asInt();
+        return value >= 0 ? value : null;
+    }
+
+    private String valueOrFallback(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private AiProviderStreamException classifyStreamFailure(String provider, Throwable error) {

@@ -369,7 +369,8 @@ public class SpringAiGeminiService implements AiProvider {
             String prompt,
             GoogleGenAiChatOptions options,
             AiCallConfig config,
-            List<Advisor> advisors) {
+            List<Advisor> advisors,
+            String resolvedModel) {
         GoogleGenAiChatModel chatClient = resolveChatClient();
         ChatClient client = ChatClient.create(chatClient);
         Filter.Expression filterExpression = RagFilters.buildScopedExpression(
@@ -378,20 +379,24 @@ public class SpringAiGeminiService implements AiProvider {
                 config != null ? config.getRagReleaseId() : null,
                 true);
         if (filterExpression == null) {
-            return client.prompt(prompt)
+            ChatResponse response = client.prompt(prompt)
                     .options(options)
                     .advisors(advisors)
                     .call()
-                    .content();
+                    .chatResponse();
+            captureSpringAiInvocationMetadata(config, response, resolvedModel, "spring-ai-google-genai-advisors");
+            return extractContent(response);
         }
         RagFilterContext.set(filterExpression);
         try {
-            return client.prompt(prompt)
+            ChatResponse response = client.prompt(prompt)
                     .options(options)
                     .advisors(spec -> spec.advisors(advisors)
                             .param(QuestionAnswerAdvisor.FILTER_EXPRESSION, filterExpression))
                     .call()
-                    .content();
+                    .chatResponse();
+            captureSpringAiInvocationMetadata(config, response, resolvedModel, "spring-ai-google-genai-advisors");
+            return extractContent(response);
         } finally {
             RagFilterContext.clear();
         }
@@ -453,6 +458,7 @@ public class SpringAiGeminiService implements AiProvider {
                         summarizeErrorBody(response.body()));
             }
             JsonNode root = objectMapper.readTree(response.body());
+            captureDirectInvocationMetadata(config, root, resolvedModel);
             return extractContentFromGemini(root);
         } catch (AiProviderCallException providerException) {
             throw providerException;
@@ -611,9 +617,10 @@ public class SpringAiGeminiService implements AiProvider {
             try {
                 return callWithRetries(() -> {
                     if (!advisors.isEmpty()) {
-                        return callWithAdvisors(prompt, options, config, advisors);
+                        return callWithAdvisors(prompt, options, config, advisors, candidate);
                     }
                     ChatResponse response = chatClient.call(new Prompt(prompt, options));
+                    captureSpringAiInvocationMetadata(config, response, candidate, "spring-ai-google-genai");
                     return extractContent(response);
                 }, candidate, "google-genai-sdk");
             } catch (RuntimeException ex) {
@@ -1194,6 +1201,62 @@ public class SpringAiGeminiService implements AiProvider {
         }
         String text = value.asText();
         return text == null || text.isBlank() ? null : text;
+    }
+
+    private void captureDirectInvocationMetadata(AiCallConfig config, JsonNode response, String requestedModel) {
+        AiProviderInvocationTrace trace = config != null ? config.getInvocationTrace() : null;
+        if (trace == null || response == null) {
+            return;
+        }
+        JsonNode usage = response.path("usageMetadata");
+        JsonNode firstCandidate = response.path("candidates").path(0);
+        trace.providerResponse(
+                "google-genai-http",
+                textOrNull(response, "responseId"),
+                valueOrFallback(textOrNull(response, "modelVersion"), requestedModel),
+                textOrNull(firstCandidate, "finishReason"),
+                integerOrNull(usage, "promptTokenCount"),
+                integerOrNull(usage, "candidatesTokenCount"),
+                integerOrNull(usage, "cachedContentTokenCount"),
+                null,
+                integerOrNull(usage, "totalTokenCount"));
+    }
+
+    private void captureSpringAiInvocationMetadata(
+            AiCallConfig config,
+            ChatResponse response,
+            String requestedModel,
+            String transport) {
+        AiProviderInvocationTrace trace = config != null ? config.getInvocationTrace() : null;
+        if (trace == null || response == null || response.getMetadata() == null) {
+            return;
+        }
+        org.springframework.ai.chat.metadata.Usage usage = response.getMetadata().getUsage();
+        Generation generation = response.getResult();
+        trace.providerResponse(
+                transport,
+                response.getMetadata().getId(),
+                valueOrFallback(response.getMetadata().getModel(), requestedModel),
+                generation != null && generation.getMetadata() != null
+                        ? generation.getMetadata().getFinishReason()
+                        : null,
+                usage != null ? usage.getPromptTokens() : null,
+                usage != null ? usage.getCompletionTokens() : null,
+                null,
+                null,
+                usage != null ? usage.getTotalTokens() : null);
+    }
+
+    private Integer integerOrNull(JsonNode node, String field) {
+        if (node == null || !node.has(field) || !node.path(field).canConvertToInt()) {
+            return null;
+        }
+        int value = node.path(field).asInt();
+        return value >= 0 ? value : null;
+    }
+
+    private String valueOrFallback(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private String trimToNull(String value) {

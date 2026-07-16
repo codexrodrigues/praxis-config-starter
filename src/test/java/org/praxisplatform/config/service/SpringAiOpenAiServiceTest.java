@@ -50,6 +50,62 @@ class SpringAiOpenAiServiceTest {
     }
 
     @Test
+    void directCallPreservesSanitizedUsageAndCacheMetadata() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            byte[] bytes = """
+                    {
+                      "id": "chatcmpl-safe-123",
+                      "model": "gpt-5.4-mini-2026-06-01",
+                      "choices": [{
+                        "finish_reason": "stop",
+                        "message": {"content": "pong"}
+                      }],
+                      "usage": {
+                        "prompt_tokens": 120,
+                        "completion_tokens": 18,
+                        "total_tokens": 138,
+                        "prompt_tokens_details": {"cached_tokens": 80}
+                      }
+                    }
+                    """.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        try {
+            SpringAiOpenAiService service = new SpringAiOpenAiService(provider(chatClient), objectMapper);
+            ReflectionTestUtils.setField(service, "apiKey", "test-key");
+            ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
+            ReflectionTestUtils.setField(service, "model", "gpt-5.4-mini");
+            ReflectionTestUtils.setField(service, "temperature", 0.1d);
+            ReflectionTestUtils.setField(service, "maxTokens", 128);
+            AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
+                    "intent_full", 1, "openai", "gpt-5.4-mini");
+
+            String result = service.generateText(
+                    "ping",
+                    AiCallConfig.builder().model("gpt-5.4-mini").invocationTrace(trace).build());
+            AiProviderInvocationTelemetry telemetry = trace.snapshot();
+
+            assertEquals("pong", result);
+            assertEquals("openai-chat-completions-http", telemetry.transport());
+            assertEquals("gpt-5.4-mini-2026-06-01", telemetry.model());
+            assertEquals("chatcmpl-safe-123", telemetry.responseId());
+            assertEquals("stop", telemetry.finishReason());
+            assertEquals(120, telemetry.inputTokens());
+            assertEquals(18, telemetry.outputTokens());
+            assertEquals(80, telemetry.cacheReadInputTokens());
+            assertEquals(138, telemetry.totalTokens());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void generateJsonUsesSchemaPrompt() throws Exception {
         HttpServer server = openAiServer("\"{\\\"value\\\":123}\"");
         server.start();
