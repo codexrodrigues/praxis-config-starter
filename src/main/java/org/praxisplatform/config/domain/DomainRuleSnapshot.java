@@ -47,6 +47,13 @@ public class DomainRuleSnapshot {
   @Column(name = "content_hash", nullable = false, length = 64)
   private String contentHash;
 
+  @Column(name = "composition_manifest", columnDefinition = "jsonb")
+  @ColumnTransformer(write = "?::jsonb")
+  private String compositionManifest;
+
+  @Column(name = "composition_digest", length = 64)
+  private String compositionDigest;
+
   @Column(name = "supersedes_snapshot_id")
   private UUID supersedesSnapshotId;
 

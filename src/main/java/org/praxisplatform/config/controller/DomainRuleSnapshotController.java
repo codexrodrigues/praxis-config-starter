@@ -8,6 +8,9 @@ import java.time.Duration;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainRuleSnapshotActivationResponse;
+import org.praxisplatform.config.dto.DomainRuleSnapshotHeadStatusResponse;
+import org.praxisplatform.config.dto.DomainRuleCompositionManifestRequest;
+import org.praxisplatform.config.dto.DomainRuleCompositionManifestResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotPublicationRequest;
 import org.praxisplatform.config.dto.DomainRuleSnapshotRollbackRequest;
 import org.praxisplatform.config.dto.DomainRuleSnapshotStoredResponse;
@@ -16,6 +19,7 @@ import org.praxisplatform.config.http.HttpEntityTagCondition;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
 import org.praxisplatform.config.service.DomainRuleSnapshotService;
+import org.praxisplatform.rules.plan.RulePlanException;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
@@ -37,6 +41,16 @@ import org.springframework.web.bind.annotation.RestController;
 @ConditionalOnBean({DomainRuleSnapshotRepository.class, DomainRuleSnapshotHeadRepository.class})
 public class DomainRuleSnapshotController {
   private final DomainRuleSnapshotService snapshotService;
+
+  @PostMapping("/composition-manifest")
+  @Operation(summary = "Canonicalize a RuleSet composition for approval",
+      description = "Resolves governed source hashes and the admitted implementation catalog, validates the candidate, and returns the exact SHA-256 that composition approvers must sign off before publication.")
+  public ResponseEntity<DomainRuleCompositionManifestResponse> compositionManifest(
+      @RequestBody DomainRuleCompositionManifestRequest request,
+      @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+      @RequestHeader(value = "X-Env", required = false) String environment) {
+    return ResponseEntity.ok(snapshotService.prepareCompositionManifest(request, tenantId, environment));
+  }
 
   @PostMapping
   @Operation(summary = "Publish and activate an immutable RuleSet snapshot",
@@ -94,6 +108,36 @@ public class DomainRuleSnapshotController {
     }
     return ResponseEntity.ok()
         .eTag(quoted(response.headEtag()))
+        .cacheControl(CacheControl.noCache())
+        .body(response);
+  }
+
+  @GetMapping("/head/status")
+  @Operation(summary = "Inspect the operational state of a RuleSet head",
+      description = "Returns only safe head metadata and the current concurrency ETag. It never returns snapshot content that failed governed verification.")
+  @ApiResponses({
+    @ApiResponse(responseCode = "200", description = "Head metadata and recovery classification"),
+    @ApiResponse(responseCode = "304", description = "The caller already has this head state"),
+    @ApiResponse(responseCode = "404", description = "No scoped RuleSet head exists")
+  })
+  public ResponseEntity<DomainRuleSnapshotHeadStatusResponse> headStatus(
+      @RequestParam String ruleSetKey,
+      @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+      @RequestHeader(value = "X-Env", required = false) String environment,
+      @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
+    DomainRuleSnapshotHeadStatusResponse response = snapshotService
+        .findHeadStatus(tenantId, environment, ruleSetKey)
+        .orElseThrow(() -> new DomainRuleSnapshotControlPlaneException(
+            HttpStatus.NOT_FOUND, "RuleSet head was not found"));
+    String headEtag = response.headEtag();
+    if (matchesWeak(ifNoneMatch, headEtag)) {
+      return ResponseEntity.status(HttpStatus.NOT_MODIFIED)
+          .eTag(quoted(headEtag))
+          .cacheControl(CacheControl.noCache())
+          .build();
+    }
+    return ResponseEntity.ok()
+        .eTag(quoted(headEtag))
         .cacheControl(CacheControl.noCache())
         .body(response);
   }
@@ -175,6 +219,13 @@ public class DomainRuleSnapshotController {
   public ResponseEntity<Map<String, String>> handleInvalidContract(IllegalArgumentException exception) {
     return ResponseEntity.badRequest().body(Map.of(
         "code", "INVALID_RULE_SNAPSHOT",
+        "message", exception.getMessage()));
+  }
+
+  @ExceptionHandler(RulePlanException.class)
+  public ResponseEntity<Map<String, String>> handleInvalidPlan(RulePlanException exception) {
+    return ResponseEntity.badRequest().body(Map.of(
+        "code", exception.getCode().name(),
         "message", exception.getMessage()));
   }
 

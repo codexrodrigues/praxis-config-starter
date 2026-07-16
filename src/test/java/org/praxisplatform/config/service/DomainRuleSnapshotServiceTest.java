@@ -6,6 +6,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -22,6 +25,7 @@ import org.praxisplatform.config.domain.DomainRuleDefinition;
 import org.praxisplatform.config.domain.DomainRuleSnapshot;
 import org.praxisplatform.config.domain.DomainRuleSnapshotHead;
 import org.praxisplatform.config.dto.DomainRuleSnapshotPublicationRequest;
+import org.praxisplatform.config.dto.DomainRuleCompositionManifestRequest;
 import org.praxisplatform.config.exception.DomainRuleSnapshotControlPlaneException;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
@@ -46,6 +50,9 @@ import org.praxisplatform.rules.contract.RuleSetRef;
 import org.praxisplatform.rules.contract.RuleSnapshotApproval;
 import org.praxisplatform.rules.contract.RuleSnapshotSource;
 import org.praxisplatform.rules.contract.SlotCardinality;
+import org.praxisplatform.rules.runtime.RuleBindingExecutorRegistry;
+import org.praxisplatform.rules.snapshot.PraxisRuleSnapshotCompiler;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 
 @Tag("unit")
@@ -81,21 +88,16 @@ class DomainRuleSnapshotServiceTest {
     UUID secondId = UUID.randomUUID();
     when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.empty());
-    when(snapshotRepository.findByTenantIdAndEnvironmentAndRuleSetKeyOrderByPublicationRevisionDesc(
-        "tenant-a", "prod", "extraordinary-grant")).thenReturn(List.of());
     when(definitionRepository.findAllById(List.of(firstId, secondId))).thenReturn(List.of(
         approvedDefinition(firstId, "grant:eligibility", "approver-a"),
         approvedDefinition(secondId, "grant:amount", "approver-b")));
 
+    DomainRuleSnapshotPublicationRequest request =
+        publicationRequest(ruleSet(), List.of(firstId, secondId));
+    clearInvocations(implementationCatalog);
+
     var response = service.publish(
-        new DomainRuleSnapshotPublicationRequest(
-            ruleSet(),
-            List.of(firstId, secondId),
-            "quickstart",
-            "quickstart/1.0",
-            "2026-07-13T20:00:00Z",
-            null,
-            "release-manager"),
+        request,
         "tenant-a",
         "prod",
         null,
@@ -106,11 +108,14 @@ class DomainRuleSnapshotServiceTest {
     assertThat(response.snapshot().publicationRevision()).isEqualTo(1);
     assertThat(response.snapshot().sources()).hasSize(2);
     assertThat(response.snapshot().approvals()).extracting(RuleSnapshotApproval::actorRef)
-        .containsExactlyInAnyOrder("approver-a", "approver-b");
+        .containsExactlyInAnyOrder(
+            "approver-a", "approver-b", "composition-approver-a", "composition-approver-b");
     assertThat(response.snapshotContentHash()).matches("[A-F0-9]{64}");
     assertThat(response.headEtag()).isNotEqualTo(response.snapshotContentHash());
     verify(snapshotRepository).save(any(DomainRuleSnapshot.class));
     verify(eventRepository).save(argThat(argThatEvent("PUBLISHED", 1L)));
+    verify(implementationCatalog, times(1)).allowedImplementations(
+        new DomainRuleImplementationScope("tenant-a", "prod", "quickstart"));
   }
 
   @Test
@@ -119,21 +124,12 @@ class DomainRuleSnapshotServiceTest {
     UUID secondId = UUID.randomUUID();
     when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.empty());
-    when(snapshotRepository.findByTenantIdAndEnvironmentAndRuleSetKeyOrderByPublicationRevisionDesc(
-        "tenant-a", "prod", "extraordinary-grant")).thenReturn(List.of());
     when(definitionRepository.findAllById(List.of(firstId, secondId))).thenReturn(List.of(
         approvedDefinition(firstId, "grant:eligibility", "approver-a"),
         approvedDefinition(secondId, "grant:amount", "approver-b")));
 
     service.publish(
-        new DomainRuleSnapshotPublicationRequest(
-            javaRuleSet(),
-            List.of(firstId, secondId),
-            "quickstart",
-            "quickstart/1.0",
-            "2026-07-13T20:00:00Z",
-            null,
-            "release-manager"),
+        publicationRequest(javaRuleSet(), List.of(firstId, secondId)),
         "tenant-a",
         "prod",
         null,
@@ -147,13 +143,20 @@ class DomainRuleSnapshotServiceTest {
     DomainRuleSnapshotHead head = headCaptor.getValue();
     when(headRepository.findByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(head));
-    when(snapshotRepository.findById(stored.getId())).thenReturn(Optional.of(stored));
+    when(snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
+        stored.getId(), "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(stored));
 
     var active = service.findActive("tenant-a", "prod", "extraordinary-grant").orElseThrow();
 
     assertThat(stored.getSnapshotPayload()).contains("\"expression\":null");
-    assertThat(active.snapshot().ruleSet().bindings().getFirst().executor().expression()).isNull();
-    verify(implementationCatalog).allowedImplementations(new DomainRuleImplementationScope(
+    assertThat(active.snapshot().ruleSet().bindings().stream()
+        .filter(binding -> "calculation".equals(binding.bindingKey()))
+        .findFirst().orElseThrow().executor().expression()).isNull();
+    assertThat(active.snapshot().ruleSet().slots().stream()
+        .filter(slot -> "calculation".equals(slot.slotKey()))
+        .findFirst().orElseThrow().stage())
+        .isEqualTo(DecisionStage.TRANSFORMATION_INTENT);
+    verify(implementationCatalog, atLeastOnce()).allowedImplementations(new DomainRuleImplementationScope(
         "tenant-a", "prod", "quickstart"));
   }
 
@@ -236,14 +239,33 @@ class DomainRuleSnapshotServiceTest {
         "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(head));
 
     assertThatThrownBy(() -> service.publish(
-        new DomainRuleSnapshotPublicationRequest(
-            ruleSet(), List.of(UUID.randomUUID()), "quickstart", "quickstart/1.0",
-            "2026-07-13T20:00:00Z", null, "release-manager"),
+        unapprovedRequest(ruleSet(), List.of(UUID.randomUUID())),
         "tenant-a", "prod", "\"stale\"", null))
         .isInstanceOfSatisfying(DomainRuleSnapshotControlPlaneException.class,
             exception -> assertThat(exception.status()).isEqualTo(HttpStatus.PRECONDITION_FAILED));
 
     verify(snapshotRepository, never()).save(any());
+  }
+
+  @Test
+  void persistentConstraintFailureIsNotMisreportedAsStaleEtag() {
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.empty());
+    when(definitionRepository.findAllById(List.of(firstId, secondId))).thenReturn(List.of(
+        approvedDefinition(firstId, "grant:eligibility", "approver-a"),
+        approvedDefinition(secondId, "grant:amount", "approver-b")));
+    when(headRepository.saveAndFlush(any())).thenThrow(
+        new DataIntegrityViolationException("constraint failure"));
+
+    assertThatThrownBy(() -> service.publish(
+        publicationRequest(ruleSet(), List.of(firstId, secondId)),
+        "tenant-a", "prod", null, "*"))
+        .isInstanceOfSatisfying(DomainRuleSnapshotControlPlaneException.class,
+            exception -> assertThat(exception.status()).isEqualTo(HttpStatus.CONFLICT))
+        .hasMessageContaining("persistent integrity constraint")
+        .hasMessageNotContaining("head changed");
   }
 
   @Test
@@ -266,14 +288,11 @@ class DomainRuleSnapshotServiceTest {
     when(definitionRepository.findAllById(List.of(firstId, secondId))).thenReturn(List.of(
         approvedDefinition(firstId, "grant:eligibility", "approver-a"),
         approvedDefinition(secondId, "grant:amount", "approver-b")));
-    when(snapshotRepository.findByTenantIdAndEnvironmentAndRuleSetKeyOrderByPublicationRevisionDesc(
-        "tenant-a", "prod", "extraordinary-grant")).thenReturn(List.of(
-            DomainRuleSnapshot.builder().ruleSetVersion(1).publicationRevision(1).build()));
+    when(snapshotRepository.existsByTenantIdAndEnvironmentAndRuleSetKeyAndRuleSetVersion(
+        "tenant-a", "prod", "extraordinary-grant", 1)).thenReturn(true);
 
     assertThatThrownBy(() -> service.publish(
-        new DomainRuleSnapshotPublicationRequest(
-            ruleSet(), List.of(firstId, secondId), "quickstart", "quickstart/1.0",
-            "2026-07-13T20:00:00Z", null, "release-manager"),
+        publicationRequest(ruleSet(), List.of(firstId, secondId)),
         "tenant-a", "prod", "\"" + etag + "\"", null))
         .isInstanceOfSatisfying(DomainRuleSnapshotControlPlaneException.class,
             exception -> assertThat(exception.status()).isEqualTo(HttpStatus.CONFLICT));
@@ -296,7 +315,9 @@ class DomainRuleSnapshotServiceTest {
         .ruleSetVersion(1)
         .publicationRevision(1)
         .snapshotPayload(objectMapper.writeValueAsString(targetContract))
-        .contentHash("A".repeat(64))
+        .contentHash(snapshotHash(targetContract))
+        .compositionManifest(compositionManifestJson())
+        .compositionDigest(compositionDigest())
         .publishedBy("release-manager")
         .publishedAt(Instant.parse("2026-07-13T20:00:00Z"))
         .build();
@@ -315,6 +336,12 @@ class DomainRuleSnapshotServiceTest {
         "tenant-a", "prod", target.getSnapshotKey())).thenReturn(Optional.of(target));
     when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(head));
+    when(snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
+        activeId, "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(
+        DomainRuleSnapshot.builder()
+            .id(activeId)
+            .publicationRevision(2)
+            .build()));
 
     var response = service.rollback(
         target.getSnapshotKey(), "operator-a", "tenant-a", "prod", "\"" + oldEtag + "\"");
@@ -322,9 +349,307 @@ class DomainRuleSnapshotServiceTest {
     assertThat(response.activationType()).isEqualTo("ROLLED_BACK");
     assertThat(response.activationRevision()).isEqualTo(3);
     assertThat(response.headEtag()).isNotEqualTo(oldEtag.toString());
-    assertThat(response.snapshotContentHash()).isEqualTo("A".repeat(64));
+    assertThat(response.snapshotContentHash()).isEqualTo(snapshotHash(targetContract));
     verify(snapshotRepository, never()).save(any());
     verify(eventRepository).save(argThat(argThatEvent("ROLLED_BACK", 3L)));
+  }
+
+  @Test
+  void rollbackRejectsSnapshotNewerThanCurrentActivePublication() throws Exception {
+    UUID activeId = UUID.randomUUID();
+    UUID targetId = UUID.randomUUID();
+    UUID etag = UUID.randomUUID();
+    PublishedRuleSnapshot targetContract = publishedSnapshot();
+    DomainRuleSnapshot target = DomainRuleSnapshot.builder()
+        .id(targetId)
+        .tenantId("tenant-a")
+        .environment("prod")
+        .snapshotKey(targetContract.snapshotKey())
+        .ruleSetKey("extraordinary-grant")
+        .ruleSetVersion(3)
+        .publicationRevision(3)
+        .snapshotPayload(objectMapper.writeValueAsString(targetContract))
+        .contentHash("A".repeat(64))
+        .compositionManifest(compositionManifestJson())
+        .compositionDigest(compositionDigest())
+        .build();
+    DomainRuleSnapshotHead head = rollbackHead(activeId, etag);
+    when(snapshotRepository.findByTenantIdAndEnvironmentAndSnapshotKey(
+        "tenant-a", "prod", target.getSnapshotKey())).thenReturn(Optional.of(target));
+    when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(head));
+    when(snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
+        activeId, "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(
+        DomainRuleSnapshot.builder().id(activeId).publicationRevision(2).build()));
+
+    assertThatThrownBy(() -> service.rollback(
+        target.getSnapshotKey(), "operator-a", "tenant-a", "prod", "\"" + etag + "\""))
+        .isInstanceOfSatisfying(DomainRuleSnapshotControlPlaneException.class,
+            exception -> assertThat(exception.status()).isEqualTo(HttpStatus.CONFLICT))
+        .hasMessageContaining("older");
+
+    verify(headRepository, never()).save(any());
+    verify(eventRepository, never()).save(any());
+  }
+
+  @Test
+  void rollbackRejectsSnapshotOutsideGovernedValidityInterval() throws Exception {
+    UUID activeId = UUID.randomUUID();
+    UUID targetId = UUID.randomUUID();
+    UUID etag = UUID.randomUUID();
+    Instant future = Instant.now().plusSeconds(3600);
+    PublishedRuleSnapshot targetContract = publishedSnapshot(future.toString(), null);
+    DomainRuleSnapshot target = DomainRuleSnapshot.builder()
+        .id(targetId)
+        .tenantId("tenant-a")
+        .environment("prod")
+        .snapshotKey(targetContract.snapshotKey())
+        .ruleSetKey("extraordinary-grant")
+        .ruleSetVersion(1)
+        .publicationRevision(1)
+        .snapshotPayload(objectMapper.writeValueAsString(targetContract))
+        .contentHash(snapshotHash(targetContract))
+        .compositionManifest(compositionManifestJson())
+        .compositionDigest(compositionDigest())
+        .build();
+    DomainRuleSnapshotHead head = rollbackHead(activeId, etag);
+    when(snapshotRepository.findByTenantIdAndEnvironmentAndSnapshotKey(
+        "tenant-a", "prod", target.getSnapshotKey())).thenReturn(Optional.of(target));
+    when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(head));
+    when(snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
+        activeId, "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(
+        DomainRuleSnapshot.builder().id(activeId).publicationRevision(2).build()));
+
+    assertThatThrownBy(() -> service.rollback(
+        target.getSnapshotKey(), "operator-a", "tenant-a", "prod", "\"" + etag + "\""))
+        .isInstanceOfSatisfying(DomainRuleSnapshotControlPlaneException.class,
+            exception -> assertThat(exception.status()).isEqualTo(HttpStatus.CONFLICT))
+        .hasMessageContaining("validity interval");
+
+    PublishedRuleSnapshot expiredContract = publishedSnapshot(
+        Instant.now().minusSeconds(7200).toString(),
+        Instant.now().minusSeconds(3600).toString());
+    DomainRuleSnapshot expired = DomainRuleSnapshot.builder()
+        .id(UUID.randomUUID())
+        .tenantId("tenant-a")
+        .environment("prod")
+        .snapshotKey(expiredContract.snapshotKey())
+        .ruleSetKey("extraordinary-grant")
+        .ruleSetVersion(1)
+        .publicationRevision(1)
+        .snapshotPayload(objectMapper.writeValueAsString(expiredContract))
+        .contentHash(snapshotHash(expiredContract))
+        .compositionManifest(compositionManifestJson())
+        .compositionDigest(compositionDigest())
+        .build();
+    when(snapshotRepository.findByTenantIdAndEnvironmentAndSnapshotKey(
+        "tenant-a", "prod", expired.getSnapshotKey())).thenReturn(Optional.of(expired));
+
+    assertThatThrownBy(() -> service.rollback(
+        expired.getSnapshotKey(), "operator-a", "tenant-a", "prod", "\"" + etag + "\""))
+        .isInstanceOfSatisfying(DomainRuleSnapshotControlPlaneException.class,
+            exception -> assertThat(exception.status()).isEqualTo(HttpStatus.CONFLICT))
+        .hasMessageContaining("validity interval");
+
+    verify(headRepository, never()).save(any());
+    verify(eventRepository, never()).save(any());
+  }
+
+  @Test
+  void activeReadFailsClosedWhenPersistedContentHashDoesNotMatchEnvelope() throws Exception {
+    PublishedRuleSnapshot contract = publishedSnapshot();
+    UUID storedId = UUID.randomUUID();
+    DomainRuleSnapshot stored = DomainRuleSnapshot.builder()
+        .id(storedId)
+        .tenantId("tenant-a")
+        .environment("prod")
+        .snapshotKey(contract.snapshotKey())
+        .ruleSetKey("extraordinary-grant")
+        .ruleSetVersion(1)
+        .publicationRevision(1)
+        .snapshotPayload(objectMapper.writeValueAsString(contract))
+        .contentHash("F".repeat(64))
+        .compositionManifest(compositionManifestJson())
+        .compositionDigest(compositionDigest())
+        .build();
+    DomainRuleSnapshotHead head = rollbackHead(storedId, UUID.randomUUID());
+    when(headRepository.findByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(head));
+    when(snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
+        storedId, "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(stored));
+
+    assertThatThrownBy(() -> service.findActive("tenant-a", "prod", "extraordinary-grant"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("content hash verification failed");
+  }
+
+  @Test
+  void publicationRejectsCompositionDriftAfterApproval() {
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    List<UUID> ids = List.of(firstId, secondId);
+    when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.empty());
+    when(definitionRepository.findAllById(ids)).thenReturn(List.of(
+        approvedDefinition(firstId, "grant:eligibility", "approver-a"),
+        approvedDefinition(secondId, "grant:amount", "approver-b")));
+    DomainRuleSnapshotPublicationRequest approved = publicationRequest(ruleSet(), ids);
+    DomainRuleSnapshotPublicationRequest drifted = new DomainRuleSnapshotPublicationRequest(
+        javaRuleSet(), ids, approved.ownerServiceKey(), approved.requiredHostContractVersion(),
+        approved.validFromUtc(), approved.validUntilUtc(), approved.compositionDigest(),
+        approved.compositionApprovals(), approved.publishedBy());
+
+    assertThatThrownBy(() -> service.publish(drifted, "tenant-a", "prod", null, "*"))
+        .isInstanceOf(DomainRuleSnapshotControlPlaneException.class)
+        .hasMessageContaining("compositionDigest");
+    verify(snapshotRepository, never()).save(any());
+  }
+
+  @Test
+  void governedPublicationCanSupersedePreservedPreManifestSnapshot() throws Exception {
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    UUID previousId = UUID.randomUUID();
+    UUID etag = UUID.randomUUID();
+    PublishedRuleSnapshot previousContract = publishedSnapshot();
+    DomainRuleSnapshot previous = DomainRuleSnapshot.builder()
+        .id(previousId)
+        .tenantId("tenant-a")
+        .environment("prod")
+        .snapshotKey(previousContract.snapshotKey())
+        .ruleSetKey("extraordinary-grant")
+        .ruleSetVersion(1)
+        .publicationRevision(1)
+        .snapshotPayload(objectMapper.writeValueAsString(previousContract))
+        .contentHash("F".repeat(64))
+        .compositionManifest(null)
+        .compositionDigest(null)
+        .publishedBy("legacy-publisher")
+        .publishedAt(Instant.parse("2026-07-13T20:00:00Z"))
+        .build();
+    DomainRuleSnapshotHead head = rollbackHead(previousId, etag);
+    head.setActivationRevision(1L);
+    when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(head));
+    when(definitionRepository.findAllById(List.of(firstId, secondId))).thenReturn(List.of(
+        approvedDefinition(firstId, "grant:eligibility", "approver-a"),
+        approvedDefinition(secondId, "grant:amount", "approver-b")));
+    when(snapshotRepository.findMaximumPublicationRevision(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(1);
+    when(snapshotRepository.findTopByTenantIdAndEnvironmentAndRuleSetKeyOrderByPublicationRevisionDesc(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(previous));
+
+    var response = service.publish(
+        publicationRequest(ruleSet(2), List.of(firstId, secondId)),
+        "tenant-a", "prod", "\"" + etag + "\"", null);
+
+    assertThat(response.snapshot().ruleSet().ref().version()).isEqualTo(2);
+    assertThat(response.snapshot().supersedesSnapshotKey()).isEqualTo(previous.getSnapshotKey());
+    assertThat(response.activationRevision()).isEqualTo(2);
+    ArgumentCaptor<DomainRuleSnapshot> persisted = ArgumentCaptor.forClass(DomainRuleSnapshot.class);
+    verify(snapshotRepository).save(persisted.capture());
+    assertThat(persisted.getValue().getSupersedesSnapshotId()).isEqualTo(previousId);
+    assertThat(persisted.getValue().getCompositionManifest()).isNotBlank();
+    assertThat(persisted.getValue().getCompositionDigest()).matches("[A-F0-9]{64}");
+  }
+
+  @Test
+  void preManifestHeadIsInspectableForRecoveryButRemainsUnreadableForRuntime() throws Exception {
+    UUID storedId = UUID.randomUUID();
+    UUID etag = UUID.randomUUID();
+    PublishedRuleSnapshot contract = publishedSnapshot();
+    DomainRuleSnapshot stored = DomainRuleSnapshot.builder()
+        .id(storedId)
+        .tenantId("tenant-a")
+        .environment("prod")
+        .snapshotKey(contract.snapshotKey())
+        .ruleSetKey("extraordinary-grant")
+        .ruleSetVersion(1)
+        .publicationRevision(1)
+        .snapshotPayload(objectMapper.writeValueAsString(contract))
+        .contentHash(snapshotHash(contract))
+        .build();
+    DomainRuleSnapshotHead head = rollbackHead(storedId, etag);
+    when(headRepository.findByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(head));
+    when(snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
+        storedId, "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(stored));
+
+    var status = service.findHeadStatus("tenant-a", "prod", "extraordinary-grant").orElseThrow();
+
+    assertThat(status.executionReady()).isFalse();
+    assertThat(status.governanceState()).isEqualTo("REPUBLICATION_REQUIRED");
+    assertThat(status.headEtag()).isEqualTo(etag.toString());
+    assertThatThrownBy(() -> service.findActive("tenant-a", "prod", "extraordinary-grant"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("composition manifest is unreadable");
+  }
+
+  @Test
+  void publicationRejectsPublisherThatApprovedComposition() {
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    List<UUID> ids = List.of(firstId, secondId);
+    when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.empty());
+    when(definitionRepository.findAllById(ids)).thenReturn(List.of(
+        approvedDefinition(firstId, "grant:eligibility", "approver-a"),
+        approvedDefinition(secondId, "grant:amount", "approver-b")));
+    DomainRuleSnapshotPublicationRequest approved = publicationRequest(ruleSet(), ids);
+    DomainRuleSnapshotPublicationRequest conflicted = new DomainRuleSnapshotPublicationRequest(
+        approved.ruleSet(), ids, approved.ownerServiceKey(), approved.requiredHostContractVersion(),
+        approved.validFromUtc(), approved.validUntilUtc(), approved.compositionDigest(),
+        approved.compositionApprovals(), "composition-approver-a");
+
+    assertThatThrownBy(() -> service.publish(conflicted, "tenant-a", "prod", null, "*"))
+        .isInstanceOf(DomainRuleSnapshotControlPlaneException.class)
+        .hasMessageContaining("publisher cannot approve");
+  }
+
+  @Test
+  void manifestRejectsJavaCoordinateOutsideHostAdmissionCatalog() {
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    List<UUID> ids = List.of(firstId, secondId);
+    when(definitionRepository.findAllById(ids)).thenReturn(List.of(
+        approvedDefinition(firstId, "grant:eligibility", "approver-a"),
+        approvedDefinition(secondId, "grant:amount", "approver-b")));
+
+    assertThatThrownBy(() -> service.prepareCompositionManifest(
+        new DomainRuleCompositionManifestRequest(
+            javaRuleSet("9.9.9"), ids, "quickstart", "quickstart/1.0",
+            "2026-07-13T20:00:00Z", null),
+        "tenant-a", "prod"))
+        .isInstanceOfSatisfying(DomainRuleSnapshotControlPlaneException.class,
+            exception -> {
+              assertThat(exception.status()).isEqualTo(HttpStatus.BAD_REQUEST);
+              assertThat(exception.getMessage()).contains("PLAN_COMPATIBILITY_INVALID");
+            });
+  }
+
+  private DomainRuleSnapshotPublicationRequest publicationRequest(
+      RuleSetDefinition definition, List<UUID> sourceIds) {
+    var manifest = service.prepareCompositionManifest(new DomainRuleCompositionManifestRequest(
+        definition, sourceIds, "quickstart", "quickstart/1.0",
+        "2026-07-13T20:00:00Z", null), "tenant-a", "prod");
+    String decidedAt = Instant.now().minusSeconds(1).toString();
+    return new DomainRuleSnapshotPublicationRequest(
+        definition, sourceIds, "quickstart", "quickstart/1.0",
+        "2026-07-13T20:00:00Z", null, manifest.compositionDigest(),
+        List.of(
+            new RuleSnapshotApproval("composition-a", "RULE_COMPOSITION_APPROVER",
+                "composition-approver-a", decidedAt, manifest.compositionDigest()),
+            new RuleSnapshotApproval("composition-b", "RULE_COMPOSITION_APPROVER",
+                "composition-approver-b", decidedAt, manifest.compositionDigest())),
+        "release-manager");
+  }
+
+  private DomainRuleSnapshotPublicationRequest unapprovedRequest(
+      RuleSetDefinition definition, List<UUID> sourceIds) {
+    return new DomainRuleSnapshotPublicationRequest(
+        definition, sourceIds, "quickstart", "quickstart/1.0",
+        "2026-07-13T20:00:00Z", null, "0".repeat(64), List.of(), "release-manager");
   }
 
   private DomainRuleDefinition approvedDefinition(UUID id, String ruleKey, String approver) {
@@ -344,10 +669,14 @@ class DomainRuleSnapshotServiceTest {
   }
 
   private RuleSetDefinition ruleSet() {
+    return ruleSet(1);
+  }
+
+  private RuleSetDefinition ruleSet(int version) {
     var expression = objectMapper.createObjectNode();
     expression.put("var", "request.eligible");
     return new RuleSetDefinition(
-        new RuleSetRef("benefits", "extraordinary-grants", "extraordinary-grant", "evaluate", 1),
+        new RuleSetRef("benefits", "extraordinary-grants", "extraordinary-grant", "evaluate", version),
         List.of("request"),
         List.of(new DecisionSlot(
             "eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
@@ -361,16 +690,31 @@ class DomainRuleSnapshotServiceTest {
   }
 
   private RuleSetDefinition javaRuleSet() {
+    return javaRuleSet("1.0.0");
+  }
+
+  private RuleSetDefinition javaRuleSet(String implementationVersion) {
+    var eligibilityExpression = objectMapper.createObjectNode();
+    eligibilityExpression.put("var", "request.eligible");
     return new RuleSetDefinition(
         new RuleSetRef("benefits", "extraordinary-grants", "extraordinary-grant", "evaluate", 1),
         List.of("request"),
-        List.of(new DecisionSlot(
-            "calculation", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-            OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT)),
-        List.of(new DecisionBinding(
-            "calculation", "calculation", DecisionSource.PRODUCT, null,
-            RuleExecutorRef.java("benefits:amount", "1.0.0"), List.of(), 10, true,
-            null, null, List.of("request.amount"))),
+        List.of(
+            new DecisionSlot(
+                "eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
+                OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT),
+            new DecisionSlot(
+                "calculation", DecisionStage.TRANSFORMATION_INTENT, SlotCardinality.SINGLE,
+                OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT)),
+        List.of(
+            new DecisionBinding(
+                "eligibility", "eligibility", DecisionSource.PRODUCT, null,
+                RuleExecutorRef.jsonLogic(eligibilityExpression), List.of(), 10, true,
+                RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible")),
+            new DecisionBinding(
+                "calculation", "calculation", DecisionSource.PRODUCT, null,
+                RuleExecutorRef.java("benefits:amount", implementationVersion), List.of("eligibility"), 10, true,
+                null, null, List.of("request.amount"))),
         RuleRuntimeCompatibility.current(),
         RuleFailPolicy.FAIL_CLOSED);
   }
@@ -394,8 +738,6 @@ class DomainRuleSnapshotServiceTest {
   private void prepareFirstPublication(UUID firstId, UUID secondId) {
     when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.empty());
-    when(snapshotRepository.findByTenantIdAndEnvironmentAndRuleSetKeyOrderByPublicationRevisionDesc(
-        "tenant-a", "prod", "extraordinary-grant")).thenReturn(List.of());
     when(definitionRepository.findAllById(List.of(firstId, secondId))).thenReturn(List.of(
         approvedDefinition(firstId, "grant:eligibility", "approver-a"),
         approvedDefinition(secondId, "grant:amount", "approver-b")));
@@ -405,17 +747,14 @@ class DomainRuleSnapshotServiceTest {
       RuleSetDefinition definition,
       UUID firstId,
       UUID secondId) {
-    return new DomainRuleSnapshotPublicationRequest(
-        definition,
-        List.of(firstId, secondId),
-        "quickstart",
-        "quickstart/1.0",
-        "2026-07-13T20:00:00Z",
-        null,
-        "release-manager");
+    return publicationRequest(definition, List.of(firstId, secondId));
   }
 
   private PublishedRuleSnapshot publishedSnapshot() {
+    return publishedSnapshot("2026-07-13T20:00:00Z", null);
+  }
+
+  private PublishedRuleSnapshot publishedSnapshot(String validFromUtc, String validUntilUtc) {
     String hash = "B".repeat(64);
     return new PublishedRuleSnapshot(
         PublishedRuleSnapshot.SNAPSHOT_CONTRACT_VERSION,
@@ -427,13 +766,50 @@ class DomainRuleSnapshotServiceTest {
         "2026-07-13T20:00:00Z",
         null,
         "quickstart/1.0",
-        "2026-07-13T20:00:00Z",
-        null,
+        validFromUtc,
+        validUntilUtc,
         List.of(new RuleSnapshotSource("definition-a", "grant:eligibility", 1, hash)),
-        List.of(new RuleSnapshotApproval(
-            "approval-a", "RULE_DEFINITION_APPROVER", "approver-a",
-            "2026-07-13T19:00:00Z", hash)),
+        List.of(
+            new RuleSnapshotApproval("approval-a", "RULE_DEFINITION_APPROVER", "approver-a",
+                "2026-07-13T19:00:00Z", hash),
+            new RuleSnapshotApproval("composition-a", "RULE_COMPOSITION_APPROVER", "composition-a",
+                "2026-07-13T19:30:00Z", compositionDigest()),
+            new RuleSnapshotApproval("composition-b", "RULE_COMPOSITION_APPROVER", "composition-b",
+                "2026-07-13T19:30:00Z", compositionDigest())),
         ruleSet());
+  }
+
+  private String compositionManifestJson() {
+    return "{\"test\":true}";
+  }
+
+  private String compositionDigest() {
+    try {
+      return org.praxisplatform.rules.digest.PraxisCanonicalJson.sha256(
+          objectMapper.readTree(compositionManifestJson()));
+    } catch (Exception exception) {
+      throw new IllegalStateException(exception);
+    }
+  }
+
+  private DomainRuleSnapshotHead rollbackHead(UUID activeId, UUID etag) {
+    return DomainRuleSnapshotHead.builder()
+        .id(UUID.randomUUID())
+        .tenantId("tenant-a")
+        .environment("prod")
+        .ruleSetKey("extraordinary-grant")
+        .activeSnapshotId(activeId)
+        .activationRevision(2L)
+        .headEtag(etag)
+        .updatedAt(Instant.now())
+        .rowVersion(0L)
+        .build();
+  }
+
+  private String snapshotHash(PublishedRuleSnapshot snapshot) {
+    return new PraxisRuleSnapshotCompiler(RuleBindingExecutorRegistry.empty())
+        .compile(snapshot, snapshot.requiredHostContractVersion())
+        .snapshotContentHash();
   }
 
   private org.mockito.ArgumentMatcher<org.praxisplatform.config.domain.DomainRuleSnapshotEvent>
