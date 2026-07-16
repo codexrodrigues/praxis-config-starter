@@ -63,6 +63,22 @@ class SpringAiOpenAiServiceTest {
     }
 
     @Test
+    void generateTextIgnoresUnconsumedEvolvingOutputVariants() throws Exception {
+        String response = completedResponse("pong").replace(
+                "\"output\":[{",
+                "\"output\":[{\"id\":\"search-safe-123\",\"type\":\"web_search_call\",\"status\":\"completed\"},{");
+        HttpServer server = responseServer(response, new AtomicReference<>());
+        SpringAiOpenAiService service = service(server, "gpt-5.4-mini");
+        server.start();
+        try {
+            assertEquals("pong", service.generateText("ping"));
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
     void generateJsonUsesStrictNativeSchemaWithoutPromptInjection() throws Exception {
         AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
         HttpServer server = responseServer(completedResponse("{\"value\":123}"), capturedRequest);

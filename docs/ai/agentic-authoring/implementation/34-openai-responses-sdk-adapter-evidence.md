@@ -40,6 +40,7 @@ como `openai-responses-sdk`; tipos do SDK nao escapam pelo contrato `AiProvider`
 | Retry | `ja-suportado-mal-nomeado-ou-mal-materializado` | Orquestrador ja governa retry/fallback e budget terminal | Retry interno do SDK foi desativado para evitar duplicacao e custo invisivel |
 | Persistencia no provider | `lacuna-real-de-contrato` no adapter antigo | Praxis opera turn/thread em sua propria fronteira canonica | Toda criacao usa `store=false`; estado do provider nao vira segunda fonte de verdade |
 | Compatibilidade do schema estrito | `ja-suportado-mal-nomeado-ou-mal-materializado` | O resolver ja declarava a decisao semantica completa, mas alguns objetos/campos nao obedeciam as invariantes de `strict=true` | Schema fechado e validação recursiva local antes da chamada; nenhum contrato publico novo |
+| Compatibilidade da resposta do provider | `ja-suportado-mal-nomeado-ou-mal-materializado` | O SDK oficial ja oferece `withRawResponse()`, mas o adapter acessava toda a uniao tipada evolutiva de `output` | Transporte e request continuam no SDK; uma projecao interna le somente mensagem, recusa, status, identificadores e usage consumidos por Praxis |
 
 Nao foi necessario criar contrato canonico. A plataforma ja possuia os
 contratos internos necessarios; a lacuna estava na materializacao do transporte.
@@ -49,6 +50,9 @@ contratos internos necessarios; a lacuna estava na materializacao do transporte.
 - `OpenAIOkHttpClient` com base URL normalizada para `/v1`, timeout por chamada
   e `maxRetries(0)`;
 - Responses sincrono para texto e JSON;
+- resposta sincrona obtida por `withRawResponse()` e projetada sem `parse()`,
+  evitando que variantes novas e nao consumidas de `output` bloqueiem a mensagem
+  sem duplicar request ou retry;
 - `text.format` com `json_schema`, `strict=true` e schema derivado do contrato
   Praxis; `json_object` somente quando nenhum schema foi fornecido;
 - validacao recursiva local exige `additionalProperties=false` em cada objeto e
@@ -70,15 +74,16 @@ contratos internos necessarios; a lacuna estava na materializacao do transporte.
 
 ## Validacao local
 
-- `SpringAiOpenAiServiceTest`: 18 testes, zero falha, cobrindo request shape,
+- `SpringAiOpenAiServiceTest`: 19 testes, zero falha, cobrindo request shape,
   `store=false`, texto, schema estrito, JSON object, budget GPT-5, resposta
   vazia/incompleta, recusa, quota/rate limit, streaming, cancelamento antes e
   depois do primeiro chunk, timeout, ausencia de retry do SDK, schema tipado e
-  rejeicao local de objeto aninhado nao estrito;
-- gate focal de provider + resolver LLM: 44 testes, zero falha;
+  rejeicao local de objeto aninhado nao estrito e uma variante evolutiva de
+  output que nao faz parte do contrato consumido;
+- gate focal de provider + resolver LLM: 45 testes, zero falha;
 - gate semantico ampliado de intent, provenance, Domain Catalog, quick replies e
   fail-closed: 323 testes, zero falha;
-- perfil `ci-smoke-unit`: 1.997 testes, zero falha, com instalacao local do
+- perfil `ci-smoke-unit`: 1.998 testes, zero falha, com instalacao local do
   starter `0.1.0-rc.82`;
 - gate focal de provider, router, fallback/cancelamento, metricas e turn/SSE:
   verde;
@@ -117,9 +122,20 @@ invariantes oficiais de Structured Outputs. O corte atual fecha essa projecao e
 adiciona uma barreira recursiva no adapter para transformar futuros drifts em
 falha local focal, antes de custo e latencia externos.
 
-O rerun remoto no novo SHA continua pendente. As credenciais locais disponiveis
-neste workspace permanecem invalidas/expiradas; por isso nao foi simulado um
-sucesso local contra a API real.
+O segundo workflow oficial [Agentic Authoring Smoke](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/29521543580)
+provou que o schema corrigido foi aceito pelo provider. A resposta real, porem,
+falhou durante a interpretacao tipada do SDK com `OpenAIInvalidDataException` e
+o gate novamente degradou corretamente para `clarification_required`. Nenhum
+payload bruto foi registrado.
+
+Esse segundo drift foi fechado usando a superficie oficial `withRawResponse()`:
+o adapter nao chama `parse()` nem tenta materializar toda a uniao de output; ele
+projeta somente os campos estaveis necessarios ao contrato Praxis. A regressao
+local inclui uma variante de output nao consumida e incompleta para demonstrar
+que a mensagem estruturada continua sendo extraida. O rerun remoto desse ultimo
+corte continua pendente. As credenciais locais disponiveis neste workspace
+permanecem invalidas/expiradas; por isso nao foi simulado um sucesso local
+contra a API real.
 
 Antes de declarar o Gate C operacionalmente fechado, executar uma rodada
 controlada no quickstart real e comparar com a evidencia anterior:
@@ -139,7 +155,7 @@ derivadas aplicaveis ao corte.
 
 ## Proximo passo recomendado
 
-Reexecutar uma vez o gate HTTP oficial no SHA que contem a correcao de schema e,
+Reexecutar uma vez o gate HTTP oficial no SHA que contem a projecao de resposta e,
 estando verde, revalidar o corpus real com o novo transporte. Se assertividade, P95 ou custo
 regredirem, ajustar policy de modelo/budget no boundary canonico, sem restaurar
 Chat Completions manual. Depois do gate real verde, ampliar a jornada

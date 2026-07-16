@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must not be enabled implicitly by host applications.
 
 ### Fixed
+- Made synchronous OpenAI Responses consumption forward-compatible with output
+  union evolution by using the official SDK raw-response surface and projecting
+  only the stable fields consumed by Praxis, without retries or raw-payload logs.
 - Made the agentic semantic-intent schema compatible with OpenAI strict
   Structured Outputs by closing nested objects, requiring every declared field
   and representing optional values as nullable types. The OpenAI adapter now
@@ -83,8 +86,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only fall back to monorepo-level docs when expected files exist there.
 
 ### Validated
-- OpenAI strict-schema/provider and semantic-intent gates passed with `44/44`
-  and `323/323` tests; the `ci-smoke-unit` profile passed with `1,997/1,997`
+- OpenAI provider focal tests passed with `19/19`, including an incomplete,
+  unconsumed output variant alongside a valid assistant message; the combined
+  provider and semantic-intent resolver gate passed with `45/45` tests.
+- OpenAI strict-schema/provider and semantic-intent gates passed with `45/45`
+  and `323/323` tests; the `ci-smoke-unit` profile passed with `1,998/1,998`
   tests and the quickstart packaged against the locally installed starter.
 - Official runtime tool plan readonly-beta smoke battery passed locally against
   real Angular, real Quickstart and Neon/Postgres with `15/15` scenarios,
