@@ -552,6 +552,9 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         if (!goal.isBlank() && goal.equalsIgnoreCase(originalPrompt)) {
             goal = "";
         }
+        if (goal.isBlank() && semanticDecision != null && semanticDecision.visualizationDecision() != null) {
+            goal = collapseRepeatedAdjacentText(semanticDecision.visualizationDecision().intent());
+        }
         if (goal.isBlank()) {
             String effectivePrompt = intentResolution == null ? "" : value(intentResolution.effectivePrompt());
             if (!effectivePrompt.equalsIgnoreCase(originalPrompt)) {

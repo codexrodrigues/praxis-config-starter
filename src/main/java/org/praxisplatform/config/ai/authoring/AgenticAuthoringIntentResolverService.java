@@ -2860,7 +2860,10 @@ public class AgenticAuthoringIntentResolverService {
             return false;
         }
         AgenticAuthoringResourceSearchFocus focus = resourceDiscoverySearchFocus(request);
-        int focusedAlignment = resourceSearchFocusAlignmentScore(focus, focusedCandidate);
+        int focusedAlignment = projectionResourceDiscoveryAlignmentScore(
+                request,
+                focus,
+                focusedCandidate);
         boolean dedicatedProjectionSemanticLead = hasDedicatedProjectionSemanticScoreLead(
                 focusedCandidate,
                 expectedRole,
@@ -2885,7 +2888,10 @@ public class AgenticAuthoringIntentResolverService {
                 .filter(this::hasTrustedSelectionEvidence)
                 .filter(candidate -> !isWeakLexicalCandidate(candidate))
                 .allMatch(candidate -> focusedCandidate.score() >= candidate.score() + 0.04d
-                        || focusedAlignment >= resourceSearchFocusAlignmentScore(focus, candidate) + 3);
+                        || focusedAlignment >= projectionResourceDiscoveryAlignmentScore(
+                                request,
+                                focus,
+                                candidate) + 3);
     }
 
     private boolean hasDedicatedProjectionSemanticScoreLead(
@@ -4430,7 +4436,10 @@ public class AgenticAuthoringIntentResolverService {
                         candidates))
                 .map(candidate -> new CandidatePromptAlignment(
                         candidate,
-                        resourceSearchFocusAlignmentScore(resourceDiscoverySearchFocus(request), candidate)))
+                        projectionResourceDiscoveryAlignmentScore(
+                                request,
+                                resourceDiscoverySearchFocus(request),
+                                candidate)))
                 .filter(alignment -> alignment.score() >= 5)
                 .toList();
         CandidatePromptAlignment best = alignments.stream()
@@ -4454,6 +4463,17 @@ public class AgenticAuthoringIntentResolverService {
             selected = dedicatedProjection.candidate();
         }
         return sameCandidate(selected, selectedCandidate) ? null : selected;
+    }
+
+    private int projectionResourceDiscoveryAlignmentScore(
+            AgenticAuthoringIntentResolutionRequest request,
+            AgenticAuthoringResourceSearchFocus focus,
+            AgenticAuthoringCandidate candidate) {
+        int score = resourceSearchFocusAlignmentScore(focus, candidate);
+        if (isDomainDiscoveryScopedCandidate(request, candidate)) {
+            score += 4;
+        }
+        return score;
     }
 
     private boolean isGroundedByResourceDiscoveryFocus(

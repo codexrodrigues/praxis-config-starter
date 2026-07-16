@@ -189,6 +189,31 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
     }
 
     @Test
+    void synthesizeUsesCanonicalVisualizationIntentWhenUserGoalRepeatsPrompt() {
+        String result = service().synthesize(
+                governedVisualizationRequest(),
+                governedPreIntentIntentWithVisualizationIntent(),
+                uiCompositionPlan(),
+                true,
+                List.of(),
+                List.of("compiled-form-patch-materialized-by-page-builder"),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result)
+                .contains("pré-visualização governada para dashboard de acompanhamento de funcionários")
+                .doesNotContain("para Crie uma tela bonita");
+        org.mockito.Mockito.verify(providerManagementService, org.mockito.Mockito.never()).generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                any(String.class),
+                any(String.class),
+                any(String.class));
+    }
+
+    @Test
     void synthesizeReusesFastGovernedIntentResolutionWithoutExtraProviderCall() {
         String result = service().synthesize(
                 governedFastIntentRequest(),
@@ -648,6 +673,16 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                 governedFastIntent());
     }
 
+    private AgenticAuthoringPlanRequest governedVisualizationRequest() {
+        return new AgenticAuthoringPlanRequest(
+                "Crie uma tela bonita para acompanhar funcionários.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                governedPreIntentIntentWithVisualizationIntent());
+    }
+
     private AgenticAuthoringPlanRequest localEditorialRequest() {
         return new AgenticAuthoringPlanRequest(
                 "Crie uma página com tabs usando conteúdo local/editorial de demonstração.",
@@ -771,6 +806,73 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                         "conversation-1",
                         "turn-1",
                         "quero criar algo que mostre informacoes dos empregados quero criar algo que mostre informacoes dos empregados",
+                        "",
+                        "semantic-goal-authored-by-llm",
+                null));
+    }
+
+    private AgenticAuthoringIntentResolutionResult governedPreIntentIntentWithVisualizationIntent() {
+        List<String> warnings = List.of(
+                "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                "llm-pre-intent-resource-discovery-used");
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/stats/timeseries&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/stats/timeseries",
+                "POST",
+                0.64d,
+                "LLM selected the governed analytics candidate from pre-intent retrieval",
+                List.of("tool-search-api-resources", "schema-available"));
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-visualization-decision.v1",
+                "dashboard de acompanhamento de funcionários",
+                "dashboard_layout",
+                "praxis-chart",
+                List.of(),
+                true,
+                true,
+                List.of(),
+                true,
+                true,
+                "semantic_retrieval+user_prompt");
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie uma tela bonita para acompanhar funcionários.",
+                "Vou montar uma prévia governada.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                warnings,
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null,
+                AgenticAuthoringSemanticDecision.from(
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        candidate,
+                        List.of(candidate),
+                        visualizationDecision,
+                        warnings,
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "conversation-1",
+                        "turn-1",
+                        "Crie uma tela bonita para acompanhar funcionários.",
                         "",
                         "semantic-goal-authored-by-llm",
                         null));

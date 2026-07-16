@@ -11443,6 +11443,107 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void llmAuthoredEmployeeAnalyticsFocusUsesDomainScopedProjectionWithoutFullProviderPass() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeTimeseries = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/stats/timeseries&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/stats/timeseries",
+                "POST",
+                0.641d,
+                "api_metadata semantic retrieval",
+                List.of(
+                        "api-metadata",
+                        "semantic-retrieval",
+                        "schema-available",
+                        "tool-search-api-resources",
+                        "semantic-role:analytics-projection"),
+                AgenticAuthoringEvidenceBundle.of("semantic_retrieval", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence(
+                                "api_metadata",
+                                "retrieved_candidate",
+                                "/api/human-resources/funcionarios",
+                                "Time-series stats sobre o conjunto filtrado.",
+                                0.641d,
+                                List.of("funcionarios", "tempo", "admissao", "status", "indicadores"),
+                                "tenant",
+                                "local",
+                                "release"))));
+        AgenticAuthoringCandidate payrollAnalytics = withEvidence(
+                withEvidence(
+                        withEvidence(candidateWithEvidence(
+                                "/api/human-resources/vw-analytics-folha-pagamento",
+                                0.680d,
+                                List.of("folha", "pagamento", "salario", "departamento")),
+                                "tool-search-api-resources"),
+                        "semantic-retrieval"),
+                "semantic-role:analytics-projection");
+        AgenticAuthoringCandidate leaveAnalytics = withEvidence(
+                withEvidence(
+                        withEvidence(candidateWithEvidence(
+                                "/api/human-resources/vw-analytics-afastamentos",
+                                0.667d,
+                                List.of("afastamentos", "ausencias", "tempo", "departamento")),
+                                "tool-search-api-resources"),
+                        "semantic-retrieval"),
+                "semantic-role:analytics-projection");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(employeeTimeseries, payrollAnalytics, leaveAnalytics));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode contextHints = resourceDiscoveryContext(
+                "dashboard",
+                List.of(employeeTimeseries, payrollAnalytics, leaveAnalytics),
+                new AgenticAuthoringResourceSearchFocus(
+                        "funcionários",
+                        List.of("distribuição por status", "tempo", "admissão", "indicadores"),
+                        "dashboard analítico de funcionários com distribuição por status ao longo do tempo",
+                        "",
+                        "foco authorado pela LLM no planejamento pre-intent"));
+        contextHints.putArray("domainDiscovery")
+                .addObject()
+                .put("resourceKey", "human-resources.funcionarios")
+                .put("title", "Funcionários");
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+                "Crie uma tela bonita para acompanhar funcionários.",
+                "deterministic-smoke-disabled",
+                contextHints));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.warnings())
+                .contains(
+                        "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                        "llm-pre-intent-resource-discovery-used")
+                .doesNotContain("llm-fast-intent-resolution-used");
+        Mockito.verify(llmIntentResolver, Mockito.never()).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+    }
+
+    @Test
     void llmAuthoredCostTrackingFocusPrefersAnalyticsProjectionOverDepartmentResource() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
