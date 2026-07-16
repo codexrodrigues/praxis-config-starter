@@ -10008,7 +10008,8 @@ class AgenticAuthoringTurnEngineTest {
                 .containsSubsequence(
                         "tool.plan.skipped",
                         "intent.resolve.llm",
-                        "consultative.grounded-domain-clarification");
+                        "consultative.grounded-domain-clarification")
+                .doesNotContain("resource.discovery");
         verify(previewService, never()).preview(any(), eq("tenant"), eq("user"), eq("local"));
         verify(consultativeAnswerService, never()).answer(
                 any(AgenticAuthoringTurnStreamRequest.class),

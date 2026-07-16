@@ -105,6 +105,23 @@ O quarto slice P0 removeu duas causas estruturais de inconsistencia no basico:
   `nome` e `cargo` para os 12 campos publicados pelo contrato, incluindo
   `nomeCompleto`, `salario`, `cargoId`, `departamentoId` e seus option sources.
 
+O quinto slice P0 eliminou a cauda operacional do planner e mais um decisor
+textual residual sem criar contrato novo:
+
+- o timeout deixou de ser budget por tentativa e passou a ser budget terminal
+  unico da fase de pre-intent planning, com teto padrao de 12 s;
+- timeout e terminal para esse planner opcional; rate limit, capacity,
+  transport e server error so recebem uma segunda tentativa quando ainda
+  restam pelo menos dois segundos dentro do mesmo budget;
+- cada retry recebe apenas o tempo restante da fase, impedindo que duas
+  chamadas sequenciais multipliquem silenciosamente a latencia do turno;
+- foi removido o fallback que procurava verbos e nomes de componentes no texto
+  para executar discovery antes da intencao; se o planner nao produzir plano,
+  a LLM resolve primeiro a intencao e o discovery governado continua no fluxo
+  pos-intencao;
+- falha ou timeout do planner permanece diagnosticado e fail-safe, sem decidir
+  intencao, inventar recurso ou promover uma heuristica textual substituta.
+
 Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
 
 - `platform-what-can-i-do-pt`: 3/3 execucoes consecutivas corretas, sem preview,
@@ -136,9 +153,16 @@ Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
 - formulario, tela aberta e tabela terminaram corretamente nas nove execucoes;
   os formularios ficaram em 28,742 s, 30,191 s e 42,798 s, todos abaixo do
   limite de authoring de 45 s;
-- a terceira criacao de formulario revelou uma cauda ainda relevante no
-  pre-intent planner (20,943 s por timeout/retry). Ela nao quebrou o gate, mas
-  deve ser eliminada no proximo slice para aumentar a margem operacional;
+- o baseline anterior revelou uma cauda de 20,943 s no pre-intent planner por
+  timeout seguido de retry sequencial;
+- depois do budget terminal, um gate focal adicional de formulario passou 6/6,
+  com seis provas transacionais, planners entre 6,324 s e 9,639 s e tempos
+  terminais entre 28,632 s e 33,090 s;
+- o gate integral posterior passou novamente 18/18; os nove planners de
+  authoring ficaram entre 6,180 s e 8,340 s, sem timeout/retry sequencial, e as
+  jornadas de authoring terminaram entre 26,927 s e 31,457 s;
+- as nove orientacoes desse corte terminaram entre 8,670 s e 10,171 s, ainda
+  abaixo do SLO de 12 s, e a mediana terminal global foi 18,549 s;
 - todas as 18 jornadas emitiram primeiro feedback imediatamente segundo a
   resolucao do runner, e nenhuma ficou presa em estado intermediario.
 
@@ -153,6 +177,9 @@ Evidencia obtida contra quickstart real, Neon, OpenAI e stream SSE:
 - Classificacao do quarto slice: `transversal`, restrito a orchestration,
   resolucao semantica e materializacao interna de formulario; nenhum endpoint,
   DTO, OpenAPI ou tipo publico novo.
+- Classificacao do quinto slice: `transversal`, restrito a budget/retry interno
+  do planner e retirada de fallback textual do turn engine; nenhum endpoint,
+  DTO, evento SSE, OpenAPI ou tipo publico novo.
 - Fonte canonica de orchestration e configuracao: `praxis-config-starter`.
 - Runtime e UX canonicos: `@praxisui/ai` em `praxis-ui-angular`.
 - Primeiros consumidores: Page Builder, Table e Dynamic Form.
@@ -542,7 +569,8 @@ Status em 2026-07-15: **verde no perfil `must-pass`**.
 - nenhum stuck turn ou alucinacao de contrato: concluido no corpus basico;
 - Page Builder apresenta proximo passo sempre acionavel: 9/9 orientacoes com
   tres quick replies;
-- pendencia de endurecimento: perfil `extended` e reducao da cauda do planner.
+- pendencia de endurecimento: ampliar o perfil `extended`; a cauda sequencial
+  do planner foi removida e recertificada no gate integral.
 
 ### Gate B - Runtime canonico
 
@@ -581,11 +609,11 @@ Status em 2026-07-15: **verde no perfil `must-pass`**.
 ## Artefatos derivados
 
 O terceiro slice atualizou o schema, corpus e runner internos de consistencia e
-adicionou o executor transacional local. O quarto slice alterou apenas services
-e testes internos do authoring e este plano de excelencia. Nao houve mudanca de
-endpoint, DTO, OpenAPI ou public API; por isso bindings, landing page e corpus
-HTTP nao precisam de sincronizacao neste corte. Quando os proximos slices
-alterarem contratos publicos, revisar no mesmo ciclo:
+adicionou o executor transacional local. O quarto e o quinto slices alteraram
+apenas services e testes internos do authoring e este plano de excelencia. Nao
+houve mudanca de endpoint, DTO, evento SSE, OpenAPI ou public API; por isso
+bindings, landing page e corpus HTTP nao precisam de sincronizacao neste corte.
+Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
 
 - `docs/ai/contracts/**` e OpenAPI do Config Starter;
 - bindings e public APIs de `@praxisui/ai`;
@@ -599,21 +627,18 @@ alterarem contratos publicos, revisar no mesmo ciclo:
 integral 18/18. O proximo slice recomendado e ampliar margem e cobertura antes
 de iniciar uma migracao ampla de SDK, nesta ordem:
 
-1. remover o retry sequencial de timeout do pre-intent planner e definir budget
-   terminal por fase, preservando retry apenas para falhas transientes em que
-   uma nova tentativa caiba no budget do turno;
-2. adicionar ao perfil `extended` variacoes linguisticas, erros humanos,
+1. adicionar ao perfil `extended` variacoes linguisticas, erros humanos,
    refinamento multi-turn, cancelamento, retomada e schema indisponivel,
    mantendo os seis `must-pass` como gate bloqueante;
-3. formalizar e certificar a state machine de `P0.6`, incluindo timeout,
+2. formalizar e certificar a state machine de `P0.6`, incluindo timeout,
    cancelamento, replay SSE e zero side effect duplicado;
-4. corrigir diagnostics residuais de provenance e registrar P50/P95, retries,
+3. corrigir diagnostics residuais de provenance e registrar P50/P95, retries,
    tokens e custo por caso/modelo;
-5. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
+4. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
    minimo de contexto assistivel;
-6. iniciar a pista compativel Spring AI 1.1.8 e a politica de modelos em slice
+5. iniciar a pista compativel Spring AI 1.1.8 e a politica de modelos em slice
    dedicado, comparando o novo caminho com os perfis `must-pass` e `extended`;
-7. manter Spring AI 2.0 + Boot 4 como spike arquitetural separado, promovendo
+6. manter Spring AI 2.0 + Boot 4 como spike arquitetural separado, promovendo
    apenas se a evidencia superar o caminho compativel.
 
 ## Referencias oficiais para a frente de SDK

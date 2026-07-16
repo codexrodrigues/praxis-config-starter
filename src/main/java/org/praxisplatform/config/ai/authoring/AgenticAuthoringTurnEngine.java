@@ -278,13 +278,6 @@ public class AgenticAuthoringTurnEngine {
                     && !plannedResourceDiscovery.candidates().isEmpty()) {
                 request = withResourceDiscoveryContext(request, plannedResourceDiscovery);
             }
-            AgenticAuthoringResourceCandidatesResult earlyResourceDiscovery =
-                    maybePreDiscoverResourcesForMaterialization(request, principalContext, eventSink);
-            if (earlyResourceDiscovery != null
-                    && earlyResourceDiscovery.candidates() != null
-                    && !earlyResourceDiscovery.candidates().isEmpty()) {
-                request = withResourceDiscoveryContext(request, earlyResourceDiscovery);
-            }
             request = withServerComponentCapabilities(
                     request,
                     eventSink,
@@ -1936,42 +1929,6 @@ public class AgenticAuthoringTurnEngine {
         return sanitized;
     }
 
-    private AgenticAuthoringResourceCandidatesResult maybePreDiscoverResourcesForMaterialization(
-            AgenticAuthoringTurnStreamRequest request,
-            AiPrincipalContext principalContext,
-            AgenticAuthoringTurnEventSink eventSink) {
-        if (!shouldPreDiscoverResourcesForMaterialization(request) || eventSink.terminalReached()) {
-            return null;
-        }
-        emitStatus(
-                eventSink,
-                "resource.discovery",
-                "Estou buscando fontes governadas relacionadas ao pedido antes de chamar a LLM.");
-        AgenticAuthoringToolCall toolCall = new AgenticAuthoringToolCall(
-                AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
-                "pre_intent_resource_discovery",
-                new AgenticAuthoringResourceCandidatesRequest(
-                        safeText(request.userPrompt()),
-                        request.userPrompt(),
-                        "page",
-                        6));
-        eventSink.append("thought.step", safeToolProjection(
-                "tool.start",
-                "Estou consultando recursos governados antes de resolver a intencao.",
-                Map.of(
-                        "tool", toolCall.name(),
-                        "routeClass", "pre_intent_resource_discovery",
-                        "maxCallsPerTurn", MAX_TOOL_CALLS_PER_TURN)));
-        AgenticAuthoringToolResult result = toolRegistry.execute(toolCall, principalContext, "retrieveEvidence");
-        eventSink.append("thought.step", safeToolProjection(
-                result.valid() ? "tool.result" : "tool.error",
-                result.valid()
-                        ? "Encontrei candidatos governados para fundamentar a decisao."
-                        : "Nao consegui concluir a busca governada neste passo.",
-                safeToolDiagnostics(result)));
-        return resourceDiscoveryPayload(result);
-    }
-
     private AgenticAuthoringResourceCandidatesResult maybeRunPreIntentToolPlan(
             AgenticAuthoringTurnStreamRequest request,
             AiPrincipalContext principalContext,
@@ -2284,41 +2241,6 @@ public class AgenticAuthoringTurnEngine {
                 "tool.plan.skipped",
                 "O planejamento de ferramenta pre-intent foi ignorado com motivo diagnosticado.",
                 diagnostics));
-    }
-
-    private boolean shouldPreDiscoverResourcesForMaterialization(AgenticAuthoringTurnStreamRequest request) {
-        if (request == null
-                || request.pendingClarification() != null
-                || request.activeSemanticDecision() != null
-                || hasResourceDiscoveryContext(request)
-                || request.userPrompt() == null
-                || request.userPrompt().isBlank()) {
-            return false;
-        }
-        String prompt = safeText(request.userPrompt()).toLowerCase(Locale.ROOT);
-        boolean createOrChange = prompt.contains("crie")
-                || prompt.contains("criar")
-                || prompt.contains("monte")
-                || prompt.contains("montar")
-                || prompt.contains("adicione")
-                || prompt.contains("adicionar")
-                || prompt.contains("inclua")
-                || prompt.contains("incluir");
-        boolean materializedSurface = prompt.contains("pagina")
-                || prompt.contains("página")
-                || prompt.contains("dashboard")
-                || prompt.contains("painel")
-                || prompt.contains("grafico")
-                || prompt.contains("gráfico")
-                || prompt.contains("tabela")
-                || prompt.contains("formulario")
-                || prompt.contains("formulário")
-                || prompt.contains("accordion")
-                || prompt.contains("acordeon")
-                || prompt.contains("abas")
-                || prompt.contains("tabs")
-                || prompt.contains("widget");
-        return createOrChange && materializedSurface;
     }
 
     private boolean hasResourceDiscoveryContext(AgenticAuthoringTurnStreamRequest request) {

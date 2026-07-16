@@ -431,7 +431,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
     }
 
     @Test
-    void retriesTransientProviderFailureBeforeSkippingPreIntentPlanning() throws Exception {
+    void doesNotRetryTimeoutBecausePreIntentPlanningIsOptionalAndBounded() throws Exception {
         when(providerManagementService.generateJson(
                 any(),
                 any(),
@@ -439,7 +439,41 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("tenant"),
                 eq("user"),
                 eq("local")))
-                .thenThrow(AiProviderCallException.timeout("openai", new RuntimeException("request timed out")))
+                .thenThrow(AiProviderCallException.timeout("openai", new RuntimeException("request timed out")));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        7,
+                        2,
+                        0L);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("quero criar algo que mostre informacoes dos empregados"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isFalse();
+        assertThat(result.skipReason()).isEqualTo("provider-error");
+        assertThat(result.errorCode()).isEqualTo("AiProviderCallException");
+        verify(providerManagementService, times(1)).generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
+    void retriesFastRateLimitFailureWhenAnotherAttemptFitsPlanningBudget() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenThrow(AiProviderCallException.fromHttpStatus("openai", 429, "rate limit exceeded"))
                 .thenReturn(objectMapper.readTree("""
                 {
                   "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
@@ -453,7 +487,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                     "uncertainty": "",
                     "rationale": "O usuario quer mostrar informacoes de empregados."
                   },
-                  "reason": "A primeira chamada falhou transitoriamente, mas o planejamento governado pode ser recuperado."
+                  "reason": "O planejamento governado foi recuperado dentro do mesmo budget da fase."
                 }
                 """));
         AgenticAuthoringLlmPreIntentToolPlanningService service =
@@ -470,12 +504,40 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
 
         assertThat(result.planned()).isTrue();
         assertThat(result.skipReason()).isBlank();
-        AgenticAuthoringResourceCandidatesRequest payload =
-                (AgenticAuthoringResourceCandidatesRequest) result.plan().toolCalls().get(0).payload();
-        assertThat(payload.retrievalQuery())
-                .contains("primary business entity: pessoas da empresa")
-                .contains("semantic query: funcionarios colaboradores recursos humanos pessoas da empresa");
         verify(providerManagementService, times(2)).generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
+    void doesNotRetryTransientFailureWhenAnotherAttemptCannotFitPlanningBudget() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenThrow(AiProviderCallException.fromHttpStatus("openai", 429, "rate limit exceeded"));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        1,
+                        2,
+                        0L);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("quero criar algo que mostre informacoes dos empregados"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isFalse();
+        assertThat(result.skipReason()).isEqualTo("provider-error");
+        verify(providerManagementService, times(1)).generateJson(
                 any(),
                 any(),
                 any(),

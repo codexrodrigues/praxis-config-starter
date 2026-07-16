@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiPrincipalContext;
@@ -28,41 +29,44 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private static final int MAX_PLANNER_PAGE_WIDGETS = 12;
     private static final int MAX_PLANNER_TEXT_LENGTH = 700;
     private static final int MAX_PLANNER_USER_PROMPT_LENGTH = 1400;
-    private static final int DEFAULT_TIMEOUT_SECONDS = 10;
+    private static final int DEFAULT_PLANNING_BUDGET_SECONDS = 12;
     private static final int DEFAULT_PROVIDER_ATTEMPTS = 2;
     private static final long DEFAULT_PROVIDER_RETRY_DELAY_MS = 250L;
+    private static final int MIN_RETRY_BUDGET_SECONDS = 2;
 
     private final AiProviderManagementService providerManagementService;
     private final ObjectMapper objectMapper;
-    private final int timeoutSeconds;
+    private final int planningBudgetSeconds;
     private final int providerAttempts;
     private final long providerRetryDelayMs;
 
     public AgenticAuthoringLlmPreIntentToolPlanningService(
             AiProviderManagementService providerManagementService,
             ObjectMapper objectMapper) {
-        this(providerManagementService, objectMapper, DEFAULT_TIMEOUT_SECONDS);
+        this(providerManagementService, objectMapper, DEFAULT_PLANNING_BUDGET_SECONDS);
     }
 
     AgenticAuthoringLlmPreIntentToolPlanningService(
             AiProviderManagementService providerManagementService,
             ObjectMapper objectMapper,
-            int timeoutSeconds) {
-        this(providerManagementService, objectMapper, timeoutSeconds, DEFAULT_PROVIDER_ATTEMPTS,
+            int planningBudgetSeconds) {
+        this(providerManagementService, objectMapper, planningBudgetSeconds, DEFAULT_PROVIDER_ATTEMPTS,
                 DEFAULT_PROVIDER_RETRY_DELAY_MS);
     }
 
     AgenticAuthoringLlmPreIntentToolPlanningService(
             AiProviderManagementService providerManagementService,
             ObjectMapper objectMapper,
-            int timeoutSeconds,
+            int planningBudgetSeconds,
             int providerAttempts,
             long providerRetryDelayMs) {
         this.providerManagementService = Objects.requireNonNull(
                 providerManagementService,
                 "providerManagementService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
-        this.timeoutSeconds = timeoutSeconds > 0 ? timeoutSeconds : DEFAULT_TIMEOUT_SECONDS;
+        this.planningBudgetSeconds = planningBudgetSeconds > 0
+                ? planningBudgetSeconds
+                : DEFAULT_PLANNING_BUDGET_SECONDS;
         this.providerAttempts = Math.max(1, providerAttempts);
         this.providerRetryDelayMs = Math.max(0L, providerRetryDelayMs);
     }
@@ -88,19 +92,17 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         }
         String prompt = prompt(request);
         AiJsonSchema jsonSchema = AiJsonSchema.ofSchema(schema());
-        AiCallConfig callConfig = AiCallConfig.builder()
-                .provider(request.provider())
-                .model(request.model())
-                .apiKey(request.apiKey())
-                .temperature(0.0d)
-                .maxTokens(MAX_PLANNING_TOKENS)
-                .timeoutSeconds(timeoutSeconds)
-                .build();
         String tenantId = principalContext == null ? null : principalContext.tenantId();
         String userId = principalContext == null ? null : principalContext.userId();
         String environment = principalContext == null ? null : principalContext.environment();
         RuntimeException lastFailure = null;
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(planningBudgetSeconds);
         for (int attempt = 1; attempt <= providerAttempts; attempt++) {
+            int attemptTimeoutSeconds = remainingTimeoutSeconds(deadlineNanos);
+            if (attemptTimeoutSeconds <= 0) {
+                break;
+            }
+            AiCallConfig callConfig = callConfig(request, attemptTimeoutSeconds);
             try {
                 JsonNode result = providerManagementService.generateJson(
                         prompt,
@@ -114,12 +116,14 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                         || !result.path("shouldRetrieveGovernedResources").isBoolean()) {
                     lastFailure = new IllegalStateException(
                             "Provider returned invalid structured pre-intent planning output");
-                    if (attempt < providerAttempts) {
+                    if (canRetryWithinBudget(attempt, deadlineNanos)) {
                         log.debug(
                                 "[AgenticAuthoringPreIntentToolPlanning] Retrying provider planning after invalid structured output; attempt={}/{}",
                                 attempt,
                                 providerAttempts);
-                        sleepBeforeRetry();
+                        if (!sleepBeforeRetry()) {
+                            break;
+                        }
                         continue;
                     }
                     break;
@@ -127,7 +131,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 return toPlan(request, result);
             } catch (RuntimeException ex) {
                 lastFailure = ex;
-                if (attempt >= providerAttempts || !isRetryableProviderFailure(ex)) {
+                if (!isRetryableProviderFailure(ex) || !canRetryWithinBudget(attempt, deadlineNanos)) {
                     break;
                 }
                 log.debug(
@@ -135,7 +139,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                         attempt,
                         providerAttempts,
                         safeProviderFailureSummary(ex));
-                sleepBeforeRetry();
+                if (!sleepBeforeRetry()) {
+                    break;
+                }
             }
         }
         log.debug("[AgenticAuthoringPreIntentToolPlanning] LLM planning skipped after provider failure: {}",
@@ -143,6 +149,39 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         return AgenticAuthoringPreIntentToolPlanningResult.failed(
                 "provider-error",
                 lastFailure == null ? "RuntimeException" : lastFailure.getClass().getSimpleName());
+    }
+
+    private AiCallConfig callConfig(
+            AgenticAuthoringTurnStreamRequest request,
+            int attemptTimeoutSeconds) {
+        return AiCallConfig.builder()
+                .provider(request.provider())
+                .model(request.model())
+                .apiKey(request.apiKey())
+                .temperature(0.0d)
+                .maxTokens(MAX_PLANNING_TOKENS)
+                .timeoutSeconds(attemptTimeoutSeconds)
+                .build();
+    }
+
+    private int remainingTimeoutSeconds(long deadlineNanos) {
+        long remainingNanos = deadlineNanos - System.nanoTime();
+        if (remainingNanos <= 0L) {
+            return 0;
+        }
+        long wholeSeconds = TimeUnit.NANOSECONDS.toSeconds(remainingNanos);
+        long roundedSeconds = wholeSeconds
+                + (remainingNanos % TimeUnit.SECONDS.toNanos(1L) == 0L ? 0L : 1L);
+        return (int) Math.min(planningBudgetSeconds, Math.max(1L, roundedSeconds));
+    }
+
+    private boolean canRetryWithinBudget(int attempt, long deadlineNanos) {
+        if (attempt >= providerAttempts) {
+            return false;
+        }
+        long requiredNanos = TimeUnit.SECONDS.toNanos(MIN_RETRY_BUDGET_SECONDS)
+                + TimeUnit.MILLISECONDS.toNanos(providerRetryDelayMs);
+        return deadlineNanos - System.nanoTime() >= requiredNanos;
     }
 
     private boolean hasResourceDiscoveryContext(AgenticAuthoringTurnStreamRequest request) {
@@ -188,8 +227,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private boolean isRetryableProviderFailure(RuntimeException error) {
         if (error instanceof AiProviderCallException callException) {
             return switch (callException.getKind()) {
-                case TRANSPORT, TIMEOUT, RATE_LIMIT, CAPACITY, SERVER_ERROR, UNKNOWN -> true;
-                case QUOTA_EXHAUSTED, AUTH, CLIENT_ERROR -> false;
+                case TRANSPORT, RATE_LIMIT, CAPACITY, SERVER_ERROR, UNKNOWN -> true;
+                case TIMEOUT, QUOTA_EXHAUSTED, AUTH, CLIENT_ERROR -> false;
             };
         }
         String message = String.valueOf(error == null ? "" : error.getMessage()).toLowerCase(Locale.ROOT);
@@ -203,9 +242,10 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 || message.contains("bad request")) {
             return false;
         }
-        return message.contains("timeout")
-                || message.contains("timed out")
-                || message.contains("429")
+        if (message.contains("timeout") || message.contains("timed out")) {
+            return false;
+        }
+        return message.contains("429")
                 || message.contains("rate limit")
                 || message.contains("500")
                 || message.contains("502")
@@ -218,14 +258,16 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 || message.contains("socket");
     }
 
-    private void sleepBeforeRetry() {
+    private boolean sleepBeforeRetry() {
         if (providerRetryDelayMs <= 0L) {
-            return;
+            return true;
         }
         try {
             Thread.sleep(providerRetryDelayMs);
+            return true;
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
+            return false;
         }
     }
 
