@@ -21,6 +21,7 @@ import org.praxisplatform.config.domain.DomainRuleEvent;
 import org.praxisplatform.config.domain.DomainRuleMaterialization;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
+import org.praxisplatform.config.dto.DomainRuleDefinitionStatusTransitionRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
@@ -36,6 +37,7 @@ import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.praxisplatform.config.repository.DomainRuleDefinitionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleEventRepository;
 import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
@@ -62,13 +64,14 @@ public class DomainRuleService {
     private final DomainRuleEventRepository eventRepository;
     private final DomainCatalogReleaseRepository releaseRepository;
     private final DomainKnowledgeChangeSetRepository changeSetRepository;
+    private final DomainRuleDefinitionApprovalRepository definitionApprovalRepository;
+    private final DomainRuleDefinitionFingerprint definitionFingerprint;
     private final ObjectMapper objectMapper;
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleIntakeResponse intake(
             DomainRuleIntakeRequest request,
-            String tenantId,
-            String environment) {
+            DomainRuleGovernancePrincipal principal) {
         if (request == null) {
             throw new ConfigurationIngestionException("Domain rule intake request is required");
         }
@@ -106,12 +109,8 @@ public class DomainRuleService {
                         request.parameters(),
                         request.condition(),
                         request.governance(),
-                        null,
-                        normalizeOrDefault(request.createdByType(), "llm"),
-                        normalize(request.createdBy()),
                         null),
-                tenantId,
-                environment);
+                principal);
 
         ObjectNode grounding = objectMapper.createObjectNode();
         grounding.put("source", "intake");
@@ -183,8 +182,7 @@ public class DomainRuleService {
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleDefinitionResponse createDefinition(
             DomainRuleDefinitionRequest request,
-            String tenantId,
-            String environment) {
+            DomainRuleGovernancePrincipal principal) {
         if (request == null) {
             throw new ConfigurationIngestionException("Domain rule definition request is required");
         }
@@ -192,8 +190,9 @@ public class DomainRuleService {
         requireText(request.ruleType(), "ruleType");
 
         DomainRuleDefinition definition = new DomainRuleDefinition();
-        definition.setTenantId(normalize(tenantId));
-        definition.setEnvironment(normalize(environment));
+        requirePrincipal(principal);
+        definition.setTenantId(principal.tenantId());
+        definition.setEnvironment(principal.environment());
         definition.setRuleKey(request.ruleKey().trim());
         definition.setVersion(request.version());
         definition.setRuleType(request.ruleType().trim());
@@ -207,7 +206,7 @@ public class DomainRuleService {
         requireDefinitionCreationGovernance(
                 request.ruleType().trim(),
                 requestedStatus,
-                normalizeOrDefault(request.createdByType(), "system"),
+                "authenticated",
                 requestedDefinition,
                 requestedParameters,
                 requestedGovernance);
@@ -224,9 +223,8 @@ public class DomainRuleService {
         definition.setCondition(writeNullable(request.condition()));
         definition.setGovernance(writeOrDefault(requestedGovernance, "{}"));
         definition.setValidationResult(writeNullable(request.validationResult()));
-        definition.setCreatedByType(normalizeOrDefault(request.createdByType(), "system"));
-        definition.setCreatedBy(normalize(request.createdBy()));
-        definition.setApprovedBy(normalize(request.approvedBy()));
+        definition.setCreatedByType("authenticated");
+        definition.setCreatedBy(principal.actorRef());
         DomainRuleDefinition saved = definitionRepository.save(definition);
         recordDefinitionEvent(
                 saved,
@@ -298,23 +296,24 @@ public class DomainRuleService {
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleDefinitionResponse transitionDefinitionStatus(
             UUID definitionId,
-            DomainRuleStatusTransitionRequest request,
-            String tenantId,
-            String environment) {
+            DomainRuleDefinitionStatusTransitionRequest request,
+            DomainRuleGovernancePrincipal principal) {
         if (definitionId == null) {
             throw new ConfigurationIngestionException("definitionId is required");
         }
         if (request == null) {
             throw new ConfigurationIngestionException("Domain rule status transition request is required");
         }
+        requirePrincipal(principal);
         String status = requireAllowedStatus(request.status(), "status", DEFINITION_STATUSES);
         DomainRuleDefinition definition = definitionRepository.findById(definitionId)
                 .orElseThrow(() -> new ConfigurationIngestionException("Rule definition not found: " + definitionId));
-        requireScope(definition.getTenantId(), tenantId, "tenantId");
-        requireScope(definition.getEnvironment(), environment, "environment");
+        requireScope(definition.getTenantId(), principal.tenantId(), "tenantId");
+        requireScope(definition.getEnvironment(), principal.environment(), "environment");
         requireAllowedDefinitionTransition(definition.getStatus(), status);
         if (isApprovalSatisfiedDefinitionStatus(status)) {
-            requireGovernedDecisionAuthorization(definition, request.decidedByType(), request.decidedBy(), status);
+            requireAuthenticatedAuthorEvidence(definition);
+            requireDefinitionApproverAuthorization(definition, principal.actorRef(), status);
         }
 
         String previousStatus = definition.getStatus();
@@ -324,8 +323,8 @@ public class DomainRuleService {
         if (request.validationResult() != null && !request.validationResult().isNull()) {
             definition.setValidationResult(write(request.validationResult()));
         }
-        if (StringUtils.hasText(request.decidedBy()) && ("approved".equals(status) || "active".equals(status))) {
-            definition.setApprovedBy(request.decidedBy().trim());
+        if ("approved".equals(status) || "active".equals(status)) {
+            definition.setApprovedBy(principal.actorRef());
         }
         Instant now = Instant.now();
         if ("approved".equals(status) && definition.getApprovedAt() == null) {
@@ -340,28 +339,31 @@ public class DomainRuleService {
             }
         }
         DomainRuleDefinition saved = definitionRepository.save(definition);
+        if (isApprovalSatisfiedDefinitionStatus(status)) {
+            persistDefinitionApproval(saved, principal.actorRef(), now);
+        }
         if (!hadApprovedAt && saved.getApprovedAt() != null) {
             recordDefinitionEvent(
                     saved,
                     "definition.approved",
                     saved.getApprovedAt(),
-                    normalizeOrDefault(request.decidedByType(), "human"),
-                    request.decidedBy(),
+                    "authenticated",
+                    principal.actorRef(),
                     "Decision definition approved",
                     saved.getStatus());
             recordApprovalCompletedEvent(
                     saved,
                     saved.getApprovedAt(),
-                    normalizeOrDefault(request.decidedByType(), "human"),
-                    request.decidedBy());
+                    "authenticated",
+                    principal.actorRef());
         }
         if (!hadActivatedAt && saved.getActivatedAt() != null && !"active".equals(previousStatus)) {
             recordDefinitionEvent(
                     saved,
                     "definition.activated",
                     saved.getActivatedAt(),
-                    normalizeOrDefault(request.decidedByType(), "human"),
-                    request.decidedBy(),
+                    "authenticated",
+                    principal.actorRef(),
                     "Decision definition activated",
                     saved.getStatus());
         }
@@ -1355,6 +1357,66 @@ public class DomainRuleService {
             throw new ConfigurationIngestionException(
                     "Governed domain rule " + action + " actor is not authorized by governance");
         }
+    }
+
+    private void requireDefinitionApproverAuthorization(
+            DomainRuleDefinition definition,
+            String actor,
+            String action) {
+        String normalizedActor = normalize(actor);
+        if (!StringUtils.hasText(normalizedActor)) {
+            throw new ConfigurationIngestionException(
+                    "Governed domain rule " + action + " requires an authenticated actor");
+        }
+        if (normalizedActor.equals(normalize(definition.getCreatedBy()))) {
+            throw new ConfigurationIngestionException(
+                    "Rule definition approver must be different from its author");
+        }
+        if (!isGovernedDecision(
+                definition.getRuleType(),
+                read(definition.getDefinition()),
+                read(definition.getParameters()))) {
+            return;
+        }
+        JsonNode governance = read(definition.getGovernance());
+        List<String> authorizedApprovers = authorizedApprovers(
+                governance, requireRequiredApprovals(governance));
+        if (!authorizedApprovers.contains(normalizedActor)) {
+            throw new ConfigurationIngestionException(
+                    "Governed domain rule " + action + " actor is not authorized by governance");
+        }
+    }
+
+    private void requireAuthenticatedAuthorEvidence(DomainRuleDefinition definition) {
+        if (!"authenticated".equals(definition.getCreatedByType())
+                || !StringUtils.hasText(definition.getCreatedBy())) {
+            throw new ConfigurationIngestionException(
+                    "Rule definition approval requires server-authenticated author evidence");
+        }
+    }
+
+    private void persistDefinitionApproval(
+            DomainRuleDefinition definition,
+            String actorRef,
+            Instant approvedAt) {
+        String definitionHash = definitionFingerprint.sha256(definition);
+        definitionApprovalRepository.insertIfAbsent(
+                UUID.randomUUID(),
+                definition.getTenantId(),
+                definition.getEnvironment(),
+                definition.getId(),
+                definitionHash,
+                actorRef,
+                approvedAt);
+    }
+
+    private void requirePrincipal(DomainRuleGovernancePrincipal principal) {
+        if (principal == null) {
+            throw new ConfigurationIngestionException("Authenticated governance principal is required");
+        }
+        requireText(principal.tenantId(), "tenantId");
+        requireText(principal.environment(), "environment");
+        requireText(principal.actorRef(), "authenticated actor");
     }
 
     private ArrayNode requireRequiredApprovals(JsonNode governance) {

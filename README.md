@@ -211,7 +211,8 @@ explicitly declares. It is not a complete clean-install schema for every
 Config Starter capability. In particular, governed rule definitions,
 materializations, domain knowledge, federation and later AI authoring stores
 still require `classpath:db/migration` (or a separately verified, host-owned
-full baseline).
+full baseline). This includes IAM-bound definition approvals introduced by V36;
+the reduced baseline alone cannot publish governed snapshots from definitions.
 
 Use the limited squashed baseline only when the host has verified that it needs
 no tables outside that declared subset:
@@ -381,9 +382,12 @@ segregated approvals by having each authenticated approver call
 `POST /api/praxis/config/domain-rules/snapshots/composition-approvals`, then have
 a different authenticated publisher submit the unchanged candidate with that
 digest. In corporate mode the host must map the IAM roles
+`RULE_DEFINITION_AUTHOR`, `RULE_DEFINITION_APPROVER`,
 `RULE_COMPOSITION_APPROVER`, `RULE_SNAPSHOT_PUBLISHER` and
 `RULE_SNAPSHOT_OPERATOR`; actor names sent in request bodies are not accepted.
-The Config Starter rejects composition or catalog drift and never treats
+Definition approval is append-only, rejects self-approval and is tied to the
+exact canonical definition hash. The Config Starter rejects source, composition
+or catalog drift and never treats
 caller-declared Java coordinates as an admission catalog.
 - [Runtime enforcement release checklist](docs/ai/runtime-enforcement-consumer-release-checklist-2026-05-02.md)
 - [Domain catalog contract](docs/domain-catalog/domain-catalog-contract-v0.2.md)

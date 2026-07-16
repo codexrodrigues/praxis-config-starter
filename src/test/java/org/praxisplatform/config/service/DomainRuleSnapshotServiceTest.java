@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.atLeastOnce;
@@ -14,7 +16,9 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Tag;
@@ -22,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
+import org.praxisplatform.config.domain.DomainRuleDefinitionApproval;
 import org.praxisplatform.config.domain.DomainRuleCompositionApproval;
 import org.praxisplatform.config.domain.DomainRuleSnapshot;
 import org.praxisplatform.config.domain.DomainRuleSnapshotHead;
@@ -29,6 +34,7 @@ import org.praxisplatform.config.dto.DomainRuleSnapshotPublicationRequest;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestRequest;
 import org.praxisplatform.config.exception.DomainRuleSnapshotControlPlaneException;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.praxisplatform.config.repository.DomainRuleDefinitionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleCompositionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
@@ -65,19 +71,25 @@ class DomainRuleSnapshotServiceTest {
   private final DomainRuleSnapshotEventRepository eventRepository = mock(DomainRuleSnapshotEventRepository.class);
   private final DomainRuleCompositionApprovalRepository compositionApprovalRepository =
       mock(DomainRuleCompositionApprovalRepository.class);
+  private final DomainRuleDefinitionApprovalRepository definitionApprovalRepository =
+      mock(DomainRuleDefinitionApprovalRepository.class);
   private final ObjectMapper objectMapper = new ObjectMapper();
   private final DomainRuleImplementationCatalog implementationCatalog = mock(
       DomainRuleImplementationCatalog.class);
+  private final Map<UUID, String> definitionApprovers = new HashMap<>();
   private DomainRuleSnapshotService service;
 
   @BeforeEach
   void setUp() {
+    definitionApprovers.clear();
     service = new DomainRuleSnapshotService(
         definitionRepository,
         snapshotRepository,
         headRepository,
         eventRepository,
         compositionApprovalRepository,
+        definitionApprovalRepository,
+        new DomainRuleDefinitionFingerprint(objectMapper),
         objectMapper,
         implementationCatalog);
     when(implementationCatalog.allowedImplementations(any())).thenReturn(List.of(
@@ -85,6 +97,23 @@ class DomainRuleSnapshotServiceTest {
     when(snapshotRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     when(headRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     when(eventRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+    when(definitionApprovalRepository
+        .findByTenantIdAndEnvironmentAndDefinitionIdAndDefinitionHashOrderByApprovedAtAsc(
+            anyString(), anyString(), any(UUID.class), anyString())).thenAnswer(invocation -> {
+              UUID definitionId = invocation.getArgument(2);
+              String approver = definitionApprovers.get(definitionId);
+              if (approver == null) return List.of();
+              return List.of(DomainRuleDefinitionApproval.builder()
+                  .id(UUID.nameUUIDFromBytes((definitionId + ":approval").getBytes()))
+                  .tenantId(invocation.getArgument(0))
+                  .environment(invocation.getArgument(1))
+                  .definitionId(definitionId)
+                  .definitionHash(invocation.getArgument(3))
+                  .actorRef(approver)
+                  .role("RULE_DEFINITION_APPROVER")
+                  .approvedAt(Instant.parse("2026-07-13T19:00:00Z"))
+                  .build());
+            });
   }
 
   @Test
@@ -173,6 +202,8 @@ class DomainRuleSnapshotServiceTest {
         headRepository,
         eventRepository,
         compositionApprovalRepository,
+        definitionApprovalRepository,
+        new DomainRuleDefinitionFingerprint(objectMapper),
         objectMapper);
     UUID firstId = UUID.randomUUID();
     UUID secondId = UUID.randomUUID();
@@ -691,6 +722,28 @@ class DomainRuleSnapshotServiceTest {
             });
   }
 
+  @Test
+  void manifestRejectsDefinitionWithoutApprovalForItsCurrentContentHash() {
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    List<UUID> ids = List.of(firstId, secondId);
+    DomainRuleDefinition first = approvedDefinition(firstId, "grant:eligibility", "approver-a");
+    DomainRuleDefinition second = approvedDefinition(secondId, "grant:amount", "approver-b");
+    definitionApprovers.remove(secondId);
+    when(definitionRepository.findAllById(ids)).thenReturn(List.of(first, second));
+
+    assertThatThrownBy(() -> service.prepareCompositionManifest(
+        new DomainRuleCompositionManifestRequest(
+            ruleSet(), ids, "quickstart", "quickstart/1.0",
+            "2026-07-13T20:00:00Z", null),
+        "tenant-a", "prod"))
+        .isInstanceOfSatisfying(DomainRuleSnapshotControlPlaneException.class,
+            exception -> {
+              assertThat(exception.status()).isEqualTo(HttpStatus.BAD_REQUEST);
+              assertThat(exception.getMessage()).contains("exact content hash");
+            });
+  }
+
   private DomainRuleSnapshotPublicationRequest publicationRequest(
       RuleSetDefinition definition, List<UUID> sourceIds) {
     var manifest = service.prepareCompositionManifest(new DomainRuleCompositionManifestRequest(
@@ -767,7 +820,7 @@ class DomainRuleSnapshotServiceTest {
   }
 
   private DomainRuleDefinition approvedDefinition(UUID id, String ruleKey, String approver) {
-    return DomainRuleDefinition.builder()
+    DomainRuleDefinition definition = DomainRuleDefinition.builder()
         .id(id)
         .tenantId("tenant-a")
         .environment("prod")
@@ -777,9 +830,13 @@ class DomainRuleSnapshotServiceTest {
         .definition("{\"kind\":\"policy\",\"key\":\"" + ruleKey + "\"}")
         .parameters("{}")
         .governance("{\"classification\":\"corporate\"}")
+        .createdByType("authenticated")
+        .createdBy("definition-author")
         .approvedBy(approver)
         .approvedAt(Instant.parse("2026-07-13T19:00:00Z"))
         .build();
+    definitionApprovers.put(id, approver);
+    return definition;
   }
 
   private RuleSetDefinition ruleSet() {

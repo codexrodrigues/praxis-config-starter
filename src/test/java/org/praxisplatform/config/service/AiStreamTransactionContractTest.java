@@ -85,13 +85,11 @@ class AiStreamTransactionContractTest {
                 DomainRuleService.class.getMethod(
                         "intake",
                         org.praxisplatform.config.dto.DomainRuleIntakeRequest.class,
-                        String.class,
-                        String.class),
+                        DomainRuleGovernancePrincipal.class),
                 DomainRuleService.class.getMethod(
                         "createDefinition",
                         org.praxisplatform.config.dto.DomainRuleDefinitionRequest.class,
-                        String.class,
-                        String.class),
+                        DomainRuleGovernancePrincipal.class),
                 DomainRuleService.class.getMethod(
                         "definitions",
                         String.class,
@@ -103,9 +101,8 @@ class AiStreamTransactionContractTest {
                 DomainRuleService.class.getMethod(
                         "transitionDefinitionStatus",
                         UUID.class,
-                        org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest.class,
-                        String.class,
-                        String.class),
+                        org.praxisplatform.config.dto.DomainRuleDefinitionStatusTransitionRequest.class,
+                        DomainRuleGovernancePrincipal.class),
                 DomainRuleService.class.getMethod(
                         "simulate",
                         org.praxisplatform.config.dto.DomainRuleSimulationRequest.class,

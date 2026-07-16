@@ -86,10 +86,10 @@ fail closed for an old snapshot that the current engine cannot verify.
 Read operations require explicit `X-Tenant-ID` and `X-Env`. In corporate mode,
 approval, publication and rollback derive tenant, environment and actor from the
 server principal; header values are only hints and cannot replace authenticated
-scope. Publication requires
-approved source definitions with approval timestamps and at least two distinct
-approvers. Source hashes and safe approval evidence become part of the immutable
-snapshot envelope.
+scope. Publication requires approved source definitions with append-only
+approval evidence for each definition's current canonical hash and at least two
+distinct composition approvers. Source hashes and authenticated approval
+evidence become part of the immutable snapshot envelope.
 
 ## Approval-to-composition binding
 
@@ -108,12 +108,18 @@ itself is never promoted, rewritten or accepted as governed content. Supersessio
 preserved envelope identity but does not require the current engine to compile an obsolete runtime
 baseline; complete compilation, composition and hash checks apply to the new candidate.
 
-This closes composition maker-checker identity: approval, publication and
-rollback actors come from server authentication, and corporate mode fails closed
-unless the request has the required IAM role. Host security remains responsible
-for mapping its authorities to the three role names. The older shared-definition
-authoring lifecycle is a separate contract and must complete the same IAM
-binding before its source approvals can be classified as a full corporate proof.
+This closes both maker-checker layers. Definition creation and intake require
+`RULE_DEFINITION_AUTHOR`; draft/proposed authoring transitions use the same role;
+approval, rejection, activation and retirement require
+`RULE_DEFINITION_APPROVER`, whose authenticated actor must differ from the
+persisted author. Composition approval, publication and rollback actors also
+come from server authentication. Corporate mode fails closed unless the request
+has the corresponding IAM role. Request payloads never supply governed actor
+identity. Migration V36 persists definition approvals append-only and binds each
+one to the exact canonical source hash used by snapshot publication.
+Definitions created before this contract without `createdByType=authenticated`
+fail closed and must be recreated or versioned through the authenticated author
+flow; migration does not relabel caller-declared legacy identity as trusted.
 
 ## Compatibility and ownership
 

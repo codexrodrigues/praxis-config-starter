@@ -23,6 +23,7 @@ import org.praxisplatform.config.domain.DomainRuleDefinition;
 import org.praxisplatform.config.domain.DomainRuleEvent;
 import org.praxisplatform.config.domain.DomainRuleMaterialization;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
+import org.praxisplatform.config.dto.DomainRuleDefinitionStatusTransitionRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRulePublicationRequest;
@@ -32,6 +33,7 @@ import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.praxisplatform.config.repository.DomainRuleDefinitionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleEventRepository;
 import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
 
@@ -89,11 +91,8 @@ class DomainRuleServiceTest {
                                 {
                                   "requiredApprovals": ["procurement-owner"]
                                 }
-                                """),
-                        "llm",
-                        "openai:gpt-5.4-mini"),
-                "tenant-a",
-                "dev");
+                                """)),
+                principal("openai:gpt-5.4-mini"));
 
         assertThat(response.ruleKey()).isEqualTo("procurement.suppliers.rule.selection-eligibility");
         assertThat(response.status()).isEqualTo("draft");
@@ -126,7 +125,7 @@ class DomainRuleServiceTest {
         verify(eventRepository, org.mockito.Mockito.times(3)).save(eventCaptor.capture());
         assertThat(eventCaptor.getAllValues()).extracting(DomainRuleEvent::getEventType)
                 .containsExactly("definition.created", "approval.requested", "intake.received");
-        assertThat(eventCaptor.getAllValues().get(0).getActorType()).isEqualTo("llm");
+        assertThat(eventCaptor.getAllValues().get(0).getActorType()).isEqualTo("authenticated");
         assertThat(eventCaptor.getAllValues().get(0).getActor()).isEqualTo("openai:gpt-5.4-mini");
         assertThat(eventCaptor.getAllValues().get(0).getSummary()).isEqualTo("Decision definition created");
         assertThat(eventCaptor.getAllValues().get(0).getStatus()).isEqualTo("draft");
@@ -135,7 +134,7 @@ class DomainRuleServiceTest {
         DomainRuleEvent intakeEvent = eventCaptor.getAllValues().get(2);
         assertThat(intakeEvent.getSummary()).isEqualTo("Decision intake received");
         assertThat(intakeEvent.getStatus()).isEqualTo("draft");
-        assertThat(intakeEvent.getActorType()).isEqualTo("llm");
+        assertThat(intakeEvent.getActorType()).isEqualTo("authenticated");
         assertThat(intakeEvent.getActor()).isEqualTo("openai:gpt-5.4-mini");
         assertThat(intakeEvent.getSafeMetadata())
                 .contains("\"decisionStage\":\"intake\"")
@@ -228,11 +227,8 @@ class DomainRuleServiceTest {
                                   "ruleAuthoring": "governed",
                                   "requiredApprovals": ["procurement-owner"]
                                 }
-                                """),
-                        "llm",
-                        "openai:gpt-5.4-mini"),
-                "tenant-a",
-                "dev");
+                                """)),
+                principal("openai:gpt-5.4-mini"));
 
         DomainRuleDefinition approvedDefinition = persistedDefinition.get();
         approvedDefinition.setStatus("approved");
@@ -466,6 +462,8 @@ class DomainRuleServiceTest {
                 .definition("{\"sourcePrompt\":\"must not leak from definition\"}")
                 .parameters("{}")
                 .governance("{\"requiredApprovals\":[\"privacy-office\"],\"privateNotes\":\"must not leak approval notes\"}")
+                .createdByType("authenticated")
+                .createdBy("rule-author")
                 .build();
         DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
                 .id(materializationId)
@@ -832,15 +830,12 @@ class DomainRuleServiceTest {
                       "aiUsage": { "trainingUse": "deny" }
                     }
                     """),
-                null,
-                "llm",
-                "openai:gpt-5.4-mini",
-                null), "tenant-a", "dev");
+                null), principal("openai:gpt-5.4-mini"));
 
         assertThat(response.id()).isNotNull();
         assertThat(response.version()).isEqualTo(1);
         assertThat(response.status()).isEqualTo("proposed");
-        assertThat(response.createdByType()).isEqualTo("llm");
+        assertThat(response.createdByType()).isEqualTo("authenticated");
         assertThat(response.definition().path("recommendedOperation").asText())
                 .isEqualTo("rule.visualBlockGuidance.add");
         assertThat(response.governance().path("ruleAuthoring").asText()).isEqualTo("review_required");
@@ -874,10 +869,7 @@ class DomainRuleServiceTest {
                 objectMapper.readTree("{}"),
                 null,
                 objectMapper.readTree("{}"),
-                null,
-                "llm",
-                "openai:gpt-5.4-mini",
-                null), "tenant-a", "dev"))
+                null), principal("openai:gpt-5.4-mini")))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("status must be one of [draft, proposed, approved, active, deprecated, retired, rejected]");
 
@@ -906,10 +898,7 @@ class DomainRuleServiceTest {
                 objectMapper.readTree("{\"optionSourceKey\":\"supplier\"}"),
                 null,
                 objectMapper.readTree("{\"requiredApprovals\":[\"procurement-owner\"]}"),
-                null,
-                "llm",
-                "openai:gpt-5.4-mini",
-                null), "tenant-a", "dev"))
+                null), principal("openai:gpt-5.4-mini")))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("must be created as draft or proposed");
 
@@ -938,10 +927,7 @@ class DomainRuleServiceTest {
                 objectMapper.readTree("{\"optionSourceKey\":\"supplier\"}"),
                 null,
                 objectMapper.readTree("{}"),
-                null,
-                "llm",
-                "openai:gpt-5.4-mini",
-                null), "tenant-a", "dev"))
+                null), principal("openai:gpt-5.4-mini")))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("governance.requiredApprovals");
 
@@ -1544,7 +1530,10 @@ class DomainRuleServiceTest {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
         DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
-        DomainRuleService service = service(definitionRepository, materializationRepository, eventRepository);
+        DomainRuleDefinitionApprovalRepository approvalRepository =
+                mock(DomainRuleDefinitionApprovalRepository.class);
+        DomainRuleService service = service(
+                definitionRepository, materializationRepository, eventRepository, approvalRepository);
         UUID definitionId = UUID.randomUUID();
         DomainRuleDefinition definition = DomainRuleDefinition.builder()
                 .id(definitionId)
@@ -1557,19 +1546,18 @@ class DomainRuleServiceTest {
                 .definition("{}")
                 .parameters("{}")
                 .governance("{\"requiredApprovals\":[\"privacy-office\"],\"privateNotes\":\"must not leak approval notes\"}")
+                .createdByType("authenticated")
+                .createdBy("rule-author")
                 .build();
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
         when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         var response = service.transitionDefinitionStatus(
                 definitionId,
-                new DomainRuleStatusTransitionRequest(
+                new DomainRuleDefinitionStatusTransitionRequest(
                         "active",
-                        "human",
-                        "privacy-office",
                         objectMapper.readTree("{\"review\":\"approved\",\"privateNotes\":\"must not leak approval notes\"}")),
-                "tenant-a",
-                "dev");
+                principal("privacy-office"));
 
         assertThat(response.status()).isEqualTo("active");
         assertThat(response.approvedBy()).isEqualTo("privacy-office");
@@ -1577,6 +1565,14 @@ class DomainRuleServiceTest {
         assertThat(response.activatedAt()).isNotNull();
         assertThat(response.validationResult().path("review").asText()).isEqualTo("approved");
         verify(definitionRepository).save(definition);
+        verify(approvalRepository).insertIfAbsent(
+                any(UUID.class),
+                eq("tenant-a"),
+                eq("dev"),
+                eq(definitionId),
+                org.mockito.ArgumentMatchers.matches("[A-F0-9]{64}"),
+                eq("privacy-office"),
+                any(Instant.class));
         ArgumentCaptor<DomainRuleEvent> eventCaptor = ArgumentCaptor.forClass(DomainRuleEvent.class);
         verify(eventRepository, org.mockito.Mockito.times(3)).save(eventCaptor.capture());
         assertThat(eventCaptor.getAllValues()).extracting(DomainRuleEvent::getEventType)
@@ -1590,7 +1586,7 @@ class DomainRuleServiceTest {
     }
 
     @Test
-    void blocksLlmActorFromApprovingGovernedDefinition() throws Exception {
+    void blocksAuthorFromApprovingOwnGovernedDefinition() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
         DomainRuleService service = service(definitionRepository, materializationRepository);
@@ -1606,20 +1602,19 @@ class DomainRuleServiceTest {
                 .definition("{\"summary\":\"Impedir seleção de fornecedores bloqueados.\"}")
                 .parameters("{\"optionSourceKey\":\"supplier\"}")
                 .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
+                .createdByType("authenticated")
+                .createdBy("procurement-owner")
                 .build();
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
 
         assertThatThrownBy(() -> service.transitionDefinitionStatus(
                 definitionId,
-                new DomainRuleStatusTransitionRequest(
+                new DomainRuleDefinitionStatusTransitionRequest(
                         "approved",
-                        "llm",
-                        "procurement-owner",
                         objectMapper.readTree("{\"review\":\"approved\"}")),
-                "tenant-a",
-                "dev"))
+                principal("procurement-owner")))
                 .isInstanceOf(ConfigurationIngestionException.class)
-                .hasMessageContaining("requires a human or system actor");
+                .hasMessageContaining("must be different from its author");
 
         assertThat(definition.getStatus()).isEqualTo("proposed");
         verify(definitionRepository, org.mockito.Mockito.never()).save(any(DomainRuleDefinition.class));
@@ -1647,13 +1642,10 @@ class DomainRuleServiceTest {
 
         assertThatThrownBy(() -> service.transitionDefinitionStatus(
                 definitionId,
-                new DomainRuleStatusTransitionRequest(
+                new DomainRuleDefinitionStatusTransitionRequest(
                         "active",
-                        "human",
-                        "privacy-office",
                         objectMapper.readTree("{\"review\":\"approved\"}")),
-                "tenant-a",
-                "dev"))
+                principal("privacy-office")))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("Rule definition status transition is not allowed: retired -> active");
 
@@ -3259,12 +3251,30 @@ class DomainRuleServiceTest {
             DomainRuleDefinitionRepository definitionRepository,
             DomainRuleMaterializationRepository materializationRepository,
             DomainRuleEventRepository eventRepository) {
+        return service(
+                definitionRepository,
+                materializationRepository,
+                eventRepository,
+                mock(DomainRuleDefinitionApprovalRepository.class));
+    }
+
+    private DomainRuleService service(
+            DomainRuleDefinitionRepository definitionRepository,
+            DomainRuleMaterializationRepository materializationRepository,
+            DomainRuleEventRepository eventRepository,
+            DomainRuleDefinitionApprovalRepository approvalRepository) {
         return new DomainRuleService(
                 definitionRepository,
                 materializationRepository,
                 eventRepository,
                 mock(DomainCatalogReleaseRepository.class),
                 mock(DomainKnowledgeChangeSetRepository.class),
+                approvalRepository,
+                new DomainRuleDefinitionFingerprint(objectMapper),
                 objectMapper);
+    }
+
+    private DomainRuleGovernancePrincipal principal(String actorRef) {
+        return new DomainRuleGovernancePrincipal("tenant-a", actorRef, "dev");
     }
 }

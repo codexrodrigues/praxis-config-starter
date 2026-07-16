@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Append-only `domain_rule_definition_approval` evidence bound to the canonical
+  SHA-256 of an exact governed definition, including database-level mutation
+  rejection and snapshot publication revalidation.
+- IAM roles `RULE_DEFINITION_AUTHOR` and `RULE_DEFINITION_APPROVER` for the
+  definition maker-checker lifecycle.
 - Release-hardening checkpoint for the governed runtime related surface preview,
   covering runtime observations, backend grounding, `runtimeToolPlan`,
   multi-read, summary, compare, detail, quick replies, governed multi-turn
@@ -37,6 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Project Knowledge Vector RAG checkpoint.
 
 ### Changed
+- Domain-rule intake, creation and definition status transitions now derive
+  tenant, environment and actor from server authentication. Definition approval
+  requires authenticated author evidence, rejects self-approval and fails closed
+  when the current source hash has no matching approval.
+- The beta request contracts no longer accept `createdByType`, `createdBy`,
+  `approvedBy`, `decidedByType` or `decidedBy` for governed definition lifecycle
+  calls. Hosts must map the new IAM roles and recreate or version legacy rules
+  whose author was not recorded as `authenticated` before snapshot publication.
 - Runtime metadata for table AI turns now promotes `recordSurfaces` and
   `runtimeOperations` ahead of the full `contextHints`, reducing truncation risk
   when the LLM must materialize declared dynamic-page surface operations.

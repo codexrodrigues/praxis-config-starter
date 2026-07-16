@@ -15,6 +15,7 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.domain.DomainRuleCompositionApproval;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
+import org.praxisplatform.config.domain.DomainRuleDefinitionApproval;
 import org.praxisplatform.config.domain.DomainRuleSnapshot;
 import org.praxisplatform.config.domain.DomainRuleSnapshotEvent;
 import org.praxisplatform.config.domain.DomainRuleSnapshotHead;
@@ -29,6 +30,7 @@ import org.praxisplatform.config.exception.DomainRuleSnapshotControlPlaneExcepti
 import org.praxisplatform.config.http.HttpEntityTagCondition;
 import org.praxisplatform.config.repository.DomainRuleCompositionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.praxisplatform.config.repository.DomainRuleDefinitionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
@@ -59,6 +61,8 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
   private final DomainRuleSnapshotHeadRepository headRepository;
   private final DomainRuleSnapshotEventRepository eventRepository;
   private final DomainRuleCompositionApprovalRepository compositionApprovalRepository;
+  private final DomainRuleDefinitionApprovalRepository definitionApprovalRepository;
+  private final DomainRuleDefinitionFingerprint definitionFingerprint;
   private final ObjectMapper objectMapper;
   private final DomainRuleImplementationCatalog implementationCatalog;
 
@@ -74,6 +78,8 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
       DomainRuleSnapshotHeadRepository headRepository,
       DomainRuleSnapshotEventRepository eventRepository,
       DomainRuleCompositionApprovalRepository compositionApprovalRepository,
+      DomainRuleDefinitionApprovalRepository definitionApprovalRepository,
+      DomainRuleDefinitionFingerprint definitionFingerprint,
       ObjectMapper objectMapper) {
     this(
         definitionRepository,
@@ -81,6 +87,8 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
         headRepository,
         eventRepository,
         compositionApprovalRepository,
+        definitionApprovalRepository,
+        definitionFingerprint,
         objectMapper,
         DomainRuleImplementationCatalog.denyAll());
   }
@@ -151,14 +159,15 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
     List<RuleSnapshotSource> provenance = new ArrayList<>();
     List<RuleSnapshotApproval> approvals = new ArrayList<>();
     for (DomainRuleDefinition source : sources) {
-      String sourceHash = sourceHash(source);
+      String sourceHash = definitionFingerprint.sha256(source);
+      DomainRuleDefinitionApproval sourceApproval = currentApproval(source, sourceHash);
       provenance.add(new RuleSnapshotSource(
           source.getId().toString(), source.getRuleKey(), source.getVersion(), sourceHash));
       approvals.add(new RuleSnapshotApproval(
-          source.getId() + ":approval",
-          "RULE_DEFINITION_APPROVER",
-          source.getApprovedBy().trim(),
-          source.getApprovedAt().toString(),
+          sourceApproval.getId().toString(),
+          sourceApproval.getRole(),
+          sourceApproval.getActorRef(),
+          sourceApproval.getApprovedAt().toString(),
           sourceHash));
     }
     String ownerServiceKey = requireText(request.ownerServiceKey(), "ownerServiceKey");
@@ -367,29 +376,29 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
       if (!tenant.equals(source.getTenantId()) || !environment.equals(source.getEnvironment())) {
         throw badRequest("Every source definition must belong to the snapshot tenant and environment");
       }
-      if (!PUBLISHABLE_STATUSES.contains(source.getStatus())
-          || source.getApprovedBy() == null || source.getApprovedBy().isBlank()
-          || source.getApprovedAt() == null) {
-        throw badRequest("Every source definition must be approved with actor and decision time evidence");
+      if (!PUBLISHABLE_STATUSES.contains(source.getStatus())) {
+        throw badRequest("Every source definition must have an approved or active status");
       }
+      if (!"authenticated".equals(source.getCreatedByType())
+          || source.getCreatedBy() == null || source.getCreatedBy().isBlank()) {
+        throw badRequest("Every source definition requires server-authenticated author evidence");
+      }
+      currentApproval(source, definitionFingerprint.sha256(source));
     }
     return sources.stream().sorted(java.util.Comparator.comparing(DomainRuleDefinition::getId)).toList();
   }
 
-  private String sourceHash(DomainRuleDefinition source) {
-    try {
-      ObjectNode content = objectMapper.createObjectNode();
-      content.put("definitionId", source.getId().toString());
-      content.put("definitionKey", source.getRuleKey());
-      content.put("version", source.getVersion());
-      content.set("definition", objectMapper.readTree(source.getDefinition()));
-      content.set("parameters", objectMapper.readTree(source.getParameters()));
-      content.set("condition", source.getCondition() == null ? objectMapper.nullNode() : objectMapper.readTree(source.getCondition()));
-      content.set("governance", objectMapper.readTree(source.getGovernance()));
-      return PraxisCanonicalJson.sha256(content);
-    } catch (JsonProcessingException exception) {
-      throw badRequest("A source definition contains invalid governed JSON");
-    }
+  private DomainRuleDefinitionApproval currentApproval(
+      DomainRuleDefinition source, String definitionHash) {
+    return definitionApprovalRepository
+        .findByTenantIdAndEnvironmentAndDefinitionIdAndDefinitionHashOrderByApprovedAtAsc(
+            source.getTenantId(), source.getEnvironment(), source.getId(), definitionHash)
+        .stream()
+        .filter(approval -> "RULE_DEFINITION_APPROVER".equals(approval.getRole()))
+        .filter(approval -> !approval.getActorRef().equals(source.getCreatedBy()))
+        .findFirst()
+        .orElseThrow(() -> badRequest(
+            "Every source definition requires authenticated approval for its exact content hash"));
   }
 
   private CompiledRuleSnapshot compileCandidate(
@@ -408,7 +417,8 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
       String tenant, String environment, String ownerServiceKey,
       String requiredHostContractVersion, String validFromUtc, String validUntilUtc) {
     var sourceEvidence = sources.stream().map(source -> new RuleSnapshotSource(
-        source.getId().toString(), source.getRuleKey(), source.getVersion(), sourceHash(source))).toList();
+        source.getId().toString(), source.getRuleKey(), source.getVersion(),
+        definitionFingerprint.sha256(source))).toList();
     List<RuleImplementationRef> implementations = allowedImplementations(
         tenant, environment, ownerServiceKey);
     ObjectNode catalog = objectMapper.createObjectNode();
