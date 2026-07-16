@@ -326,8 +326,10 @@ Scoped API candidate retrieval fails closed when no tenant/environment result is
 not retry against an unscoped corpus that could include another tenant's API evidence.
 
 The official Quickstart authoring smoke bootstraps its own scoped `api_metadata` evidence from the
-Quickstart OpenAPI before resolving intent. This keeps the release proof reproducible on an empty
-database and exercises the canonical ingestion endpoint instead of relying on manually seeded rows.
+Quickstart OpenAPI before resolving intent. The bootstrap includes the minimum cross-domain corpus
+used by the complete suite, rather than only the first scenario, so later authoring decisions remain
+grounded and compete against the same reproducible evidence. This keeps the release proof valid on an
+empty database and exercises the canonical ingestion endpoint instead of relying on manually seeded rows.
 
 API catalog ingestion persists the canonical `api_metadata` rows before publishing the derived RAG
 corpus. RAG publication is scheduled after the database commit and can be replayed from canonical
