@@ -2538,6 +2538,11 @@ public class AgenticAuthoringIntentResolverService {
         }
         AgenticAuthoringCandidate focusedCandidate =
                 resourceDiscoveryFocusedCandidate(request, prompt, artifactKind, candidates);
+        AgenticAuthoringCandidate singleGovernedFormCreateCandidate =
+                singleGovernedFormCreateCandidate(request, artifactKind, candidates);
+        if (singleGovernedFormCreateCandidate != null) {
+            focusedCandidate = singleGovernedFormCreateCandidate;
+        }
         AgenticAuthoringCandidate projectionFocusedCandidate =
                 projectionResourceDiscoveryFocusedCandidate(request, prompt, artifactKind, null, candidates);
         if (projectionFocusedCandidate != null) {
@@ -2553,7 +2558,13 @@ public class AgenticAuthoringIntentResolverService {
                 || !hasEvidence(focusedCandidate, "tool-search-api-resources")
                 || !hasTrustedSelectionEvidence(focusedCandidate)
                 || isWeakLexicalCandidate(focusedCandidate)
-                || !hasSafeFocusedResourceDiscoveryLead(request, prompt, artifactKind, focusedCandidate, candidates)) {
+                || (singleGovernedFormCreateCandidate == null
+                        && !hasSafeFocusedResourceDiscoveryLead(
+                                request,
+                                prompt,
+                                artifactKind,
+                                focusedCandidate,
+                                candidates))) {
             focusedCandidate = strongLlmAuthoredOperationalResourceDiscoveryLead(
                     request,
                     prompt,
@@ -2580,6 +2591,30 @@ public class AgenticAuthoringIntentResolverService {
                 null,
                 null,
                 false);
+    }
+
+    private AgenticAuthoringCandidate singleGovernedFormCreateCandidate(
+            AgenticAuthoringIntentResolutionRequest request,
+            String artifactKind,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (!"form".equals(artifactKind)
+                || request == null
+                || candidates == null
+                || candidates.isEmpty()
+                || !hasLlmAuthoredMaterializableResourceFocus(request)) {
+            return null;
+        }
+        List<AgenticAuthoringCandidate> eligible = candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> hasResourceDiscoveryCandidate(request, candidate))
+                .filter(candidate -> hasEvidence(candidate, "tool-search-api-resources"))
+                .filter(candidate -> hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE))
+                .filter(candidate -> !isDerivedProjectionCandidate(candidate))
+                .filter(this::isCreateEndpointCandidate)
+                .filter(this::hasTrustedSelectionEvidence)
+                .filter(candidate -> !isWeakLexicalCandidate(candidate))
+                .toList();
+        return eligible.size() == 1 ? eligible.get(0) : null;
     }
 
     private AgenticAuthoringCandidate strongLlmAuthoredOperationalResourceDiscoveryLead(
@@ -5256,13 +5291,10 @@ public class AgenticAuthoringIntentResolverService {
         String submitMethod = valueOrDefault(candidate.submitMethod(), operation);
         String resourcePath = normalizePath(candidate.resourcePath());
         String submitUrl = normalizePath(valueOrDefault(candidate.submitUrl(), resourcePath));
-        String schemaUrl = valueOrDefault(candidate.schemaUrl(), "");
         return "post".equalsIgnoreCase(operation)
                 && "post".equalsIgnoreCase(submitMethod)
                 && !resourcePath.isBlank()
-                && resourcePath.equals(submitUrl)
-                && !schemaUrl.contains("/filter")
-                && !schemaUrl.contains("/stats/");
+                && resourcePath.equals(submitUrl);
     }
 
     String semanticRawPrompt(AgenticAuthoringIntentResolutionRequest request, String rawPrompt) {
@@ -7971,6 +8003,9 @@ public class AgenticAuthoringIntentResolverService {
             return changeKind;
         }
         if ("form".equals(artifactKind)) {
+            return "create_artifact";
+        }
+        if (Set.of("author_component", "materialize", "materialize_component").contains(changeKind)) {
             return "create_artifact";
         }
         if (containsAny(changeKind, "add_field", "add_column", "add_filter", "modify_field", "update_field")) {

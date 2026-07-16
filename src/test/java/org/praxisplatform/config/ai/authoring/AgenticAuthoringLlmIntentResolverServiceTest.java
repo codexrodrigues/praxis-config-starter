@@ -896,6 +896,70 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     }
 
     @Test
+    void componentAuthoringSemanticClassNormalizesAuthorComponentCreationTuple() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "semanticIntentClass": "component_authoring",
+                  "operationKind": "create",
+                  "artifactKind": "table",
+                  "changeKind": "author_component",
+                  "selectedResourcePath": "/api/human-resources/employees",
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "requiresGovernedAuthoring": true,
+                  "assistantMessage": "Vou criar a tabela de funcionários.",
+                  "visualizationDecision": null,
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Crie uma tabela de funcionários",
+                        "page-builder",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key"),
+                "Crie uma tabela de funcionários",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(),
+                componentCapabilities(),
+                "tenant",
+                "user",
+                "local").orElseThrow();
+
+        assertThat(result.semanticIntentClass()).isEqualTo("component_authoring");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.warnings())
+                .contains("llm-semantic-intent-tuple-normalized", "llm-fast-intent-resolution-used");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
     void sharedRuleSemanticClassNormalizesVisualTupleWithoutDiscardingResourceDiscoveryIntent() throws Exception {
         when(providerManagementService.generateJson(
                 any(),

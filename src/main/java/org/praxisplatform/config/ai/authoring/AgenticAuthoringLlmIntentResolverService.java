@@ -1487,7 +1487,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 && resolved
                 && "create".equals(operationKind)
                 && !"unknown".equals(artifactKind)
-                && ("materialize".equals(changeKind) || "materialize_component".equals(changeKind))
+                && ("materialize".equals(changeKind)
+                        || "materialize_component".equals(changeKind)
+                        || "author_component".equals(changeKind))
                 && ("none".equals(followUpKind) || "new_instruction".equals(followUpKind))) {
             ArrayList<String> normalizedWarnings = new ArrayList<>(warnings);
             if (!normalizedWarnings.contains("llm-semantic-intent-tuple-normalized")) {
