@@ -58,8 +58,78 @@ jq -e '.semanticDecision.schemaVersion == "praxis-agentic-authoring-semantic-dec
 plan_body="$(jq --argjson intentResolution "$intent" '. + {intentResolution:$intentResolution}' <<<"$body")"
 plan="$(curl -fsS --max-time 120 -X POST "$BASE_URL/api/praxis/config/ai/authoring/minimal-form-plan" "${headers[@]}" --data-binary @<(printf '%s' "$plan_body") | tee "$ARTIFACTS_DIR/plan.response.json")"
 test "$(jq -r '.valid' <<<"$plan")" = "true"
-jq -e '.minimalFormPlan.fields | map(.name) | index("titulo") != null' <<<"$plan" >/dev/null
-jq -e '.minimalFormPlan.fields | map(.name) | index("prioridadeId") == null and index("statusAtualId") == null' <<<"$plan" >/dev/null
+schema_ref="$(jq -r '.minimalFormPlan.fieldSelectionPlanRef // empty' <<<"$plan")"
+if [[ "$schema_ref" != /schemas/filtered\?* ]]; then
+  echo "MinimalFormPlan did not expose a canonical /schemas/filtered reference: $schema_ref" >&2
+  exit 1
+fi
+curl -fsS --max-time 60 "$BASE_URL$schema_ref" "${headers[@]}" \
+  -o "$ARTIFACTS_DIR/plan.canonical-schema.json"
+python3 - "$ARTIFACTS_DIR/plan.response.json" "$ARTIFACTS_DIR/plan.canonical-schema.json" "$ARTIFACTS_DIR/plan.schema-conformance.json" <<'PY'
+import json
+import pathlib
+import sys
+
+plan_path, schema_path, report_path = map(pathlib.Path, sys.argv[1:])
+plan = json.loads(plan_path.read_text(encoding="utf-8"))["minimalFormPlan"]
+schema = json.loads(schema_path.read_text(encoding="utf-8"))
+properties = schema.get("properties")
+fields = plan.get("fields")
+if not isinstance(properties, dict) or not properties:
+    raise SystemExit("Canonical create request schema has no properties.")
+if not isinstance(fields, list) or not fields:
+    raise SystemExit("MinimalFormPlan has no fields.")
+
+field_names = [field.get("name") for field in fields if isinstance(field, dict)]
+if len(field_names) != len(fields) or any(not isinstance(name, str) or not name for name in field_names):
+    raise SystemExit("MinimalFormPlan contains a field without a canonical name.")
+if len(field_names) != len(set(field_names)):
+    raise SystemExit(f"MinimalFormPlan contains duplicated fields: {field_names}")
+
+invented = sorted(set(field_names) - set(properties))
+if invented:
+    raise SystemExit(f"MinimalFormPlan invented fields outside /schemas/filtered: {invented}")
+
+schema_required = {
+    name for name in schema.get("required", [])
+    if isinstance(name, str)
+}
+schema_required.update(
+    name for name, definition in properties.items()
+    if isinstance(definition, dict) and definition.get("required") is True
+)
+missing_required = sorted(schema_required - set(field_names))
+if missing_required:
+    raise SystemExit(f"MinimalFormPlan omitted required schema fields: {missing_required}")
+
+required_mismatches = sorted(
+    field["name"] for field in fields
+    if bool(field.get("required")) != (field["name"] in schema_required)
+)
+if required_mismatches:
+    raise SystemExit(f"MinimalFormPlan changed schema required semantics: {required_mismatches}")
+
+pointer_mismatches = sorted(
+    field["name"] for field in fields
+    if field.get("schemaPointer") != f"#/properties/{field['name']}"
+)
+if pointer_mismatches:
+    raise SystemExit(f"MinimalFormPlan has non-canonical schema pointers: {pointer_mismatches}")
+
+report = {
+    "schemaRef": plan.get("fieldSelectionPlanRef"),
+    "schemaPropertyCount": len(properties),
+    "planFieldCount": len(fields),
+    "requiredFieldCount": len(schema_required),
+    "fieldNames": field_names,
+    "inventedFields": invented,
+    "missingRequiredFields": missing_required,
+    "requiredSemanticsPreserved": not required_mismatches,
+    "schemaPointersCanonical": not pointer_mismatches,
+    "schemaConformant": True,
+}
+report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
 
 echo "[3/7] compiled-form-patch"
 compile_body="$(jq -n --argjson minimalFormPlan "$(jq '.minimalFormPlan' <<<"$plan")" --argjson intentResolution "$intent" '{minimalFormPlan:$minimalFormPlan, intentResolution:$intentResolution}')"
@@ -139,5 +209,5 @@ curl -fsS --max-time 30 -X POST "$BASE_URL/api/praxis/config/ai/patch/stream/$st
 
 echo "[7/7] summary"
 jq -n --arg artifactsDir "$ARTIFACTS_DIR" --arg provider "$PROVIDER" --arg model "$MODEL" --arg eventCount "$event_count" --arg replayChecked "$replay_checked" \
-  '{provider:$provider, model:$model, artifactsDir:$artifactsDir, planValid:true, compileValid:true, previewValid:true, applyPersisted:true, applyCleanupDeleted:true, streamTerminalSeen:true, streamReplayChecked:($replayChecked == "true"), streamEventCount:($eventCount|tonumber)}' \
+  '{provider:$provider, model:$model, artifactsDir:$artifactsDir, planValid:true, planSchemaConformant:true, compileValid:true, previewValid:true, applyPersisted:true, applyCleanupDeleted:true, streamTerminalSeen:true, streamReplayChecked:($replayChecked == "true"), streamEventCount:($eventCount|tonumber)}' \
   | tee "$ARTIFACTS_DIR/summary.json"

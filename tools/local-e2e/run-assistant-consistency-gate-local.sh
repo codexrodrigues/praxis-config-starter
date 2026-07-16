@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STARTER_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CORPUS_PATH="${CORPUS_PATH:-$STARTER_ROOT/docs/ai/agentic-authoring/proofs/assistant-consistency-corpus.v1.json}"
+PRICING_SNAPSHOT_PATH="${PRICING_SNAPSHOT_PATH:-$STARTER_ROOT/docs/ai/agentic-authoring/proofs/provider-pricing-snapshot.v1.json}"
 PROFILE="${PROFILE:-must-pass}"
 REPETITIONS="${REPETITIONS:-1}"
 RELEASE_GATE="${RELEASE_GATE:-false}"
@@ -28,6 +29,9 @@ MAX_FIRST_FEEDBACK_SECONDS="${MAX_FIRST_FEEDBACK_SECONDS:-2}"
 MAX_GUIDANCE_SECONDS="${MAX_GUIDANCE_SECONDS:-12}"
 MAX_AUTHORING_SECONDS="${MAX_AUTHORING_SECONDS:-45}"
 ENFORCE_LATENCY="${ENFORCE_LATENCY:-$RELEASE_GATE}"
+MAX_TOKENS_PER_RUN="${MAX_TOKENS_PER_RUN:-12000}"
+MAX_ESTIMATED_COST_USD_MICROS_PER_RUN="${MAX_ESTIMATED_COST_USD_MICROS_PER_RUN:-10000}"
+ENFORCE_EFFICIENCY="${ENFORCE_EFFICIENCY:-$RELEASE_GATE}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required." >&2
@@ -39,6 +43,10 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 if [[ ! -f "$CORPUS_PATH" ]]; then
   echo "Corpus not found: $CORPUS_PATH" >&2
+  exit 1
+fi
+if [[ ! -f "$PRICING_SNAPSHOT_PATH" ]]; then
+  echo "Pricing snapshot not found: $PRICING_SNAPSHOT_PATH" >&2
   exit 1
 fi
 if ! [[ "$REPETITIONS" =~ ^[1-9][0-9]*$ ]]; then
@@ -183,6 +191,7 @@ PY
 
 echo "Running Praxis assistant consistency gate"
 echo "Corpus: $CORPUS_PATH"
+echo "Pricing: $PRICING_SNAPSHOT_PATH"
 echo "Profile: $PROFILE | repetitions: $REPETITIONS | provider: $PROVIDER | model: $MODEL"
 echo "Artifacts: $ARTIFACTS_DIR"
 
@@ -233,7 +242,7 @@ if [[ "$REUSE_EXISTING_ARTIFACTS" != "true" ]]; then
       CURRENT_ROUTE="$(jq -r '.currentRoute' "$case_dir/context.json")" \
       CURRENT_PAGE_JSON="$current_page_json" \
       SELECTED_WIDGET_KEY_JSON="$(jq -c '.selectedWidgetKey' "$case_dir/context.json")" \
-      CONTEXT_HINTS_JSON="$(jq -c '.contextHints' "$case_dir/context.json")" \
+      CONTEXT_HINTS_JSON="$(jq -c '.contextHints + {includeLlmDiagnostics:true}' "$case_dir/context.json")" \
       CONVERSATION_MESSAGES_JSON="$conversation_messages_json" \
       SESSION_ID="$session_id" \
       ARTIFACTS_DIR="$case_dir" \
@@ -278,8 +287,12 @@ ENFORCE_LATENCY="$ENFORCE_LATENCY" \
 MAX_FIRST_FEEDBACK_SECONDS="$MAX_FIRST_FEEDBACK_SECONDS" \
 MAX_GUIDANCE_SECONDS="$MAX_GUIDANCE_SECONDS" \
 MAX_AUTHORING_SECONDS="$MAX_AUTHORING_SECONDS" \
-python3 - "$ARTIFACTS_DIR" <<'PY'
+MAX_TOKENS_PER_RUN="$MAX_TOKENS_PER_RUN" \
+MAX_ESTIMATED_COST_USD_MICROS_PER_RUN="$MAX_ESTIMATED_COST_USD_MICROS_PER_RUN" \
+ENFORCE_EFFICIENCY="$ENFORCE_EFFICIENCY" \
+python3 - "$ARTIFACTS_DIR" "$PRICING_SNAPSHOT_PATH" <<'PY'
 import json
+import math
 import os
 import pathlib
 import re
@@ -287,16 +300,90 @@ import statistics
 import sys
 import unicodedata
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 
 base = pathlib.Path(sys.argv[1])
+pricing_path = pathlib.Path(sys.argv[2])
 plan = json.loads((base / "execution-plan.json").read_text(encoding="utf-8"))
+pricing = json.loads(pricing_path.read_text(encoding="utf-8"))
+if pricing.get("version") != "1.0.0" or pricing.get("kind") != "praxis.ai-provider-pricing-snapshot":
+    raise SystemExit("Unsupported provider pricing snapshot version or kind.")
 provider = os.environ["PROVIDER"]
 model = os.environ["MODEL"]
 release_gate = os.environ.get("RELEASE_GATE", "false").lower() == "true"
 enforce_latency = os.environ.get("ENFORCE_LATENCY", "false").lower() == "true"
+enforce_efficiency = os.environ.get("ENFORCE_EFFICIENCY", "false").lower() == "true"
 max_first_feedback = float(os.environ.get("MAX_FIRST_FEEDBACK_SECONDS", "2"))
 max_guidance = float(os.environ.get("MAX_GUIDANCE_SECONDS", "12"))
 max_authoring = float(os.environ.get("MAX_AUTHORING_SECONDS", "45"))
+max_tokens_per_run = int(os.environ.get("MAX_TOKENS_PER_RUN", "12000"))
+max_cost_micros_per_run = int(os.environ.get("MAX_ESTIMATED_COST_USD_MICROS_PER_RUN", "10000"))
+
+def non_negative_int(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+def pricing_entry(invocation_provider, invocation_model):
+    for entry in pricing.get("entries") or []:
+        if entry.get("provider") != invocation_provider:
+            continue
+        if entry.get("model") == invocation_model:
+            return entry
+        if any(invocation_model.startswith(prefix) for prefix in entry.get("modelPrefixes") or []):
+            return entry
+    return None
+
+def efficiency_projection(terminal_payload):
+    diagnostics = terminal_payload.get("decisionDiagnostics")
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    telemetry = diagnostics.get("providerTelemetry")
+    telemetry = telemetry if isinstance(telemetry, dict) else {}
+    invocations = telemetry.get("providerInvocations")
+    invocations = invocations if isinstance(invocations, list) else []
+    successful = [
+        item for item in invocations
+        if isinstance(item, dict) and item.get("status") == "success"
+    ]
+    total_tokens = 0
+    priced_count = 0
+    cost_micros = Decimal("0")
+    missing_usage = []
+    missing_pricing = []
+    for invocation in successful:
+        invocation_provider = str(invocation.get("provider") or "")
+        invocation_model = str(invocation.get("model") or "")
+        input_tokens = invocation.get("inputTokens")
+        output_tokens = invocation.get("outputTokens")
+        if not non_negative_int(input_tokens) or not non_negative_int(output_tokens):
+            missing_usage.append(f"{invocation_provider}:{invocation_model}")
+            continue
+        invocation_total = invocation.get("totalTokens")
+        total_tokens += invocation_total if non_negative_int(invocation_total) else input_tokens + output_tokens
+        entry = pricing_entry(invocation_provider, invocation_model)
+        if entry is None:
+            missing_pricing.append(f"{invocation_provider}:{invocation_model}")
+            continue
+        cached_tokens = invocation.get("cacheReadInputTokens")
+        cached_tokens = cached_tokens if non_negative_int(cached_tokens) else 0
+        cached_tokens = min(cached_tokens, input_tokens)
+        uncached_tokens = input_tokens - cached_tokens
+        cost_micros += Decimal(uncached_tokens) * Decimal(str(entry["inputUsdPerMillion"]))
+        cost_micros += Decimal(cached_tokens) * Decimal(str(entry["cachedInputUsdPerMillion"]))
+        cost_micros += Decimal(output_tokens) * Decimal(str(entry["outputUsdPerMillion"]))
+        priced_count += 1
+    rounded_cost = int(cost_micros.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    complete = bool(successful) and not missing_usage and not missing_pricing and priced_count == len(successful)
+    return {
+        "providerInvocationCount": len(invocations),
+        "successfulInvocationCount": len(successful),
+        "pricedInvocationCount": priced_count,
+        "totalTokens": total_tokens,
+        "estimatedCostUsdMicros": rounded_cost if complete else None,
+        "costEstimateComplete": complete,
+        "missingUsage": sorted(set(missing_usage)),
+        "missingPricing": sorted(set(missing_pricing)),
+        "pricingSnapshotVersion": pricing.get("version"),
+        "pricingCapturedAt": pricing.get("capturedAt"),
+    }
 
 def event_payload(event):
     payload = event.get("payload")
@@ -560,6 +647,26 @@ for run in plan["runs"]:
     if can_apply is True and safety["mutationRequiresPreview"] and not has_preview:
         failures.append("mutation became applicable without preview")
 
+    efficiency = efficiency_projection(terminal_payload)
+    if enforce_efficiency:
+        if efficiency["successfulInvocationCount"] <= 0:
+            failures.append("efficiency telemetry has no successful provider invocation")
+        if efficiency["missingUsage"]:
+            failures.append(f"provider usage unavailable for {efficiency['missingUsage']}")
+        if efficiency["missingPricing"]:
+            failures.append(f"pricing snapshot does not cover {efficiency['missingPricing']}")
+        if efficiency["totalTokens"] > max_tokens_per_run:
+            failures.append(
+                f"total tokens {efficiency['totalTokens']} exceed {max_tokens_per_run} per run"
+            )
+        estimated_cost = efficiency["estimatedCostUsdMicros"]
+        if estimated_cost is None:
+            failures.append("estimated provider cost is incomplete")
+        elif estimated_cost > max_cost_micros_per_run:
+            failures.append(
+                f"estimated cost {estimated_cost} USD micros exceeds {max_cost_micros_per_run} per run"
+            )
+
     first_feedback = next((
         event for event in events
         if event.get("type") in {"status", "thought.step", "heartbeat"}
@@ -601,6 +708,7 @@ for run in plan["runs"]:
             "activeSemanticDecisionId": active_decision_id,
             "columnFields": column_fields,
             "persistence": transaction,
+            "efficiency": efficiency,
         },
         "timingSeconds": {
             "firstFeedback": first_feedback_seconds,
@@ -623,6 +731,23 @@ extended_accuracy = (
 )
 durations = [row.get("timingSeconds", {}).get("terminal") for row in rows]
 durations = [value for value in durations if isinstance(value, (int, float))]
+sorted_durations = sorted(durations)
+p95_terminal = (
+    sorted_durations[max(0, math.ceil(len(sorted_durations) * 0.95) - 1)]
+    if sorted_durations else None
+)
+efficiency_rows = [
+    row.get("actual", {}).get("efficiency", {})
+    for row in rows
+]
+token_counts = [
+    item.get("totalTokens") for item in efficiency_rows
+    if item.get("successfulInvocationCount", 0) > 0 and non_negative_int(item.get("totalTokens"))
+]
+cost_estimates = [
+    item.get("estimatedCostUsdMicros") for item in efficiency_rows
+    if non_negative_int(item.get("estimatedCostUsdMicros"))
+]
 transaction_rows = [
     row for row in rows
     if row.get("persistenceExpected") is True
@@ -650,6 +775,20 @@ report = {
     "repetitions": plan["repetitions"],
     "releaseGate": release_gate,
     "latencyEnforced": enforce_latency,
+    "efficiencyEnforced": enforce_efficiency,
+    "pricingSnapshot": {
+        "version": pricing.get("version"),
+        "capturedAt": pricing.get("capturedAt"),
+        "sourceUrl": pricing.get("sourceUrl"),
+        "path": str(pricing_path),
+    },
+    "thresholds": {
+        "maxFirstFeedbackSeconds": max_first_feedback,
+        "maxGuidanceSeconds": max_guidance,
+        "maxAuthoringSeconds": max_authoring,
+        "maxTokensPerRun": max_tokens_per_run,
+        "maxEstimatedCostUsdMicrosPerRun": max_cost_micros_per_run,
+    },
     "summary": {
         "runCount": total,
         "passed": passed,
@@ -658,6 +797,16 @@ report = {
         "mustPassAccuracy": must_pass_accuracy,
         "extendedAccuracy": extended_accuracy,
         "medianTerminalSeconds": statistics.median(durations) if durations else None,
+        "p95TerminalSeconds": p95_terminal,
+        "totalTokens": sum(token_counts),
+        "averageTokensPerRun": (sum(token_counts) / len(token_counts)) if token_counts else None,
+        "maxTokensPerRun": max(token_counts) if token_counts else None,
+        "totalEstimatedCostUsdMicros": sum(cost_estimates),
+        "averageEstimatedCostUsdMicrosPerRun": (
+            sum(cost_estimates) / len(cost_estimates) if cost_estimates else None
+        ),
+        "maxEstimatedCostUsdMicrosPerRun": max(cost_estimates) if cost_estimates else None,
+        "completeCostEstimateRunCount": len(cost_estimates),
         "transactionRunCount": len(transaction_rows),
         "transactionPassed": transaction_passed,
         "gatePassed": not gate_failures,
@@ -675,10 +824,14 @@ lines = [
     f"- Repetitions: `{plan['repetitions']}`",
     f"- Passed: `{passed}/{total}`",
     f"- Must-pass accuracy: `{must_pass_accuracy:.1%}`",
+    f"- Terminal median / p95: `{statistics.median(durations) if durations else None}` / `{p95_terminal}` seconds",
+    f"- Tokens total / max per run: `{sum(token_counts)}` / `{max(token_counts) if token_counts else None}`",
+    f"- Estimated cost total / max per run: `{sum(cost_estimates)}` / `{max(cost_estimates) if cost_estimates else None}` USD micros",
+    f"- Pricing snapshot: `{pricing.get('version')}` captured `{pricing.get('capturedAt')}`",
     f"- Gate: `{'PASS' if not gate_failures else 'FAIL'}`",
     "",
-    "| Run | Case | Turn | Family | Result | Terminal | Transaction | Seconds |",
-    "| --- | --- | --- | --- | --- | --- | --- | ---: |",
+    "| Run | Case | Turn | Family | Result | Terminal | Transaction | Seconds | Tokens | Cost USD micros |",
+    "| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: |",
 ]
 for row in rows:
     timing = row.get("timingSeconds", {}).get("terminal")
@@ -693,10 +846,14 @@ for row in rows:
         )
     else:
         transaction_text = "—"
+    efficiency = actual.get("efficiency", {})
+    tokens_text = efficiency.get("totalTokens", "")
+    cost_text = efficiency.get("estimatedCostUsdMicros")
+    cost_text = "" if cost_text is None else cost_text
     lines.append(
         f"| {row['repetition']} | {row['caseId']} | {row.get('turnId') or '—'} | {row['family']} | "
         f"{'PASS' if row['passed'] else 'FAIL'} | {actual.get('terminalType', '')} | "
-        f"{transaction_text} | {timing_text} |"
+        f"{transaction_text} | {timing_text} | {tokens_text} | {cost_text} |"
     )
 if gate_failures:
     lines.extend(["", "## Gate failures", ""] + [f"- {failure}" for failure in gate_failures])

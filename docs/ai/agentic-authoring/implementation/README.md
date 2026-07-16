@@ -106,9 +106,11 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 31. [27-assistant-consistency-p06-evidence.md](./27-assistant-consistency-p06-evidence.md)
 32. [28-assistant-consistency-apply-lineage-evidence.md](./28-assistant-consistency-apply-lineage-evidence.md)
 33. [29-provider-phase-telemetry-evidence.md](./29-provider-phase-telemetry-evidence.md)
-34. [01-current-state-and-target.md](./01-current-state-and-target.md)
-35. [02-implementation-backlog.md](./02-implementation-backlog.md)
-36. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+34. [30-turn-provider-telemetry-and-metrics-evidence.md](./30-turn-provider-telemetry-and-metrics-evidence.md)
+35. [31-assistant-consistency-efficiency-gates-evidence.md](./31-assistant-consistency-efficiency-gates-evidence.md)
+36. [01-current-state-and-target.md](./01-current-state-and-target.md)
+37. [02-implementation-backlog.md](./02-implementation-backlog.md)
+38. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -198,7 +200,12 @@ provider antes da comparacao de SDK/modelo.
 `28-assistant-consistency-apply-lineage-evidence.md` fecha a linhagem governada
 entre resultado terminal, decisao, preview e `ui_user_config`, incluindo o
 contrato publico, consumidores e falhas certificadas antes do slice de
-telemetria de provider.
+telemetria de provider. `29-provider-phase-telemetry-evidence.md` registra o
+primeiro boundary de telemetria por fase, e
+`30-turn-provider-telemetry-and-metrics-evidence.md` fecha sua agregacao segura
+por turno. `31-assistant-consistency-efficiency-gates-evidence.md` transforma
+essa observabilidade em gates reproduziveis de schema, latencia, tokens e custo
+e registra a prova OpenAI real do pacote atual.
 
 ## Checkpoint 2026-06-18 - pre-intent resource discovery e UX de revisao
 

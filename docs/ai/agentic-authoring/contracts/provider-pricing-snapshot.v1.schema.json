@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://praxisplatform.org/schemas/ai/provider-pricing-snapshot.v1.schema.json",
+  "title": "Praxis AI provider pricing snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "kind", "capturedAt", "currency", "unit", "sourceUrl", "entries"],
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "kind": { "const": "praxis.ai-provider-pricing-snapshot" },
+    "capturedAt": { "type": "string", "format": "date" },
+    "currency": { "const": "USD" },
+    "unit": { "const": "per-million-tokens" },
+    "sourceUrl": { "type": "string", "format": "uri", "pattern": "^https://developers\\.openai\\.com/" },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "model",
+          "modelPrefixes",
+          "serviceTier",
+          "inputUsdPerMillion",
+          "cachedInputUsdPerMillion",
+          "outputUsdPerMillion"
+        ],
+        "properties": {
+          "provider": { "enum": ["openai"] },
+          "model": { "type": "string", "minLength": 1 },
+          "modelPrefixes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "serviceTier": { "const": "standard" },
+          "inputUsdPerMillion": { "type": "number", "minimum": 0 },
+          "cachedInputUsdPerMillion": { "type": "number", "minimum": 0 },
+          "outputUsdPerMillion": { "type": "number", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

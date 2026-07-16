@@ -719,6 +719,12 @@ regenerou bindings Java/Angular, projetou a referencia terminal ja existente no
 cliente SSE, atualizou Page Builder, runners transacionais e a prova Playwright.
 A landing page e o corpus HTTP nao possuem payload de `page-apply` a sincronizar;
 o inventario de cobertura continua valido.
+O decimo primeiro slice agregou a telemetria de provider ao turno sem expor
+prompt, resposta bruta ou credenciais. O decimo segundo removeu campos de
+dominio hardcoded do smoke, passou a validar planos contra `/schemas/filtered`
+e adicionou gates locais de latencia, tokens e custo com fotografia de precos
+versionada. Nao houve mudanca de contrato publico nem artefato Angular, landing
+page ou corpus HTTP a sincronizar nesses dois slices.
 Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
 
 - `docs/ai/contracts/**` e OpenAPI do Config Starter;
@@ -729,10 +735,10 @@ Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
 
 ## Proximo slice recomendado
 
-`P0.1`, `P0.3`, a vertical basica de `P0.4`, a jornada progressiva de Table e a
-state machine deterministica de `P0.6` estao certificadas. O proximo slice
-recomendado e fechar lineage/diagnostics antes de iniciar uma migracao ampla de
-SDK, nesta ordem:
+`P0.1`, `P0.3`, a vertical basica de `P0.4`, a jornada progressiva de Table, a
+state machine deterministica de `P0.6`, lineage, telemetria por turno e o gate
+de eficiencia estao certificados. O proximo corte deve ampliar a cobertura
+repetivel antes de iniciar uma migracao ampla de SDK, nesta ordem:
 
 1. [x] incorporar ao relatorio versionado a comparacao antes/depois deste slice
    em
@@ -742,15 +748,25 @@ SDK, nesta ordem:
 2. [x] corrigir diagnostics residuais de provenance e provar lineage completo
    da decisao semantica ate o preview e a materializacao; evidencia em
    [`28-assistant-consistency-apply-lineage-evidence.md`](28-assistant-consistency-apply-lineage-evidence.md);
-3. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
+3. [x] implementar telemetria canonica de provider por fase e por turno, com
+   tokens e latencia sanitizados; evidencias em
+   [`29-provider-phase-telemetry-evidence.md`](29-provider-phase-telemetry-evidence.md)
+   e
+   [`30-turn-provider-telemetry-and-metrics-evidence.md`](30-turn-provider-telemetry-and-metrics-evidence.md);
+4. [x] remover drift de campos hardcoded do smoke e ativar gates de tokens e
+   custo estimado; evidencia em
+   [`31-assistant-consistency-efficiency-gates-evidence.md`](31-assistant-consistency-efficiency-gates-evidence.md);
+5. executar as seis jornadas `must-pass` tres vezes e depois o perfil
+   `extended`, investigando qualquer variancia antes da promocao;
+6. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
    minimo de contexto assistivel;
-4. ampliar a jornada progressiva com reordenacao, visibilidade, formato,
+7. ampliar a jornada progressiva com reordenacao, visibilidade, formato,
    filtros e recuperacao apos schema temporariamente indisponivel, provando que
    cada capability governada continua semanticamente distinta;
-5. implementar primeiro telemetria canonica de provider por fase e, depois,
-   iniciar a pista compativel Spring AI 1.1.8 e a politica de modelos em slice
-   dedicado, comparando o novo caminho com os perfis `must-pass` e `extended`;
-6. manter Spring AI 2.0 + Boot 4 como spike arquitetural separado, promovendo
+8. iniciar a pista compativel mais atual de Spring AI e a politica de modelos
+   em slice dedicado, comparando o novo caminho com os perfis `must-pass` e
+   `extended`;
+9. manter Spring AI 2.0 + Boot 4 como spike arquitetural separado, promovendo
    apenas se a evidencia superar o caminho compativel.
 
 ## Referencias oficiais para a frente de SDK

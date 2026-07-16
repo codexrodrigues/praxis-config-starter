@@ -70,4 +70,9 @@ A prova final opt-in criou um formulário profissional de cadastro de funcionár
 
 `cacheWriteInputTokens` permaneceu `null` nas invocações, em vez de ser confundido com credencial. A projeção confirmou `rawPromptCopied=false`, `rawResponseCopied=false` e `credentialsCopied=false`. Evidência local: `artifacts/local-e2e/provider-telemetry-opt-in-20260716-1023-final`.
 
-O smoke legado `run-agentic-http-sse-smoke-local.sh` ainda espera o campo fictício `titulo` para incidentes, enquanto o schema canônico atual expõe `missaoId`, `descricao`, `severidade`, `local`, `ocorridoEm`, `danosCivis`, `feridos` e `mortos`. Essa divergência é drift do verificador e deve ser corrigida no corpus operacional, não no runtime ou no contrato canônico.
+O drift legado do `run-agentic-http-sse-smoke-local.sh`, que esperava o campo
+fictício `titulo` para incidentes, foi removido no corte seguinte. O runner agora
+resolve o `/schemas/filtered` apontado pelo próprio plano e valida campos,
+obrigatoriedade e schema pointers contra a fonte canônica. A evidência, os gates
+de tokens/custo e a prova real estão em
+[`31-assistant-consistency-efficiency-gates-evidence.md`](31-assistant-consistency-efficiency-gates-evidence.md).
