@@ -49,6 +49,7 @@ O smoke manual:
 - usa por padrao um ref pinado do `praxis-api-quickstart` para evitar que releases do starter fiquem bloqueados por dependencias ainda nao publicadas no consumidor;
 - sobe o quickstart empacotado;
 - ingere no mesmo tenant/ambiente do smoke o corpus minimo dos cenarios exercitados, extraido dos grupos OpenAPI de compras e operacoes do Quickstart; isso inclui fornecedor, pedido de compra e incidente, garantindo que `api_metadata` seja evidencia scoped, competitiva entre dominios e reproduzivel sem seed manual no banco;
+- confirma que os planos de incidente preservam os campos obrigatorios `descricao` e `ocorridoEm` do schema publicado e rejeitam campos inventados, como `titulo`;
 - valida `minimal-form-plan`, `compiled-form-patch`, `page-preview`, `page-apply`, SSE, replay e cleanup.
 - quando `run_page_builder_full_e2e=true`, valida tambem o fluxo agentic do page-builder com browser real; use `page_builder_e2e_mode=smoke` como gate de release e `page_builder_e2e_mode=full` apenas para investigacoes deliberadas da matriz completa;
 - usa `praxis.ai.stream.processing-timeout-seconds=360` por padrao para acomodar turnos reais com discovery, RAG, multiplas chamadas LLM e materializacao.

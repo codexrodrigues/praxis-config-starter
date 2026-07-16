@@ -94,11 +94,14 @@ if (-not $result.intentValid) {
 if (-not $result.valid) {
     throw "Agentic authoring MinimalFormPlan is not valid: $($result.failureCodes -join ', ')"
 }
-if ($result.fields -notcontains "titulo") {
-    throw "MinimalFormPlan did not include titulo."
+if ($result.selectedResourcePath -ne "/api/operations/incidentes") {
+    throw "MinimalFormPlan did not resolve the canonical operations incident create endpoint."
 }
-if ($result.fields -contains "prioridadeId" -or $result.fields -contains "statusAtualId") {
-    throw "MinimalFormPlan included blocked fields."
+if ($result.fields -notcontains "descricao" -or $result.fields -notcontains "ocorridoEm") {
+    throw "MinimalFormPlan did not include the required incident fields descricao and ocorridoEm."
+}
+if ($result.fields -contains "titulo" -or $result.fields -contains "prioridadeId" -or $result.fields -contains "statusAtualId") {
+    throw "MinimalFormPlan included fields that do not belong to the incident create schema."
 }
 
 $result | ConvertTo-Json -Depth 6

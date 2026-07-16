@@ -84,8 +84,11 @@ if ($result.health -ne "UP") {
 if (-not $result.valid) {
     throw "Agentic authoring page preview is not valid: $($result.failureCodes -join ', ')"
 }
-if ($result.fields -notcontains "titulo") {
-    throw "Page preview MinimalFormPlan did not include titulo."
+if ($result.fields -notcontains "descricao" -or $result.fields -notcontains "ocorridoEm") {
+    throw "Page preview MinimalFormPlan did not include the required incident fields descricao and ocorridoEm."
+}
+if ($result.fields -contains "titulo") {
+    throw "Page preview MinimalFormPlan invented titulo outside the incident create schema."
 }
 if ($result.widgetId -ne "praxis-dynamic-form") {
     throw "Page preview did not compile a praxis-dynamic-form widget."
