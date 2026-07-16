@@ -1010,6 +1010,26 @@ public class AgenticAuthoringLlmIntentResolverService {
             clarificationQuestions = List.of();
             visualizationDecision = null;
             requiresGovernedAuthoring = false;
+        } else if ("shared_rule_authoring".equals(semanticIntentClass)) {
+            boolean tupleAlreadyConsistent = resolved
+                    && ("create".equals(operationKind) || "modify".equals(operationKind))
+                    && "unknown".equals(artifactKind)
+                    && "route_shared_rule_authoring".equals(changeKind)
+                    && visualizationDecision == null
+                    && requiresGovernedAuthoring;
+            if (!tupleAlreadyConsistent) {
+                ArrayList<String> normalizedWarnings = new ArrayList<>(warnings);
+                if (!normalizedWarnings.contains("llm-semantic-intent-tuple-normalized")) {
+                    normalizedWarnings.add("llm-semantic-intent-tuple-normalized");
+                }
+                warnings = List.copyOf(normalizedWarnings);
+            }
+            resolved = true;
+            operationKind = "modify".equals(operationKind) ? "modify" : "create";
+            artifactKind = "unknown";
+            changeKind = "route_shared_rule_authoring";
+            visualizationDecision = null;
+            requiresGovernedAuthoring = true;
         } else if ("component_authoring".equals(semanticIntentClass)
                 && resolved
                 && "create".equals(operationKind)

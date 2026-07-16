@@ -554,6 +554,73 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     }
 
     @Test
+    void sharedRuleSemanticClassNormalizesVisualTupleWithoutDiscardingResourceDiscoveryIntent() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "semanticIntentClass": "shared_rule_authoring",
+                  "operationKind": "create",
+                  "artifactKind": "dashboard",
+                  "changeKind": "route_shared_rule_authoring",
+                  "selectedResourcePath": null,
+                  "resourceSearchQuery": "fornecedor bloqueado compras",
+                  "followUpKind": "none",
+                  "requiresGovernedAuthoring": true,
+                  "assistantMessage": "Vou preparar a regra governada de elegibilidade de fornecedores.",
+                  "visualizationDecision": {
+                    "artifactKind": "dashboard",
+                    "primaryComponent": "praxis-chart",
+                    "layoutKind": "dashboard",
+                    "axes": []
+                  },
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        AgenticAuthoringLlmIntentResolution result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras",
+                        "page-builder",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key"),
+                "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(),
+                componentCapabilities(),
+                "tenant",
+                "user",
+                "local").orElseThrow();
+
+        assertThat(result.semanticIntentClass()).isEqualTo("shared_rule_authoring");
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.changeKind()).isEqualTo("route_shared_rule_authoring");
+        assertThat(result.requiresGovernedAuthoring()).isTrue();
+        assertThat(result.resourceSearchQuery()).isEqualTo("fornecedor bloqueado compras");
+        assertThat(result.visualizationDecision()).isNull();
+        assertThat(result.warnings())
+                .contains("llm-semantic-intent-tuple-normalized");
+    }
+
+    @Test
     void semanticReconciliationForcesTheFullIntentPass() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
