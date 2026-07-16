@@ -390,6 +390,11 @@ if ($definition.createdByType -ne "authenticated" -or $definition.createdBy -ne 
     throw "Expected server-authenticated author '$UserId', got type='$($definition.createdByType)' actor='$($definition.createdBy)'."
 }
 
+$selfApprovalExpectedMessage = if ([string]::IsNullOrWhiteSpace($AuthorPassword)) {
+    "Rule definition approver must be different from its author"
+} else {
+    "Authenticated principal requires IAM role RULE_DEFINITION_APPROVER."
+}
 $selfApprovalBlocked = Invoke-ExpectedFailure `
     -Method Patch `
     -Uri "$base/api/praxis/config/domain-rules/definitions/$($definition.id)/status" `
@@ -400,7 +405,7 @@ $selfApprovalBlocked = Invoke-ExpectedFailure `
             checks = @("http-lifecycle-self-approval-rejection")
         }
     } `
-    -ExpectedMessage "Rule definition approver must be different from its author"
+    -ExpectedMessage $selfApprovalExpectedMessage
 
 $definition = Set-DefinitionStatus `
     -BaseUrl $base `
