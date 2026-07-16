@@ -1206,6 +1206,10 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(prompt).contains("consultative platform guidance");
         assertThat(prompt).contains("which governed data can be used to create a table, form, chart, dashboard, page or other component");
         assertThat(prompt).contains("Do not treat it as immediate component creation");
+        assertThat(prompt).contains("Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras");
+        assertThat(prompt).contains("route_shared_rule_authoring");
+        assertThat(prompt).contains("Mostre um badge de fornecedor bloqueado nesta tabela");
+        assertThat(prompt).contains("Never reinterpret a requested reusable business rule as a dashboard");
         assertThat(prompt).contains("Praxis is a governed AI authoring platform");
         assertThat(prompt).contains("Visualizar metricas");
         assertThat(prompt).contains("Select visualizationDecision.primaryComponent from authorableComponents");
