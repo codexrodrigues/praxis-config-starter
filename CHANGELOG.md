@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Append-only `domain_rule_definition_approval` evidence bound to the canonical
   SHA-256 of an exact governed definition, including database-level mutation
   rejection and snapshot publication revalidation.
+- Safe domain-rule timeline events accept the server-resolved `authenticated`
+  actor class introduced by the maker-checker lifecycle.
 - IAM roles `RULE_DEFINITION_AUTHOR` and `RULE_DEFINITION_APPROVER` for the
   definition maker-checker lifecycle.
 - Release-hardening checkpoint for the governed runtime related surface preview,
