@@ -92,6 +92,53 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
     }
 
     @Test
+    void materializesACompiledTableConfigInsideThePersistedWidgetInputsEnvelope() throws Exception {
+        JsonNode plan = objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-component-edit-plan.v1",
+                  "componentId": "praxis-table",
+                  "operations": [{
+                    "operationId": "column.order.set",
+                    "target": { "kind": "column", "field": "salario" },
+                    "input": { "order": 0 }
+                  }]
+                }
+                """);
+        JsonNode compiled = objectMapper.readTree("""
+                {
+                  "manifestVersion": "2.0.0",
+                  "proposedConfig": {
+                    "resourcePath": "/api/human-resources/funcionarios",
+                    "tableId": "funcionarios-table",
+                    "config": {
+                      "title": "Funcionários",
+                      "columns": [{ "field": "salario", "type": "number", "order": 0 }]
+                    }
+                  }
+                }
+                """);
+        when(componentEditPlanService.generateAndCompile(
+                any(), eq("praxis-table"), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringComponentEditPlanResult(
+                        true,
+                        List.of(),
+                        List.of("component-edit-plan-config-input-bound:config"),
+                        plan,
+                        compiled));
+
+        AgenticAuthoringPreviewResult result = previewService().preview(
+                tableRequest(), "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        JsonNode inputs = result.compiledFormPatch().at("/patch/page/widgets/0/definition/inputs");
+        assertThat(inputs.path("resourcePath").asText()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(inputs.path("tableId").asText()).isEqualTo("funcionarios-table");
+        assertThat(inputs.at("/config/columns/0/order").asInt()).isZero();
+        assertThat(result.warnings()).contains("component-edit-plan-config-input-bound:config");
+        verify(planService, never()).generateMinimalFormPlan(any(), any(), any(), any());
+    }
+
+    @Test
     void failsClosedWhenContextResolverReportedAnError() throws Exception {
         AgenticAuthoringPreviewResult result = previewService().preview(
                 request(contextHints(true), "chartOne", "praxis-chart"),
@@ -204,5 +251,69 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
                 """.formatted(error
                 ? "[{\"code\":\"chart-target-catalog-unavailable\",\"severity\":\"error\"}]"
                 : "[]"));
+    }
+
+    private AgenticAuthoringPlanRequest tableRequest() throws Exception {
+        JsonNode currentPage = objectMapper.readTree("""
+                {
+                  "version": "1.0.0",
+                  "widgets": [{
+                    "key": "funcionarios-table",
+                    "definition": {
+                      "id": "praxis-table",
+                      "inputs": {
+                        "resourcePath": "/api/human-resources/funcionarios",
+                        "tableId": "funcionarios-table",
+                        "config": {
+                          "title": "Funcionários",
+                          "columns": [{ "field": "salario", "type": "number" }]
+                        }
+                      }
+                    }
+                  }]
+                }
+                """);
+        JsonNode contextHints = objectMapper.readTree("""
+                {
+                  "selectedWidgetKey": "funcionarios-table",
+                  "selectedComponentId": "praxis-table",
+                  "authoringManifestRef": {
+                    "componentId": "praxis-table",
+                    "version": "2.0.0",
+                    "source": "PRAXIS_TABLE_AUTHORING_MANIFEST"
+                  },
+                  "validationContext": {},
+                  "contextDiagnostics": []
+                }
+                """);
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "table",
+                "set_column_order",
+                "semantic-manifest",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget("funcionarios-table", "praxis-table", "", "", "", ""),
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("component-edit", "eligible", List.of()),
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+        return new AgenticAuthoringPlanRequest(
+                "Mova a coluna salário para o início",
+                "openai",
+                "gpt-5",
+                "secret",
+                currentPage,
+                intent,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                contextHints);
     }
 }

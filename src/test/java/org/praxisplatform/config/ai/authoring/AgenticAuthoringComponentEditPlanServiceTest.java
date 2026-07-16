@@ -36,10 +36,20 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         JsonNode manifest = objectMapper.readTree("""
                 {
                   "componentId": "praxis-chart",
+                  "configSchemaId": "PraxisXUiChartContract",
                   "manifestVersion": "1.0.0",
+                  "runtimeInputs": [{
+                    "name": "chartDocument",
+                    "type": "PraxisChartDocument | PraxisXUiChartContract"
+                  }],
                   "operations": [{
                     "operationId": "crossFilter.configure",
                     "title": "Configure cross-filter",
+                    "effects": [{
+                      "kind": "set",
+                      "path": "chartDocument.events.crossFilter"
+                    }],
+                    "affectedPaths": ["chartDocument.events.crossFilter"],
                     "inputSchema": {
                       "type": "object",
                       "required": ["action", "target"],
@@ -181,5 +191,90 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         assertThat(result.failureCodes())
                 .contains("component-edit-plan-component-mismatch", "component-edit-plan-operations-required");
         verify(manifestService, never()).compilePatch(any(), any());
+    }
+
+    @Test
+    void bindsManifestConfigSchemaToTheDeclaredWidgetRuntimeInputAndRewrapsTheResult() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "configSchemaId": "TableConfig",
+                  "manifestVersion": "2.0.0",
+                  "runtimeInputs": [
+                    { "name": "config", "type": "TableConfig" },
+                    { "name": "resourcePath", "type": "string" }
+                  ],
+                  "operations": [{
+                    "operationId": "column.order.set",
+                    "inputSchema": {
+                      "type": "object",
+                      "required": ["order"],
+                      "properties": { "order": { "type": "number" } }
+                    },
+                    "effects": [{ "kind": "merge-by-key", "path": "columns[]", "key": "field" }],
+                    "affectedPaths": ["columns[].order"]
+                  }]
+                }
+                """);
+        JsonNode plan = objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-component-edit-plan.v1",
+                  "componentId": "praxis-table",
+                  "operations": [{
+                    "operationId": "column.order.set",
+                    "target": { "kind": "column", "field": "salario" },
+                    "input": { "order": 0 }
+                  }]
+                }
+                """);
+        JsonNode widgetInputs = objectMapper.readTree("""
+                {
+                  "resourcePath": "/api/human-resources/funcionarios",
+                  "tableId": "funcionarios-table",
+                  "config": {
+                    "title": "Funcionários",
+                    "columns": [{ "field": "salario", "type": "number" }]
+                  }
+                }
+                """);
+        JsonNode compiledPatch = objectMapper.readTree("""
+                {
+                  "manifestVersion": "2.0.0",
+                  "proposedConfig": {
+                    "title": "Funcionários",
+                    "columns": [{ "field": "salario", "type": "number", "order": 0 }]
+                  }
+                }
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
+                .thenReturn(plan);
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(new AgenticAuthoringManifestCompileResult(
+                        true, java.util.List.of(), java.util.List.of(), compiledPatch));
+        AgenticAuthoringComponentEditPlanService service =
+                new AgenticAuthoringComponentEditPlanService(providerManagementService, manifestService, objectMapper);
+
+        AgenticAuthoringComponentEditPlanResult result = service.generateAndCompile(
+                new AgenticAuthoringPlanRequest("Mova salário para o início", "openai", "gpt-5", "secret"),
+                "praxis-table",
+                widgetInputs,
+                objectMapper.createObjectNode(),
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings()).contains("component-edit-plan-config-input-bound:config");
+        assertThat(result.compiledPatch().at("/proposedConfig/resourcePath").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.compiledPatch().at("/proposedConfig/tableId").asText())
+                .isEqualTo("funcionarios-table");
+        assertThat(result.compiledPatch().at("/proposedConfig/config/columns/0/order").asInt()).isZero();
+
+        ArgumentCaptor<AgenticAuthoringManifestEditPlanRequest> compileRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringManifestEditPlanRequest.class);
+        verify(manifestService).compilePatch(eq("praxis-table"), compileRequest.capture());
+        assertThat(compileRequest.getValue().config()).isEqualTo(widgetInputs.path("config"));
     }
 }

@@ -148,6 +148,21 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
     }
 
     @Test
+    void progressiveTableContextMatchesTheCanonicalPageBuilderWidgetAndManifestEnvelope() throws Exception {
+        JsonNode context = corpus().path("contexts").path("employee-table-existing-page");
+
+        assertThat(context.at("/currentPage/widgets/0/key").asText()).isEqualTo("funcionarios-table");
+        assertThat(context.at("/currentPage/widgets/0/definition/id").asText()).isEqualTo("praxis-table");
+        assertThat(context.at("/currentPage/widgets/0/definition/inputs/config/columns").isArray()).isTrue();
+        assertThat(context.at("/contextHints/selectedWidgetKey").asText()).isEqualTo("funcionarios-table");
+        assertThat(context.at("/contextHints/selectedComponentId").asText()).isEqualTo("praxis-table");
+        assertThat(context.at("/contextHints/authoringManifestRef/componentId").asText())
+                .isEqualTo("praxis-table");
+        assertThat(context.at("/contextHints/authoringManifestRef/source").asText())
+                .isEqualTo("PRAXIS_TABLE_AUTHORING_MANIFEST");
+    }
+
+    @Test
     void guidanceIsNonMutatingAndEveryMutationRequiresPreview() throws Exception {
         for (JsonNode testCase : corpus().path("cases")) {
             assertSafeExpectation(testCase.path("id").asText(), testCase.path("family").asText(), testCase.path("expected"));

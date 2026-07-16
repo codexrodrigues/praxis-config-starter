@@ -57,24 +57,24 @@
       "targetComponentId": "praxis-dynamic-page-builder",
       "currentRoute": "/decision-playground",
       "currentPage": {
-        "kind": "praxis.ui-composition-plan",
-        "version": "1.0",
+        "version": "1.0.0",
         "layoutPreset": "single-table-page",
         "widgets": [
           {
             "key": "funcionarios-table",
-            "componentId": "praxis-table",
-            "role": "main",
-            "inputs": {
-              "resourcePath": "/api/human-resources/funcionarios",
-              "tableId": "funcionarios-table",
-              "config": {
-                "title": "Funcionários",
-                "columns": [
-                  { "field": "nomeCompleto", "header": "Nome Completo", "type": "string" },
-                  { "field": "cargoNome", "header": "Cargo", "type": "string" },
-                  { "field": "departamentoNome", "header": "Departamento", "type": "string" }
-                ]
+            "definition": {
+              "id": "praxis-table",
+              "inputs": {
+                "resourcePath": "/api/human-resources/funcionarios",
+                "tableId": "funcionarios-table",
+                "config": {
+                  "title": "Funcionários",
+                  "columns": [
+                    { "field": "nomeCompleto", "header": "Nome Completo", "type": "string" },
+                    { "field": "cargoNome", "header": "Cargo", "type": "string" },
+                    { "field": "departamentoNome", "header": "Departamento", "type": "string" }
+                  ]
+                }
               }
             }
           }
@@ -98,6 +98,14 @@
       },
       "selectedWidgetKey": "funcionarios-table",
       "contextHints": {
+        "selectedWidgetKey": "funcionarios-table",
+        "selectedComponentId": "praxis-table",
+        "authoringManifestRef": {
+          "componentId": "praxis-table",
+          "source": "PRAXIS_TABLE_AUTHORING_MANIFEST"
+        },
+        "validationContext": {},
+        "contextDiagnostics": [],
         "domainDiscovery": [
           {
             "resourceKey": "human-resources.funcionarios",

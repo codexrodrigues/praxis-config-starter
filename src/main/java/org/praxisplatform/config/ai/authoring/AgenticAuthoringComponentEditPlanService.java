@@ -69,6 +69,8 @@ public class AgenticAuthoringComponentEditPlanService {
             if (!manifest.path("operations").isArray() || manifest.path("operations").isEmpty()) {
                 return failure("component-authoring-manifest-operations-unavailable");
             }
+            ComponentConfigBinding configBinding = resolveComponentConfigBinding(manifest, config);
+            JsonNode componentConfig = configBinding.componentConfig();
 
             AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
                     "component_edit_plan", 1, request.provider(), request.model());
@@ -84,7 +86,7 @@ public class AgenticAuthoringComponentEditPlanService {
             JsonNode plan;
             try {
                 plan = providerManagementService.generateJson(
-                        prompt(request, componentId, manifest, config, validationContext),
+                        prompt(request, componentId, manifest, componentConfig, validationContext),
                         AiJsonSchema.ofSchema(objectMapper.writeValueAsString(outputSchema(componentId, manifest))),
                         callConfig,
                         tenantId,
@@ -119,7 +121,7 @@ public class AgenticAuthoringComponentEditPlanService {
             AgenticAuthoringManifestCompileResult compiled = manifestService.compilePatch(
                     componentId,
                     new AgenticAuthoringManifestEditPlanRequest(
-                            copyOrEmptyObject(config),
+                            copyOrEmptyObject(componentConfig),
                             plan.deepCopy(),
                             copyOrEmptyObject(validationContext)));
             if (!compiled.compiled()) {
@@ -138,6 +140,11 @@ public class AgenticAuthoringComponentEditPlanService {
             }
             List<String> warnings = new ArrayList<>();
             warnings.add("component-edit-plan-provider:semantic-manifest");
+            JsonNode compiledPatch = compiled.patch() == null ? missing() : compiled.patch().deepCopy();
+            if (configBinding.nested()) {
+                compiledPatch = rebindCompiledConfig(compiledPatch, config, configBinding.runtimeInputName());
+                warnings.add("component-edit-plan-config-input-bound:" + configBinding.runtimeInputName());
+            }
             if (compiled.warnings() != null) {
                 warnings.addAll(compiled.warnings());
             }
@@ -146,7 +153,7 @@ public class AgenticAuthoringComponentEditPlanService {
                     List.of(),
                     List.copyOf(warnings),
                     plan.deepCopy(),
-                    compiled.patch() == null ? missing() : compiled.patch().deepCopy(),
+                    compiledPatch,
                     List.of(invocation));
         } catch (IllegalArgumentException ex) {
             return failure("component-authoring-manifest-not-found");
@@ -288,6 +295,66 @@ public class AgenticAuthoringComponentEditPlanService {
         return value != null && value.isObject() ? value.deepCopy() : objectMapper.createObjectNode();
     }
 
+    private ComponentConfigBinding resolveComponentConfigBinding(JsonNode manifest, JsonNode config) {
+        JsonNode safeConfig = copyOrEmptyObject(config);
+        String configSchemaId = manifest.path("configSchemaId").asText("").trim();
+        if (configSchemaId.isBlank() || !manifest.path("runtimeInputs").isArray()) {
+            return ComponentConfigBinding.root(safeConfig);
+        }
+        for (JsonNode runtimeInput : manifest.path("runtimeInputs")) {
+            String inputName = runtimeInput.path("name").asText("").trim();
+            String inputType = runtimeInput.path("type").asText("").replace(" ", "");
+            JsonNode inputConfig = safeConfig.path(inputName);
+            if (inputName.isBlank()
+                    || !inputConfig.isObject()
+                    || !containsTypeIdentifier(inputType, configSchemaId)
+                    || manifestOperatesOnRuntimeInputRoot(manifest, inputName)) {
+                continue;
+            }
+            return ComponentConfigBinding.nested(inputName, inputConfig.deepCopy());
+        }
+        return ComponentConfigBinding.root(safeConfig);
+    }
+
+    private boolean containsTypeIdentifier(String declaredType, String expectedType) {
+        if (declaredType == null || expectedType == null || expectedType.isBlank()) {
+            return false;
+        }
+        return java.util.Arrays.stream(declaredType.split("[^A-Za-z0-9_$]+"))
+                .anyMatch(expectedType::equals);
+    }
+
+    private boolean manifestOperatesOnRuntimeInputRoot(JsonNode manifest, String inputName) {
+        for (JsonNode operation : manifest.path("operations")) {
+            for (JsonNode affectedPath : operation.path("affectedPaths")) {
+                if (pathStartsWith(affectedPath.asText(""), inputName)) {
+                    return true;
+                }
+            }
+            for (JsonNode effect : operation.path("effects")) {
+                if (pathStartsWith(effect.path("path").asText(""), inputName)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean pathStartsWith(String path, String root) {
+        return path.equals(root) || path.startsWith(root + ".") || path.startsWith(root + "[");
+    }
+
+    private JsonNode rebindCompiledConfig(JsonNode compiledPatch, JsonNode originalInputs, String inputName) {
+        if (!(compiledPatch instanceof ObjectNode compiledObject)
+                || !compiledPatch.path("proposedConfig").isObject()) {
+            return compiledPatch;
+        }
+        ObjectNode proposedInputs = copyOrEmptyObject(originalInputs);
+        proposedInputs.set(inputName, compiledPatch.path("proposedConfig").deepCopy());
+        compiledObject.set("proposedConfig", proposedInputs);
+        return compiledObject;
+    }
+
     private void copy(JsonNode source, ObjectNode target, String field) {
         JsonNode value = source.path(field);
         if (!value.isMissingNode() && !value.isNull()) {
@@ -310,5 +377,20 @@ public class AgenticAuthoringComponentEditPlanService {
 
     private String safe(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private record ComponentConfigBinding(String runtimeInputName, JsonNode componentConfig) {
+
+        private static ComponentConfigBinding root(JsonNode componentConfig) {
+            return new ComponentConfigBinding("", componentConfig);
+        }
+
+        private static ComponentConfigBinding nested(String runtimeInputName, JsonNode componentConfig) {
+            return new ComponentConfigBinding(runtimeInputName, componentConfig);
+        }
+
+        private boolean nested() {
+            return !runtimeInputName.isBlank();
+        }
     }
 }

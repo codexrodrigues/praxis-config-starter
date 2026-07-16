@@ -207,8 +207,19 @@ if [[ "$REUSE_EXISTING_ARTIFACTS" != "true" ]]; then
     session_id="assistant-consistency-$repetition-$case_id"
     if [[ "$run_kind" == "journey" && -n "$previous_relative" ]]; then
       previous_dir="$ARTIFACTS_DIR/$previous_relative"
+      if [[ ! -f "$previous_dir/turn.start.response.json" || ! -f "$previous_dir/turn.events.jsonl" ]]; then
+        echo "Previous journey turn did not produce the required transport artifacts." | tee "$case_dir/journey-precondition-error.txt" >&2
+        printf '%s\n' '1' > "$case_dir/runner-exit-code.txt"
+        continue
+      fi
       session_id="$(jq -r '.threadId // empty' "$previous_dir/turn.start.response.json")"
-      current_page_json="$(jq -s -c '[.[] | select(.type == "result")][-1].payload.preview.uiCompositionPlan // empty' "$previous_dir/turn.events.jsonl")"
+      current_page_json="$(jq -s -c '
+        [.[] | select(.type == "result")][-1].payload.preview
+        | if (.uiCompositionPlan.widgets? | type) == "array" then .uiCompositionPlan
+          elif (.compiledFormPatch.patch.page.widgets? | type) == "array" then .compiledFormPatch.patch.page
+          else empty
+          end
+      ' "$previous_dir/turn.events.jsonl")"
       if [[ -z "$session_id" || -z "$current_page_json" ]]; then
         echo "Previous journey turn did not expose a thread and materialized preview." | tee "$case_dir/journey-precondition-error.txt" >&2
         printf '%s\n' '1' > "$case_dir/runner-exit-code.txt"
@@ -447,6 +458,18 @@ def same_json_value(actual, expected):
         return type(actual) is type(expected) and actual == expected
     return actual == expected
 
+
+def widget_inputs(widget):
+    if not isinstance(widget, dict):
+        return {}
+    direct = widget.get("inputs")
+    if isinstance(direct, dict):
+        return direct
+    definition = widget.get("definition")
+    if isinstance(definition, dict) and isinstance(definition.get("inputs"), dict):
+        return definition["inputs"]
+    return {}
+
 rows = []
 for run in plan["runs"]:
     case_dir = base / run["directory"]
@@ -565,11 +588,17 @@ for run in plan["runs"]:
     if has_preview:
         composition = preview.get("uiCompositionPlan")
         composition = composition if isinstance(composition, dict) else {}
+        if not isinstance(composition.get("widgets"), list):
+            compiled_patch = preview.get("compiledFormPatch")
+            compiled_patch = compiled_patch if isinstance(compiled_patch, dict) else {}
+            patch = compiled_patch.get("patch") if isinstance(compiled_patch.get("patch"), dict) else {}
+            page = patch.get("page") if isinstance(patch.get("page"), dict) else {}
+            composition = page if isinstance(page.get("widgets"), list) else {}
         selected_widget_key = context.get("selectedWidgetKey")
         for widget in composition.get("widgets") or []:
             if not isinstance(widget, dict):
                 continue
-            inputs = widget.get("inputs") if isinstance(widget.get("inputs"), dict) else {}
+            inputs = widget_inputs(widget)
             config = inputs.get("config") if isinstance(inputs.get("config"), dict) else {}
             if widget.get("key") == selected_widget_key:
                 selected_config = config
@@ -578,12 +607,12 @@ for run in plan["runs"]:
                     column_fields.append(column["field"])
         if not selected_config:
             selected_config = next((
-                widget.get("inputs", {}).get("config", {})
+                inputs.get("config", {})
                 for widget in composition.get("widgets") or []
+                for inputs in (widget_inputs(widget),)
                 if isinstance(widget, dict)
-                and isinstance(widget.get("inputs"), dict)
-                and isinstance(widget.get("inputs", {}).get("config"), dict)
-                and isinstance(widget.get("inputs", {}).get("config", {}).get("columns"), list)
+                and isinstance(inputs.get("config"), dict)
+                and isinstance(inputs.get("config", {}).get("columns"), list)
             ), {})
     page_assertions = case.get("pageAssertions")
     asserted_config_values = {}
