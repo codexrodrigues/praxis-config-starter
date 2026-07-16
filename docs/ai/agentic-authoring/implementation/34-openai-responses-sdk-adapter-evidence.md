@@ -198,8 +198,9 @@ integrada confirmou:
   estado `completed`;
 - nenhuma credencial OpenAI ou payload bruto do provider nos artefatos.
 
-Antes de declarar o Gate C operacionalmente fechado, executar uma rodada
-controlada no quickstart real e comparar com a evidencia anterior:
+O baseline `must-pass` foi concluido depois deste corte e esta registrado em
+[35-openai-responses-consistency-baseline-evidence.md](./35-openai-responses-consistency-baseline-evidence.md).
+A rodada controlada no quickstart real comparou:
 
 1. as seis jornadas `must-pass` tres vezes;
 2. o perfil `extended` e a jornada progressiva de Table;
@@ -216,17 +217,15 @@ derivadas aplicaveis ao corte.
 
 ## Proximo passo recomendado
 
-O gate HTTP integrado esta fechado. O proximo corte deve medir consistencia, nao
-adicionar outro caminho funcional:
+O gate HTTP integrado e o baseline `must-pass x3` estao fechados. O proximo
+corte deve ampliar a consistencia, nao adicionar outro caminho funcional:
 
-1. executar as seis jornadas `must-pass` tres vezes com a mesma versao de
-   modelo e snapshot de pricing;
-2. publicar taxa de sucesso por jornada, terminalidade, P50/P95, tokens de
-   entrada/saida/cache e custo por turno;
-3. ampliar a jornada progressiva de Table para reordenacao, visibilidade,
+1. executar o perfil `extended` tres vezes com a mesma versao de modelo e
+   snapshot de pricing;
+2. ampliar a jornada progressiva de Table para reordenacao, visibilidade,
    formato, filtros e recuperacao de schema, preservando o action plan
    manifest-backed;
-4. corrigir qualquer regressao no boundary canonico de policy/schema, sem
+3. corrigir qualquer regressao no boundary canonico de policy/schema, sem
    restaurar Chat Completions manual nem criar roteamento lexical;
-5. somente depois desse baseline comparar Spring AI 2/Boot 4 em spike separado,
+4. somente depois desse baseline comparar Spring AI 2/Boot 4 em spike separado,
    usando as mesmas jornadas e metricas como criterio de decisao.
