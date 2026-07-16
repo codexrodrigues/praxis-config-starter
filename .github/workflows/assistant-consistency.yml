@@ -1,0 +1,272 @@
+name: Assistant Consistency Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: 'AI provider used by the assistant consistency gate.'
+        required: true
+        default: openai
+        type: choice
+        options:
+          - openai
+          - gemini
+      model:
+        description: 'Optional model override for the selected provider.'
+        required: false
+        default: ''
+        type: string
+      profile:
+        description: 'Corpus profile. Extended includes the must-pass cases.'
+        required: true
+        default: must-pass
+        type: choice
+        options:
+          - must-pass
+          - extended
+      repetitions:
+        description: 'Consecutive corpus repetitions. Release gate requires at least three.'
+        required: true
+        default: '3'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+      release_gate:
+        description: 'Enforce the release-grade minimum repetition and accuracy policy.'
+        required: true
+        default: true
+        type: boolean
+      enforce_latency:
+        description: 'Enforce first-feedback and terminal latency budgets.'
+        required: true
+        default: true
+        type: boolean
+      enforce_efficiency:
+        description: 'Enforce provider usage, token and estimated-cost budgets.'
+        required: true
+        default: true
+        type: boolean
+      quickstart_ref:
+        description: 'praxis-api-quickstart ref to package against the local starters.'
+        required: false
+        default: main
+        type: string
+      metadata_ref:
+        description: 'praxis-metadata-starter ref to install locally.'
+        required: false
+        default: main
+        type: string
+
+concurrency:
+  group: assistant-consistency-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  assistant-consistency:
+    name: ${{ inputs.profile }} x${{ inputs.repetitions }} · ${{ inputs.provider }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      PRAXIS_AI_OPENAI_API_KEY: ${{ secrets.PRAXIS_AI_OPENAI_API_KEY }}
+      PRAXIS_AI_OPENAI_MODEL: ${{ vars.PRAXIS_AI_OPENAI_MODEL || 'gpt-5.4-mini' }}
+      PRAXIS_AI_GEMINI_API_KEY: ${{ secrets.PRAXIS_AI_GEMINI_API_KEY }}
+      PRAXIS_AI_GEMINI_MODEL: ${{ vars.PRAXIS_AI_GEMINI_MODEL || 'gemini-2.5-flash' }}
+      SPRING_DATASOURCE_URL: ${{ secrets.SPRING_DATASOURCE_URL }}
+      SPRING_DATASOURCE_USERNAME: ${{ secrets.SPRING_DATASOURCE_USERNAME }}
+      SPRING_DATASOURCE_PASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+      CONFIG_DATASOURCE_URL: ${{ secrets.CONFIG_DATASOURCE_URL }}
+      CONFIG_DATASOURCE_USERNAME: ${{ secrets.CONFIG_DATASOURCE_USERNAME }}
+      CONFIG_DATASOURCE_PASSWORD: ${{ secrets.CONFIG_DATASOURCE_PASSWORD }}
+    steps:
+      - name: Checkout praxis-config-starter
+        uses: actions/checkout@v5
+        with:
+          path: praxis-config-starter
+
+      - name: Checkout praxis-api-quickstart
+        uses: actions/checkout@v5
+        with:
+          repository: codexrodrigues/praxis-api-quickstart
+          ref: ${{ inputs.quickstart_ref }}
+          path: praxis-api-quickstart
+          token: ${{ secrets.RELEASE_PAT || github.token }}
+
+      - name: Checkout praxis-metadata-starter
+        uses: actions/checkout@v5
+        with:
+          repository: codexrodrigues/praxis-metadata-starter
+          ref: ${{ inputs.metadata_ref }}
+          path: praxis-metadata-starter
+          token: ${{ secrets.RELEASE_PAT || github.token }}
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Validate inputs and required secrets
+        shell: bash
+        env:
+          SELECTED_PROVIDER: ${{ inputs.provider }}
+          SELECTED_REPETITIONS: ${{ inputs.repetitions }}
+          SELECTED_RELEASE_GATE: ${{ inputs.release_gate }}
+        run: |
+          set -euo pipefail
+          if [[ "$SELECTED_RELEASE_GATE" == 'true' && "$SELECTED_REPETITIONS" -lt 3 ]]; then
+            echo 'release_gate=true requires at least three repetitions.' >&2
+            exit 1
+          fi
+          case "$SELECTED_PROVIDER" in
+            openai)
+              [[ -n "$PRAXIS_AI_OPENAI_API_KEY" ]] || { echo 'Missing PRAXIS_AI_OPENAI_API_KEY.' >&2; exit 1; }
+              ;;
+            gemini)
+              [[ -n "$PRAXIS_AI_GEMINI_API_KEY" ]] || { echo 'Missing PRAXIS_AI_GEMINI_API_KEY.' >&2; exit 1; }
+              ;;
+          esac
+          for name in \
+            SPRING_DATASOURCE_URL SPRING_DATASOURCE_USERNAME SPRING_DATASOURCE_PASSWORD \
+            CONFIG_DATASOURCE_URL CONFIG_DATASOURCE_USERNAME CONFIG_DATASOURCE_PASSWORD; do
+            [[ -n "${!name:-}" ]] || { echo "Missing required secret $name." >&2; exit 1; }
+          done
+
+      - name: Resolve quickstart starter versions
+        shell: bash
+        working-directory: praxis-api-quickstart
+        run: |
+          set -euo pipefail
+          config_version="$(mvn -q -DforceStdout help:evaluate -Dexpression=praxis.config.version)"
+          metadata_version="$(mvn -q -DforceStdout help:evaluate -Dexpression=praxis.core.version)"
+          [[ -n "$config_version" ]] || { echo 'Could not resolve praxis.config.version.' >&2; exit 1; }
+          [[ -n "$metadata_version" ]] || { echo 'Could not resolve praxis.core.version.' >&2; exit 1; }
+          echo "STARTER_VERSION=$config_version" >> "$GITHUB_ENV"
+          echo "METADATA_STARTER_VERSION=$metadata_version" >> "$GITHUB_ENV"
+
+      - name: Install praxis-metadata-starter locally
+        shell: bash
+        working-directory: praxis-metadata-starter
+        run: |
+          set -euo pipefail
+          mvn -q versions:set -DnewVersion="$METADATA_STARTER_VERSION" -DgenerateBackupPoms=false
+          mvn -B -DskipTests install
+
+      - name: Install praxis-config-starter locally
+        shell: bash
+        working-directory: praxis-config-starter
+        run: |
+          set -euo pipefail
+          mvn -q versions:set -DnewVersion="$STARTER_VERSION" -DgenerateBackupPoms=false
+          mvn -B -DskipTests install
+
+      - name: Package praxis-api-quickstart against local starters
+        shell: bash
+        working-directory: praxis-api-quickstart
+        run: >-
+          mvn -B -DskipTests
+          -Dpraxis.core.version="$METADATA_STARTER_VERSION"
+          -Dpraxis.config.version="$STARTER_VERSION"
+          package
+
+      - name: Run canonical assistant consistency gate
+        shell: bash
+        working-directory: praxis-config-starter
+        env:
+          SELECTED_PROVIDER: ${{ inputs.provider }}
+          SELECTED_MODEL: ${{ inputs.model }}
+          SELECTED_PROFILE: ${{ inputs.profile }}
+          SELECTED_REPETITIONS: ${{ inputs.repetitions }}
+          SELECTED_RELEASE_GATE: ${{ inputs.release_gate }}
+          SELECTED_ENFORCE_LATENCY: ${{ inputs.enforce_latency }}
+          SELECTED_ENFORCE_EFFICIENCY: ${{ inputs.enforce_efficiency }}
+        run: |
+          set -euo pipefail
+          artifacts_dir="$RUNNER_TEMP/assistant-consistency"
+          quickstart_log="$RUNNER_TEMP/quickstart-assistant-consistency.log"
+          env_file="$RUNNER_TEMP/assistant-consistency-empty.env"
+          : > "$env_file"
+          mkdir -p "$artifacts_dir"
+
+          provider="$SELECTED_PROVIDER"
+          model="$SELECTED_MODEL"
+          if [[ -z "$model" ]]; then
+            if [[ "$provider" == 'gemini' ]]; then
+              model="$PRAXIS_AI_GEMINI_MODEL"
+            else
+              model="$PRAXIS_AI_OPENAI_MODEL"
+            fi
+          fi
+
+          cleanup() {
+            if [[ -n "${quickstart_pid:-}" ]] && kill -0 "$quickstart_pid" 2>/dev/null; then
+              kill "$quickstart_pid" 2>/dev/null || true
+              wait "$quickstart_pid" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          QUICKSTART_ROOT="$GITHUB_WORKSPACE/praxis-api-quickstart" \
+            ENV_FILE="$env_file" \
+            QUICKSTART_ENV_FILE="$env_file" \
+            PROVIDER="$provider" \
+            STREAM_TIMEOUT_SECONDS=180 \
+            tools/local-e2e/start-quickstart-local-e2e.sh > "$quickstart_log" 2>&1 &
+          quickstart_pid=$!
+
+          ready=false
+          for _ in $(seq 1 180); do
+            if curl --silent --fail http://localhost:8088/actuator/health >/dev/null; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$quickstart_pid" 2>/dev/null; then
+              echo 'Quickstart exited before becoming healthy.' >&2
+              tail -n 200 "$quickstart_log" >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != 'true' ]]; then
+            echo 'Quickstart did not become healthy within 180 seconds.' >&2
+            tail -n 200 "$quickstart_log" >&2 || true
+            exit 1
+          fi
+
+          PROFILE="$SELECTED_PROFILE" \
+            REPETITIONS="$SELECTED_REPETITIONS" \
+            RELEASE_GATE="$SELECTED_RELEASE_GATE" \
+            ENFORCE_LATENCY="$SELECTED_ENFORCE_LATENCY" \
+            ENFORCE_EFFICIENCY="$SELECTED_ENFORCE_EFFICIENCY" \
+            PROVIDER="$provider" \
+            MODEL="$model" \
+            STREAM_TIMEOUT_SECONDS=180 \
+            ARTIFACTS_DIR="$artifacts_dir" \
+            tools/local-e2e/run-assistant-consistency-gate-local.sh
+
+          cp "$quickstart_log" "$artifacts_dir/quickstart.log"
+          cat "$artifacts_dir/gate-result.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve quickstart log after a failed gate
+        if: failure()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/quickstart-assistant-consistency.log" ]]; then
+            mkdir -p "$RUNNER_TEMP/assistant-consistency"
+            cp "$RUNNER_TEMP/quickstart-assistant-consistency.log" "$RUNNER_TEMP/assistant-consistency/quickstart.log"
+          fi
+
+      - name: Upload consistency evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assistant-consistency-${{ inputs.provider }}-${{ inputs.profile }}-x${{ inputs.repetitions }}
+          path: ${{ runner.temp }}/assistant-consistency
+          if-no-files-found: warn
+          retention-days: 14

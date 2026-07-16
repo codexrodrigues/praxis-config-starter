@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Opt-in GitHub release gate for the versioned assistant consistency corpus,
+  reusing the canonical local runner to execute repeated real-provider journeys
+  with semantic accuracy, transaction, latency, token and cost evidence.
 - Append-only `domain_rule_definition_approval` evidence bound to the canonical
   SHA-256 of an exact governed definition, including database-level mutation
   rejection and snapshot publication revalidation.
