@@ -22,6 +22,42 @@ function Get-HeaderValue($Headers, [string] $Name) {
     return $value
 }
 
+function Read-ErrorBody([System.Management.Automation.ErrorRecord] $ErrorRecord) {
+    $response = $ErrorRecord.Exception.Response
+    if ($null -eq $response) {
+        return $ErrorRecord.Exception.Message
+    }
+    $reader = [System.IO.StreamReader]::new($response.GetResponseStream())
+    try {
+        return $reader.ReadToEnd()
+    } finally {
+        $reader.Dispose()
+    }
+}
+
+function ConvertFrom-SseContent([string] $Content) {
+    $events = @()
+    if ([string]::IsNullOrWhiteSpace($Content)) {
+        return $events
+    }
+    foreach ($line in ($Content -split "`n")) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed.StartsWith("data:")) {
+            continue
+        }
+        $payload = $trimmed.Substring(5).Trim()
+        if ([string]::IsNullOrWhiteSpace($payload)) {
+            continue
+        }
+        try {
+            $events += ($payload | ConvertFrom-Json)
+        } catch {
+            # Ignore non-JSON SSE frames. Praxis terminal turn events are JSON.
+        }
+    }
+    return $events
+}
+
 $root = Split-Path -Parent $PSScriptRoot
 $envPath = if ([System.IO.Path]::IsPathRooted($EnvFile)) {
     $EnvFile
@@ -67,33 +103,69 @@ $deleted = $false
 $persistedEtag = $null
 
 try {
-    $previewBody = @{
+    $turnBody = @{
         userPrompt = $UserPrompt
         provider = $Provider
         model = $model
         apiKey = $apiKey
-    } | ConvertTo-Json -Compress
+        clientTurnId = [guid]::NewGuid().ToString()
+        targetApp = "praxis-api-quickstart"
+        targetComponentId = "praxis-dynamic-page-builder"
+        currentPage = @{
+            widgets = @()
+        }
+    } | ConvertTo-Json -Depth 10 -Compress
 
     $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
-    $intent = Invoke-RestMethod `
+    $startResponse = Invoke-WebRequest `
         -Method Post `
-        -Uri "$base/api/praxis/config/ai/authoring/intent-resolution" `
+        -Uri "$base/api/praxis/config/ai/authoring/turn/stream/start" `
         -Headers $headers `
-        -Body $previewBody `
-        -TimeoutSec 90
-    $previewRequest = $previewBody | ConvertFrom-Json
-    $previewRequest | Add-Member -NotePropertyName intentResolution -NotePropertyValue $intent
-    $previewBodyWithIntent = $previewRequest | ConvertTo-Json -Depth 40 -Compress
-    $preview = Invoke-RestMethod `
-        -Method Post `
-        -Uri "$base/api/praxis/config/ai/authoring/page-preview" `
-        -Headers $headers `
-        -Body $previewBodyWithIntent `
-        -TimeoutSec 90
+        -Body $turnBody `
+        -TimeoutSec 120
+    $start = $startResponse.Content | ConvertFrom-Json
+    if ([string]::IsNullOrWhiteSpace($start.streamId)) {
+        throw "Authoring turn start did not include streamId."
+    }
+
+    $streamQuery = ""
+    if (-not [string]::IsNullOrWhiteSpace($start.streamAccessToken)) {
+        $streamQuery = "?accessToken=$([System.Uri]::EscapeDataString($start.streamAccessToken))"
+    }
+    $streamContent = ""
+    try {
+        $streamResponse = Invoke-WebRequest `
+            -Method Get `
+            -Uri "$base/api/praxis/config/ai/authoring/turn/stream/$($start.streamId)$streamQuery" `
+            -Headers $headers `
+            -TimeoutSec 180
+        $streamContent = $streamResponse.Content
+    } catch {
+        $streamContent = Read-ErrorBody $_
+    }
+    $events = @(ConvertFrom-SseContent $streamContent)
+    $errorEvent = @($events | Where-Object { "$($_.type)".ToLowerInvariant() -eq "error" } | Select-Object -First 1)[0]
+    if ($null -ne $errorEvent) {
+        throw "Authoring turn ended with error: $($errorEvent.payload.message)"
+    }
+    $terminal = @($events | Where-Object { "$($_.type)".ToLowerInvariant() -eq "result" } | Select-Object -Last 1)[0]
+    if ($null -eq $terminal) {
+        throw "Authoring turn did not produce a terminal result event."
+    }
+    if ([string]::IsNullOrWhiteSpace($terminal.streamId) -or [string]::IsNullOrWhiteSpace($terminal.eventId)) {
+        throw "Authoring terminal result did not include streamId and eventId lineage."
+    }
+    if (-not [bool] $terminal.payload.canApply) {
+        throw "Authoring turn result is not applicable: $($terminal.payload.reviewReason)"
+    }
+    $preview = $terminal.payload.preview
+    $intent = $terminal.payload.intentResolution
 
     $applyBody = @{
         compiledFormPatch = $preview.compiledFormPatch
         semanticDecision = $intent.semanticDecision
+        streamId = $terminal.streamId
+        resultEventId = $terminal.eventId
         componentType = $ComponentType
         componentId = $ComponentId
         scope = "user"
@@ -136,6 +208,8 @@ try {
         model = $model
         previewValid = [bool] $preview.valid
         applied = [bool] $apply.applied
+        authoringStreamId = $terminal.streamId
+        authoringResultEventId = $terminal.eventId
         componentType = $apply.componentType
         componentId = $apply.componentId
         persistedScope = $saved.scope
@@ -145,6 +219,8 @@ try {
         widgetCount = $widgets.Count
         widgetId = if ($null -ne $firstWidget) { $firstWidget.definition.id } else { $null }
         submitUrl = if ($null -ne $firstWidget) { $firstWidget.definition.inputs.submitUrl } else { $null }
+        persistedAuthoringStreamId = $saved.tags.authoringStreamId
+        persistedAuthoringResultEventId = $saved.tags.authoringResultEventId
         cleanupDeleted = $deleted
         failureCodes = @($preview.failureCodes)
     }
@@ -163,6 +239,10 @@ try {
     }
     if ($result.submitUrl -ne "/api/operations/incidentes") {
         throw "Persisted submitUrl is not the canonical operations incident create endpoint."
+    }
+    if ($result.persistedAuthoringStreamId -ne $result.authoringStreamId -or
+        $result.persistedAuthoringResultEventId -ne $result.authoringResultEventId) {
+        throw "Persisted UI config did not preserve the terminal authoring lineage."
     }
     if (-not $result.cleanupDeleted) {
         throw "E2E record cleanup did not run."

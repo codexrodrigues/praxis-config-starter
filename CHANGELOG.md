@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must not be enabled implicitly by host applications.
 
 ### Fixed
+- Migrated the official page-apply HTTP proof from the obsolete synchronous
+  preview path to the canonical persisted authoring-turn result, forwarding the
+  required `streamId` and `resultEventId` lineage before materialization.
 - Unified the full OpenAI HTTP smoke and deterministic domain-rule-only smoke
   on the same server-authenticated maker/checker identities, while keeping the
   corporate IAM rejection assertion specific to the corporate-only gate.
