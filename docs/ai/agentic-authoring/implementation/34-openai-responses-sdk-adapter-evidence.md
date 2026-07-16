@@ -25,8 +25,9 @@ como `openai-responses-sdk`; tipos do SDK nao escapam pelo contrato `AiProvider`
 - OpenAPI, DTOs, eventos SSE Praxis, headers, ETag e contratos Angular:
   inalterados;
 - risco de breaking change publico: nenhum identificado;
-- risco operacional remanescente: revalidacao do corpus real com credencial e
-  comparacao de latencia/tokens/custo no novo transporte.
+- risco operacional remanescente: repeticao do corpus real `must-pass` e
+  comparacao de latencia/tokens/custo no novo transporte; o gate HTTP integrado
+  de referencia ja esta verde.
 
 ## Inventario de aderencia
 
@@ -41,6 +42,7 @@ como `openai-responses-sdk`; tipos do SDK nao escapam pelo contrato `AiProvider`
 | Persistencia no provider | `lacuna-real-de-contrato` no adapter antigo | Praxis opera turn/thread em sua propria fronteira canonica | Toda criacao usa `store=false`; estado do provider nao vira segunda fonte de verdade |
 | Compatibilidade do schema estrito | `ja-suportado-mal-nomeado-ou-mal-materializado` | O resolver ja declarava a decisao semantica completa, mas alguns objetos/campos nao obedeciam as invariantes de `strict=true` | Schema fechado e validação recursiva local antes da chamada; nenhum contrato publico novo |
 | Compatibilidade da resposta do provider | `ja-suportado-mal-nomeado-ou-mal-materializado` | O SDK oficial ja oferece `withRawResponse()`, mas o adapter acessava toda a uniao tipada evolutiva de `output` | Transporte e request continuam no SDK; uma projecao interna le somente mensagem, recusa, status, identificadores e usage consumidos por Praxis |
+| Parametros dinamicos de action plan | `suportado-parcialmente` | O authoring manifest ja possui `inputSchema` e validacao canonica por operacao, mas o envelope do provider repetia `params` como objeto aberto | O boundary estrito transporta `params` como JSON serializado anulavel, decodifica para o objeto canonico e deixa o manifest validar a semantica |
 
 Nao foi necessario criar contrato canonico. A plataforma ja possuia os
 contratos internos necessarios; a lacuna estava na materializacao do transporte.
@@ -55,6 +57,9 @@ contratos internos necessarios; a lacuna estava na materializacao do transporte.
   sem duplicar request ou retry;
 - `text.format` com `json_schema`, `strict=true` e schema derivado do contrato
   Praxis; `json_object` somente quando nenhum schema foi fornecido;
+- action plans manifest-backed usam um boundary fechado `string|null` para
+  `params`; a string JSON e decodificada imediatamente para o objeto canonico
+  antes de deduplicacao, safety gates e validacao pelo `inputSchema` da operacao;
 - validacao recursiva local exige `additionalProperties=false` em cada objeto e
   correspondencia exata entre `properties` e `required`, falhando como erro de
   cliente antes de qualquer request remoto;
@@ -83,8 +88,10 @@ contratos internos necessarios; a lacuna estava na materializacao do transporte.
 - gate focal de provider + resolver LLM: 45 testes, zero falha;
 - gate semantico ampliado de intent, provenance, Domain Catalog, quick replies e
   fail-closed: 323 testes, zero falha;
-- perfil `ci-smoke-unit`: 1.998 testes, zero falha, com instalacao local do
-  starter `0.1.0-rc.82`;
+- gate focal do schema/round-trip de action plan e adapter OpenAI: 197 testes,
+  zero falha;
+- perfil `ci-smoke-unit` apos o fechamento do action plan: 1.999 testes, zero
+  falha, com empacotamento e instalacao local do starter `0.1.0-rc.83`;
 - gate focal de provider, router, fallback/cancelamento, metricas e turn/SSE:
   verde;
 - suite completa do starter rebased sobre `origin/main`: 2.060 testes, zero
@@ -146,6 +153,51 @@ rejeicao de self-approval. As credenciais locais disponiveis neste workspace
 permanecem invalidas/expiradas; por isso a validacao real depende do gate
 oficial.
 
+A prova maker-checker foi separada do provider e ficou verde no workflow
+[29523140410](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/29523140410),
+com autor/reviewer distintos, self-approval bloqueado e lifecycle terminal
+certificado. Ao recompor o gate completo, o workflow
+[29523874528](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/29523874528)
+revelou que o modo integrado ainda nao propagava essas credenciais ao script
+de dominio; isso foi corrigido sem relaxar IAM nem aceitar ator enviado pelo
+cliente.
+
+O workflow
+[29524338080](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/29524338080)
+passou pelo maker-checker, intent e plano de formulario, mas encontrou um runner
+antigo tentando promover um preview sincrono diretamente em `page-apply`.
+Desde o contrato de lineage, o apply exige o resultado terminal persistido do
+turno. O runner passou a iniciar o turno agentic, extrair `streamId` e
+`resultEventId`, aplicar o patch emitido e verificar as tags de lineage antes
+do cleanup.
+
+O workflow
+[29525127240](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/29525127240)
+certificou esse apply e avancou ate o smoke SSE da Table. Nesse ponto a barreira
+local estrita encontrou `actions[].params` como objeto aberto no schema de
+`table_action_plan`. A plataforma ja possuia o `inputSchema` da operacao no
+manifest; portanto nao foi criado um segundo schema de parametros. O boundary
+do provider foi fechado e o objeto canonico continuou sendo validado pelo
+manifest depois da decodificacao.
+
+O workflow final
+[29526063124](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/29526063124),
+no SHA `3e3cc3e`, ficou verde com OpenAI real e `gpt-5.4-mini`. A evidencia
+integrada confirmou:
+
+- routing semantico de regra compartilhada para
+  `/api/procurement/suppliers`, sem component edit plan indevido;
+- maker-checker autenticado com autor `codex-local` e reviewer
+  `codex-local-reviewer`, self-approval e transicoes terminais bloqueados;
+- plano, compile e preview validos para o formulario de incidentes, com recurso
+  `/api/operations/incidentes`;
+- persistencia e cleanup do apply por lineage terminal;
+- `intent_classification` e `table_action_plan` OpenAI bem-sucedidos na primeira
+  tentativa;
+- stream com terminal `result`, replay verificado e cancelamento retornando
+  estado `completed`;
+- nenhuma credencial OpenAI ou payload bruto do provider nos artefatos.
+
 Antes de declarar o Gate C operacionalmente fechado, executar uma rodada
 controlada no quickstart real e comparar com a evidencia anterior:
 
@@ -164,9 +216,17 @@ derivadas aplicaveis ao corte.
 
 ## Proximo passo recomendado
 
-Reexecutar uma vez o gate HTTP oficial no SHA que contem a prova maker-checker e,
-estando verde, revalidar o corpus real com o novo transporte. Se assertividade, P95 ou custo
-regredirem, ajustar policy de modelo/budget no boundary canonico, sem restaurar
-Chat Completions manual. Depois do gate real verde, ampliar a jornada
-progressiva de Table para reordenacao, visibilidade, formato, filtros e
-recuperacao de schema, antes de iniciar o spike separado de Spring AI 2/Boot 4.
+O gate HTTP integrado esta fechado. O proximo corte deve medir consistencia, nao
+adicionar outro caminho funcional:
+
+1. executar as seis jornadas `must-pass` tres vezes com a mesma versao de
+   modelo e snapshot de pricing;
+2. publicar taxa de sucesso por jornada, terminalidade, P50/P95, tokens de
+   entrada/saida/cache e custo por turno;
+3. ampliar a jornada progressiva de Table para reordenacao, visibilidade,
+   formato, filtros e recuperacao de schema, preservando o action plan
+   manifest-backed;
+4. corrigir qualquer regressao no boundary canonico de policy/schema, sem
+   restaurar Chat Completions manual nem criar roteamento lexical;
+5. somente depois desse baseline comparar Spring AI 2/Boot 4 em spike separado,
+   usando as mesmas jornadas e metricas como criterio de decisao.
