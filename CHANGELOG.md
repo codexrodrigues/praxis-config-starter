@@ -89,6 +89,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only fall back to monorepo-level docs when expected files exist there.
 
 ### Validated
+- The official OpenAI `gpt-5.4-mini` HTTP intent gate reached
+  `route_required` with LLM-authored quick replies after the raw-response
+  projection fix; the later lifecycle failure was isolated to a stale
+  same-identity maker-checker fixture.
 - OpenAI provider focal tests passed with `19/19`, including an incomplete,
   unconsumed output variant alongside a valid assistant message; the combined
   provider and semantic-intent resolver gate passed with `45/45` tests.

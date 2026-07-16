@@ -132,10 +132,19 @@ Esse segundo drift foi fechado usando a superficie oficial `withRawResponse()`:
 o adapter nao chama `parse()` nem tenta materializar toda a uniao de output; ele
 projeta somente os campos estaveis necessarios ao contrato Praxis. A regressao
 local inclui uma variante de output nao consumida e incompleta para demonstrar
-que a mensagem estruturada continua sendo extraida. O rerun remoto desse ultimo
-corte continua pendente. As credenciais locais disponiveis neste workspace
-permanecem invalidas/expiradas; por isso nao foi simulado um sucesso local
-contra a API real.
+que a mensagem estruturada continua sendo extraida.
+
+O terceiro workflow oficial [Agentic Authoring Smoke](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/29522663785)
+provou a correcao contra a API real: o passe semantico chegou a
+`route_required`, com `changeKind=route_shared_rule_authoring`, warnings
+`llm-intent-resolution-used` e `llm-authored-quick-replies-used`, sem
+`OpenAIInvalidDataException`. O job ficou vermelho somente na prova de lifecycle
+executada depois do intent, porque o script ainda tentava aprovar a definicao
+com a mesma identidade autenticada do autor. A prova foi alinhada ao contrato
+maker-checker para usar autor e reviewer distintos e afirmar explicitamente a
+rejeicao de self-approval. As credenciais locais disponiveis neste workspace
+permanecem invalidas/expiradas; por isso a validacao real depende do gate
+oficial.
 
 Antes de declarar o Gate C operacionalmente fechado, executar uma rodada
 controlada no quickstart real e comparar com a evidencia anterior:
@@ -155,7 +164,7 @@ derivadas aplicaveis ao corte.
 
 ## Proximo passo recomendado
 
-Reexecutar uma vez o gate HTTP oficial no SHA que contem a projecao de resposta e,
+Reexecutar uma vez o gate HTTP oficial no SHA que contem a prova maker-checker e,
 estando verde, revalidar o corpus real com o novo transporte. Se assertividade, P95 ou custo
 regredirem, ajustar policy de modelo/budget no boundary canonico, sem restaurar
 Chat Completions manual. Depois do gate real verde, ampliar a jornada
