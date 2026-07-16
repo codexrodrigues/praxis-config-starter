@@ -4,7 +4,8 @@
 
 O runtime de authoring agora preserva, de forma request-scoped, as invocações de provider das fases:
 
-- `platform_guidance_confirmation`, `intent_fast` e `intent_full`;
+- `platform_guidance_confirmation`, `targeted_component_intent`, `intent_fast`
+  e `intent_full`;
 - `pre_intent_tool_plan`, incluindo tentativas e retries;
 - `minimal_form_plan`;
 - `component_edit_plan`;

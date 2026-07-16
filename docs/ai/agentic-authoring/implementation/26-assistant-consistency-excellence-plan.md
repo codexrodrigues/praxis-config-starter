@@ -2,8 +2,8 @@
 
 Data: 2026-07-15
 
-Status: Gate A `must-pass` verde; refinamento isolado `extended` verde, jornada
-multi-turn materializada e atualmente vermelha por inconsistencia semantica
+Status: Gate A verde nos perfis `must-pass` e `extended`; jornada multi-turn
+progressiva consistente e gates de latencia, tokens e custo ativos
 
 ## Objetivo
 
@@ -659,8 +659,14 @@ transacional P0.6 do authoring turn**.
 - lineage de apply certificado: a materializacao exige `streamId` e
   `resultEventId`, revalida ownership e igualdade exata da decisao/preview
   persistidos e grava `stream/thread/turn/event/decision` nas tags;
-- proxima pendencia bloqueante do Gate A: telemetria canonica de provider por
-  fase (`attempt`, usage de tokens e custo por snapshot versionado).
+- telemetria canonica de provider, usage, custo por snapshot e gates de
+  eficiencia: concluidos;
+- repeticao final de 2026-07-16: `must-pass` 18/18 e `extended` 12/12;
+- a correcao da variancia de Table reduziu o P95 estendido de 68,512 s para
+  39,481 s, tokens totais de 66.098 para 30.437 e custo estimado de 31.718 para
+  13.721 micros de USD;
+- proxima pendencia do Gate A: nenhuma; evolucoes de shell, SDK e modelo seguem
+  para os Gates B, C e D.
 
 ### Gate B - Runtime canonico
 
@@ -756,8 +762,10 @@ repetivel antes de iniciar uma migracao ampla de SDK, nesta ordem:
 4. [x] remover drift de campos hardcoded do smoke e ativar gates de tokens e
    custo estimado; evidencia em
    [`31-assistant-consistency-efficiency-gates-evidence.md`](31-assistant-consistency-efficiency-gates-evidence.md);
-5. executar as seis jornadas `must-pass` tres vezes e depois o perfil
-   `extended`, investigando qualquer variancia antes da promocao;
+5. [x] executar as seis jornadas `must-pass` tres vezes e depois o perfil
+   `extended`, investigando e corrigindo a variancia antes da promocao;
+   evidencia em
+   [`32-assistant-extended-consistency-evidence.md`](32-assistant-extended-consistency-evidence.md);
 6. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
    minimo de contexto assistivel;
 7. ampliar a jornada progressiva com reordenacao, visibilidade, formato,

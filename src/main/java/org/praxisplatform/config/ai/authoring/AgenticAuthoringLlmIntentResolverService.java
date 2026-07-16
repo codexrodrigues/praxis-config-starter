@@ -33,6 +33,7 @@ public class AgenticAuthoringLlmIntentResolverService {
     private static final String SYSTEM_PROMPT_TEMPLATE = loadSystemPromptTemplate();
     private static final int MAX_ASSISTANT_MESSAGE_CHARS = 700;
     private static final int MAX_PLATFORM_GUIDANCE_CONFIRMATION_TOKENS = 700;
+    private static final int MAX_TARGETED_COMPONENT_INTENT_TOKENS = 900;
     private static final int MAX_FAST_INTENT_RESOLUTION_TOKENS = 1800;
     private static final int MAX_INTENT_RESOLUTION_TOKENS = 4096;
     private static final int DEFAULT_FAST_INTENT_TIMEOUT_SECONDS = 12;
@@ -108,6 +109,19 @@ public class AgenticAuthoringLlmIntentResolverService {
                             providerInvocations);
             if (platformGuidanceConfirmation.isPresent()) {
                 return platformGuidanceConfirmation.map(value -> withProviderInvocations(value, providerInvocations));
+            }
+            Optional<AgenticAuthoringLlmIntentResolution> targetedComponentIntent =
+                    compactTargetedComponentIntent(
+                            request,
+                            effectivePrompt,
+                            target,
+                            componentCapabilities,
+                            tenantId,
+                            userId,
+                            environment,
+                            providerInvocations);
+            if (targetedComponentIntent.isPresent()) {
+                return targetedComponentIntent.map(value -> withProviderInvocations(value, providerInvocations));
             }
             Optional<AgenticAuthoringLlmIntentResolution> fastResolution = fastIntentResolution(
                     request,
@@ -494,6 +508,259 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .add("assistantMessage");
         root.put("additionalProperties", false);
         return root.toString();
+    }
+
+    private Optional<AgenticAuthoringLlmIntentResolution> compactTargetedComponentIntent(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            AgenticAuthoringTarget target,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            String tenantId,
+            String userId,
+            String environment,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+        List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> capabilities =
+                targetedComponentCapabilities(target, componentCapabilities);
+        if (!shouldTryCompactTargetedComponentIntent(request, target, capabilities)) {
+            return Optional.empty();
+        }
+        try {
+            JsonNode result = invokeJson(
+                    "targeted_component_intent",
+                    compactTargetedComponentIntentPrompt(request, effectivePrompt, target, capabilities),
+                    AiJsonSchema.ofSchema(compactTargetedComponentIntentSchema(capabilities)),
+                    AiCallConfig.builder()
+                            .provider(request.provider())
+                            .model(request.model())
+                            .apiKey(request.apiKey())
+                            .temperature(0.0d)
+                            .maxTokens(MAX_TARGETED_COMPONENT_INTENT_TOKENS)
+                            .timeoutSeconds(fastIntentTimeoutSeconds)
+                            .build(),
+                    tenantId,
+                    userId,
+                    environment,
+                    providerInvocations);
+            return toCompactTargetedComponentResolution(result, target, componentCapabilities);
+        } catch (RuntimeException ex) {
+            log.debug(
+                    "[AgenticAuthoringLlmIntentResolver] Compact targeted component intent failed closed; kind={} cause={}",
+                    providerFailureKind(rootCause(ex)),
+                    safeProviderFailureSummary(rootCause(ex)));
+            return Optional.of(failedResolution(ex, request));
+        }
+    }
+
+    private boolean shouldTryCompactTargetedComponentIntent(
+            AgenticAuthoringIntentResolutionRequest request,
+            AgenticAuthoringTarget target,
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> capabilities) {
+        if (request == null
+                || request.pendingClarification() != null
+                || forceFullIntentResolution(request)
+                || target == null
+                || !StringUtils.hasText(target.widgetKey())
+                || !StringUtils.hasText(target.componentId())
+                || !StringUtils.hasText(target.resourcePath())
+                || capabilities == null
+                || capabilities.isEmpty()) {
+            return false;
+        }
+        AgenticAuthoringSemanticDecision activeDecision = request.activeSemanticDecision();
+        return activeDecision == null
+                || activeDecision.selectedResource() == null
+                || !StringUtils.hasText(activeDecision.selectedResource().resourcePath())
+                || target.resourcePath().equals(activeDecision.selectedResource().resourcePath());
+    }
+
+    private List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> targetedComponentCapabilities(
+            AgenticAuthoringTarget target,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        if (target == null
+                || !StringUtils.hasText(target.componentId())
+                || componentCapabilities == null
+                || componentCapabilities.catalogs() == null) {
+            return List.of();
+        }
+        return componentCapabilities.catalogs().stream()
+                .filter(Objects::nonNull)
+                .filter(catalog -> target.componentId().equals(catalog.componentId()))
+                .flatMap(catalog -> (catalog.capabilities() == null
+                        ? List.<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability>of()
+                        : catalog.capabilities()).stream())
+                .filter(Objects::nonNull)
+                .filter(capability -> StringUtils.hasText(capability.changeKind()))
+                .toList();
+    }
+
+    private String compactTargetedComponentIntentPrompt(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            AgenticAuthoringTarget target,
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> capabilities) {
+        ObjectNode context = objectMapper.createObjectNode();
+        context.put("schemaVersion", "praxis-targeted-component-intent-context.v1");
+        context.put("userPrompt", boundedText(valueOrDefault(effectivePrompt, request.userPrompt()), 1200));
+        ObjectNode selectedTarget = context.putObject("selectedTarget");
+        selectedTarget.put("widgetKey", target.widgetKey());
+        selectedTarget.put("componentId", target.componentId());
+        selectedTarget.put("resourcePath", target.resourcePath());
+        if (request.activeSemanticDecision() != null) {
+            AgenticAuthoringSemanticDecision activeDecision = request.activeSemanticDecision();
+            ObjectNode active = context.putObject("activeSemanticDecision");
+            active.put("decisionId", valueOrDefault(activeDecision.decisionId(), ""));
+            active.put("operationKind", valueOrDefault(activeDecision.operationKind(), ""));
+            active.put("artifactKind", valueOrDefault(activeDecision.artifactKind(), ""));
+            active.put("changeKind", valueOrDefault(activeDecision.changeKind(), ""));
+            active.put("activeObjective", boundedText(valueOrDefault(activeDecision.activeObjective(), ""), 500));
+            if (activeDecision.selectedResource() != null) {
+                active.put("selectedResourcePath", valueOrDefault(
+                        activeDecision.selectedResource().resourcePath(), ""));
+            }
+        }
+        if (request.conversationMessages() != null && !request.conversationMessages().isEmpty()) {
+            ArrayNode conversation = context.putArray("recentConversation");
+            List<AgenticAuthoringConversationMessage> messages = request.conversationMessages();
+            int start = Math.max(0, messages.size() - 2);
+            for (int index = start; index < messages.size(); index++) {
+                AgenticAuthoringConversationMessage message = messages.get(index);
+                if (message == null || !StringUtils.hasText(message.text())) {
+                    continue;
+                }
+                ObjectNode item = conversation.addObject();
+                item.put("role", valueOrDefault(message.role(), ""));
+                item.put("text", boundedText(message.text(), 500));
+            }
+        }
+        ArrayNode governedCapabilities = context.putArray("governedCapabilities");
+        for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : capabilities) {
+            ObjectNode capabilityNode = governedCapabilities.addObject();
+            capabilityNode.put("changeKind", capability.changeKind());
+            ArrayNode examples = capabilityNode.putArray("semanticExamples");
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample> values =
+                    capability.examples() == null ? List.of() : capability.examples();
+            for (int index = 0; index < Math.min(values.size(), 2); index++) {
+                AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample example = values.get(index);
+                if (example == null) {
+                    continue;
+                }
+                ObjectNode exampleNode = examples.addObject();
+                exampleNode.put("request", boundedText(valueOrDefault(example.prompt(), ""), 400));
+                exampleNode.put("semanticEffect", boundedText(valueOrDefault(example.intent(), ""), 500));
+                ArrayNode constraints = exampleNode.putArray("constraints");
+                List<String> hints = example.configHints() == null ? List.of() : example.configHints();
+                for (int hintIndex = 0; hintIndex < Math.min(hints.size(), 4); hintIndex++) {
+                    constraints.add(boundedText(hints.get(hintIndex), 300));
+                }
+            }
+        }
+        return """
+                You resolve the primary semantic intent for an edit to the selected Praxis component.
+                Return only one JSON object matching the supplied schema.
+
+                Decide from the user's meaning, never from keywords, regexes or capability order.
+                The selected target, active decision and conversation are governed evidence, not permission.
+                Set matchesSelectedComponentScope=true only when the new request semantically edits the selected
+                component. A request for a new artifact, a different component, a reusable business rule, general
+                guidance or an unrelated task must set it to false so the complete resolver can evaluate it.
+                When it matches, choose changeKind only by comparing the semantic effects and constraints of the
+                governed capabilities. Adding a new schema-backed item is different from formatting, moving,
+                renaming, hiding or changing an existing item. Preserve the current component unless the user asks
+                for a different artifact. Use requiresGovernedAuthoring=true for reusable business decisions and
+                false for local component presentation/configuration. Do not invent a resource, capability or field.
+                Keep assistantMessage short and natural in the user's language. If the scope does not match, use
+                changeKind="unknown", operationKind="unknown", artifactKind="unknown" and an empty message.
+
+                Compact governed context:
+                %s
+                """.formatted(context.toPrettyString());
+    }
+
+    private String compactTargetedComponentIntentSchema(
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> capabilities) {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("type", "object");
+        ObjectNode properties = root.putObject("properties");
+        properties.putObject("matchesSelectedComponentScope").put("type", "boolean");
+        stringEnum(properties, "semanticIntentClass", List.of(
+                "component_authoring", "shared_rule_authoring", "out_of_scope", "unknown"));
+        stringEnum(properties, "operationKind", List.of("modify", "remove", "unknown"));
+        stringEnum(properties, "artifactKind", List.of(
+                "dashboard", "chart", "table", "form", "page", "component", "unknown"));
+        LinkedHashSet<String> changeKinds = new LinkedHashSet<>();
+        capabilities.stream()
+                .map(AgenticAuthoringComponentCapabilitiesResult.ComponentCapability::changeKind)
+                .filter(StringUtils::hasText)
+                .forEach(changeKinds::add);
+        changeKinds.add("unknown");
+        stringEnum(properties, "changeKind", List.copyOf(changeKinds));
+        stringEnum(properties, "followUpKind", List.of("refinement", "new_instruction", "unknown"));
+        properties.putObject("requiresGovernedAuthoring").put("type", "boolean");
+        nullableString(properties, "assistantMessage");
+        arrayOfStrings(properties, "clarificationQuestions");
+        arrayOfStrings(properties, "warnings");
+        root.putArray("required")
+                .add("matchesSelectedComponentScope")
+                .add("semanticIntentClass")
+                .add("operationKind")
+                .add("artifactKind")
+                .add("changeKind")
+                .add("followUpKind")
+                .add("requiresGovernedAuthoring")
+                .add("assistantMessage")
+                .add("clarificationQuestions")
+                .add("warnings");
+        root.put("additionalProperties", false);
+        return root.toString();
+    }
+
+    private Optional<AgenticAuthoringLlmIntentResolution> toCompactTargetedComponentResolution(
+            JsonNode result,
+            AgenticAuthoringTarget target,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        if (result == null
+                || !result.isObject()
+                || !result.path("matchesSelectedComponentScope").asBoolean(false)
+                || !"component_authoring".equals(nullableText(result, "semanticIntentClass"))
+                || !"modify".equals(nullableText(result, "operationKind"))
+                || result.path("requiresGovernedAuthoring").asBoolean(false)) {
+            return Optional.empty();
+        }
+        String artifactKind = nullableText(result, "artifactKind");
+        String changeKind = nullableText(result, "changeKind");
+        if (!StringUtils.hasText(artifactKind)
+                || "unknown".equals(artifactKind)
+                || !declaredChangeKind(target.componentId(), changeKind, componentCapabilities)) {
+            return Optional.empty();
+        }
+        List<String> warnings = new ArrayList<>(strings(result.path("warnings")));
+        if (!warnings.contains("llm-compact-targeted-component-intent-used")) {
+            warnings.add("llm-compact-targeted-component-intent-used");
+        }
+        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                true,
+                "modify",
+                artifactKind,
+                changeKind,
+                target.resourcePath(),
+                null,
+                valueOrDefault(nullableText(result, "followUpKind"), "refinement"),
+                conciseAssistantMessage(nullableText(result, "assistantMessage")),
+                List.of(),
+                strings(result.path("clarificationQuestions")),
+                List.copyOf(warnings),
+                null,
+                null,
+                false,
+                "component_authoring"));
+    }
+
+    private String boundedText(String value, int maxChars) {
+        String text = valueOrDefault(value, "").trim();
+        if (text.length() <= maxChars) {
+            return text;
+        }
+        return text.substring(0, Math.max(0, maxChars - 3)).trim() + "...";
     }
 
     private int positiveOrDefault(int value, int fallback) {

@@ -124,9 +124,10 @@ Evidências locais:
 
 ## Próximos passos recomendados
 
-1. Executar as seis jornadas `must-pass`, três vezes, e depois o perfil
-   `extended`, preservando o gate como fechamento de fase/release, não como
-   ferramenta de iteração via GitHub Actions.
+1. Concluído: as seis jornadas `must-pass` passaram 18/18 e o perfil
+   `extended` passou 12/12 depois da correção da variância de Table. Evidência
+   em
+   [`32-assistant-extended-consistency-evidence.md`](32-assistant-extended-consistency-evidence.md).
 2. Comparar a versão compatível mais atual de Spring AI e a política de modelos
    em slice isolado, usando assertividade, p50/p95, tokens e custo deste gate;
    manter Spring AI 2/Boot 4 como spike arquitetural separado.

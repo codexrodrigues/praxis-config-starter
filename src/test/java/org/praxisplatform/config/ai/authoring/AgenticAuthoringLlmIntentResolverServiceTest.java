@@ -209,28 +209,24 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     @Test
     void resolveUsesRankedCompactCapabilitiesForAGovernedSelectedComponentRefinement() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiJsonSchema> schemaCaptor = ArgumentCaptor.forClass(AiJsonSchema.class);
         ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
         when(providerManagementService.generateJson(
                 promptCaptor.capture(),
-                any(AiJsonSchema.class),
+                schemaCaptor.capture(),
                 configCaptor.capture(),
                 eq("tenant"),
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "resolved": true,
+                  "matchesSelectedComponentScope": true,
+                  "semanticIntentClass": "component_authoring",
                   "operationKind": "modify",
                   "artifactKind": "table",
                   "changeKind": "column.add",
-                  "selectedResourcePath": "/api/human-resources/funcionarios",
-                  "resourceSearchQuery": null,
                   "followUpKind": "refinement",
                   "requiresGovernedAuthoring": false,
-                  "semanticIntentClass": "component_authoring",
                   "assistantMessage": "Adicionei a coluna salário mantendo as colunas atuais.",
-                  "visualizationDecision": null,
-                  "consultativeRetrievalPlan": null,
-                  "quickReplies": [],
                   "clarificationQuestions": [],
                   "warnings": []
                 }
@@ -317,17 +313,30 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .orElseThrow();
 
         assertThat(promptCaptor.getValue())
-                .contains("praxis-agentic-authoring-fast-intent-context.v1")
+                .contains("praxis-targeted-component-intent-context.v1")
                 .contains("\"activeSemanticDecision\"")
                 .contains("\"recentConversation\"")
-                .contains("\"rankedComponentCapabilities\"")
+                .contains("\"governedCapabilities\"")
                 .contains("\"changeKind\" : \"column.add\"")
-                .contains("nova coluna schema-backed")
-                .contains("set_column_order apenas reposicionam");
-        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(1800);
+                .contains("Introduzir uma nova coluna schema-backed")
+                .contains("set_column_order apenas reposicionam")
+                .contains("never from keywords, regexes or capability order")
+                .doesNotContain("praxis-agentic-authoring-fast-intent-context.v1");
+        assertThat(promptCaptor.getValue().length()).isLessThan(12_000);
+        assertThat(schemaCaptor.getValue().jsonSchema())
+                .contains("matchesSelectedComponentScope")
+                .contains("column.add")
+                .contains("unknown")
+                .doesNotContain("visualizationDecision");
+        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(900);
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(12);
         assertThat(result.changeKind()).isEqualTo("column.add");
-        assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
+        assertThat(result.warnings()).contains("llm-compact-targeted-component-intent-used");
+        assertThat(result.providerInvocations())
+                .extracting(
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::phase,
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::status)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("targeted_component_intent", "success"));
         Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
                 any(),
                 any(AiJsonSchema.class),
@@ -335,6 +344,163 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 eq("tenant"),
                 eq("user"),
                 eq("local"));
+    }
+
+    @Test
+    void targetedComponentIntentProviderFailureDoesNotCascadeIntoTheLargeGenericResolver() {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenThrow(AiProviderCallException.timeout(
+                "openai",
+                new RuntimeException("targeted component timeout")));
+        AgenticAuthoringIntentResolutionRequest request = targetedTableRefinementRequest();
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        request,
+                        request.userPrompt(),
+                        objectMapper.createObjectNode(),
+                        targetedTableTarget(),
+                        List.of(new AgenticAuthoringCandidate(
+                                "/api/human-resources/funcionarios",
+                                "get",
+                                "",
+                                "/api/human-resources/funcionarios",
+                                "get",
+                                0.97d,
+                                "resource preserved from existing component target",
+                                List.of("current-page-target-resource"))),
+                        new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(result.resolved()).isFalse();
+        assertThat(result.warnings())
+                .contains("llm-provider-timeout")
+                .doesNotContain("llm-fast-intent-resolution-used");
+        assertThat(result.providerInvocations())
+                .extracting(
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::phase,
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::status)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("targeted_component_intent", "failure"));
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
+    void targetedComponentIntentFallsThroughWhenTheRequestSemanticallyTargetsANewArtifact() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(
+                        objectMapper.readTree("""
+                                {
+                                  "matchesSelectedComponentScope": false,
+                                  "semanticIntentClass": "out_of_scope",
+                                  "operationKind": "unknown",
+                                  "artifactKind": "unknown",
+                                  "changeKind": "unknown",
+                                  "followUpKind": "new_instruction",
+                                  "requiresGovernedAuthoring": false,
+                                  "assistantMessage": "",
+                                  "clarificationQuestions": [],
+                                  "warnings": []
+                                }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "resolved": true,
+                                  "semanticIntentClass": "component_authoring",
+                                  "operationKind": "create",
+                                  "artifactKind": "form",
+                                  "changeKind": "create_artifact",
+                                  "selectedResourcePath": "/api/human-resources/funcionarios",
+                                  "resourceSearchQuery": null,
+                                  "followUpKind": "new_instruction",
+                                  "requiresGovernedAuthoring": false,
+                                  "assistantMessage": "Vou preparar um novo formulário de funcionários para revisão.",
+                                  "visualizationDecision": null,
+                                  "consultativeRetrievalPlan": null,
+                                  "quickReplies": [],
+                                  "clarificationQuestions": [],
+                                  "warnings": []
+                                }
+                                """));
+        AgenticAuthoringIntentResolutionRequest refinement = targetedTableRefinementRequest();
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "Crie também um novo formulário de funcionários.",
+                refinement.targetApp(),
+                refinement.targetComponentId(),
+                refinement.currentRoute(),
+                refinement.currentPage(),
+                refinement.selectedWidgetKey(),
+                refinement.provider(),
+                refinement.model(),
+                refinement.apiKey(),
+                refinement.sessionId(),
+                refinement.clientTurnId(),
+                refinement.conversationMessages(),
+                refinement.pendingClarification(),
+                refinement.attachmentSummaries(),
+                refinement.contextHints(),
+                refinement.activeSemanticDecision());
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        request,
+                        request.userPrompt(),
+                        objectMapper.createObjectNode(),
+                        targetedTableTarget(),
+                        List.of(new AgenticAuthoringCandidate(
+                                "/api/human-resources/funcionarios",
+                                "get",
+                                "",
+                                "/api/human-resources/funcionarios",
+                                "get",
+                                0.97d,
+                                "resource preserved from existing component target",
+                                List.of("current-page-target-resource"))),
+                        new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(promptCaptor.getAllValues()).hasSize(3);
+        assertThat(promptCaptor.getAllValues().get(0))
+                .contains("praxis-targeted-component-intent-context.v1");
+        assertThat(promptCaptor.getAllValues().get(1))
+                .contains("praxis-agentic-authoring-fast-intent-context.v1");
+        assertThat(promptCaptor.getAllValues().get(2))
+                .contains("Praxis");
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.providerInvocations())
+                .extracting(
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::phase,
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::status)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("targeted_component_intent", "success"),
+                        org.assertj.core.groups.Tuple.tuple("intent_fast", "success"),
+                        org.assertj.core.groups.Tuple.tuple("intent_full", "success"));
     }
 
     @Test
@@ -2033,6 +2199,67 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("llm-provider-auth-error")
                 .doesNotContain("OpenAI Error 401: invalid api key sk-test-secret");
         assertThat(resolution.assistantMessage()).doesNotContain("sk-test-secret");
+    }
+
+    private AgenticAuthoringIntentResolutionRequest targetedTableRefinementRequest() {
+        AgenticAuthoringSemanticDecision activeDecision = new AgenticAuthoringSemanticDecision(
+                AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                "decision-add-email",
+                "modify",
+                "table",
+                "column.add",
+                new AgenticAuthoringSemanticDecision.SelectedResource(
+                        "/api/human-resources/funcionarios",
+                        "get",
+                        "",
+                        "/api/human-resources/funcionarios",
+                        "get"),
+                null,
+                new AgenticAuthoringSemanticDecision.RetrievalEvidence(
+                        "current_page",
+                        List.of("current-page-target-resource"),
+                        1),
+                false,
+                "",
+                "",
+                "");
+        return new AgenticAuthoringIntentResolutionRequest(
+                "Agora adicione também a coluna salário sem remover nenhuma das anteriores.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                "funcionarios-table",
+                "openai",
+                "gpt-4.1-mini",
+                "test-key",
+                "session-1",
+                "turn-2",
+                List.of(
+                        new AgenticAuthoringConversationMessage(
+                                "user-1",
+                                "user",
+                                "Adicione a coluna e-mail à tabela de funcionários.",
+                                "2026-07-15T20:00:00Z"),
+                        new AgenticAuthoringConversationMessage(
+                                "assistant-1",
+                                "assistant",
+                                "A coluna e-mail foi adicionada.",
+                                "2026-07-15T20:00:01Z")),
+                null,
+                List.of(),
+                objectMapper.createObjectNode(),
+                activeDecision);
+    }
+
+    private AgenticAuthoringTarget targetedTableTarget() {
+        return new AgenticAuthoringTarget(
+                "funcionarios-table",
+                "praxis-table",
+                "/api/human-resources/funcionarios",
+                "",
+                "/api/human-resources/funcionarios",
+                "get");
     }
 
     private AgenticAuthoringComponentCapabilitiesResult componentCapabilities() {
