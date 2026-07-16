@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must not be enabled implicitly by host applications.
 
 ### Fixed
+- Unified the full OpenAI HTTP smoke and deterministic domain-rule-only smoke
+  on the same server-authenticated maker/checker identities, while keeping the
+  corporate IAM rejection assertion specific to the corporate-only gate.
 - Added a deterministic domain-rule-only mode to the official HTTP smoke so a
   rules release gate does not depend on an unrelated external LLM call.
 - Made synchronous OpenAI Responses consumption forward-compatible with output

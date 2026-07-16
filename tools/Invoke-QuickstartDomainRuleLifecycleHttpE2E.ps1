@@ -10,7 +10,8 @@ param(
     [string] $AuthorUsername = "",
     [string] $AuthorPassword = "",
     [string] $ReviewerUsername = "",
-    [string] $ReviewerPassword = ""
+    [string] $ReviewerPassword = "",
+    [switch] $ExpectAuthorApprovalIamRejection
 )
 
 $ErrorActionPreference = "Stop"
@@ -390,10 +391,10 @@ if ($definition.createdByType -ne "authenticated" -or $definition.createdBy -ne 
     throw "Expected server-authenticated author '$UserId', got type='$($definition.createdByType)' actor='$($definition.createdBy)'."
 }
 
-$selfApprovalExpectedMessage = if ([string]::IsNullOrWhiteSpace($AuthorPassword)) {
-    "Rule definition approver must be different from its author"
-} else {
+$selfApprovalExpectedMessage = if ($ExpectAuthorApprovalIamRejection) {
     "Authenticated principal requires IAM role RULE_DEFINITION_APPROVER."
+} else {
+    "Rule definition approver must be different from its author"
 }
 $selfApprovalBlocked = Invoke-ExpectedFailure `
     -Method Patch `

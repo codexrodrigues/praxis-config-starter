@@ -101,8 +101,7 @@ $governanceReviewerUsername = "$UserId-reviewer"
 $governanceAuthorPassword = [Guid]::NewGuid().ToString("N")
 $governanceReviewerPassword = [Guid]::NewGuid().ToString("N")
 $corporateMode = if ($DomainRuleLifecycleOnly) { "true" } else { "false" }
-$governanceLabEnvironment = if ($DomainRuleLifecycleOnly) {
-@"
+$governanceLabEnvironment = @"
 `$env:APP_AUTH_GOVERNANCE_LAB_ENABLED = 'true'
 `$env:APP_AUTH_GOVERNANCE_APPROVER_A_USERNAME = '$governanceReviewerUsername'
 `$env:APP_AUTH_GOVERNANCE_APPROVER_A_PASSWORD = '$governanceReviewerPassword'
@@ -110,11 +109,14 @@ $governanceLabEnvironment = if ($DomainRuleLifecycleOnly) {
 `$env:APP_AUTH_GOVERNANCE_APPROVER_B_PASSWORD = '$governanceReviewerPassword-b'
 `$env:APP_AUTH_GOVERNANCE_PUBLISHER_USERNAME = '$governanceAuthorUsername'
 `$env:APP_AUTH_GOVERNANCE_PUBLISHER_PASSWORD = '$governanceAuthorPassword'
+"@
+if ($DomainRuleLifecycleOnly) {
+$governanceLabEnvironment += @"
 `$env:PRAXIS_AI_SECURITY_ALLOW_DEFAULT_TENANT_IN_CORPORATE = 'true'
 `$env:PRAXIS_AI_SECURITY_SERVER_DEFAULT_TENANT = '$TenantId'
 `$env:PRAXIS_AI_SECURITY_SERVER_DEFAULT_ENVIRONMENT = '$Environment'
 "@
-} else { "" }
+}
 
 try {
     if ($null -ne $existingPid) {
@@ -185,11 +187,12 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
     }
 
     $domainRuleArgs = @{} + $commonArgs
+    $domainRuleArgs.AuthorUsername = $governanceAuthorUsername
+    $domainRuleArgs.AuthorPassword = $governanceAuthorPassword
+    $domainRuleArgs.ReviewerUsername = $governanceReviewerUsername
+    $domainRuleArgs.ReviewerPassword = $governanceReviewerPassword
     if ($DomainRuleLifecycleOnly) {
-        $domainRuleArgs.AuthorUsername = $governanceAuthorUsername
-        $domainRuleArgs.AuthorPassword = $governanceAuthorPassword
-        $domainRuleArgs.ReviewerUsername = $governanceReviewerUsername
-        $domainRuleArgs.ReviewerPassword = $governanceReviewerPassword
+        $domainRuleArgs.ExpectAuthorApprovalIamRejection = $true
     }
     $domainRuleLifecycle = & (Join-Path $PSScriptRoot "Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1") @domainRuleArgs | ConvertFrom-Json
     if ($DomainRuleLifecycleOnly) {
