@@ -331,6 +331,10 @@ used by the complete suite, rather than only the first scenario, so later author
 grounded and compete against the same reproducible evidence. This keeps the release proof valid on an
 empty database and exercises the canonical ingestion endpoint instead of relying on manually seeded rows.
 
+For a resolved canonical create-form intent, both `/minimal-form-plan` and `/page-preview` retrieve the
+selected `/schemas/filtered` request schema and materialize fields deterministically. If that schema is
+unavailable, planning fails closed; an LLM response must not substitute invented host fields.
+
 API catalog ingestion persists the canonical `api_metadata` rows before publishing the derived RAG
 corpus. RAG publication is scheduled after the database commit and can be replayed from canonical
 rows with `POST /api/praxis/config/api-catalog/rag/reconcile?releaseId=...`; operators can inspect

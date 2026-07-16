@@ -276,7 +276,12 @@ public class AgenticAuthoringController {
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         try {
-            AgenticAuthoringPlanResult result = planService.generateMinimalFormPlan(request, tenantId, userId, environment);
+            AgenticAuthoringPlanResult result = previewService.generateMinimalFormPlan(
+                    request,
+                    tenantId,
+                    userId,
+                    environment,
+                    currentContextBaseUrl());
             return ResponseEntity.ok(result);
         } catch (IllegalArgumentException | IllegalStateException | IOException ex) {
             return ResponseEntity.badRequest().body(AgenticAuthoringDryRunErrorResponse.configurationInvalid(ex.getMessage()));

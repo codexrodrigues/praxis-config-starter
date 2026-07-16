@@ -217,6 +217,52 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void minimalFormPlanEndpointUsesCanonicalCreateRequestSchemaWithoutLlmGeneration() throws Exception {
+        AgenticAuthoringIntentResolutionResult intent = createEmployeeFormIntent();
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie um formulario de funcionarios",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent);
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.putArray("required").add("nomeCompleto");
+        schema.putObject("properties").putObject("nomeCompleto").put("type", "string");
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.putArray("fields").addObject().put("name", "nomeCompleto");
+        when(schemaRetrievalService.fetchSchemaResult(
+                any(AiSchemaContext.class),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+        when(planService.materializeCreateFormPlanFromCanonicalSchema(any(), eq(schema)))
+                .thenReturn(new AgenticAuthoringPlanResult(
+                        true,
+                        List.of(),
+                        List.of("minimal-form-plan-materialized-from-schemas-filtered"),
+                        plan));
+
+        AgenticAuthoringPlanResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(),
+                null,
+                schemaRetrievalService)
+                .generateMinimalFormPlan(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.minimalFormPlan()).isSameAs(plan);
+        assertThat(result.warnings()).contains("minimal-form-plan-materialized-from-schemas-filtered");
+        verify(planService).materializeCreateFormPlanFromCanonicalSchema(any(), eq(schema));
+        verify(planService, never()).generateMinimalFormPlan(any(), any(), any(), any());
+        verifyNoInteractions(patchCompilerService);
+    }
+
+    @Test
     void previewFailsClosedWhenCanonicalCreateRequestSchemaIsUnavailable() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Crie um formulario de funcionarios",
