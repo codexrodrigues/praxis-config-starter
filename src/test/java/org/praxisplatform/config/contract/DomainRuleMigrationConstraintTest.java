@@ -103,4 +103,21 @@ class DomainRuleMigrationConstraintTest {
         assertThat(migration).contains("ck_domain_rule_snapshot_composition_digest");
         assertThat(migration).doesNotContain("DELETE FROM domain_rule_snapshot");
     }
+
+    @Test
+    void makerCheckerMigrationPersistsIamBoundApprovalsAppendOnly() throws IOException {
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/V35__persist_rule_composition_approvals.sql"));
+        String baseline = Files.readString(Path.of(
+                "src/main/resources/db/baseline/V1__baseline.sql"));
+
+        assertThat(migration).contains("CREATE TABLE domain_rule_composition_approval");
+        assertThat(migration).contains("actor_ref VARCHAR(255) NOT NULL");
+        assertThat(migration).contains("CHECK (role = 'RULE_COMPOSITION_APPROVER')");
+        assertThat(migration).contains(
+                "UNIQUE (tenant_id, environment, composition_digest, actor_ref)");
+        assertThat(migration).doesNotContain("ON DELETE CASCADE");
+        assertThat(baseline).contains("CREATE TABLE IF NOT EXISTS domain_rule_composition_approval");
+        assertThat(baseline).contains("uq_domain_rule_composition_approval_actor");
+    }
 }

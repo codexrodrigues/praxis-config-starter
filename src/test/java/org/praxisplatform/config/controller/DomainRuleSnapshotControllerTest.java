@@ -14,13 +14,17 @@ import org.praxisplatform.config.dto.DomainRuleSnapshotStoredResponse;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestRequest;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestResponse;
 import org.praxisplatform.config.service.DomainRuleSnapshotService;
+import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 
 @Tag("unit")
 class DomainRuleSnapshotControllerTest {
   private final DomainRuleSnapshotService service = mock(DomainRuleSnapshotService.class);
-  private final DomainRuleSnapshotController controller = new DomainRuleSnapshotController(service);
+  private final DomainRuleGovernancePrincipalResolver principalResolver =
+      mock(DomainRuleGovernancePrincipalResolver.class);
+  private final DomainRuleSnapshotController controller =
+      new DomainRuleSnapshotController(service, principalResolver);
 
   @Test
   void unchangedHeadReturnsNotModifiedWithNoCachePolicy() {

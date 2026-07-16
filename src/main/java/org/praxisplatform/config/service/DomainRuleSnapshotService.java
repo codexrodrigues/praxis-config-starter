@@ -13,18 +13,21 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.praxisplatform.config.domain.DomainRuleCompositionApproval;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
 import org.praxisplatform.config.domain.DomainRuleSnapshot;
 import org.praxisplatform.config.domain.DomainRuleSnapshotEvent;
 import org.praxisplatform.config.domain.DomainRuleSnapshotHead;
-import org.praxisplatform.config.dto.DomainRuleSnapshotActivationResponse;
-import org.praxisplatform.config.dto.DomainRuleSnapshotHeadStatusResponse;
+import org.praxisplatform.config.dto.DomainRuleCompositionApprovalResponse;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestRequest;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestResponse;
+import org.praxisplatform.config.dto.DomainRuleSnapshotActivationResponse;
+import org.praxisplatform.config.dto.DomainRuleSnapshotHeadStatusResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotPublicationRequest;
 import org.praxisplatform.config.dto.DomainRuleSnapshotStoredResponse;
 import org.praxisplatform.config.exception.DomainRuleSnapshotControlPlaneException;
 import org.praxisplatform.config.http.HttpEntityTagCondition;
+import org.praxisplatform.config.repository.DomainRuleCompositionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
@@ -55,6 +58,7 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
   private final DomainRuleSnapshotRepository snapshotRepository;
   private final DomainRuleSnapshotHeadRepository headRepository;
   private final DomainRuleSnapshotEventRepository eventRepository;
+  private final DomainRuleCompositionApprovalRepository compositionApprovalRepository;
   private final ObjectMapper objectMapper;
   private final DomainRuleImplementationCatalog implementationCatalog;
 
@@ -69,12 +73,14 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
       DomainRuleSnapshotRepository snapshotRepository,
       DomainRuleSnapshotHeadRepository headRepository,
       DomainRuleSnapshotEventRepository eventRepository,
+      DomainRuleCompositionApprovalRepository compositionApprovalRepository,
       ObjectMapper objectMapper) {
     this(
         definitionRepository,
         snapshotRepository,
         headRepository,
         eventRepository,
+        compositionApprovalRepository,
         objectMapper,
         DomainRuleImplementationCatalog.denyAll());
   }
@@ -94,12 +100,45 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+  public DomainRuleCompositionApprovalResponse approveComposition(
+      DomainRuleCompositionManifestRequest request,
+      String tenantId,
+      String environment,
+      String actorRef) {
+    DomainRuleCompositionManifestResponse prepared =
+        prepareCompositionManifest(request, tenantId, environment);
+    String tenant = requireText(tenantId, "X-Tenant-ID");
+    String env = requireText(environment, "X-Env");
+    String actor = requireText(actorRef, "authenticated actor");
+    Optional<DomainRuleCompositionApproval> existing = compositionApprovalRepository
+        .findByTenantIdAndEnvironmentAndCompositionDigestAndActorRef(
+            tenant, env, prepared.compositionDigest(), actor);
+    if (existing.isPresent()) return approvalResponse(existing.get());
+    UUID approvalId = UUID.randomUUID();
+    Instant approvedAt = Instant.now();
+    compositionApprovalRepository.insertIfAbsent(
+        approvalId,
+        tenant,
+        env,
+        prepared.compositionDigest(),
+        actor,
+        writeJson(prepared.manifest(), "Cannot persist composition approval manifest"),
+        approvedAt);
+    DomainRuleCompositionApproval approval = compositionApprovalRepository
+        .findByTenantIdAndEnvironmentAndCompositionDigestAndActorRef(
+            tenant, env, prepared.compositionDigest(), actor)
+        .orElseThrow(() -> new IllegalStateException("Composition approval was not persisted"));
+    return approvalResponse(approval);
+  }
+
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleSnapshotActivationResponse publish(
       DomainRuleSnapshotPublicationRequest request,
       String tenantId,
       String environment,
       String ifMatch,
-      String ifNoneMatch) {
+      String ifNoneMatch,
+      String publishedBy) {
     requireRequest(request);
     String tenant = requireText(tenantId, "X-Tenant-ID");
     String env = requireText(environment, "X-Env");
@@ -128,8 +167,9 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
         requireText(request.requiredHostContractVersion(), "requiredHostContractVersion"),
         requireText(request.validFromUtc(), "validFromUtc"), normalize(request.validUntilUtc()));
     DomainRuleCompositionManifestResponse manifest = composition.manifest();
-    verifyCompositionApprovals(request, sources, manifest.compositionDigest());
-    approvals.addAll(request.compositionApprovals());
+    List<RuleSnapshotApproval> compositionApprovals = verifyCompositionApprovals(
+        request, sources, manifest.compositionDigest(), publishedBy, tenant, env);
+    approvals.addAll(compositionApprovals);
 
     if (snapshotRepository.existsByTenantIdAndEnvironmentAndRuleSetKeyAndRuleSetVersion(
         tenant, env, ruleSetKey, request.ruleSet().ref().version())) {
@@ -175,7 +215,7 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
         .compositionManifest(writeJson(manifest.manifest(), "Cannot persist composition approval manifest"))
         .compositionDigest(manifest.compositionDigest())
         .supersedesSnapshotId(previous == null ? null : previous.getId())
-        .publishedBy(requireText(request.publishedBy(), "publishedBy"))
+        .publishedBy(requireText(publishedBy, "authenticated publisher"))
         .publishedAt(now)
         .build());
 
@@ -194,8 +234,17 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
     } catch (DataIntegrityViolationException exception) {
       throw conflict("Snapshot publication violated a persistent integrity constraint; reload scoped state before retrying");
     }
-    appendEvent("PUBLISHED", head, fromSnapshotId, persisted.getId(), request.publishedBy(), now);
+    appendEvent("PUBLISHED", head, fromSnapshotId, persisted.getId(), publishedBy, now);
     return activation(compiled.snapshot(), compiled.snapshotContentHash(), head, "PUBLISHED");
+  }
+
+  DomainRuleSnapshotActivationResponse publish(
+      DomainRuleSnapshotPublicationRequest request,
+      String tenantId,
+      String environment,
+      String ifMatch,
+      String ifNoneMatch) {
+    return publish(request, tenantId, environment, ifMatch, ifNoneMatch, "release-manager");
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
@@ -505,22 +554,35 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
     }
   }
 
-  private void verifyCompositionApprovals(
+  private List<RuleSnapshotApproval> verifyCompositionApprovals(
       DomainRuleSnapshotPublicationRequest request,
       List<DomainRuleDefinition> sources,
-      String calculatedDigest) {
+      String calculatedDigest,
+      String publishedBy,
+      String tenant,
+      String environment) {
     if (request.compositionDigest() == null
         || !calculatedDigest.equalsIgnoreCase(request.compositionDigest().trim())) {
       throw badRequest("compositionDigest does not match the server-canonicalized publication candidate");
     }
-    List<RuleSnapshotApproval> values = request.compositionApprovals();
-    if (values == null || values.isEmpty()) throw badRequest("compositionApprovals are required");
+    List<DomainRuleCompositionApproval> persisted = compositionApprovalRepository
+        .findByTenantIdAndEnvironmentAndCompositionDigestOrderByApprovedAtAsc(
+            tenant, environment, calculatedDigest);
+    if (persisted.isEmpty()) throw badRequest("Persisted composition approvals are required");
+    List<RuleSnapshotApproval> values = persisted.stream()
+        .map(value -> new RuleSnapshotApproval(
+            value.getId().toString(),
+            value.getRole(),
+            value.getActorRef(),
+            value.getApprovedAt().toString(),
+            value.getCompositionDigest()))
+        .toList();
     Set<String> actors = new LinkedHashSet<>();
     Set<String> keys = new LinkedHashSet<>();
     Instant latestSourceApproval = sources.stream().map(DomainRuleDefinition::getApprovedAt)
         .max(Instant::compareTo).orElseThrow();
     Instant now = Instant.now();
-    String publisher = requireText(request.publishedBy(), "publishedBy");
+    String publisher = requireText(publishedBy, "authenticated publisher");
     for (RuleSnapshotApproval approval : values) {
       if (approval == null
           || !"RULE_COMPOSITION_APPROVER".equals(approval.role())
@@ -540,6 +602,17 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
     if (actors.contains(publisher)) {
       throw badRequest("The publisher cannot approve the same RuleSet composition");
     }
+    return values;
+  }
+
+  private DomainRuleCompositionApprovalResponse approvalResponse(
+      DomainRuleCompositionApproval approval) {
+    return new DomainRuleCompositionApprovalResponse(
+        approval.getId().toString(),
+        approval.getRole(),
+        approval.getActorRef(),
+        approval.getApprovedAt().toString(),
+        approval.getCompositionDigest());
   }
 
   private PublishedRuleSnapshot readVerifiedSnapshot(DomainRuleSnapshot stored) {

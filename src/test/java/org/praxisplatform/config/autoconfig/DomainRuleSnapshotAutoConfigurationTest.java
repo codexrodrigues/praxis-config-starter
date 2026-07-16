@@ -8,10 +8,12 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.controller.DomainRuleSnapshotController;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.praxisplatform.config.repository.DomainRuleCompositionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
 import org.praxisplatform.config.service.DomainRuleSnapshotReader;
+import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.DomainRuleSnapshotService;
 import org.praxisplatform.config.service.DomainRuleImplementationCatalog;
 import org.praxisplatform.config.service.DomainRuleImplementationScope;
@@ -25,6 +27,9 @@ class DomainRuleSnapshotAutoConfigurationTest {
       .withConfiguration(AutoConfigurations.of(DomainRuleSnapshotAutoConfiguration.class))
       .withBean(ObjectMapper.class, ObjectMapper::new)
       .withBean(DomainRuleDefinitionRepository.class, () -> mock(DomainRuleDefinitionRepository.class))
+      .withBean(DomainRuleCompositionApprovalRepository.class,
+          () -> mock(DomainRuleCompositionApprovalRepository.class))
+      .withBean(AiPrincipalContextResolver.class, () -> mock(AiPrincipalContextResolver.class))
       .withBean(DomainRuleSnapshotRepository.class, () -> mock(DomainRuleSnapshotRepository.class))
       .withBean(DomainRuleSnapshotHeadRepository.class, () -> mock(DomainRuleSnapshotHeadRepository.class))
       .withBean(DomainRuleSnapshotEventRepository.class, () -> mock(DomainRuleSnapshotEventRepository.class));

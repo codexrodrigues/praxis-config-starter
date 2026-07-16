@@ -3,20 +3,25 @@ package org.praxisplatform.config.autoconfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.praxisplatform.config.controller.DomainRuleSnapshotController;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.praxisplatform.config.repository.DomainRuleCompositionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
 import org.praxisplatform.config.service.DomainRuleSnapshotService;
+import org.praxisplatform.config.service.AiPrincipalContextResolver;
+import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleImplementationCatalog;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.beans.factory.annotation.Value;
 
 /** Exposes the snapshot control plane when the host has enabled Config Starter persistence. */
 @AutoConfiguration
 @ConditionalOnBean({
   DomainRuleDefinitionRepository.class,
+  DomainRuleCompositionApprovalRepository.class,
   DomainRuleSnapshotRepository.class,
   DomainRuleSnapshotHeadRepository.class,
   DomainRuleSnapshotEventRepository.class
@@ -32,6 +37,7 @@ public class DomainRuleSnapshotAutoConfiguration {
   @ConditionalOnMissingBean
   DomainRuleSnapshotService domainRuleSnapshotService(
       DomainRuleDefinitionRepository definitionRepository,
+      DomainRuleCompositionApprovalRepository compositionApprovalRepository,
       DomainRuleSnapshotRepository snapshotRepository,
       DomainRuleSnapshotHeadRepository headRepository,
       DomainRuleSnapshotEventRepository eventRepository,
@@ -42,13 +48,24 @@ public class DomainRuleSnapshotAutoConfiguration {
         snapshotRepository,
         headRepository,
         eventRepository,
+        compositionApprovalRepository,
         objectMapper,
         implementationCatalog);
   }
 
   @Bean
   @ConditionalOnMissingBean
-  DomainRuleSnapshotController domainRuleSnapshotController(DomainRuleSnapshotService service) {
-    return new DomainRuleSnapshotController(service);
+  DomainRuleGovernancePrincipalResolver domainRuleGovernancePrincipalResolver(
+      AiPrincipalContextResolver principalContextResolver,
+      @Value("${praxis.ai.security.corporate-mode:true}") boolean corporateMode) {
+    return new DomainRuleGovernancePrincipalResolver(principalContextResolver, corporateMode);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  DomainRuleSnapshotController domainRuleSnapshotController(
+      DomainRuleSnapshotService service,
+      DomainRuleGovernancePrincipalResolver principalResolver) {
+    return new DomainRuleSnapshotController(service, principalResolver);
   }
 }

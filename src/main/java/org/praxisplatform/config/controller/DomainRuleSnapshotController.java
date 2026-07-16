@@ -4,20 +4,23 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
-import org.praxisplatform.config.dto.DomainRuleSnapshotActivationResponse;
-import org.praxisplatform.config.dto.DomainRuleSnapshotHeadStatusResponse;
+import org.praxisplatform.config.dto.DomainRuleCompositionApprovalResponse;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestRequest;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestResponse;
+import org.praxisplatform.config.dto.DomainRuleSnapshotActivationResponse;
+import org.praxisplatform.config.dto.DomainRuleSnapshotHeadStatusResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotPublicationRequest;
-import org.praxisplatform.config.dto.DomainRuleSnapshotRollbackRequest;
 import org.praxisplatform.config.dto.DomainRuleSnapshotStoredResponse;
 import org.praxisplatform.config.exception.DomainRuleSnapshotControlPlaneException;
 import org.praxisplatform.config.http.HttpEntityTagCondition;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
+import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
+import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleSnapshotService;
 import org.praxisplatform.rules.plan.RulePlanException;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -41,6 +44,7 @@ import org.springframework.web.bind.annotation.RestController;
 @ConditionalOnBean({DomainRuleSnapshotRepository.class, DomainRuleSnapshotHeadRepository.class})
 public class DomainRuleSnapshotController {
   private final DomainRuleSnapshotService snapshotService;
+  private final DomainRuleGovernancePrincipalResolver principalResolver;
 
   @PostMapping("/composition-manifest")
   @Operation(summary = "Canonicalize a RuleSet composition for approval",
@@ -50,6 +54,25 @@ public class DomainRuleSnapshotController {
       @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
       @RequestHeader(value = "X-Env", required = false) String environment) {
     return ResponseEntity.ok(snapshotService.prepareCompositionManifest(request, tenantId, environment));
+  }
+
+  @PostMapping("/composition-approvals")
+  @Operation(summary = "Approve one exact RuleSet composition",
+      description = "Recomputes the canonical manifest and appends an approval using only the authenticated server principal. Each approver must call this endpoint independently.")
+  @ApiResponses({
+    @ApiResponse(responseCode = "200", description = "Existing or newly appended approval for this principal and digest"),
+    @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_COMPOSITION_APPROVER"),
+    @ApiResponse(responseCode = "400", description = "Candidate or governed sources are invalid")
+  })
+  public ResponseEntity<DomainRuleCompositionApprovalResponse> approveComposition(
+      @RequestBody DomainRuleCompositionManifestRequest request,
+      @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+      @RequestHeader(value = "X-Env", required = false) String environment,
+      HttpServletRequest servletRequest) {
+    DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+        servletRequest, tenantId, environment, "RULE_COMPOSITION_APPROVER");
+    return ResponseEntity.ok(snapshotService.approveComposition(
+        request, principal.tenantId(), principal.environment(), principal.actorRef()));
   }
 
   @PostMapping
@@ -70,9 +93,18 @@ public class DomainRuleSnapshotController {
       @Parameter(description = "Strong current-head ETag required after the first publication.")
       @RequestHeader(value = "If-Match", required = false) String ifMatch,
       @Parameter(description = "Must be * when creating the first scoped RuleSet head.")
-      @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
+      @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch,
+      HttpServletRequest servletRequest) {
+    DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+        servletRequest, tenantId, environment, "RULE_SNAPSHOT_PUBLISHER");
     DomainRuleSnapshotActivationResponse response =
-        snapshotService.publish(request, tenantId, environment, ifMatch, ifNoneMatch);
+        snapshotService.publish(
+            request,
+            principal.tenantId(),
+            principal.environment(),
+            ifMatch,
+            ifNoneMatch,
+            principal.actorRef());
     return ResponseEntity.status(HttpStatus.CREATED)
         .eTag(quoted(response.headEtag()))
         .cacheControl(CacheControl.noCache())
@@ -188,18 +220,20 @@ public class DomainRuleSnapshotController {
   public ResponseEntity<DomainRuleSnapshotActivationResponse> rollback(
       @Parameter(description = "Previously published immutable snapshot to select as the new active head.", required = true)
       @PathVariable String snapshotKey,
-      @RequestBody DomainRuleSnapshotRollbackRequest request,
       @Parameter(description = "Governed tenant scope whose head will change.", required = true)
       @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
       @Parameter(description = "Governed deployment environment whose head will change.", required = true)
       @RequestHeader(value = "X-Env", required = false) String environment,
       @Parameter(description = "Strong current-head ETag required to prevent overwriting a concurrent activation.", required = true)
-      @RequestHeader(value = "If-Match", required = false) String ifMatch) {
+      @RequestHeader(value = "If-Match", required = false) String ifMatch,
+      HttpServletRequest servletRequest) {
+    DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+        servletRequest, tenantId, environment, "RULE_SNAPSHOT_OPERATOR");
     DomainRuleSnapshotActivationResponse response = snapshotService.rollback(
         snapshotKey,
-        request == null ? null : request.activatedBy(),
-        tenantId,
-        environment,
+        principal.actorRef(),
+        principal.tenantId(),
+        principal.environment(),
         ifMatch);
     return ResponseEntity.ok()
         .eTag(quoted(response.headEtag()))
