@@ -6,7 +6,11 @@ param(
     [string] $Origin = "http://localhost:4200",
     [string] $TenantId = "agentic-authoring-e2e",
     [string] $UserId = "codex-local",
-    [string] $Environment = "local"
+    [string] $Environment = "local",
+    [string] $AuthorUsername = "",
+    [string] $AuthorPassword = "",
+    [string] $ReviewerUsername = "",
+    [string] $ReviewerPassword = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -283,9 +287,31 @@ $headers = @{
     "X-User-ID" = $UserId
     "X-Env" = $Environment
 }
-$reviewerUserId = "$UserId-reviewer"
+$reviewerUserId = if ([string]::IsNullOrWhiteSpace($ReviewerUsername)) { "$UserId-reviewer" } else { $ReviewerUsername }
 $reviewerHeaders = $headers.Clone()
 $reviewerHeaders["X-User-ID"] = $reviewerUserId
+
+function Add-AuthenticatedCookie(
+    [hashtable] $Headers,
+    [string] $Username,
+    [string] $Password
+) {
+    if ([string]::IsNullOrWhiteSpace($Username) -or [string]::IsNullOrWhiteSpace($Password)) {
+        return $Headers
+    }
+    $null = Invoke-WebRequest `
+        -Method Post `
+        -Uri "$base/auth/login" `
+        -ContentType "application/json" `
+        -Body (@{ username = $Username; password = $Password } | ConvertTo-Json -Compress) `
+        -SessionVariable authenticatedSession
+    $authenticatedHeaders = $Headers.Clone()
+    $authenticatedHeaders["Cookie"] = $authenticatedSession.Cookies.GetCookieHeader($base)
+    return $authenticatedHeaders
+}
+
+$headers = Add-AuthenticatedCookie $headers $AuthorUsername $AuthorPassword
+$reviewerHeaders = Add-AuthenticatedCookie $reviewerHeaders $ReviewerUsername $ReviewerPassword
 
 $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
 if ($health.status -ne "UP") {

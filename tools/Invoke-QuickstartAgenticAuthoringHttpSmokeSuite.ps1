@@ -96,6 +96,25 @@ $quickstartProcess = $null
 $startedQuickstart = $false
 $logDir = Join-Path $QuickstartRoot "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$governanceAuthorUsername = $UserId
+$governanceReviewerUsername = "$UserId-reviewer"
+$governanceAuthorPassword = [Guid]::NewGuid().ToString("N")
+$governanceReviewerPassword = [Guid]::NewGuid().ToString("N")
+$corporateMode = if ($DomainRuleLifecycleOnly) { "true" } else { "false" }
+$governanceLabEnvironment = if ($DomainRuleLifecycleOnly) {
+@"
+`$env:APP_AUTH_GOVERNANCE_LAB_ENABLED = 'true'
+`$env:APP_AUTH_GOVERNANCE_APPROVER_A_USERNAME = '$governanceReviewerUsername'
+`$env:APP_AUTH_GOVERNANCE_APPROVER_A_PASSWORD = '$governanceReviewerPassword'
+`$env:APP_AUTH_GOVERNANCE_APPROVER_B_USERNAME = '$governanceReviewerUsername-b'
+`$env:APP_AUTH_GOVERNANCE_APPROVER_B_PASSWORD = '$governanceReviewerPassword-b'
+`$env:APP_AUTH_GOVERNANCE_PUBLISHER_USERNAME = '$governanceAuthorUsername'
+`$env:APP_AUTH_GOVERNANCE_PUBLISHER_PASSWORD = '$governanceAuthorPassword'
+`$env:PRAXIS_AI_SECURITY_ALLOW_DEFAULT_TENANT_IN_CORPORATE = 'true'
+`$env:PRAXIS_AI_SECURITY_SERVER_DEFAULT_TENANT = '$TenantId'
+`$env:PRAXIS_AI_SECURITY_SERVER_DEFAULT_ENVIRONMENT = '$Environment'
+"@
+} else { "" }
 
 try {
     if ($null -ne $existingPid) {
@@ -133,9 +152,10 @@ Set-Location '$QuickstartRoot'
 `$env:PRAXIS_AI_AUTHORING_ARTIFACTS_DIR = '$authoringRoot\proofs'
 `$env:PRAXIS_AI_AUTHORING_CONTRACTS_DIR = '$authoringRoot\contracts'
 `$env:PRAXIS_AI_STREAM_PROCESSING_TIMEOUT_SECONDS = '$StreamProcessingTimeoutSeconds'
-`$env:PRAXIS_AI_SECURITY_CORPORATE_MODE = 'false'
+`$env:PRAXIS_AI_SECURITY_CORPORATE_MODE = '$corporateMode'
 `$env:PRAXIS_AI_SECURITY_ALLOW_HEADER_IDENTITY_IN_LOCAL = 'true'
 `$env:EMBEDDING_PROVIDER = '$resolvedEmbeddingProvider'
+$governanceLabEnvironment
 if (`$env:PRAXIS_AI_OPENAI_MODEL) {
     `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = `$env:PRAXIS_AI_OPENAI_MODEL
 }
@@ -164,7 +184,14 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         Environment = $Environment
     }
 
-    $domainRuleLifecycle = & (Join-Path $PSScriptRoot "Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1") @commonArgs | ConvertFrom-Json
+    $domainRuleArgs = @{} + $commonArgs
+    if ($DomainRuleLifecycleOnly) {
+        $domainRuleArgs.AuthorUsername = $governanceAuthorUsername
+        $domainRuleArgs.AuthorPassword = $governanceAuthorPassword
+        $domainRuleArgs.ReviewerUsername = $governanceReviewerUsername
+        $domainRuleArgs.ReviewerPassword = $governanceReviewerPassword
+    }
+    $domainRuleLifecycle = & (Join-Path $PSScriptRoot "Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1") @domainRuleArgs | ConvertFrom-Json
     if ($DomainRuleLifecycleOnly) {
         [pscustomobject]@{
             health = $health.status
