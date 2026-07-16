@@ -108,7 +108,22 @@
       "required": ["requiredColumnFields", "uniqueColumnFields"],
       "properties": {
         "requiredColumnFields": { "$ref": "#/$defs/nonEmptyStrings" },
-        "uniqueColumnFields": { "type": "boolean" }
+        "uniqueColumnFields": { "type": "boolean" },
+        "requiredColumnProperties": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": true
+          }
+        },
+        "requiredConfigValues": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^/" },
+          "additionalProperties": true
+        }
       }
     },
     "expected": {

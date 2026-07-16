@@ -472,6 +472,181 @@
             "requiredColumnFields": ["nomeCompleto", "cargoNome", "departamentoNome", "email", "salario"],
             "uniqueColumnFields": true
           }
+        },
+        {
+          "id": "move-salary-first",
+          "userPrompt": "Agora mova a coluna salário para o início da tabela, sem remover nem duplicar as demais colunas.",
+          "currentPageSource": "previous-preview",
+          "expected": {
+            "intent": {
+              "operationKinds": ["modify"],
+              "artifactKinds": ["table"],
+              "changeKinds": ["column.order.set", "set_column_order"],
+              "resourcePaths": ["/api/human-resources/funcionarios"]
+            },
+            "terminal": {
+              "eventTypes": ["result"],
+              "canApply": true,
+              "preview": "required",
+              "minimumQuickReplies": 0,
+              "forbiddenPhases": []
+            },
+            "assistantMessage": {
+              "minimumCharacters": 50,
+              "requiredConceptGroups": [["coluna", "column"], ["salário", "salario", "salary"], ["início", "inicio", "primeira", "first"]],
+              "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+            },
+            "safety": {
+              "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
+              "forbidUnlistedResourcePaths": true,
+              "mutationRequiresPreview": true
+            }
+          },
+          "lineage": {
+            "sameThread": true,
+            "distinctTurn": true,
+            "activeDecisionFromPreviousTurn": true
+          },
+          "pageAssertions": {
+            "requiredColumnFields": ["nomeCompleto", "cargoNome", "departamentoNome", "email", "salario"],
+            "uniqueColumnFields": true,
+            "requiredColumnProperties": {
+              "salario": { "order": 0 }
+            }
+          }
+        },
+        {
+          "id": "hide-department",
+          "userPrompt": "Oculte a coluna Departamento sem removê-la da configuração e preserve a ordem atual.",
+          "currentPageSource": "previous-preview",
+          "expected": {
+            "intent": {
+              "operationKinds": ["modify"],
+              "artifactKinds": ["table"],
+              "changeKinds": ["column.visibility.set", "set_column_visibility"],
+              "resourcePaths": ["/api/human-resources/funcionarios"]
+            },
+            "terminal": {
+              "eventTypes": ["result"],
+              "canApply": true,
+              "preview": "required",
+              "minimumQuickReplies": 0,
+              "forbiddenPhases": []
+            },
+            "assistantMessage": {
+              "minimumCharacters": 50,
+              "requiredConceptGroups": [["coluna", "column"], ["departamento", "department"], ["oculta", "ocultar", "hide", "hidden"]],
+              "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+            },
+            "safety": {
+              "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
+              "forbidUnlistedResourcePaths": true,
+              "mutationRequiresPreview": true
+            }
+          },
+          "lineage": {
+            "sameThread": true,
+            "distinctTurn": true,
+            "activeDecisionFromPreviousTurn": true
+          },
+          "pageAssertions": {
+            "requiredColumnFields": ["nomeCompleto", "cargoNome", "departamentoNome", "email", "salario"],
+            "uniqueColumnFields": true,
+            "requiredColumnProperties": {
+              "salario": { "order": 0 },
+              "departamentoNome": { "visible": false }
+            }
+          }
+        },
+        {
+          "id": "format-salary-brl",
+          "userPrompt": "Formate a coluna salário como moeda brasileira em reais, preservando todas as alterações anteriores.",
+          "currentPageSource": "previous-preview",
+          "expected": {
+            "intent": {
+              "operationKinds": ["modify"],
+              "artifactKinds": ["table"],
+              "changeKinds": ["column.format.set", "set_column_format"],
+              "resourcePaths": ["/api/human-resources/funcionarios"]
+            },
+            "terminal": {
+              "eventTypes": ["result"],
+              "canApply": true,
+              "preview": "required",
+              "minimumQuickReplies": 0,
+              "forbiddenPhases": []
+            },
+            "assistantMessage": {
+              "minimumCharacters": 50,
+              "requiredConceptGroups": [["salário", "salario", "salary"], ["moeda", "reais", "real", "brl", "currency"]],
+              "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+            },
+            "safety": {
+              "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
+              "forbidUnlistedResourcePaths": true,
+              "mutationRequiresPreview": true
+            }
+          },
+          "lineage": {
+            "sameThread": true,
+            "distinctTurn": true,
+            "activeDecisionFromPreviousTurn": true
+          },
+          "pageAssertions": {
+            "requiredColumnFields": ["nomeCompleto", "cargoNome", "departamentoNome", "email", "salario"],
+            "uniqueColumnFields": true,
+            "requiredColumnProperties": {
+              "salario": { "order": 0, "format": "BRL|symbol|2" },
+              "departamentoNome": { "visible": false }
+            }
+          }
+        },
+        {
+          "id": "enable-advanced-filters",
+          "userPrompt": "Ative os filtros avançados desta tabela e mantenha todas as colunas, a ordem, a visibilidade e a formatação atuais.",
+          "currentPageSource": "previous-preview",
+          "expected": {
+            "intent": {
+              "operationKinds": ["modify"],
+              "artifactKinds": ["table"],
+              "changeKinds": ["filter.advanced.configure", "configure_advanced_filters"],
+              "resourcePaths": ["/api/human-resources/funcionarios"]
+            },
+            "terminal": {
+              "eventTypes": ["result"],
+              "canApply": true,
+              "preview": "required",
+              "minimumQuickReplies": 0,
+              "forbiddenPhases": []
+            },
+            "assistantMessage": {
+              "minimumCharacters": 50,
+              "requiredConceptGroups": [["filtro", "filter"], ["avançado", "avancado", "advanced"]],
+              "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+            },
+            "safety": {
+              "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
+              "forbidUnlistedResourcePaths": true,
+              "mutationRequiresPreview": true
+            }
+          },
+          "lineage": {
+            "sameThread": true,
+            "distinctTurn": true,
+            "activeDecisionFromPreviousTurn": true
+          },
+          "pageAssertions": {
+            "requiredColumnFields": ["nomeCompleto", "cargoNome", "departamentoNome", "email", "salario"],
+            "uniqueColumnFields": true,
+            "requiredColumnProperties": {
+              "salario": { "order": 0, "format": "BRL|symbol|2" },
+              "departamentoNome": { "visible": false }
+            },
+            "requiredConfigValues": {
+              "/behavior/filtering/enabled": true,
+              "/behavior/filtering/advancedFilters/enabled": true
+            }
+          }
         }
       ]
     }

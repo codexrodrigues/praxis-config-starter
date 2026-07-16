@@ -425,10 +425,33 @@ def collect_paths(value, key=""):
             paths.extend(collect_paths(child, key))
     return sorted(set(paths))
 
+MISSING = object()
+
+def json_pointer(value, pointer):
+    if not isinstance(pointer, str) or not pointer.startswith("/"):
+        return MISSING
+    current = value
+    for raw_token in pointer[1:].split("/"):
+        token = raw_token.replace("~1", "/").replace("~0", "~")
+        if isinstance(current, dict) and token in current:
+            current = current[token]
+            continue
+        if isinstance(current, list) and token.isdigit() and int(token) < len(current):
+            current = current[int(token)]
+            continue
+        return MISSING
+    return current
+
+def same_json_value(actual, expected):
+    if isinstance(actual, bool) or isinstance(expected, bool):
+        return type(actual) is type(expected) and actual == expected
+    return actual == expected
+
 rows = []
 for run in plan["runs"]:
     case_dir = base / run["directory"]
     case = json.loads((case_dir / "case.json").read_text(encoding="utf-8"))
+    context = json.loads((case_dir / "context.json").read_text(encoding="utf-8"))
     expected = case["expected"]
     persistence_expected = expected.get("persistence")
     failures = []
@@ -538,18 +561,32 @@ for run in plan["runs"]:
         failures.append("preview forbidden but present")
 
     column_fields = []
+    selected_config = {}
     if has_preview:
         composition = preview.get("uiCompositionPlan")
         composition = composition if isinstance(composition, dict) else {}
+        selected_widget_key = context.get("selectedWidgetKey")
         for widget in composition.get("widgets") or []:
             if not isinstance(widget, dict):
                 continue
             inputs = widget.get("inputs") if isinstance(widget.get("inputs"), dict) else {}
             config = inputs.get("config") if isinstance(inputs.get("config"), dict) else {}
+            if widget.get("key") == selected_widget_key:
+                selected_config = config
             for column in config.get("columns") or []:
                 if isinstance(column, dict) and isinstance(column.get("field"), str):
                     column_fields.append(column["field"])
+        if not selected_config:
+            selected_config = next((
+                widget.get("inputs", {}).get("config", {})
+                for widget in composition.get("widgets") or []
+                if isinstance(widget, dict)
+                and isinstance(widget.get("inputs"), dict)
+                and isinstance(widget.get("inputs", {}).get("config"), dict)
+                and isinstance(widget.get("inputs", {}).get("config", {}).get("columns"), list)
+            ), {})
     page_assertions = case.get("pageAssertions")
+    asserted_config_values = {}
     if isinstance(page_assertions, dict):
         missing_columns = [
             field for field in page_assertions.get("requiredColumnFields", [])
@@ -559,6 +596,36 @@ for run in plan["runs"]:
             failures.append(f"preview missing required columns: {missing_columns}")
         if page_assertions.get("uniqueColumnFields") is True and len(column_fields) != len(set(column_fields)):
             failures.append(f"preview contains duplicated column fields: {column_fields}")
+        columns_by_field = {
+            column.get("field"): column
+            for column in selected_config.get("columns", [])
+            if isinstance(column, dict) and isinstance(column.get("field"), str)
+        }
+        for field, expected_properties in page_assertions.get("requiredColumnProperties", {}).items():
+            column = columns_by_field.get(field)
+            if column is None:
+                failures.append(f"preview cannot assert properties for missing column {field!r}")
+                continue
+            for property_name, expected_value in expected_properties.items():
+                actual_value = column.get(property_name, MISSING)
+                if actual_value is MISSING:
+                    failures.append(
+                        f"preview column {field!r} missing required property {property_name!r}"
+                    )
+                elif not same_json_value(actual_value, expected_value):
+                    failures.append(
+                        f"preview column {field!r} property {property_name!r} "
+                        f"{actual_value!r} expected {expected_value!r}"
+                    )
+        for pointer, expected_value in page_assertions.get("requiredConfigValues", {}).items():
+            actual_value = json_pointer(selected_config, pointer)
+            asserted_config_values[pointer] = None if actual_value is MISSING else actual_value
+            if actual_value is MISSING:
+                failures.append(f"preview config missing required value at {pointer!r}")
+            elif not same_json_value(actual_value, expected_value):
+                failures.append(
+                    f"preview config value at {pointer!r} {actual_value!r} expected {expected_value!r}"
+                )
 
     start_response_path = case_dir / "turn.start.response.json"
     start_response = (
@@ -707,6 +774,16 @@ for run in plan["runs"]:
             "turnId": turn_id,
             "activeSemanticDecisionId": active_decision_id,
             "columnFields": column_fields,
+            "columnProperties": {
+                field: properties
+                for field, properties in (
+                    (column.get("field"), column)
+                    for column in selected_config.get("columns", [])
+                    if isinstance(column, dict)
+                )
+                if isinstance(field, str)
+            },
+            "assertedConfigValues": asserted_config_values,
             "persistence": transaction,
             "efficiency": efficiency,
         },

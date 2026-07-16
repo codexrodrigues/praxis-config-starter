@@ -101,6 +101,53 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
     }
 
     @Test
+    void progressiveTableJourneyCoversCumulativeAuthoringState() throws Exception {
+        JsonNode journey = findById(corpus().path("journeys"), "employee-table-progressive-columns-pt");
+
+        assertThat(journey).isNotNull();
+        assertThat(journey.path("turns")).hasSize(6);
+        assertThat(journey.path("turns").findValuesAsText("id"))
+                .containsExactly(
+                        "add-email",
+                        "add-salary",
+                        "move-salary-first",
+                        "hide-department",
+                        "format-salary-brl",
+                        "enable-advanced-filters");
+
+        Set<String> coveredChangeKinds = new HashSet<>();
+        for (JsonNode turn : journey.path("turns")) {
+            turn.path("expected").path("intent").path("changeKinds")
+                    .forEach(changeKind -> coveredChangeKinds.add(changeKind.asText()));
+        }
+        assertThat(coveredChangeKinds)
+                .contains(
+                        "column.add",
+                        "column.order.set",
+                        "column.visibility.set",
+                        "column.format.set",
+                        "filter.advanced.configure");
+
+        JsonNode finalAssertions = journey.path("turns").get(5).path("pageAssertions");
+        Set<String> finalColumnFields = new HashSet<>();
+        finalAssertions.path("requiredColumnFields")
+                .forEach(field -> finalColumnFields.add(field.asText()));
+        assertThat(finalColumnFields)
+                .containsExactlyInAnyOrder("nomeCompleto", "cargoNome", "departamentoNome", "email", "salario");
+        assertThat(finalAssertions.at("/requiredColumnProperties/salario/order").asInt()).isZero();
+        assertThat(finalAssertions.at("/requiredColumnProperties/salario/format").asText())
+                .isEqualTo("BRL|symbol|2");
+        assertThat(finalAssertions.at("/requiredColumnProperties/departamentoNome/visible").asBoolean())
+                .isFalse();
+        assertThat(finalAssertions.at("/requiredConfigValues/~1behavior~1filtering~1enabled").asBoolean())
+                .isTrue();
+        assertThat(finalAssertions
+                        .at("/requiredConfigValues/~1behavior~1filtering~1advancedFilters~1enabled")
+                        .asBoolean())
+                .isTrue();
+    }
+
+    @Test
     void guidanceIsNonMutatingAndEveryMutationRequiresPreview() throws Exception {
         for (JsonNode testCase : corpus().path("cases")) {
             assertSafeExpectation(testCase.path("id").asText(), testCase.path("family").asText(), testCase.path("expected"));
@@ -141,6 +188,15 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
 
     private JsonNode corpus() throws Exception {
         return objectMapper.readTree(AgenticAuthoringTestPaths.proof(CORPUS_FILE).toFile());
+    }
+
+    private JsonNode findById(JsonNode nodes, String id) {
+        for (JsonNode node : nodes) {
+            if (id.equals(node.path("id").asText())) {
+                return node;
+            }
+        }
+        return null;
     }
 
     private void assertSafeExpectation(String id, String family, JsonNode expected) {
