@@ -194,7 +194,9 @@ public class SpringAiOpenAiService implements AiProvider {
     }
 
     private String callWithOptions(String prompt, AiCallConfig config, boolean jsonMode) {
-        // BYPASS Spring AI Chat Client to avoid "extra_body" bug in 1.x versions with native OpenAI
+        // Temporary compatibility path. Spring AI 1.1.8 fixes the historical extra_body
+        // serialization issue; removal still depends on parity for cancellation, usage telemetry,
+        // structured output and streaming in the canonical consistency corpus.
         try {
             return callOpenAiDirectly(prompt, config, jsonMode);
         } catch (Exception e) {

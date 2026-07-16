@@ -329,6 +329,7 @@ class AgenticAuthoringTurnStreamHttpSseIntegrationTest {
     }
 
     private List<AiTurnEventEnvelope> readSseEvents(UUID streamId, String lastEventId) throws Exception {
+        awaitTerminalEvent(streamId);
         var connectRequest = get("/api/praxis/config/ai/authoring/turn/stream/{streamId}", streamId)
                 .requestAttr("tenantId", TENANT)
                 .requestAttr("userId", USER)
@@ -344,6 +345,22 @@ class AgenticAuthoringTurnStreamHttpSseIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn();
         return parseSseBody(completed.getResponse().getContentAsString());
+    }
+
+    private void awaitTerminalEvent(UUID streamId) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            Integer terminalCount = jdbcTemplate.queryForObject(
+                    "select count(*) from ai_turn_event where stream_id = ? "
+                            + "and event_type in ('result', 'error', 'cancelled')",
+                    Integer.class,
+                    streamId);
+            if (terminalCount != null && terminalCount > 0) {
+                return;
+            }
+            TimeUnit.MILLISECONDS.sleep(25);
+        }
+        throw new AssertionError("Timed out waiting for terminal authoring event for stream " + streamId);
     }
 
     private List<AiTurnEventEnvelope> parseSseBody(String rawBody) throws Exception {

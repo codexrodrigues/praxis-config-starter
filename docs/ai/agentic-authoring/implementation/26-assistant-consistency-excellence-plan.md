@@ -278,6 +278,7 @@ um bot especial para o Page Builder.
 | Intencao semantica consistente | `suportado-parcialmente` | A LLM ja produz decisao tipada e o keyword fallback legado fica desabilitado por padrao | Remover heuristicas textuais residuais da decisao primaria e limitar matching a grounding pos-intencao |
 | Suite versionada de excelencia | `ja-suportado-mal-nomeado-ou-mal-materializado` | Corpus, schema e runner internos agora existem e validam recurso, operacao, terminalidade, mensagem, seguranca e latencia | Expandir cobertura e ligar o perfil integral ao gate de fase sem transforma-lo em contrato HTTP publico |
 | Politica de modelo/provider por tarefa | `lacuna-real-de-contrato` | O provider e configuravel, mas OpenAI ainda usa default global `gpt-4o-mini` e heuristicas por nome de modelo | Definir politica canonica de capability, tier, snapshot, custo, latencia e fallback |
+| Transporte OpenAI moderno | `lacuna-real-de-contrato` | A linha compativel foi atualizada e o bug de `extra_body` foi provado como corrigido, mas o adapter real ainda usa Chat Completions HTTP manual | Criar apenas o contrato interno do adapter, certificar SDK oficial/Responses contra o corpus e substituir o caminho manual sem criar trilhas paralelas ou DTO HTTP publico |
 
 O ensaio real refinou ainda duas classificacoes de aderencia:
 
@@ -316,7 +317,7 @@ lista de palavras.
 
 ### 3. A integracao OpenAI contorna a camada que deveria dar consistencia
 
-O projeto usa Spring Boot `3.5.9` e Spring AI `1.1.1`, mas
+O projeto passou a usar Spring Boot `3.5.15` e Spring AI `1.1.8`, mas
 `SpringAiOpenAiService` contorna o `ChatClient` por causa de uma limitacao
 historica de `extra_body`. O servico monta manualmente requests para
 `/v1/chat/completions`, interpreta SSE e envia `response_format=json_object`.
@@ -326,8 +327,10 @@ caminho OpenAI real.
 
 As linhas estaveis atuais exigem duas pistas:
 
-- pista compativel: provar Spring AI `1.1.8` e o patch corrente de Spring Boot
-  3.5.x, removendo workarounds que deixaram de ser necessarios;
+- pista compativel: baseline Spring AI `1.1.8` e Spring Boot `3.5.15` provado;
+  o teste black-box confirma que `extra_body` e achatado corretamente, restando
+  certificar paridade de streaming, cancelamento, structured output e telemetria
+  antes de remover o workaround;
 - pista alvo: avaliar Spring AI `2.0.x`, que usa o SDK oficial `openai-java`,
   junto da migracao necessaria para Spring Boot 4.0/4.1.
 
@@ -482,11 +485,14 @@ corpus; nao viram uma matriz de sinonimos decisoria.
 
 ### P1.1 Pista compativel Spring Boot 3.5
 
-- Atualizar o baseline Spring AI de `1.1.1` para `1.1.8` em branch/slice
+- [x] Atualizar o baseline Spring AI de `1.1.1` para `1.1.8` em branch/slice
   dedicado.
-- Avaliar o patch Spring Boot 3.5.x corrente e CVEs/dependencias transientes.
-- Reproduzir o bug historico de `extra_body`; remover o bypass se a versao
-  atual resolver o problema.
+- [x] Atualizar o patch Spring Boot compativel de `3.5.9` para `3.5.15`.
+- [x] Reproduzir o bug historico de `extra_body` em teste black-box; Spring AI
+  1.1.8 achata a extensao corretamente e elimina a justificativa original do
+  bypass.
+- [ ] Remover o bypass depois de provar paridade de streaming, cancelamento,
+  structured output e telemetria.
 - Comparar `ChatClient`/advisors contra o caminho HTTP manual usando o corpus
   canonico.
 - Nao manter dois caminhos permanentes. Como a plataforma esta em beta, a
@@ -676,7 +682,7 @@ transacional P0.6 do authoring turn**.
 
 ### Gate C - SDK e modelo
 
-- versao compativel atualizada;
+- [x] versao compativel atualizada;
 - structured output, tools e streaming passam no corpus;
 - policy de modelo/custo observavel esta ativa;
 - caminho manual antigo foi removido, ou existe decisao arquitetural explicita
@@ -731,6 +737,12 @@ dominio hardcoded do smoke, passou a validar planos contra `/schemas/filtered`
 e adicionou gates locais de latencia, tokens e custo com fotografia de precos
 versionada. Nao houve mudanca de contrato publico nem artefato Angular, landing
 page ou corpus HTTP a sincronizar nesses dois slices.
+O decimo terceiro slice atualizou Spring Boot/Spring AI dentro da linha 3.5
+compativel, adicionou a prova black-box de `extra_body` e registrou a matriz de
+modernizacao em
+[`33-spring-ai-openai-modernization-evidence.md`](33-spring-ai-openai-modernization-evidence.md).
+Nao houve mudanca de contrato publico; portanto OpenAPI, bindings Angular,
+landing page e corpus HTTP nao exigiram sincronizacao.
 Quando os proximos slices alterarem contratos publicos, revisar no mesmo ciclo:
 
 - `docs/ai/contracts/**` e OpenAPI do Config Starter;
@@ -766,20 +778,29 @@ repetivel antes de iniciar uma migracao ampla de SDK, nesta ordem:
    `extended`, investigando e corrigindo a variancia antes da promocao;
    evidencia em
    [`32-assistant-extended-consistency-evidence.md`](32-assistant-extended-consistency-evidence.md);
-6. certificar a mesma shell/orchestration em Table e Dynamic Form com o pacote
-   minimo de contexto assistivel;
+6. [x] certificar a mesma shell/orchestration em Table e Dynamic Form com o
+   pacote minimo de contexto assistivel;
 7. ampliar a jornada progressiva com reordenacao, visibilidade, formato,
    filtros e recuperacao apos schema temporariamente indisponivel, provando que
    cada capability governada continua semanticamente distinta;
-8. iniciar a pista compativel mais atual de Spring AI e a politica de modelos
-   em slice dedicado, comparando o novo caminho com os perfis `must-pass` e
-   `extended`;
+8. [x] atualizar a pista compativel para Boot 3.5.15/Spring AI 1.1.8 e provar a
+   correcao de `extra_body`; evidencia em
+   [`33-spring-ai-openai-modernization-evidence.md`](33-spring-ai-openai-modernization-evidence.md);
 9. manter Spring AI 2.0 + Boot 4 como spike arquitetural separado, promovendo
-   apenas se a evidencia superar o caminho compativel.
+   apenas se a evidencia superar o caminho compativel;
+10. implementar o spike focal do adapter OpenAI com SDK oficial/Responses,
+    Structured Outputs e telemetria, substituindo o caminho manual somente
+    depois dos gates de paridade.
 
 ## Referencias oficiais para a frente de SDK
 
 - OpenAI Models: <https://developers.openai.com/api/docs/models>
+- OpenAI latest model guidance: <https://developers.openai.com/api/docs/guides/latest-model>
+- OpenAI Responses migration: <https://developers.openai.com/api/docs/guides/migrate-to-responses>
+- OpenAI Structured Outputs: <https://developers.openai.com/api/docs/guides/structured-outputs>
+- OpenAI Java SDK: <https://github.com/openai/openai-java>
+- Spring AI 1.1.8 release: <https://spring.io/blog/2026/06/12/spring-ai-1-1-8-1-0-9-avaialble-now/>
+- Spring AI 2.0 GA: <https://spring.io/blog/2026/06/12/spring-ai-2-0-0-GA-available-now/>
 - Spring AI Getting Started: <https://docs.spring.io/spring-ai/reference/getting-started.html>
 - Spring AI Upgrade Notes: <https://docs.spring.io/spring-ai/reference/upgrade-notes.html>
 - Spring AI Tool Calling: <https://docs.spring.io/spring-ai/reference/api/tools.html>

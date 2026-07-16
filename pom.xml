@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.5.9</version>
+        <version>3.5.15</version>
         <relativePath/>
     </parent>
 
@@ -45,7 +45,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- Build as a plain library JAR (no boot repackage) for starter consumption -->
         <spring-boot.repackage.skip>true</spring-boot.repackage.skip>
-        <spring-ai.version>1.1.1</spring-ai.version>
+        <spring-ai.version>1.1.8</spring-ai.version>
         <lombok.version>1.18.30</lombok.version>
         <praxis-rules-engine.version>0.1.0-beta.13</praxis-rules-engine.version>
         <swagger-annotations.version>2.2.28</swagger-annotations.version>
