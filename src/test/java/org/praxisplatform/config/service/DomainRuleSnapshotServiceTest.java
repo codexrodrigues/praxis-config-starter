@@ -531,7 +531,8 @@ class DomainRuleSnapshotServiceTest {
         .ruleSetVersion(1)
         .publicationRevision(1)
         .snapshotPayload(objectMapper.writeValueAsString(previousContract))
-        .contentHash("F".repeat(64))
+        .contentHash(org.praxisplatform.rules.digest.PraxisCanonicalJson.sha256(
+            objectMapper.valueToTree(previousContract)))
         .compositionManifest(null)
         .compositionDigest(null)
         .publishedBy("legacy-publisher")
@@ -561,6 +562,59 @@ class DomainRuleSnapshotServiceTest {
     assertThat(persisted.getValue().getSupersedesSnapshotId()).isEqualTo(previousId);
     assertThat(persisted.getValue().getCompositionManifest()).isNotBlank();
     assertThat(persisted.getValue().getCompositionDigest()).matches("[A-F0-9]{64}");
+  }
+
+  @Test
+  void governedPublicationCanSupersedeVerifiedManifestSnapshotFromOlderEngineBaseline() throws Exception {
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    UUID previousId = UUID.randomUUID();
+    UUID etag = UUID.randomUUID();
+    RuleSetDefinition current = ruleSet(1);
+    RuleSetDefinition olderDefinition = new RuleSetDefinition(
+        current.ref(), current.availableRoots(), current.slots(), current.bindings(),
+        new RuleRuntimeCompatibility(
+            "1.2",
+            RuleRuntimeCompatibility.JSON_LOGIC_DIALECT_VERSION,
+            RuleRuntimeCompatibility.JSON_LOGIC_CORPUS_SHA256),
+        current.failPolicy());
+    PublishedRuleSnapshot previousContract = publishedSnapshot(
+        "2026-07-13T20:00:00Z", null, olderDefinition);
+    DomainRuleSnapshot previous = DomainRuleSnapshot.builder()
+        .id(previousId)
+        .tenantId("tenant-a")
+        .environment("prod")
+        .snapshotKey(previousContract.snapshotKey())
+        .ruleSetKey("extraordinary-grant")
+        .ruleSetVersion(1)
+        .publicationRevision(1)
+        .snapshotPayload(objectMapper.writeValueAsString(previousContract))
+        .contentHash(org.praxisplatform.rules.digest.PraxisCanonicalJson.sha256(
+            objectMapper.valueToTree(previousContract)))
+        .compositionManifest(compositionManifestJson())
+        .compositionDigest(compositionDigest())
+        .publishedBy("prior-release-manager")
+        .publishedAt(Instant.parse("2026-07-13T20:00:00Z"))
+        .build();
+    DomainRuleSnapshotHead head = rollbackHead(previousId, etag);
+    head.setActivationRevision(1L);
+    when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(head));
+    when(definitionRepository.findAllById(List.of(firstId, secondId))).thenReturn(List.of(
+        approvedDefinition(firstId, "grant:eligibility", "approver-a"),
+        approvedDefinition(secondId, "grant:amount", "approver-b")));
+    when(snapshotRepository.findMaximumPublicationRevision(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(1);
+    when(snapshotRepository.findTopByTenantIdAndEnvironmentAndRuleSetKeyOrderByPublicationRevisionDesc(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(previous));
+
+    var response = service.publish(
+        publicationRequest(ruleSet(2), List.of(firstId, secondId)),
+        "tenant-a", "prod", "\"" + etag + "\"", null);
+
+    assertThat(response.snapshot().ruleSet().ref().version()).isEqualTo(2);
+    assertThat(response.snapshot().supersedesSnapshotKey()).isEqualTo(previousContract.snapshotKey());
+    verify(snapshotRepository).save(argThat(snapshot -> previousId.equals(snapshot.getSupersedesSnapshotId())));
   }
 
   @Test
@@ -815,6 +869,11 @@ class DomainRuleSnapshotServiceTest {
   }
 
   private PublishedRuleSnapshot publishedSnapshot(String validFromUtc, String validUntilUtc) {
+    return publishedSnapshot(validFromUtc, validUntilUtc, ruleSet());
+  }
+
+  private PublishedRuleSnapshot publishedSnapshot(
+      String validFromUtc, String validUntilUtc, RuleSetDefinition definition) {
     String hash = "B".repeat(64);
     return new PublishedRuleSnapshot(
         PublishedRuleSnapshot.SNAPSHOT_CONTRACT_VERSION,
@@ -836,7 +895,7 @@ class DomainRuleSnapshotServiceTest {
                 "2026-07-13T19:30:00Z", compositionDigest()),
             new RuleSnapshotApproval("composition-b", "RULE_COMPOSITION_APPROVER", "composition-b",
                 "2026-07-13T19:30:00Z", compositionDigest())),
-        ruleSet());
+        definition);
   }
 
   private String compositionManifestJson() {
