@@ -42,18 +42,30 @@ if (-not [string]::IsNullOrWhiteSpace($model)) {
 $body = $bodyObject | ConvertTo-Json -Compress -Depth 8
 
 $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
-$openApi = Invoke-RestMethod -Method Get -Uri "$base/v3/api-docs/procurement" -TimeoutSec 30
-$groundingResourcePaths = @(
-    "/api/procurement/suppliers",
-    "/api/procurement/purchase-orders"
+$groundingResources = @(
+    [pscustomobject]@{ group = "procurement"; path = "/api/procurement/suppliers" },
+    [pscustomobject]@{ group = "procurement"; path = "/api/procurement/purchase-orders" },
+    [pscustomobject]@{ group = "operations"; path = "/api/operations/incidentes" }
 )
 $httpMethods = @("get", "post", "put", "patch", "delete")
 $catalogEndpoints = @()
+$openApiByGroup = @{}
+$catalogVersion = "quickstart-e2e"
 
-foreach ($resourcePath in $groundingResourcePaths) {
+foreach ($resource in $groundingResources) {
+    $resourcePath = $resource.path
+    $group = $resource.group
+    if (-not $openApiByGroup.ContainsKey($group)) {
+        $groupOpenApi = Invoke-RestMethod -Method Get -Uri "$base/v3/api-docs/$group" -TimeoutSec 30
+        $openApiByGroup[$group] = $groupOpenApi
+        if ($catalogVersion -eq "quickstart-e2e" -and -not [string]::IsNullOrWhiteSpace([string] $groupOpenApi.info.version)) {
+            $catalogVersion = [string] $groupOpenApi.info.version
+        }
+    }
+    $openApi = $openApiByGroup[$group]
     $pathProperty = $openApi.paths.PSObject.Properties[$resourcePath]
     if ($null -eq $pathProperty) {
-        throw "Required Quickstart OpenAPI resource is missing: $resourcePath"
+        throw "Required Quickstart OpenAPI resource is missing from group '$group': $resourcePath"
     }
     foreach ($method in $httpMethods) {
         $operationProperty = $pathProperty.Value.PSObject.Properties[$method]
@@ -90,14 +102,14 @@ foreach ($resourcePath in $groundingResourcePaths) {
     }
 }
 
-if ($catalogEndpoints.Count -lt $groundingResourcePaths.Count) {
-    throw "Quickstart OpenAPI did not expose enough procurement operations for scoped API grounding."
+if ($catalogEndpoints.Count -lt $groundingResources.Count) {
+    throw "Quickstart OpenAPI did not expose enough operations for the scoped authoring corpus."
 }
 
 $catalogReleaseId = "v1"
 $catalogBody = @{
     releaseId = $catalogReleaseId
-    version = if ([string]::IsNullOrWhiteSpace([string] $openApi.info.version)) { "quickstart-e2e" } else { [string] $openApi.info.version }
+    version = $catalogVersion
     generatedAt = (Get-Date).ToUniversalTime().ToString("o")
     endpoints = $catalogEndpoints
 } | ConvertTo-Json -Compress -Depth 64
@@ -116,7 +128,7 @@ $apiCatalogGrounding = [pscustomobject]@{
     environment = $Environment
     releaseId = $catalogReleaseId
     endpointCount = $catalogEndpoints.Count
-    resourcePaths = $groundingResourcePaths
+    resourcePaths = @($groundingResources | ForEach-Object { $_.path })
     ingestStatus = $catalogIngest.StatusCode
 }
 
