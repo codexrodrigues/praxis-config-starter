@@ -318,8 +318,11 @@ public class AgenticAuthoringPlanService {
                 || !"form".equals(intent.artifactKind()))) {
             return false;
         }
+        if (intent != null && intent.selectedCandidate() != null) {
+            return false;
+        }
         String normalizedPrompt = normalizeForMatch(request.userPrompt());
-        return containsAny(normalizedPrompt, "chamado", "chamados", "solicitacao", "solicitacoes", "incidente", "incidentes", "ticket", "tickets")
+        return containsAny(normalizedPrompt, "chamado", "chamados", "solicitacao", "solicitacoes", "ticket", "tickets")
                 && containsAny(normalizedPrompt, "abrir", "abertura", "criar", "crie", "registrar", "registro", "formulario");
     }
 
