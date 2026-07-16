@@ -227,12 +227,13 @@ class AgenticAuthoringControllerTest {
                 List.of("minimal-form-plan-only"),
                 com.fasterxml.jackson.databind.node.MissingNode.getInstance()
         );
-        when(planService.generateMinimalFormPlan(request, "tenant", "user", "local")).thenReturn(expected);
+        when(previewService.generateMinimalFormPlan(request, "tenant", "user", "local", null)).thenReturn(expected);
 
         ResponseEntity<?> response = controller().generateMinimalFormPlan(request, "tenant", "user", "local");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).isSameAs(expected);
+        verify(previewService).generateMinimalFormPlan(request, "tenant", "user", "local", null);
     }
 
     @Test
