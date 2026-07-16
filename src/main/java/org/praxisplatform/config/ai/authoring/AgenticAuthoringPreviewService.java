@@ -575,7 +575,8 @@ public class AgenticAuthoringPreviewService {
             message = value(request.userPrompt());
         }
         if (!message.isBlank()) {
-            return AgenticAuthoringPresentationText.assistantReply(message);
+            return AgenticAuthoringPresentationText.assistantReply(
+                    message + " As demais configurações atuais serão preservadas.");
         }
         return deterministicPreviewAssistantMessage(request, intent, null, true, List.of());
     }

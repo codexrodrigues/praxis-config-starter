@@ -562,6 +562,37 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
     }
 
     @Test
+    void llmAuthoredCanonicalResourceFocusKeepsCollectionDashboardOnTheGovernedBusinessEntity() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ApiMetadata funcionarios = apiMetadata(
+                "/api/human-resources/funcionarios/filter/cursor",
+                "POST",
+                "human resources funcionarios empregados colaboradores",
+                "Funcionarios",
+                "Funcionarios com nome, email, cargo e departamento.");
+        Mockito.when(repository.findAll()).thenReturn(List.of(funcionarios));
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: human-resources.funcionarios. "
+                        + "supporting concepts: indicadores, filtros, lista detalhada. "
+                        + "desired surface: dashboard de colecao com visao geral e tabela. "
+                        + "semantic query: tela bonita para acompanhar funcionarios",
+                "dashboard");
+
+        assertThat(candidates).singleElement().satisfies(candidate -> {
+            assertThat(candidate.resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+            assertThat(candidate.submitUrl()).isEqualTo("/api/human-resources/funcionarios/filter/cursor");
+            assertThat(candidate.evidence())
+                    .contains("llm-resource-focus", "semantic-role:operational-resource");
+        });
+        Mockito.verify(repository).findAll();
+        Mockito.verifyNoInteractions(retrievalService);
+    }
+
+    @Test
     void llmAuthoredCanonicalResourceFocusFallsBackToCatalogScanWhenExactMetadataIsMissing() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of(

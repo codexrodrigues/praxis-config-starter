@@ -367,7 +367,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("unknown")
                 .doesNotContain("visualizationDecision");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(900);
-        assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(12);
+        assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(8);
         assertThat(result.changeKind()).isEqualTo("column.add");
         assertThat(result.warnings()).contains("llm-compact-targeted-component-intent-used");
         assertThat(result.providerInvocations())
@@ -427,14 +427,71 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .extracting(
                         org.praxisplatform.config.service.AiProviderInvocationTelemetry::phase,
                         org.praxisplatform.config.service.AiProviderInvocationTelemetry::status)
-                .containsExactly(org.assertj.core.groups.Tuple.tuple("targeted_component_intent", "failure"));
-        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("targeted_component_intent", "failure"),
+                        org.assertj.core.groups.Tuple.tuple("targeted_component_intent", "failure"));
+        Mockito.verify(providerManagementService, Mockito.times(2)).generateJson(
                 any(),
                 any(AiJsonSchema.class),
                 any(AiCallConfig.class),
                 eq("tenant"),
                 eq("user"),
                 eq("local"));
+    }
+
+    @Test
+    void targetedComponentIntentRetriesATransientFailureWithinTheCompactSemanticContract() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenThrow(AiProviderCallException.transport(
+                        "openai",
+                        new RuntimeException("connection reset")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "matchesSelectedComponentScope": true,
+                          "semanticIntentClass": "component_authoring",
+                          "operationKind": "modify",
+                          "artifactKind": "table",
+                          "changeKind": "column.add",
+                          "followUpKind": "refinement",
+                          "requiresGovernedAuthoring": false,
+                          "assistantMessage": "Vou formatar a coluna salário.",
+                          "clarificationQuestions": [],
+                          "warnings": []
+                        }
+                        """));
+        AgenticAuthoringIntentResolutionRequest request = targetedTableRefinementRequest();
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        request,
+                        request.userPrompt(),
+                        objectMapper.createObjectNode(),
+                        targetedTableTarget(),
+                        List.of(),
+                        new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(result.resolved()).isTrue();
+        assertThat(result.changeKind()).isEqualTo("column.add");
+        assertThat(result.providerInvocations())
+                .extracting(
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::phase,
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::attempt,
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::status)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("targeted_component_intent", 1, "failure"),
+                        org.assertj.core.groups.Tuple.tuple("targeted_component_intent", 2, "success"));
     }
 
     @Test

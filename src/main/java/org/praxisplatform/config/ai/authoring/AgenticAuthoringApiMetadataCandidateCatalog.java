@@ -237,10 +237,12 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     }
 
     private List<AgenticAuthoringCandidate> discoverLlmAuthoredResourceFocusCandidates(RetrievalContext context) {
+        SemanticResourceNeed resourceNeed = semanticResourceNeed(
+                context.normalizedPrompt(),
+                context.artifactKind());
         if (repository == null
                 || "api_catalog".equals(context.artifactKind())
-                || semanticResourceNeed(context.normalizedPrompt(), context.artifactKind())
-                != SemanticResourceNeed.GENERIC_OPERATIONAL) {
+                || resourceNeed == SemanticResourceNeed.PROFILE) {
             return List.of();
         }
         String resourceFocus = canonicalLlmResourceFocus(context.normalizedPrompt());

@@ -135,6 +135,42 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
     }
 
     @Test
+    void synthesizeDescribesGovernedFormWhenMaterializationUsesCompiledFormPatch() {
+        AgenticAuthoringIntentResolutionResult intent = governedPreIntentIntent("form");
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Monte um formulário de funcionários.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent);
+
+        AgenticAuthoringPreviewMessageResult result = service().synthesizeWithTelemetry(
+                request,
+                intent,
+                null,
+                true,
+                List.of(),
+                List.of("minimal-form-plan-materialized-from-schemas-filtered"),
+                "fallback sem tipo de artefato",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result.message())
+                .contains("pré-visualização governada")
+                .contains("Materialização: formulário")
+                .contains("Fonte governada: Resumo missoes");
+        assertThat(result.providerInvocations()).isEmpty();
+        org.mockito.Mockito.verify(providerManagementService, org.mockito.Mockito.never()).generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                any(String.class),
+                any(String.class),
+                any(String.class));
+    }
+
+    @Test
     void synthesizeUsesGovernedEvidenceSummaryAsPublicResourceLabel() {
         String result = service().synthesize(
                 governedPreIntentRequest(),
@@ -721,10 +757,14 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
     }
 
     private AgenticAuthoringIntentResolutionResult governedPreIntentIntent() {
+        return governedPreIntentIntent("dashboard");
+    }
+
+    private AgenticAuthoringIntentResolutionResult governedPreIntentIntent(String artifactKind) {
         return new AgenticAuthoringIntentResolutionResult(
                 true,
                 "create",
-                "dashboard",
+                artifactKind,
                 "create_artifact",
                 "generic-page-change",
                 "praxis-ui-angular",

@@ -135,7 +135,8 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
         assertThat(inputs.path("tableId").asText()).isEqualTo("funcionarios-table");
         assertThat(inputs.at("/config/columns/0/order").asInt()).isZero();
         assertThat(result.warnings()).contains("component-edit-plan-config-input-bound:config");
-        assertThat(result.assistantMessage()).contains("coluna salário", "início");
+        assertThat(result.assistantMessage())
+                .contains("coluna salário", "início", "demais configurações atuais serão preservadas");
         verify(planService, never()).generateMinimalFormPlan(any(), any(), any(), any());
     }
 

@@ -34,6 +34,8 @@ public class AgenticAuthoringLlmIntentResolverService {
     private static final int MAX_ASSISTANT_MESSAGE_CHARS = 700;
     private static final int MAX_PLATFORM_GUIDANCE_CONFIRMATION_TOKENS = 700;
     private static final int MAX_TARGETED_COMPONENT_INTENT_TOKENS = 900;
+    private static final int MAX_TARGETED_COMPONENT_INTENT_ATTEMPTS = 2;
+    private static final int MAX_TARGETED_COMPONENT_ATTEMPT_TIMEOUT_SECONDS = 8;
     private static final int MAX_FAST_INTENT_RESOLUTION_TOKENS = 1800;
     private static final int MAX_INTENT_RESOLUTION_TOKENS = 4096;
     private static final int DEFAULT_FAST_INTENT_TIMEOUT_SECONDS = 12;
@@ -525,18 +527,11 @@ public class AgenticAuthoringLlmIntentResolverService {
             return Optional.empty();
         }
         try {
-            JsonNode result = invokeJson(
-                    "targeted_component_intent",
-                    compactTargetedComponentIntentPrompt(request, effectivePrompt, target, capabilities),
-                    AiJsonSchema.ofSchema(compactTargetedComponentIntentSchema(capabilities)),
-                    AiCallConfig.builder()
-                            .provider(request.provider())
-                            .model(request.model())
-                            .apiKey(request.apiKey())
-                            .temperature(0.0d)
-                            .maxTokens(MAX_TARGETED_COMPONENT_INTENT_TOKENS)
-                            .timeoutSeconds(fastIntentTimeoutSeconds)
-                            .build(),
+            JsonNode result = invokeTargetedComponentIntent(
+                    request,
+                    effectivePrompt,
+                    target,
+                    capabilities,
                     tenantId,
                     userId,
                     environment,
@@ -549,6 +544,63 @@ public class AgenticAuthoringLlmIntentResolverService {
                     safeProviderFailureSummary(rootCause(ex)));
             return Optional.of(failedResolution(ex, request));
         }
+    }
+
+    private JsonNode invokeTargetedComponentIntent(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            AgenticAuthoringTarget target,
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> capabilities,
+            String tenantId,
+            String userId,
+            String environment,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+        RuntimeException lastFailure = null;
+        int attemptTimeoutSeconds = Math.max(
+                1,
+                Math.min(fastIntentTimeoutSeconds, MAX_TARGETED_COMPONENT_ATTEMPT_TIMEOUT_SECONDS));
+        for (int attempt = 1; attempt <= MAX_TARGETED_COMPONENT_INTENT_ATTEMPTS; attempt++) {
+            try {
+                return invokeJson(
+                        "targeted_component_intent",
+                        compactTargetedComponentIntentPrompt(request, effectivePrompt, target, capabilities),
+                        AiJsonSchema.ofSchema(compactTargetedComponentIntentSchema(capabilities)),
+                        AiCallConfig.builder()
+                                .provider(request.provider())
+                                .model(request.model())
+                                .apiKey(request.apiKey())
+                                .temperature(0.0d)
+                                .maxTokens(MAX_TARGETED_COMPONENT_INTENT_TOKENS)
+                                .timeoutSeconds(attemptTimeoutSeconds)
+                                .build(),
+                        tenantId,
+                        userId,
+                        environment,
+                        providerInvocations);
+            } catch (RuntimeException ex) {
+                lastFailure = ex;
+                String failureKind = providerFailureKind(rootCause(ex));
+                if (attempt >= MAX_TARGETED_COMPONENT_INTENT_ATTEMPTS
+                        || !isRetryableTargetedComponentFailure(failureKind)) {
+                    throw ex;
+                }
+                log.debug(
+                        "[AgenticAuthoringLlmIntentResolver] Retrying compact targeted component intent after transient failure; attempt={}/{} kind={}",
+                        attempt,
+                        MAX_TARGETED_COMPONENT_INTENT_ATTEMPTS,
+                        failureKind);
+            }
+        }
+        throw lastFailure == null
+                ? new IllegalStateException("Targeted component intent resolution produced no result")
+                : lastFailure;
+    }
+
+    private boolean isRetryableTargetedComponentFailure(String failureKind) {
+        return switch (failureKind == null ? "" : failureKind) {
+            case "timeout", "transport-error", "rate-limit", "capacity", "server-error", "unknown-error" -> true;
+            default -> false;
+        };
     }
 
     private boolean shouldTryCompactTargetedComponentIntent(

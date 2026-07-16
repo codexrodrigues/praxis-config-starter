@@ -27,6 +27,9 @@ import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -1224,6 +1227,88 @@ class AgenticAuthoringTurnStreamServiceTest {
         org.mockito.Mockito.verify(turnEventService, org.mockito.Mockito.timeout(2500).atLeastOnce())
                 .findLastEvent(streamId);
         service.shutdown();
+    }
+
+    @Test
+    void connectMakesReplaySnapshotAndLiveEmitterRegistrationAtomicWithAppends() throws Exception {
+        UUID streamId = UUID.randomUUID();
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AiTurnEventService.StreamOwnership ownership = new AiTurnEventService.StreamOwnership(
+                streamId,
+                threadId,
+                turnId,
+                "tenant",
+                "user",
+                "local",
+                Instant.now().plusSeconds(60));
+        CountDownLatch replayStarted = new CountDownLatch(1);
+        CountDownLatch releaseReplay = new CountDownLatch(1);
+        when(turnEventService.replay(streamId, null, principalContext)).thenAnswer(invocation -> {
+            replayStarted.countDown();
+            releaseReplay.await(5, TimeUnit.SECONDS);
+            return new AiTurnEventService.ReplayResult(ownership, List.of(), 0);
+        });
+        when(turnEventService.findLastEvent(streamId)).thenReturn(Optional.empty());
+        when(turnEventService.isTerminalType(anyString())).thenReturn(false);
+        when(turnEventService.appendEvent(
+                        eq(principalContext),
+                        eq(streamId),
+                        eq(threadId),
+                        eq(turnId),
+                        eq("thought.step"),
+                        any()))
+                .thenReturn(AiTurnEventEnvelope.builder()
+                        .eventId(UUID.randomUUID())
+                        .streamId(streamId)
+                        .threadId(threadId)
+                        .turnId(turnId)
+                        .seq(2L)
+                        .type("thought.step")
+                        .payload(objectMapper.createObjectNode().put("phase", "tool.plan.skipped"))
+                        .build());
+
+        AgenticAuthoringTurnStreamService service = service();
+        ReflectionTestUtils.setField(service, "processingPollSeconds", 60L);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> connection = executor.submit(() -> service.connect(streamId, null, principalContext));
+            org.assertj.core.api.Assertions.assertThat(replayStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            Future<?> append = executor.submit(() -> ReflectionTestUtils.invokeMethod(
+                    service,
+                    "appendAndEmit",
+                    principalContext,
+                    streamId,
+                    threadId,
+                    turnId,
+                    "thought.step",
+                    Map.of("phase", "tool.plan.skipped")));
+
+            Thread.sleep(150L);
+            verify(turnEventService, never()).appendEvent(
+                    eq(principalContext),
+                    eq(streamId),
+                    eq(threadId),
+                    eq(turnId),
+                    eq("thought.step"),
+                    any());
+
+            releaseReplay.countDown();
+            connection.get(2, TimeUnit.SECONDS);
+            append.get(2, TimeUnit.SECONDS);
+            verify(turnEventService).appendEvent(
+                    eq(principalContext),
+                    eq(streamId),
+                    eq(threadId),
+                    eq(turnId),
+                    eq("thought.step"),
+                    any());
+        } finally {
+            releaseReplay.countDown();
+            executor.shutdownNow();
+            service.shutdown();
+        }
     }
 
     @Test

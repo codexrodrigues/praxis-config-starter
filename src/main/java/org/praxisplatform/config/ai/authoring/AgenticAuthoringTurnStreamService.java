@@ -408,7 +408,15 @@ public class AgenticAuthoringTurnStreamService {
                 request.runtimeComponentObservationTrustBoundary());
     }
 
-    public SseEmitter connect(UUID streamId, String lastEventId, AiPrincipalContext principalContext) {
+    /**
+     * Serializes replay registration with live appends. Without the shared monitor used by
+     * {@link #appendAndEmit}, an event committed after the replay snapshot but before emitter
+     * registration could be absent from both replay and the live stream.
+     */
+    public synchronized SseEmitter connect(
+            UUID streamId,
+            String lastEventId,
+            AiPrincipalContext principalContext) {
         AiTurnEventService.ReplayResult replay = turnEventService.replay(streamId, lastEventId, principalContext);
         SseEmitter emitter = new SseEmitter(Math.max(10_000L, emitterTimeoutMs));
         Set<SseEmitter> emitters = emittersByStream.computeIfAbsent(streamId, ignored -> ConcurrentHashMap.newKeySet());

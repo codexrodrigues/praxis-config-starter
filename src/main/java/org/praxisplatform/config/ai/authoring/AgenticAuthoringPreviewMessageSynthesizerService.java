@@ -480,9 +480,6 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         if (!valid
                 || intentResolution == null
                 || intentResolution.selectedCandidate() == null
-                || uiCompositionPlan == null
-                || uiCompositionPlan.isMissingNode()
-                || uiCompositionPlan.isNull()
                 || isLocalEditorialComposition(request, intentResolution, warnings)
                 || (failureCodes != null && !failureCodes.isEmpty())
                 || !hasGovernedResolvedCandidate(intentResolution)) {
@@ -490,6 +487,9 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         }
         String sourceLabel = selectedResourceLabel(intentResolution);
         String componentSummary = materializedComponentSummary(uiCompositionPlan);
+        if (componentSummary.isBlank()) {
+            componentSummary = userFacingArtifactKind(intentResolution.artifactKind());
+        }
         if (sourceLabel.isBlank() || componentSummary.isBlank()) {
             return "";
         }
@@ -539,6 +539,17 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
             }
         }
         return humanJoin(componentKinds);
+    }
+
+    private String userFacingArtifactKind(String artifactKind) {
+        return switch (value(artifactKind).toLowerCase(Locale.ROOT)) {
+            case "form" -> "formulário";
+            case "table" -> "tabela";
+            case "chart" -> "gráfico";
+            case "dashboard" -> "dashboard";
+            case "page" -> "página";
+            default -> "";
+        };
     }
 
     private String authoringGoal(
