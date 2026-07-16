@@ -536,7 +536,7 @@ $manualSelectedExistingPublication = Invoke-JsonRequest `
         ruleDefinitionId = $activeDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "procurement-owner"
+        publishedBy = $reviewerUserId
         publicationNotes = @{
             smoke = "domain-rule-selected-existing-diagnostics"
         }
@@ -598,7 +598,7 @@ $terminalPublishBlocked = Invoke-ExpectedFailure `
         materializationIds = @($failedMaterialization.id)
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "procurement-owner"
+        publishedBy = $reviewerUserId
         publicationNotes = @{
             smoke = "domain-rule-lifecycle"
         }
@@ -635,7 +635,7 @@ $blockedPublication = Invoke-JsonRequest `
         ruleDefinitionId = $reviewRequiredDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "procurement-owner"
+        publishedBy = $reviewerUserId
         publicationNotes = @{
             smoke = "domain-rule-blocked-diagnostics"
         }
@@ -750,7 +750,7 @@ $inactivePublication = Invoke-JsonRequest `
         ruleDefinitionId = $inactiveDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "procurement-owner"
+        publishedBy = $reviewerUserId
         publicationNotes = @{
             smoke = "domain-rule-semantic-source-hash"
         }
@@ -764,7 +764,7 @@ $suspendedPublication = Invoke-JsonRequest `
         ruleDefinitionId = $suspendedDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "procurement-owner"
+        publishedBy = $reviewerUserId
         publicationNotes = @{
             smoke = "domain-rule-semantic-source-hash"
         }
@@ -828,7 +828,7 @@ $inactiveRepublish = Invoke-JsonRequest `
         ruleDefinitionId = $inactiveDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = "procurement-owner"
+        publishedBy = $reviewerUserId
         publicationNotes = @{
             smoke = "domain-rule-publication-diagnostics"
         }
