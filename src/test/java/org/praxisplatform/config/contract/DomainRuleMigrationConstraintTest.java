@@ -120,4 +120,17 @@ class DomainRuleMigrationConstraintTest {
         assertThat(baseline).contains("CREATE TABLE IF NOT EXISTS domain_rule_composition_approval");
         assertThat(baseline).contains("uq_domain_rule_composition_approval_actor");
     }
+
+    @Test
+    void definitionMakerCheckerBindsApprovalToExactContentAndRejectsMutation() throws IOException {
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/V36__persist_rule_definition_approvals.sql"));
+        assertThat(migration).contains("CREATE TABLE domain_rule_definition_approval");
+        assertThat(migration).contains("'authenticated'");
+        assertThat(migration).contains(
+                "definition_id UUID NOT NULL REFERENCES domain_rule_definition(id) ON DELETE RESTRICT");
+        assertThat(migration).contains("definition_hash VARCHAR(64) NOT NULL");
+        assertThat(migration).contains("CHECK (role = 'RULE_DEFINITION_APPROVER')");
+        assertThat(migration).contains("BEFORE UPDATE OR DELETE");
+    }
 }

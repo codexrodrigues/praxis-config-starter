@@ -19,9 +19,6 @@ public record DomainRuleDefinitionRequest(
         JsonNode parameters,
         JsonNode condition,
         JsonNode governance,
-        JsonNode validationResult,
-        String createdByType,
-        String createdBy,
-        String approvedBy
+        JsonNode validationResult
 ) {
 }

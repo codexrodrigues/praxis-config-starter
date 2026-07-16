@@ -1,10 +1,12 @@
 package org.praxisplatform.config.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
+import org.praxisplatform.config.dto.DomainRuleDefinitionStatusTransitionRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
@@ -18,6 +20,8 @@ import org.praxisplatform.config.dto.DomainRuleTimelineResponse;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
 import org.praxisplatform.config.service.DomainRuleService;
+import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
+import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,21 +44,28 @@ import org.springframework.web.bind.annotation.RestController;
 public class DomainRuleController {
 
     private final DomainRuleService domainRuleService;
+    private final DomainRuleGovernancePrincipalResolver principalResolver;
 
     @PostMapping("/intake")
     public ResponseEntity<DomainRuleIntakeResponse> intake(
             @RequestBody DomainRuleIntakeRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-Env", required = false) String environment) {
-        return ResponseEntity.accepted().body(domainRuleService.intake(request, tenantId, environment));
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, "RULE_DEFINITION_AUTHOR");
+        return ResponseEntity.accepted().body(domainRuleService.intake(request, principal));
     }
 
     @PostMapping("/definitions")
     public ResponseEntity<DomainRuleDefinitionResponse> createDefinition(
             @RequestBody DomainRuleDefinitionRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-Env", required = false) String environment) {
-        return ResponseEntity.accepted().body(domainRuleService.createDefinition(request, tenantId, environment));
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, "RULE_DEFINITION_AUTHOR");
+        return ResponseEntity.accepted().body(domainRuleService.createDefinition(request, principal));
     }
 
     @GetMapping("/definitions")
@@ -77,14 +88,19 @@ public class DomainRuleController {
     @PatchMapping("/definitions/{definitionId}/status")
     public ResponseEntity<DomainRuleDefinitionResponse> transitionDefinitionStatus(
             @PathVariable UUID definitionId,
-            @RequestBody DomainRuleStatusTransitionRequest request,
+            @RequestBody DomainRuleDefinitionStatusTransitionRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-Env", required = false) String environment) {
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        String requiredRole = isAuthorTransition(request)
+                ? "RULE_DEFINITION_AUTHOR"
+                : "RULE_DEFINITION_APPROVER";
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, requiredRole);
         return ResponseEntity.ok(domainRuleService.transitionDefinitionStatus(
                 definitionId,
                 request,
-                tenantId,
-                environment));
+                principal));
     }
 
     @GetMapping("/definitions/{definitionId}/timeline")
@@ -149,5 +165,10 @@ public class DomainRuleController {
                 request,
                 tenantId,
                 environment));
+    }
+
+    private boolean isAuthorTransition(DomainRuleDefinitionStatusTransitionRequest request) {
+        return request != null
+                && ("draft".equals(request.status()) || "proposed".equals(request.status()));
     }
 }

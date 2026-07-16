@@ -1104,7 +1104,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DomainRuleStatusTransitionRequest'
+              $ref: '#/components/schemas/DomainRuleDefinitionStatusTransitionRequest'
       responses:
         '200':
           description: Definicao atualizada
@@ -4014,14 +4014,6 @@ components:
           $ref: '#/components/schemas/DomainRuleJsonObject'
         validationResult:
           $ref: '#/components/schemas/DomainRuleJsonObject'
-        createdByType:
-          $ref: '#/components/schemas/DomainRuleActorType'
-        createdBy:
-          type: string
-          nullable: true
-        approvedBy:
-          type: string
-          nullable: true
       additionalProperties: false
 
     DomainRuleDefinitionResponse:
@@ -4036,6 +4028,17 @@ components:
               type: string
             environment:
               type: string
+            createdByType:
+              type: string
+              description: Classe de identidade registrada pelo servidor; mutacoes governadas usam `authenticated`.
+            createdBy:
+              type: string
+              nullable: true
+              description: Referencia do autor obtida do principal autenticado, nunca do payload.
+            approvedBy:
+              type: string
+              nullable: true
+              description: Referencia resumida do aprovador autenticado; a evidencia autoritativa fica vinculada ao hash exato da definicao.
             createdAt:
               type: string
               format: date-time
@@ -4448,11 +4451,6 @@ components:
           $ref: '#/components/schemas/DomainRuleJsonObject'
         governance:
           $ref: '#/components/schemas/DomainRuleJsonObject'
-        createdByType:
-          $ref: '#/components/schemas/DomainRuleActorType'
-        createdBy:
-          type: string
-          nullable: true
       additionalProperties: false
 
     DomainRuleIntakeResponse:
@@ -4719,6 +4717,7 @@ components:
 
     DomainRuleStatusTransitionRequest:
       type: object
+      description: Transicao de materializacao; a identidade operacional ainda pertence ao fluxo especifico de materializacao.
       properties:
         status:
           type: string
@@ -4728,6 +4727,16 @@ components:
         decidedBy:
           type: string
           nullable: true
+        validationResult:
+          $ref: '#/components/schemas/DomainRuleJsonObject'
+      additionalProperties: false
+
+    DomainRuleDefinitionStatusTransitionRequest:
+      type: object
+      description: Decisao de ciclo de vida da definicao. A identidade e o escopo sao resolvidos pelo servidor e nao podem ser declarados no payload.
+      properties:
+        status:
+          $ref: '#/components/schemas/DomainRuleDefinitionStatus'
         validationResult:
           $ref: '#/components/schemas/DomainRuleJsonObject'
       additionalProperties: false

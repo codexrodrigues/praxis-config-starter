@@ -3,11 +3,13 @@ package org.praxisplatform.config.autoconfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.praxisplatform.config.controller.DomainRuleSnapshotController;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.praxisplatform.config.repository.DomainRuleDefinitionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleCompositionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
 import org.praxisplatform.config.service.DomainRuleSnapshotService;
+import org.praxisplatform.config.service.DomainRuleDefinitionFingerprint;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleImplementationCatalog;
@@ -21,6 +23,7 @@ import org.springframework.beans.factory.annotation.Value;
 @AutoConfiguration
 @ConditionalOnBean({
   DomainRuleDefinitionRepository.class,
+  DomainRuleDefinitionApprovalRepository.class,
   DomainRuleCompositionApprovalRepository.class,
   DomainRuleSnapshotRepository.class,
   DomainRuleSnapshotHeadRepository.class,
@@ -35,13 +38,21 @@ public class DomainRuleSnapshotAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  DomainRuleDefinitionFingerprint domainRuleDefinitionFingerprint(ObjectMapper objectMapper) {
+    return new DomainRuleDefinitionFingerprint(objectMapper);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   DomainRuleSnapshotService domainRuleSnapshotService(
       DomainRuleDefinitionRepository definitionRepository,
+      DomainRuleDefinitionApprovalRepository definitionApprovalRepository,
       DomainRuleCompositionApprovalRepository compositionApprovalRepository,
       DomainRuleSnapshotRepository snapshotRepository,
       DomainRuleSnapshotHeadRepository headRepository,
       DomainRuleSnapshotEventRepository eventRepository,
       ObjectMapper objectMapper,
+      DomainRuleDefinitionFingerprint definitionFingerprint,
       DomainRuleImplementationCatalog implementationCatalog) {
     return new DomainRuleSnapshotService(
         definitionRepository,
@@ -49,6 +60,8 @@ public class DomainRuleSnapshotAutoConfiguration {
         headRepository,
         eventRepository,
         compositionApprovalRepository,
+        definitionApprovalRepository,
+        definitionFingerprint,
         objectMapper,
         implementationCatalog);
   }

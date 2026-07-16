@@ -357,7 +357,9 @@ not create a generic approval inbox, BPM engine or UI-local approval rule.
    policy heuristics locally. Publication is not an approval shortcut: governed
    definitions must be created as `draft` or `proposed`, declare
    `governance.requiredApprovals`, transition to `approved` or `active` through
-   an authorized `human` or `system` actor, and only then reach publication. For
+   a server-authenticated `RULE_DEFINITION_APPROVER` different from the author,
+   and only then reach publication. The approval is append-only and bound to the
+   exact canonical definition hash. For
    `selection_eligibility`, this step can
    already derive canonical `option_source` and `backend_validation`
    materialization payloads: the lookup projection explains and disables
@@ -465,13 +467,12 @@ and `revert_evidence` are executable. Planned concept, alias, binding and
 relationship operations remain non-executable until a canonical applier and
 lifecycle/indexing proof exist, and they are rejected before approval.
 
-Status transition endpoints accept a compact governance decision payload:
+Definition status transitions accept a compact decision payload. Actor and
+scope are resolved from server authentication:
 
 ```json
 {
   "status": "active",
-  "decidedByType": "human",
-  "decidedBy": "privacy-office",
   "validationResult": {
     "review": "approved"
   }
@@ -484,11 +485,14 @@ or transitioning to `applied` sets `applied_at` when missing and is only valid
 when the linked definition is already `active`. These endpoints are for
 lifecycle governance; they still do not execute rules.
 
-Governed rule definitions require `governance.requiredApprovals`. Approval,
-activation and publication fail closed unless the actor type is `human` or
-`system` and the actor appears in `requiredApprovals` or
-`governance.authorizedApprovers`. LLM-authored definitions may propose governed
-decisions, but cannot approve, activate or publish them.
+Governed rule definitions require `governance.requiredApprovals`. Creation and
+intake resolve the author from server authentication and require
+`RULE_DEFINITION_AUTHOR`; caller-declared `createdBy` and `approvedBy` are not
+part of the request contract. Approval and activation require
+`RULE_DEFINITION_APPROVER`, reject self-approval and also require the resolved
+actor in `requiredApprovals` or `governance.authorizedApprovers`. Snapshot
+publication accepts only append-only approval evidence whose stored hash equals
+the definition's current canonical hash.
 
 Definition status transitions are deliberately directional:
 

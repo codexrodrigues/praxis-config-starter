@@ -5,12 +5,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
+import org.praxisplatform.config.dto.DomainRuleDefinitionStatusTransitionRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
@@ -22,14 +24,19 @@ import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
 import org.praxisplatform.config.dto.DomainRuleTimelineResponse;
 import org.praxisplatform.config.service.DomainRuleService;
+import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
+import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 
 @Tag("unit")
 class DomainRuleControllerTest {
 
+    private static final DomainRuleGovernancePrincipal PRINCIPAL =
+            new DomainRuleGovernancePrincipal("tenant-a", "agent", "dev");
+
     @Test
     void intakeCreatesDraftDefinitionWithTenantAndEnvironmentHeaders() {
         DomainRuleService service = mock(DomainRuleService.class);
-        DomainRuleController controller = new DomainRuleController(service);
+        DomainRuleController controller = controller(service);
         DomainRuleIntakeRequest request = new DomainRuleIntakeRequest(
                 "Impedir seleção de fornecedores bloqueados em pedidos de compra.",
                 "Esse pedido deve seguir pela trilha governada de regra compartilhada.",
@@ -41,9 +48,7 @@ class DomainRuleControllerTest {
                 null,
                 null,
                 null,
-                null,
-                "llm",
-                "agent");
+                null);
         DomainRuleDefinitionResponse definition = new DomainRuleDefinitionResponse(
                 UUID.randomUUID(),
                 "tenant-a",
@@ -84,18 +89,18 @@ class DomainRuleControllerTest {
                 null,
                 definition,
                 java.time.Instant.now());
-        when(service.intake(request, "tenant-a", "dev")).thenReturn(response);
+        when(service.intake(request, PRINCIPAL)).thenReturn(response);
 
-        var entity = controller.intake(request, "tenant-a", "dev");
+        var entity = controller.intake(request, "tenant-a", "dev", servletRequest());
 
         assertThat(entity.getBody()).isSameAs(response);
-        verify(service).intake(request, "tenant-a", "dev");
+        verify(service).intake(request, PRINCIPAL);
     }
 
     @Test
     void createsDefinitionWithTenantAndEnvironmentHeaders() {
         DomainRuleService service = mock(DomainRuleService.class);
-        DomainRuleController controller = new DomainRuleController(service);
+        DomainRuleController controller = controller(service);
         DomainRuleDefinitionRequest request = new DomainRuleDefinitionRequest(
                 "rule-a",
                 null,
@@ -112,9 +117,6 @@ class DomainRuleControllerTest {
                 null,
                 null,
                 null,
-                null,
-                "llm",
-                "agent",
                 null);
         DomainRuleDefinitionResponse response = new DomainRuleDefinitionResponse(
                 UUID.randomUUID(),
@@ -143,18 +145,18 @@ class DomainRuleControllerTest {
                 null,
                 null,
                 null);
-        when(service.createDefinition(request, "tenant-a", "dev")).thenReturn(response);
+        when(service.createDefinition(request, PRINCIPAL)).thenReturn(response);
 
-        var entity = controller.createDefinition(request, "tenant-a", "dev");
+        var entity = controller.createDefinition(request, "tenant-a", "dev", servletRequest());
 
         assertThat(entity.getBody()).isSameAs(response);
-        verify(service).createDefinition(request, "tenant-a", "dev");
+        verify(service).createDefinition(request, PRINCIPAL);
     }
 
     @Test
     void listsMaterializationsByTargetArtifact() {
         DomainRuleService service = mock(DomainRuleService.class);
-        DomainRuleController controller = new DomainRuleController(service);
+        DomainRuleController controller = controller(service);
         UUID definitionId = UUID.randomUUID();
         DomainRuleMaterializationResponse response = new DomainRuleMaterializationResponse(
                 UUID.randomUUID(),
@@ -213,7 +215,7 @@ class DomainRuleControllerTest {
     @Test
     void returnsDefinitionTimelineWithTenantAndEnvironmentHeaders() {
         DomainRuleService service = mock(DomainRuleService.class);
-        DomainRuleController controller = new DomainRuleController(service);
+        DomainRuleController controller = controller(service);
         UUID definitionId = UUID.randomUUID();
         DomainRuleTimelineResponse response = new DomainRuleTimelineResponse(
                 definitionId,
@@ -236,7 +238,7 @@ class DomainRuleControllerTest {
     @Test
     void createsMaterializationWithTenantAndEnvironmentHeaders() {
         DomainRuleService service = mock(DomainRuleService.class);
-        DomainRuleController controller = new DomainRuleController(service);
+        DomainRuleController controller = controller(service);
         UUID definitionId = UUID.randomUUID();
         DomainRuleMaterializationRequest request = new DomainRuleMaterializationRequest(
                 definitionId,
@@ -288,12 +290,10 @@ class DomainRuleControllerTest {
     @Test
     void transitionsDefinitionStatusWithTenantAndEnvironmentHeaders() {
         DomainRuleService service = mock(DomainRuleService.class);
-        DomainRuleController controller = new DomainRuleController(service);
+        DomainRuleController controller = controller(service);
         UUID definitionId = UUID.randomUUID();
-        DomainRuleStatusTransitionRequest request = new DomainRuleStatusTransitionRequest(
+        DomainRuleDefinitionStatusTransitionRequest request = new DomainRuleDefinitionStatusTransitionRequest(
                 "active",
-                "human",
-                "privacy-office",
                 null);
         DomainRuleDefinitionResponse response = new DomainRuleDefinitionResponse(
                 definitionId,
@@ -322,18 +322,19 @@ class DomainRuleControllerTest {
                 null,
                 null,
                 null);
-        when(service.transitionDefinitionStatus(definitionId, request, "tenant-a", "dev")).thenReturn(response);
+        when(service.transitionDefinitionStatus(definitionId, request, PRINCIPAL)).thenReturn(response);
 
-        var entity = controller.transitionDefinitionStatus(definitionId, request, "tenant-a", "dev");
+        var entity = controller.transitionDefinitionStatus(
+                definitionId, request, "tenant-a", "dev", servletRequest());
 
         assertThat(entity.getBody()).isSameAs(response);
-        verify(service).transitionDefinitionStatus(definitionId, request, "tenant-a", "dev");
+        verify(service).transitionDefinitionStatus(definitionId, request, PRINCIPAL);
     }
 
     @Test
     void simulatesRuleWithTenantAndEnvironmentHeaders() {
         DomainRuleService service = mock(DomainRuleService.class);
-        DomainRuleController controller = new DomainRuleController(service);
+        DomainRuleController controller = controller(service);
         DomainRuleSimulationRequest request = new DomainRuleSimulationRequest(
                 null,
                 "procurement.suppliers.rule.selection-eligibility",
@@ -375,7 +376,7 @@ class DomainRuleControllerTest {
     @Test
     void publishesRuleWithTenantAndEnvironmentHeaders() {
         DomainRuleService service = mock(DomainRuleService.class);
-        DomainRuleController controller = new DomainRuleController(service);
+        DomainRuleController controller = controller(service);
         UUID definitionId = UUID.randomUUID();
         DomainRulePublicationRequest request = new DomainRulePublicationRequest(
                 definitionId,
@@ -411,7 +412,7 @@ class DomainRuleControllerTest {
     @Test
     void transitionsMaterializationStatusWithTenantAndEnvironmentHeaders() {
         DomainRuleService service = mock(DomainRuleService.class);
-        DomainRuleController controller = new DomainRuleController(service);
+        DomainRuleController controller = controller(service);
         UUID definitionId = UUID.randomUUID();
         UUID materializationId = UUID.randomUUID();
         DomainRuleStatusTransitionRequest request = new DomainRuleStatusTransitionRequest(
@@ -450,5 +451,19 @@ class DomainRuleControllerTest {
 
         assertThat(entity.getBody()).isSameAs(response);
         verify(service).transitionMaterializationStatus(materializationId, request, "tenant-a", "dev");
+    }
+
+    private DomainRuleController controller(DomainRuleService service) {
+        DomainRuleGovernancePrincipalResolver resolver = mock(DomainRuleGovernancePrincipalResolver.class);
+        when(resolver.resolve(
+                org.mockito.ArgumentMatchers.any(HttpServletRequest.class),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString())).thenReturn(PRINCIPAL);
+        return new DomainRuleController(service, resolver);
+    }
+
+    private HttpServletRequest servletRequest() {
+        return mock(HttpServletRequest.class);
     }
 }

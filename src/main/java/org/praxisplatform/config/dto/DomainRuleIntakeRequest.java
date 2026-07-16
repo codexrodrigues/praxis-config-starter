@@ -13,8 +13,6 @@ public record DomainRuleIntakeRequest(
         JsonNode definition,
         JsonNode parameters,
         JsonNode condition,
-        JsonNode governance,
-        String createdByType,
-        String createdBy
+        JsonNode governance
 ) {
 }

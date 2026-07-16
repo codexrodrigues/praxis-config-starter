@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.controller.DomainRuleSnapshotController;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.praxisplatform.config.repository.DomainRuleDefinitionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleCompositionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
@@ -27,6 +28,8 @@ class DomainRuleSnapshotAutoConfigurationTest {
       .withConfiguration(AutoConfigurations.of(DomainRuleSnapshotAutoConfiguration.class))
       .withBean(ObjectMapper.class, ObjectMapper::new)
       .withBean(DomainRuleDefinitionRepository.class, () -> mock(DomainRuleDefinitionRepository.class))
+      .withBean(DomainRuleDefinitionApprovalRepository.class,
+          () -> mock(DomainRuleDefinitionApprovalRepository.class))
       .withBean(DomainRuleCompositionApprovalRepository.class,
           () -> mock(DomainRuleCompositionApprovalRepository.class))
       .withBean(AiPrincipalContextResolver.class, () -> mock(AiPrincipalContextResolver.class))
