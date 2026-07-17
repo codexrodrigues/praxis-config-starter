@@ -8942,7 +8942,7 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void skipsOptionalPreviewKnowledgeAndAuthoringEvidenceWhenPreIntentGovernedEvidenceIsSufficient()
+    void retrievesScopedProjectKnowledgeAfterPreIntentGovernedEvidenceResolvesTheResource()
             throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
@@ -8951,6 +8951,7 @@ class AgenticAuthoringTurnEngineTest {
 
         when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(preIntentGovernedEvidenceIntent());
+        when(projectKnowledgeService.retrieve(any())).thenReturn(List.of());
         when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(new AgenticAuthoringPreviewResult(
                         true,
@@ -8966,15 +8967,22 @@ class AgenticAuthoringTurnEngineTest {
                 .execute(request(), principalContext, sink);
 
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
-        verify(projectKnowledgeService, never()).retrieve(any());
+        ArgumentCaptor<AgenticAuthoringProjectKnowledgeQuery> knowledgeQuery =
+                ArgumentCaptor.forClass(AgenticAuthoringProjectKnowledgeQuery.class);
+        verify(projectKnowledgeService).retrieve(knowledgeQuery.capture());
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().contextKey())
+                .isEqualTo("human-resources");
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().resourceKey())
+                .isEqualTo("human-resources.funcionarios");
         verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
         org.assertj.core.api.Assertions.assertThat(phases(sink))
-                .doesNotContain("intent.resolve.grounding", "projectKnowledge.retrieve", "projectKnowledge.result");
+                .doesNotContain("intent.resolve.grounding")
+                .contains("projectKnowledge.result");
         org.assertj.core.api.Assertions.assertThat(sink.payloads)
                 .noneSatisfy(payload -> {
                     JsonNode node = objectMapper.valueToTree(payload);
                     org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
-                            .isIn("projectKnowledge.retrieve", "projectKnowledge.result", "authoringEvidence.skipped");
+                            .isEqualTo("authoringEvidence.skipped");
                 });
     }
 

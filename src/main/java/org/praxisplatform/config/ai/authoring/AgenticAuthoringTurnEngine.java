@@ -438,13 +438,11 @@ public class AgenticAuthoringTurnEngine {
             if (route.allowsPreview() && intentResolution.valid()) {
                 AgenticAuthoringTurnStreamRequest contextualPreviewRequest =
                         withImplicitChartDetailModalActionContext(request, intentResolution);
-                AgenticAuthoringTurnStreamRequest previewRequest = resolvedByPreIntentGovernedEvidence(intentResolution)
-                        ? contextualPreviewRequest
-                        : withProjectKnowledgeContext(
-                                contextualPreviewRequest,
-                                principalContext,
-                                eventSink,
-                                intentResolution);
+                AgenticAuthoringTurnStreamRequest previewRequest = withProjectKnowledgeContext(
+                        contextualPreviewRequest,
+                        principalContext,
+                        eventSink,
+                        intentResolution);
                 if (!compactGovernedFastPath) {
                     emitStatus(
                             eventSink,
