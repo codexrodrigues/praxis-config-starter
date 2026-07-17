@@ -29,6 +29,7 @@ class AgenticAuthoringApplyServiceTest {
     private static final UUID THREAD_ID = UUID.fromString("00000000-0000-0000-0000-000000000202");
     private static final UUID TURN_ID = UUID.fromString("00000000-0000-0000-0000-000000000203");
     private static final UUID RESULT_EVENT_ID = UUID.fromString("00000000-0000-0000-0000-000000000204");
+    private static final String BASE_ETAG = "00000000-0000-0000-0000-000000000205";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final UserConfigService userConfigService = org.mockito.Mockito.mock(UserConfigService.class);
@@ -57,7 +58,7 @@ class AgenticAuthoringApplyServiceTest {
                 eq("local"),
                 org.mockito.ArgumentMatchers.any(JsonNode.class),
                 org.mockito.ArgumentMatchers.any(JsonNode.class),
-                eq("\"stale-etag\""),
+                eq("\"" + BASE_ETAG + "\""),
                 eq("author"))).thenReturn(saved);
         when(apiKeyProtectionService.sanitizeForResponse(savedPayload)).thenReturn(savedPayload);
 
@@ -68,13 +69,13 @@ class AgenticAuthoringApplyServiceTest {
                 null,
                 validSemanticDecision());
         AiPrincipalContext principalContext = principal("user");
-        authorize(request, principalContext);
+        authorize(request, principalContext, "update", BASE_ETAG);
 
         AgenticAuthoringApplyResult result = service().apply(
                 request,
                 principalContext,
                 "author",
-                "\"stale-etag\"");
+                "\"" + BASE_ETAG + "\"");
 
         ArgumentCaptor<JsonNode> payloadCaptor = ArgumentCaptor.forClass(JsonNode.class);
         ArgumentCaptor<JsonNode> tagsCaptor = ArgumentCaptor.forClass(JsonNode.class);
@@ -87,7 +88,7 @@ class AgenticAuthoringApplyServiceTest {
                 eq("local"),
                 payloadCaptor.capture(),
                 tagsCaptor.capture(),
-                eq("\"stale-etag\""),
+                eq("\"" + BASE_ETAG + "\""),
                 eq("author"));
         assertThat(payloadCaptor.getValue()).isEqualTo(savedPayload);
         JsonNode persistedInputs = payloadCaptor.getValue()
@@ -191,6 +192,64 @@ class AgenticAuthoringApplyServiceTest {
     }
 
     @Test
+    void applyRejectsTerminalResultBoundToAnotherComponent() throws Exception {
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "user",
+                validSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+        AiTurnEventEnvelope terminal = terminalResult(request, true);
+        ((ObjectNode) terminal.getPayload().path("applyTarget")).put("componentId", "another-page");
+        when(turnEventService.findLastEvent(STREAM_ID)).thenReturn(Optional.of(terminal));
+
+        assertThatThrownBy(() -> service().apply(request, principalContext, "author", null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("agentic-turn-result-apply-target-mismatch");
+    }
+
+    @Test
+    void applyRejectsTerminalResultBoundToAnotherScope() throws Exception {
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "user",
+                validSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+        AiTurnEventEnvelope terminal = terminalResult(request, true);
+        ((ObjectNode) terminal.getPayload().path("applyTarget")).put("scope", "tenant");
+        when(turnEventService.findLastEvent(STREAM_ID)).thenReturn(Optional.of(terminal));
+
+        assertThatThrownBy(() -> service().apply(request, principalContext, "author", null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("agentic-turn-result-apply-target-mismatch");
+    }
+
+    @Test
+    void applyRejectsIfMatchDifferentFromTerminalBaseEtag() throws Exception {
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "user",
+                validSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext, "update", BASE_ETAG);
+
+        assertThatThrownBy(() -> service().apply(
+                request,
+                principalContext,
+                "author",
+                "\"00000000-0000-0000-0000-000000000299\""))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("agentic-turn-result-base-etag-mismatch");
+    }
+
+    @Test
     void applyRejectsSemanticDecisionDifferentFromTerminalResult() throws Exception {
         AgenticAuthoringApplyRequest request = applicableRequest(
                 compiledPatch(),
@@ -228,6 +287,25 @@ class AgenticAuthoringApplyServiceTest {
                 null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("compiledFormPatch.patch.page");
+    }
+
+    @Test
+    void applyRejectsIncompleteCanonicalCanvas() throws Exception {
+        ObjectNode invalid = (ObjectNode) compiledPatch();
+        ((ObjectNode) invalid.path("patch").path("page")).putObject("canvas");
+
+        assertThatThrownBy(() -> service().apply(
+                applicableRequest(
+                        invalid,
+                        "praxis-dynamic-page",
+                        "page",
+                        "user",
+                        validSemanticDecision()),
+                principal("user"),
+                "author",
+                null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("compiled-page-canvas-mode-invalid");
     }
 
     @Test
@@ -315,7 +393,7 @@ class AgenticAuthoringApplyServiceTest {
                 .version(3L)
                 .etag(UUID.fromString("00000000-0000-0000-0000-000000000456"))
                 .build();
-        when(userConfigService.upsert(
+        when(userConfigService.create(
                 eq(UserConfigService.Scope.TENANT),
                 eq("tenant"),
                 eq("user"),
@@ -324,7 +402,6 @@ class AgenticAuthoringApplyServiceTest {
                 eq("local"),
                 org.mockito.ArgumentMatchers.any(JsonNode.class),
                 org.mockito.ArgumentMatchers.any(JsonNode.class),
-                eq(null),
                 eq("author"))).thenReturn(saved);
         when(apiKeyProtectionService.sanitizeForResponse(savedPayload)).thenReturn(savedPayload);
 
@@ -397,6 +474,14 @@ class AgenticAuthoringApplyServiceTest {
     private void authorize(
             AgenticAuthoringApplyRequest request,
             AiPrincipalContext principalContext) {
+        authorize(request, principalContext, "create", null);
+    }
+
+    private void authorize(
+            AgenticAuthoringApplyRequest request,
+            AiPrincipalContext principalContext,
+            String mode,
+            String baseEtag) {
         when(turnEventService.requireOwnership(STREAM_ID, principalContext))
                 .thenReturn(new AiTurnEventService.StreamOwnership(
                         STREAM_ID,
@@ -407,17 +492,37 @@ class AgenticAuthoringApplyServiceTest {
                         principalContext.environment(),
                         java.time.Instant.now().plusSeconds(900)));
         when(turnEventService.findLastEvent(STREAM_ID))
-                .thenReturn(Optional.of(terminalResult(request, true)));
+                .thenReturn(Optional.of(terminalResult(request, true, mode, baseEtag)));
     }
 
     private AiTurnEventEnvelope terminalResult(
             AgenticAuthoringApplyRequest request,
             boolean canApply) {
+        return terminalResult(request, canApply, "create", null);
+    }
+
+    private AiTurnEventEnvelope terminalResult(
+            AgenticAuthoringApplyRequest request,
+            boolean canApply,
+            String mode,
+            String baseEtag) {
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("canApply", canApply);
         payload.putObject("preview").set("compiledFormPatch", request.compiledFormPatch());
         payload.putObject("intentResolution")
                 .set("semanticDecision", objectMapper.valueToTree(request.semanticDecision()));
+        ObjectNode applyTarget = payload.putObject("applyTarget");
+        applyTarget.put("schemaVersion", AgenticAuthoringApplyTarget.SCHEMA_VERSION);
+        applyTarget.put("componentType", request.componentType() == null
+                ? "praxis-dynamic-page"
+                : request.componentType());
+        applyTarget.put("componentId", request.componentId());
+        applyTarget.put("scope", request.scope() == null ? "user" : request.scope());
+        applyTarget.put("environment", "local");
+        applyTarget.put("mode", mode);
+        if (baseEtag != null) {
+            applyTarget.put("baseEtag", baseEtag);
+        }
         return AiTurnEventEnvelope.builder()
                 .eventId(RESULT_EVENT_ID)
                 .streamId(STREAM_ID)
@@ -434,13 +539,12 @@ class AgenticAuthoringApplyServiceTest {
                 {
                   "profileId": "create-minimal-form",
                   "catalogReleaseId": "catalog-release-test",
-                  "builderVersion": "0.1.0",
-                  "patch": {
-                    "page": {
-                      "canvas": {"layout": "single-column"},
+                    "builderVersion": "0.1.0",
+                    "patch": {
+                      "page": {
                       "widgets": [
                         {
-                          "id": "ticket-form",
+                          "key": "ticket-form",
                           "definition": {
                             "id": "praxis-dynamic-form",
                             "inputs": {

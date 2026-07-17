@@ -2884,7 +2884,7 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         registry.appendCompiledEffects("praxis-page-builder",
                 operationWithHandler("composition.plan.compile", "agenticPreview", "agentic-preview-result", true,
                         "compile-domain-patch", "page-builder-ui-composition-plan-compile", "compiledFormPatch.patch.page"),
-                plan("{}", "{ \"uiCompositionPlan\": { \"id\": \"plan1\", \"page\": { \"title\": \"Compiled\", \"widgets\": [ { \"widgetKey\": \"formA\", \"definition\": { \"componentId\": \"praxis-dynamic-form\", \"inputs\": {} } } ], \"canvas\": { \"items\": [ { \"widgetKey\": \"formA\", \"x\": 2, \"y\": 1, \"w\": 6, \"h\": 5 } ] }, \"composition\": { \"links\": [ { \"linkId\": \"link1\", \"from\": { \"widgetKey\": \"formA\", \"port\": \"submit\" }, \"to\": { \"widgetKey\": \"formA\", \"port\": \"refresh\" } } ] } } } }"),
+                plan("{}", "{ \"uiCompositionPlan\": { \"version\": \"1.0\", \"kind\": \"praxis.ui-composition-plan\", \"layoutPreset\": \"analytics\", \"widgets\": [ { \"key\": \"formA\", \"componentId\": \"praxis-dynamic-form\", \"inputs\": {} } ], \"bindings\": [ { \"id\": \"link1\", \"from\": { \"kind\": \"component-port\", \"widget\": \"formA\", \"port\": \"submit\", \"direction\": \"output\" }, \"to\": { \"kind\": \"component-port\", \"widget\": \"formA\", \"port\": \"refresh\", \"direction\": \"input\" }, \"intent\": \"command-dispatch\" } ] } }"),
                 proposedConfig, patchOperations, failures, new ArrayList<>());
         registry.appendCompiledEffects("praxis-page-builder",
                 operationWithHandler("page.preview.apply", "agenticPreview", "agentic-preview-result", true,
@@ -2934,6 +2934,7 @@ class AgenticAuthoringEffectCompilerRegistryTest {
                 plan("{}", """
                         {
                           "uiCompositionPlan": {
+                            "version": "1.0",
                             "kind": "praxis.ui-composition-plan",
                             "layoutPreset": "resource-master-detail",
                             "widgets": [
@@ -2960,7 +2961,7 @@ class AgenticAuthoringEffectCompilerRegistryTest {
                                 }
                               }
                             },
-                            "composition": { "links": [] }
+                            "bindings": []
                           }
                         }
                         """),
@@ -2979,6 +2980,37 @@ class AgenticAuthoringEffectCompilerRegistryTest {
                 .path("items").path("funcionarios-master").path("colSpan").asInt()).isEqualTo(1);
         assertThat(patchOperations.get(0).path("page").path("canvas").path("items")
                 .path("funcionarios-master").path("colSpan").asInt()).isEqualTo(12);
+        AgenticAuthoringUiCompositionPlanCompiler.CompileResult directCompilation =
+                new AgenticAuthoringUiCompositionPlanCompiler(objectMapper)
+                        .compile(proposedConfig.path("uiCompositionPlan"), objectMapper.createObjectNode());
+        assertThat(directCompilation.valid()).isTrue();
+        assertThat(page).isEqualTo(directCompilation.compiledFormPatch().path("patch").path("page"));
+    }
+
+    @Test
+    void shouldPropagateCanonicalUiCompositionPlanValidationFailuresWithoutMaterializingPage() throws Exception {
+        ObjectNode proposedConfig = objectMapper.createObjectNode();
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("composition.plan.compile", "agenticPreview", "agentic-preview-result", true,
+                        "compile-domain-patch", "page-builder-ui-composition-plan-compile", "compiledFormPatch.patch.page"),
+                plan("{}", """
+                        {
+                          "uiCompositionPlan": {
+                            "kind": "praxis.ui-composition-plan",
+                            "widgets": [
+                              { "key": "chart", "componentId": "praxis-chart" }
+                            ]
+                          }
+                        }
+                        """),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+
+        assertThat(failures).containsExactly("ui-composition-plan-version-invalid");
+        assertThat(patchOperations).isEmpty();
+        assertThat(proposedConfig.has("compiledFormPatch")).isFalse();
     }
 
     private ObjectNode dynamicFormConfig() throws Exception {

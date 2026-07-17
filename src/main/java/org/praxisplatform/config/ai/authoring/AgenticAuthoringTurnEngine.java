@@ -246,6 +246,9 @@ public class AgenticAuthoringTurnEngine {
             AiPrincipalContext principalContext,
             AgenticAuthoringTurnEventSink eventSink,
             String schemaBaseUrl) {
+        AgenticAuthoringApplyTarget.Resolution terminalApplyTargetResolution =
+                AgenticAuthoringApplyTarget.resolve(request, principalContext);
+        request = withoutAgenticApplyTargetContext(request);
         request = withGroundedRuntimeComponentContext(request);
         AgenticAuthoringTurnState state = initialState(request);
         List<AiProviderInvocationTelemetry> turnProviderInvocations = new ArrayList<>();
@@ -517,6 +520,14 @@ public class AgenticAuthoringTurnEngine {
                     toolLoopResult,
                     request,
                     turnProviderInvocations);
+            String terminalPreviewApplyBlockReason = terminalPreviewApplyBlockReason(
+                    preview,
+                    terminalApplyTargetResolution);
+            decisionDiagnostics.put("terminalPreviewApplyEligible", terminalPreviewApplyBlockReason.isBlank());
+            decisionDiagnostics.put("terminalApplyTargetEligible", terminalApplyTargetResolution.valid());
+            if (!terminalPreviewApplyBlockReason.isBlank()) {
+                decisionDiagnostics.put("terminalPreviewApplyBlockReason", terminalPreviewApplyBlockReason);
+            }
             if (Boolean.TRUE.equals(decisionDiagnostics.get("semanticDecisionReviewGroundedByPreview"))) {
                 assistantMessage = groundedPreviewAssistantMessage(preview, intentResolution);
             }
@@ -524,6 +535,7 @@ public class AgenticAuthoringTurnEngine {
                     terminalIntentResolution(intentResolution, decisionDiagnostics);
             boolean canApply = preview != null
                     && preview.valid()
+                    && terminalPreviewApplyBlockReason.isBlank()
                     && !requiresDecisionReview(decisionDiagnostics)
                     && (toolLoopResult == null || toolLoopResult.completed());
             Map<String, Object> resultPayload = new LinkedHashMap<>();
@@ -545,6 +557,9 @@ public class AgenticAuthoringTurnEngine {
                             decisionDiagnostics));
             resultPayload.put("canApply", canApply);
             resultPayload.put("decisionDiagnostics", decisionDiagnostics);
+            if (terminalApplyTargetResolution.valid()) {
+                resultPayload.put("applyTarget", terminalApplyTargetResolution.target());
+            }
             if (toolLoopResult != null) {
                 resultPayload.put("toolLoopTrace", safeToolLoopTrace(toolLoopResult));
             }
@@ -565,6 +580,22 @@ public class AgenticAuthoringTurnEngine {
         } finally {
             cancelPreloadedComponentCapabilities(componentCapabilitiesFuture);
         }
+    }
+
+    private String terminalPreviewApplyBlockReason(
+            AgenticAuthoringPreviewResult preview,
+            AgenticAuthoringApplyTarget.Resolution applyTargetResolution) {
+        if (preview == null || !preview.valid()) {
+            return "preview-invalid";
+        }
+        String compiledPageBlockReason = AgenticAuthoringCompiledPagePatchValidator.terminalApplyBlockReason(
+                preview.compiledFormPatch());
+        if (!compiledPageBlockReason.isBlank()) {
+            return compiledPageBlockReason;
+        }
+        return applyTargetResolution == null || !applyTargetResolution.valid()
+                ? applyTargetResolution == null ? "apply-target-missing" : applyTargetResolution.failureCode()
+                : "";
     }
 
     private void emitStatus(
@@ -3352,6 +3383,16 @@ public class AgenticAuthoringTurnEngine {
                 request.diagnostics(),
                 request.runtimeComponentObservations(),
                 request.runtimeComponentObservationTrustBoundary());
+    }
+
+    private AgenticAuthoringTurnStreamRequest withoutAgenticApplyTargetContext(
+            AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
+            return request;
+        }
+        ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
+        sanitized.remove("agenticApplyTarget");
+        return copyWithContextHints(request, sanitized.isEmpty() ? null : sanitized);
     }
 
     private AgenticAuthoringProjectKnowledgeQuery projectKnowledgeQuery(

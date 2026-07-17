@@ -228,9 +228,28 @@ export interface AiDomainCatalogContextHintContract {
   relationships?: AiDomainCatalogRelationshipHintContract | null;
 }
 
+interface AgenticAuthoringApplyTargetBaseContract {
+  schemaVersion: 'praxis-agentic-authoring-apply-target.v1';
+  componentType: string;
+  componentId: string;
+  scope: 'user' | 'tenant';
+  environment?: string | null;
+}
+
+export type AgenticAuthoringApplyTargetContract = AgenticAuthoringApplyTargetBaseContract & (
+  | { mode: 'create'; baseEtag?: never }
+  | { mode: 'update'; baseEtag: string }
+);
+
 export interface AiContextHintsContract {
   domainCatalog?: AiDomainCatalogContextHintContract;
   [key: string]: AiJsonValue | AiDomainCatalogContextHintContract | undefined;
+}
+
+export interface AgenticAuthoringTurnStreamContextHintsContract {
+  domainCatalog?: AiDomainCatalogContextHintContract;
+  agenticApplyTarget?: AgenticAuthoringApplyTargetContract;
+  [key: string]: AiJsonValue | AiDomainCatalogContextHintContract | AgenticAuthoringApplyTargetContract | undefined;
 }
 
 export interface AiSchemaContextContract {
@@ -657,13 +676,13 @@ export interface AgenticAuthoringTurnStreamRequestContract
   provider?: string | null;
   model?: string | null;
   apiKey?: string | null;
-  contextHints?: AiContextHintsContract | null;
+  contextHints?: AgenticAuthoringTurnStreamContextHintsContract | null;
   componentCapabilities?: AgenticAuthoringComponentCapabilitiesResultContract | null;
   activeSemanticDecision?: AgenticAuthoringSemanticDecisionContract | null;
   diagnostics?: AiJsonObject | null;
   runtimeComponentObservations?: unknown[] | null;
   runtimeComponentObservationTrustBoundary?: 'untrusted_frontend_observation' | null;
-  [key: string]: AiJsonValue | AiContextHintsContract | AgenticAuthoringComponentCapabilitiesResultContract | AgenticAuthoringSemanticDecisionContract | AgenticAuthoringConversationMessageContract[] | AgenticAuthoringPendingClarificationContract | AgenticAuthoringAttachmentSummaryContract[] | unknown[] | undefined;
+  [key: string]: AiJsonValue | AgenticAuthoringTurnStreamContextHintsContract | AgenticAuthoringComponentCapabilitiesResultContract | AgenticAuthoringSemanticDecisionContract | AgenticAuthoringConversationMessageContract[] | AgenticAuthoringPendingClarificationContract | AgenticAuthoringAttachmentSummaryContract[] | unknown[] | undefined;
 }
 
 export interface AgenticAuthoringSemanticAxisDecisionDiagnosticContract {
@@ -709,6 +728,9 @@ export interface AgenticAuthoringDecisionDiagnosticsContract {
   toolLoopStepCount?: number | null;
   requiresReview?: boolean | null;
   reviewReason?: string | null;
+  terminalPreviewApplyEligible?: boolean | null;
+  terminalPreviewApplyBlockReason?: string | null;
+  terminalApplyTargetEligible?: boolean | null;
   [key: string]: AiJsonValue | AgenticAuthoringSemanticAxisDecisionDiagnosticContract[] | undefined;
 }
 
@@ -719,9 +741,10 @@ export interface AgenticAuthoringTurnResultPayloadContract {
   assistantContent?: AiJsonObject | null;
   quickReplies?: AgenticAuthoringQuickReplyContract[];
   canApply?: boolean | null;
+  applyTarget?: AgenticAuthoringApplyTargetContract | null;
   decisionDiagnostics?: AgenticAuthoringDecisionDiagnosticsContract | null;
   toolLoopTrace?: AiJsonObject[] | null;
-  [key: string]: AiJsonValue | AgenticAuthoringIntentResolutionResultContract | AgenticAuthoringPreviewResultContract | AgenticAuthoringQuickReplyContract[] | AgenticAuthoringDecisionDiagnosticsContract | AiJsonObject[] | undefined;
+  [key: string]: AiJsonValue | AgenticAuthoringIntentResolutionResultContract | AgenticAuthoringPreviewResultContract | AgenticAuthoringQuickReplyContract[] | AgenticAuthoringApplyTargetContract | AgenticAuthoringDecisionDiagnosticsContract | AiJsonObject[] | undefined;
 }
 
 export interface AgenticAuthoringPreviewResultContract {

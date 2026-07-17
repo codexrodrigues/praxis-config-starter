@@ -20,12 +20,14 @@ public final class AgenticAuthoringEffectCompilerRegistry {
 
     private final ObjectMapper objectMapper;
     private final AgenticAuthoringTargetResolverRegistry targetResolverRegistry;
+    private final AgenticAuthoringUiCompositionPlanCompiler uiCompositionPlanCompiler;
 
     public AgenticAuthoringEffectCompilerRegistry(
             ObjectMapper objectMapper,
             AgenticAuthoringTargetResolverRegistry targetResolverRegistry) {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.targetResolverRegistry = Objects.requireNonNull(targetResolverRegistry, "targetResolverRegistry must not be null");
+        this.uiCompositionPlanCompiler = new AgenticAuthoringUiCompositionPlanCompiler(this.objectMapper);
     }
 
     void appendCompiledEffects(
@@ -2687,45 +2689,21 @@ public final class AgenticAuthoringEffectCompilerRegistry {
 
     private ObjectNode compilePageBuilderUiCompositionPlan(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
         JsonNode plan = planOperation.path("input").path("uiCompositionPlan");
-        if (!plan.isObject()) {
-            failures.add("page-builder-ui-composition-plan-compile requires uiCompositionPlan");
+        AgenticAuthoringUiCompositionPlanCompiler.CompileResult compilation =
+                uiCompositionPlanCompiler.compile(plan, proposedConfig.path("compiledFormPatch"));
+        if (!compilation.valid()) {
+            failures.addAll(compilation.failureCodes());
             return null;
         }
-        JsonNode page = pageFromUiCompositionPlan(plan, proposedConfig);
-        objectAt(proposedConfig, "compiledFormPatch.patch", true).set("page", page);
+        ObjectNode compiledFormPatch = compilation.compiledFormPatch();
+        JsonNode page = compiledFormPatch.path("patch").path("page");
+        proposedConfig.set("compiledFormPatch", compiledFormPatch);
         proposedConfig.set("uiCompositionPlan", plan.deepCopy());
         ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
         compiled.put("op", "compile-page-builder-ui-composition-plan");
         compiled.put("path", "compiledFormPatch.patch.page");
-        compiled.set("page", page);
+        compiled.set("page", page.deepCopy());
         return compiled;
-    }
-
-    private ObjectNode pageFromUiCompositionPlan(JsonNode plan, ObjectNode proposedConfig) {
-        if (plan.path("page").isObject()) {
-            return plan.path("page").deepCopy();
-        }
-        ObjectNode page = objectMapper.createObjectNode();
-        copyIfPresentOrFallback(plan, proposedConfig, page, "title");
-        copyIfPresentOrFallback(plan, proposedConfig, page, "layoutPreset");
-        copyIfPresentOrFallback(plan, proposedConfig, page, "context");
-        copyIfPresentOrFallback(plan, proposedConfig, page, "metadata");
-        copyIfPresentOrFallback(plan, proposedConfig, page, "widgets");
-        copyIfPresentOrFallback(plan, proposedConfig, page, "canvas");
-        copyIfPresentOrFallback(plan, proposedConfig, page, "composition");
-        copyIfPresent(plan, page, "deviceLayouts");
-        copyIfPresent(plan, page, "grouping");
-        copyIfPresent(plan, page, "slotAssignments");
-        copyIfPresent(plan, page, "bindings");
-        return page;
-    }
-
-    private void copyIfPresentOrFallback(JsonNode source, JsonNode fallback, ObjectNode target, String field) {
-        if (source.path(field).isMissingNode() || source.path(field).isNull()) {
-            copyIfPresent(fallback, target, field);
-            return;
-        }
-        target.set(field, source.path(field).deepCopy());
     }
 
     private ObjectNode compilePageBuilderStateSet(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {

@@ -46,6 +46,7 @@ public class AgenticAuthoringPreviewService {
     private final ObjectMapper objectMapper;
     private final AgenticAuthoringIntentResolutionContext intentResolutionContext;
     private final AgenticAuthoringConversationTurnOrchestrator conversationTurnOrchestrator;
+    private final AgenticAuthoringUiCompositionPlanCompiler uiCompositionPlanCompiler;
     private final List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders;
     private final AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer;
     private final SchemaRetrievalService schemaRetrievalService;
@@ -177,6 +178,7 @@ public class AgenticAuthoringPreviewService {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.intentResolutionContext = new AgenticAuthoringIntentResolutionContext(this.objectMapper);
         this.conversationTurnOrchestrator = new AgenticAuthoringConversationTurnOrchestrator();
+        this.uiCompositionPlanCompiler = new AgenticAuthoringUiCompositionPlanCompiler(this.objectMapper);
         this.uiCompositionPlanProviders = List.copyOf(
                 uiCompositionPlanProviders == null ? List.of() : uiCompositionPlanProviders);
         this.messageSynthesizer = messageSynthesizer;
@@ -825,7 +827,29 @@ public class AgenticAuthoringPreviewService {
             if (!semanticValidation.valid()) {
                 semanticallyValid = false;
             }
-            warnings.add("compiled-form-patch-materialized-by-page-builder");
+            JsonNode compiledFormPatch = planResult.compiledFormPatch() == null
+                    ? MissingNode.getInstance()
+                    : planResult.compiledFormPatch();
+            if (uiCompositionPlan != null && uiCompositionPlan.isObject()) {
+                AgenticAuthoringUiCompositionPlanCompiler.CompileResult compilation =
+                        uiCompositionPlanCompiler.compile(uiCompositionPlan, compiledFormPatch);
+                addAllOnce(failureCodes, compilation.failureCodes());
+                if (!compilation.valid()) {
+                    technicallyValid = false;
+                    semanticallyValid = false;
+                } else {
+                    compiledFormPatch = compilation.compiledFormPatch();
+                    addWarningOnce(warnings, "ui-composition-plan-compiled-by-config");
+                }
+            } else {
+                String compiledPatchFailure =
+                        AgenticAuthoringCompiledPagePatchValidator.terminalApplyBlockReason(compiledFormPatch);
+                if (!compiledPatchFailure.isBlank()) {
+                    addAllOnce(failureCodes, List.of(compiledPatchFailure));
+                    technicallyValid = false;
+                    semanticallyValid = false;
+                }
+            }
             String fallbackMessage = deterministicPreviewAssistantMessage(
                     request,
                     request.intentResolution(),
@@ -848,16 +872,14 @@ public class AgenticAuthoringPreviewService {
                     List.copyOf(failureCodes),
                     List.copyOf(warnings),
                     MissingNode.getInstance(),
-                    planResult.compiledFormPatch() == null ? MissingNode.getInstance() : planResult.compiledFormPatch(),
+                    compiledFormPatch,
                     diagnostics(
                             request,
                             request.intentResolution(),
                             failureCodes,
                             List.copyOf(warnings),
                             semanticMaterialization,
-                            planResult.compiledFormPatch() == null
-                                    ? MissingNode.getInstance()
-                                    : planResult.compiledFormPatch()),
+                            compiledFormPatch),
                     uiCompositionPlan,
                     messageResult.message(),
                     messageResult.providerInvocations()
@@ -3580,6 +3602,7 @@ public class AgenticAuthoringPreviewService {
             }
             ObjectNode transform = bindingObject.putObject("transform");
             transform.put("kind", "template");
+            transform.put("id", bindingObject.path("id").asText() + "-query-context");
             ObjectNode template = transform.putObject("template");
             template.put("filters", "${payload}");
             addWarningOnce(warnings, "ui-composition-plan-filter-query-context-normalized");
