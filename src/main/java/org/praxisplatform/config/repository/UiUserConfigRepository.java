@@ -16,17 +16,17 @@ public interface UiUserConfigRepository extends JpaRepository<UiUserConfig, UUID
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Transactional
-  @Query("""
-      update UiUserConfig config
-         set config.payload = :payload,
-             config.tags = :tags,
-             config.version = :nextVersion,
-             config.etag = :nextEtag,
-             config.updatedAt = :updatedAt,
-             config.updatedBy = :updatedBy
-       where config.id = :id
-         and config.etag = :expectedEtag
-      """)
+  @Query(value = """
+      UPDATE ui_user_config
+         SET payload = CAST(:payload AS jsonb),
+             tags = CAST(:tags AS jsonb),
+             version = :nextVersion,
+             etag = :nextEtag,
+             updated_at = :updatedAt,
+             updated_by = :updatedBy
+       WHERE id = :id
+         AND etag = :expectedEtag
+      """, nativeQuery = true)
   int updateIfCurrent(
       @Param("id") UUID id,
       @Param("payload") String payload,

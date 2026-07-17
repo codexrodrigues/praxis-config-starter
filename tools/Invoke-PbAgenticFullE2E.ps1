@@ -145,8 +145,12 @@ function Get-PlaywrightSummaryFromReport([object] $Report) {
 
 function Get-PlaywrightSpecs([object[]] $Suites) {
     foreach ($suite in @($Suites)) {
+        if ($null -eq $suite) { continue }
         foreach ($spec in @($suite.specs)) { $spec }
-        Get-PlaywrightSpecs @($suite.suites)
+        $children = @($suite.suites | Where-Object { $null -ne $_ })
+        if ($children.Count -gt 0) {
+            Get-PlaywrightSpecs $children
+        }
     }
 }
 

@@ -111,8 +111,7 @@ $governanceLabEnvironment = @"
 `$env:APP_AUTH_GOVERNANCE_PUBLISHER_PASSWORD = '$governanceAuthorPassword'
 "@
 if ($DomainRuleLifecycleOnly) {
-$governanceLabEnvironment += @"
-
+$governanceLabEnvironment += [Environment]::NewLine + @"
 `$env:PRAXIS_AI_SECURITY_ALLOW_DEFAULT_TENANT_IN_CORPORATE = 'true'
 `$env:PRAXIS_AI_SECURITY_SERVER_DEFAULT_TENANT = '$TenantId'
 `$env:PRAXIS_AI_SECURITY_SERVER_DEFAULT_ENVIRONMENT = '$Environment'
@@ -169,10 +168,11 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         [System.Management.Automation.Language.Parser]::ParseInput(
             $startScript,
             [ref] $launchTokens,
-            [ref] $launchParseErrors
-        ) | Out-Null
+            [ref] $launchParseErrors) | Out-Null
         if ($launchParseErrors.Count -gt 0) {
-            throw "Generated Quickstart launch script is invalid."
+            $launchDiagnostics = $launchParseErrors |
+                ForEach-Object { "line $($_.Extent.StartLineNumber): $($_.Message)" }
+            throw "Generated Quickstart launch script is invalid: $($launchDiagnostics -join '; ')"
         }
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($startScript))
         $quickstartProcess = Start-Process `

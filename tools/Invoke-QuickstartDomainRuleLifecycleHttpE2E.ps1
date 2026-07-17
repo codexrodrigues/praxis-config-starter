@@ -39,45 +39,26 @@ function Invoke-ExpectedFailure(
     [string] $Uri,
     [hashtable] $Headers,
     [object] $Body,
-    [string] $ExpectedMessage,
-    [int] $ExpectedStatusCode = 0,
-    [switch] $StatusOnly
+    [string] $ExpectedMessage = "",
+    [int] $ExpectedStatus = 0
 ) {
     try {
         Invoke-JsonRequest -Method $Method -Uri $Uri -Headers $Headers -Body $Body | Out-Null
     } catch {
-        $failure = $_
-        $response = $failure.Exception.Response
-        $actualStatusCode = 0
-        $responseBody = ""
-        if ($null -ne $response) {
-            if ($null -ne $response.StatusCode) {
-                $actualStatusCode = [int] $response.StatusCode
-            }
+        $actualStatus = 0
+        if ($null -ne $_.Exception.Response -and $null -ne $_.Exception.Response.StatusCode) {
+            $actualStatus = [int] $_.Exception.Response.StatusCode
         }
-        if ($ExpectedStatusCode -gt 0 -and $actualStatusCode -ne $ExpectedStatusCode) {
-            throw "Expected HTTP status $ExpectedStatusCode, got $actualStatusCode for $Method $Uri."
+        if ($ExpectedStatus -gt 0 -and $actualStatus -ne $ExpectedStatus) {
+            throw "Expected HTTP $ExpectedStatus, got HTTP $actualStatus for: $Method $Uri"
         }
-        if ($StatusOnly) {
-            return $true
-        }
-        if ($null -ne $response -and $null -ne $response.Content) {
-            try {
-                $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-            } catch {
-                $responseBody = ""
-            }
-        }
-
-        $text = $responseBody
+        $text = $_.ErrorDetails.Message
         if ([string]::IsNullOrWhiteSpace($text)) {
-            $text = $failure.ErrorDetails.Message
-        }
-        if ([string]::IsNullOrWhiteSpace($text)) {
-            $text = $failure.Exception.Message
+            $text = $_.Exception.Message
         }
         $normalizedText = $text.Replace("\u003E", ">").Replace("\u003C", "<")
-        if ($normalizedText -notlike "*$ExpectedMessage*") {
+        if (-not [string]::IsNullOrWhiteSpace($ExpectedMessage) -and
+            $normalizedText -notlike "*$ExpectedMessage*") {
             throw "Expected failure containing '$ExpectedMessage', got: $text"
         }
         return $true
@@ -420,10 +401,11 @@ if ($definition.createdByType -ne "authenticated" -or $definition.createdBy -ne 
 }
 
 $selfApprovalExpectedMessage = if ($ExpectAuthorApprovalIamRejection) {
-    "Authenticated principal requires IAM role RULE_DEFINITION_APPROVER."
+    ""
 } else {
     "Rule definition approver must be different from its author"
 }
+$selfApprovalExpectedStatus = if ($ExpectAuthorApprovalIamRejection) { 403 } else { 0 }
 $selfApprovalBlocked = Invoke-ExpectedFailure `
     -Method Patch `
     -Uri "$base/api/praxis/config/domain-rules/definitions/$($definition.id)/status" `
@@ -435,8 +417,7 @@ $selfApprovalBlocked = Invoke-ExpectedFailure `
         }
     } `
     -ExpectedMessage $selfApprovalExpectedMessage `
-    -ExpectedStatusCode $(if ($ExpectAuthorApprovalIamRejection) { 403 } else { 0 }) `
-    -StatusOnly:$ExpectAuthorApprovalIamRejection
+    -ExpectedStatus $selfApprovalExpectedStatus
 
 $definition = Set-DefinitionStatus `
     -BaseUrl $base `
