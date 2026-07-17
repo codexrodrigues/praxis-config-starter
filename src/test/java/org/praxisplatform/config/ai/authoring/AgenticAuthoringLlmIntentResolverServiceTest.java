@@ -21,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiProviderCallException;
+import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
 
@@ -32,6 +33,137 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     private AiProviderManagementService providerManagementService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void repairsIncompleteFastDashboardVisualizationBeforeUsingTheFullResolver() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(
+                objectMapper.readTree("""
+                        {
+                          "resolved": true,
+                          "semanticIntentClass": "component_authoring",
+                          "operationKind": "create",
+                          "artifactKind": "chart",
+                          "changeKind": "create_chart",
+                          "selectedResourcePath": "/api/human-resources/vw-analytics-folha-pagamento",
+                          "resourceSearchQuery": null,
+                          "followUpKind": "none",
+                          "requiresGovernedAuthoring": false,
+                          "assistantMessage": "Vou preparar a visualização de pagamentos.",
+                          "visualizationDecision": null,
+                          "consultativeRetrievalPlan": null,
+                          "quickReplies": [],
+                          "clarificationQuestions": [],
+                          "warnings": []
+                        }
+                        """),
+                objectMapper.readTree("""
+                        {
+                          "resolved": true,
+                          "semanticIntentClass": "component_authoring",
+                          "operationKind": "create",
+                          "artifactKind": "dashboard",
+                          "changeKind": "create_dashboard",
+                          "selectedResourcePath": "/api/human-resources/vw-analytics-folha-pagamento",
+                          "resourceSearchQuery": null,
+                          "followUpKind": "none",
+                          "requiresGovernedAuthoring": false,
+                          "assistantMessage": "Vou preparar o dashboard coordenado de pagamentos.",
+                          "visualizationDecision": {
+                            "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
+                            "intent": "payroll-dashboard",
+                            "layoutKind": "dashboard_grid",
+                            "primaryComponent": "praxis-chart",
+                            "primaryComponentId": "praxis-chart",
+                            "axes": [{
+                              "concept": "competência de pagamento",
+                              "field": "competencia",
+                              "label": "Competência",
+                              "chartType": "line",
+                              "orientation": "temporal",
+                              "metricField": "salarioLiquido",
+                              "metricAggregation": "sum",
+                              "metricLabel": "Salário líquido",
+                              "provenance": "governed-candidate-evidence"
+                            }],
+                            "includeSummary": true,
+                            "includeDetailTable": true,
+                            "excludedComponentIds": [],
+                            "includeFilters": true,
+                            "includeKpis": true,
+                            "provenance": "llm-fast-visualization-repair"
+                          },
+                          "consultativeRetrievalPlan": null,
+                          "quickReplies": [],
+                          "clarificationQuestions": [],
+                          "warnings": []
+                        }
+                        """));
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode discovery = contextHints.putObject("resourceDiscovery");
+        discovery.put("artifactKind", "dashboard");
+        ObjectNode focus = discovery.putObject("resourceSearchFocus");
+        focus.put("primaryBusinessEntity", "pagamentos de funcionários");
+        focus.putArray("supportingConcepts").add("competência").add("departamento");
+        focus.put("desiredSurface", "dashboard com indicadores, gráficos e tabela detalhada");
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        new AgenticAuthoringIntentResolutionRequest(
+                                "Monte um painel bonito para acompanhar os pagamentos dos funcionários.",
+                                "page-builder",
+                                "praxis-dynamic-page-builder",
+                                "/page-builder-ia",
+                                objectMapper.createObjectNode(),
+                                null,
+                                "openai",
+                                "gpt-5.4-mini",
+                                "test-key",
+                                "session-1",
+                                "turn-1",
+                                List.of(),
+                                null,
+                                List.of(),
+                                contextHints),
+                        "Monte um painel bonito para acompanhar os pagamentos dos funcionários.",
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(new AgenticAuthoringCandidate(
+                                "/api/human-resources/vw-analytics-folha-pagamento",
+                                "post",
+                                "/schemas/filtered/payroll",
+                                "/api/human-resources/vw-analytics-folha-pagamento/filter",
+                                "post",
+                                0.91d,
+                                "semantic payroll analytics",
+                                List.of("semantic-retrieval", "tool-search-api-resources"))),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(promptCaptor.getAllValues()).hasSize(2);
+        assertThat(promptCaptor.getAllValues().get(1))
+                .contains("The previous compact resolution selected an analytical artifact")
+                .contains("resolved=false instead of inventing fields or components");
+        assertThat(result.artifactKind()).isEqualTo("dashboard");
+        assertThat(result.visualizationDecision()).isNotNull();
+        assertThat(result.visualizationDecision().axes()).hasSize(1);
+        assertThat(result.warnings())
+                .contains("llm-fast-intent-resolution-used", "llm-fast-visualization-repair-used");
+        assertThat(result.providerInvocations())
+                .extracting(AiProviderInvocationTelemetry::phase)
+                .containsExactly("intent_fast", "intent_fast_visualization_repair");
+    }
 
     @Test
     void resolveCanUseFastLlmIntentPassWhenCompactEvidenceIsSufficient() throws Exception {

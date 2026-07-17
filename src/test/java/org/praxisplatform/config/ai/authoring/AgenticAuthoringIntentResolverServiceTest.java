@@ -11379,6 +11379,9 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        stubGovernedDashboardIntent(
+                llmIntentResolver,
+                "/api/human-resources/vw-analytics-folha-pagamento");
         AgenticAuthoringCandidate payrollAnalytics = withEvidence(
                 withEvidence(
                         withEvidence(candidateWithEvidence(
@@ -11422,15 +11425,11 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate().resourcePath())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(result.warnings())
-                .contains(
-                        "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
-                        "llm-pre-intent-resource-discovery-used")
-                .doesNotContain(
-                        "llm-fast-intent-resolution-used",
-                        "llm-intent-resolution-second-pass-used");
+                .contains("llm-intent-resolution-used")
+                .doesNotContain("llm-intent-resolution-satisfied-by-pre-intent-governed-evidence");
         assertThat(result.semanticDecision()).isNotNull();
         assertThat(result.semanticDecision().reviewRequired()).isFalse();
-        Mockito.verify(llmIntentResolver, Mockito.never()).resolve(
+        Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
                 Mockito.any(),
@@ -11448,6 +11447,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        stubGovernedDashboardIntent(llmIntentResolver, "/api/human-resources/funcionarios");
         AgenticAuthoringCandidate employeeTimeseries = new AgenticAuthoringCandidate(
                 "/api/human-resources/funcionarios",
                 "post",
@@ -11527,11 +11527,9 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate().resourcePath())
                 .isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.warnings())
-                .contains(
-                        "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
-                        "llm-pre-intent-resource-discovery-used")
-                .doesNotContain("llm-fast-intent-resolution-used");
-        Mockito.verify(llmIntentResolver, Mockito.never()).resolve(
+                .contains("llm-intent-resolution-used")
+                .doesNotContain("llm-intent-resolution-satisfied-by-pre-intent-governed-evidence");
+        Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
                 Mockito.any(),
@@ -11549,6 +11547,9 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        stubGovernedDashboardIntent(
+                llmIntentResolver,
+                "/api/human-resources/vw-analytics-folha-pagamento");
         AgenticAuthoringCandidate departmentCandidate = withEvidence(
                 withEvidence(
                         withEvidence(candidateWithEvidence(
@@ -11599,13 +11600,11 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate().resourcePath())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(result.warnings())
-                .contains(
-                        "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
-                        "llm-pre-intent-resource-discovery-used")
-                .doesNotContain("llm-fast-intent-resolution-used");
+                .contains("llm-intent-resolution-used")
+                .doesNotContain("llm-intent-resolution-satisfied-by-pre-intent-governed-evidence");
         assertThat(result.semanticDecision()).isNotNull();
         assertThat(result.semanticDecision().reviewRequired()).isFalse();
-        Mockito.verify(llmIntentResolver, Mockito.never()).resolve(
+        Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
                 Mockito.any(),
@@ -11623,6 +11622,9 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        stubGovernedDashboardIntent(
+                llmIntentResolver,
+                "/api/human-resources/vw-analytics-folha-pagamento");
         AgenticAuthoringCandidate departmentStatsCandidate = withEvidence(
                 withEvidence(
                         withEvidence(
@@ -11676,7 +11678,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(result.semanticDecision()).isNotNull();
         assertThat(result.semanticDecision().reviewRequired()).isFalse();
-        Mockito.verify(llmIntentResolver, Mockito.never()).resolve(
+        Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
                 Mockito.any(),
@@ -11694,6 +11696,9 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        stubGovernedDashboardIntent(
+                llmIntentResolver,
+                "/api/human-resources/vw-analytics-folha-pagamento");
         AgenticAuthoringCandidate departmentStatsCandidate = withEvidence(
                 withEvidence(
                         withEvidence(
@@ -11751,7 +11756,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(result.semanticDecision()).isNotNull();
         assertThat(result.semanticDecision().reviewRequired()).isFalse();
-        Mockito.verify(llmIntentResolver, Mockito.never()).resolve(
+        Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
                 Mockito.any(),
@@ -13344,6 +13349,56 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 "tenant",
                                 "local",
                                 "release"))));
+    }
+
+    private void stubGovernedDashboardIntent(
+            AgenticAuthoringLlmIntentResolverService llmIntentResolver,
+            String selectedResourcePath) {
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "dashboard",
+                        "create_dashboard",
+                        selectedResourcePath,
+                        null,
+                        "none",
+                        "Vou preparar o dashboard governado para revisão.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"),
+                        null,
+                        new AgenticAuthoringVisualizationDecision(
+                                "praxis-agentic-authoring-visualization-decision.v1",
+                                "governed-analytics-dashboard",
+                                "dashboard_grid",
+                                "praxis-chart",
+                                List.of(new AgenticAuthoringVisualizationAxisDecision(
+                                        "governed analytical dimension",
+                                        "governedDimension",
+                                        "Dimensão",
+                                        "bar",
+                                        "vertical",
+                                        "count",
+                                        null,
+                                        "Total",
+                                        "governed-test-evidence")),
+                                true,
+                                true,
+                                List.of(),
+                                true,
+                                true,
+                                "llm-test"),
+                        false)));
     }
 
     private ObjectNode resourceDiscoveryContext(

@@ -2532,7 +2532,7 @@ public class AgenticAuthoringIntentResolverService {
         }
         String prompt = normalize(effectivePrompt);
         String artifactKind = materializableResourceDiscoveryArtifactKind(request, "unknown");
-        if (!List.of("page", "table", "form", "dashboard").contains(artifactKind)
+        if (!List.of("page", "table", "form").contains(artifactKind)
                 || !hasBusinessDataAuthoringSignal(request, prompt)
                 || candidates == null
                 || candidates.isEmpty()) {
