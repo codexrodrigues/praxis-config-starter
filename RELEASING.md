@@ -53,7 +53,8 @@ O smoke manual:
 - valida `minimal-form-plan`, `compiled-form-patch`, `page-preview`, `page-apply`, SSE, replay e cleanup.
 - quando `run_page_builder_full_e2e=true`, valida tambem o fluxo agentic do page-builder com browser real; use `page_builder_e2e_mode=smoke` como gate de release e `page_builder_e2e_mode=full` apenas para investigacoes deliberadas da matriz completa;
 - usa os defaults de `tools/e2e/page-builder-agentic-gate-matrix.json`, atualmente com `praxis.ai.stream.processing-timeout-seconds=360`, para acomodar turnos reais com discovery, RAG, multiplas chamadas LLM e materializacao;
-- executa apenas a config Playwright `production-like`, que bloqueia mocks de endpoints criticos, exige capabilities provenientes do registry e produz JSON com discovered/executed/skipped/failed, SHAs, versoes, provider/model sanitizado e cleanup;
+- executa apenas a config Playwright `production-like`, que bloqueia mocks de endpoints criticos, exige capabilities provenientes do registry e produz JSON com discovered/executed/skipped/failed, tentativas/retries reais, SHAs, versoes, provider/model sanitizado e cleanup;
+- publica `criticalEndpointMocks=0` somente quando o teste negativo da matriz comprovar que a interceptacao critica foi rejeitada antes do registro; trace, video e screenshot permanecem desabilitados na lane live;
 - mantem cenarios com mocks em uma config separada, sem contabiliza-los como gate live.
 
 Para reproduzir localmente, primeiro empacote o quickstart e depois rode:

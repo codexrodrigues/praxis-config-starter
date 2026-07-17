@@ -34,7 +34,7 @@ on:
       ui_ref:
         description: 'Immutable praxis-ui-angular commit SHA used by the page-builder E2E gate.'
         required: true
-        default: 2ec8ff6c0c83cc3e284ff1c19e05d6ec72224b44
+        default: 03786b9513b10b37898035dfa71f1598db3b87df
         type: string
       run_page_builder_full_e2e:
         description: 'Run the page-builder agentic Playwright gate after the HTTP/SSE smoke.'
