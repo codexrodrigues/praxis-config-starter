@@ -12760,6 +12760,87 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void llmAuthoredResourceDiscoveryCandidatesAvoidDuplicateCatalogDiscovery() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate payroll = richCandidate(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                0.78d,
+                "Folha analítica",
+                "Indicadores e séries temporais de pagamentos.");
+        AgenticAuthoringCandidate departments = richCandidate(
+                "/api/human-resources/departamentos",
+                0.71d,
+                "Departamentos",
+                "Dimensão organizacional para análise de pagamentos.");
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    List<AgenticAuthoringCandidate> options = invocation.getArgument(4, List.class);
+                    assertThat(options)
+                            .extracting(AgenticAuthoringCandidate::resourcePath)
+                            .containsExactly(
+                                    "/api/human-resources/vw-analytics-folha-pagamento",
+                                    "/api/human-resources/departamentos");
+                    return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                            true,
+                            "create",
+                            "chart",
+                            "create_chart",
+                            payroll.resourcePath(),
+                            null,
+                            "none",
+                            "Vou criar o gráfico com a fonte analítica governada.",
+                            List.of(),
+                            List.of(),
+                            List.of("llm-intent-resolution-used")));
+                });
+        AgenticAuthoringIntentResolverService service = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(requestWithContextHints(
+                "Monte uma visualização analítica dos pagamentos por departamento.",
+                "deterministic-smoke-disabled",
+                resourceDiscoveryContext(
+                        "chart",
+                        List.of(payroll, departments),
+                        new AgenticAuthoringResourceSearchFocus(
+                                "pagamentos de funcionários",
+                                List.of("departamentos", "evolução mensal"),
+                                "visualização analítica",
+                                "",
+                                "busca governada planejada pela LLM"))));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo(payroll.resourcePath());
+        Mockito.verifyNoInteractions(candidateCatalog);
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+    }
+
+    @Test
     void resourceDiscoverySemanticCandidateIsRankedBeforeWeakLexicalCatalogCandidate() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);

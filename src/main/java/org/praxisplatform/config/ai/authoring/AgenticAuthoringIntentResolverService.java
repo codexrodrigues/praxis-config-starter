@@ -214,7 +214,6 @@ public class AgenticAuthoringIntentResolverService {
                 shouldUsePreIntentResourceDiscoveryAsPrimaryEvidence(
                         shouldResolveLlmIntent,
                         request,
-                        prompt,
                         target);
         List<AgenticAuthoringCandidate> candidates = usePreIntentResourceDiscoveryAsPrimaryEvidence
                 ? contextHintCandidates(request)
@@ -2257,7 +2256,6 @@ public class AgenticAuthoringIntentResolverService {
     private boolean shouldUsePreIntentResourceDiscoveryAsPrimaryEvidence(
             boolean shouldResolveLlmIntent,
             AgenticAuthoringIntentResolutionRequest request,
-            String prompt,
             AgenticAuthoringTarget target) {
         if (!shouldResolveLlmIntent
                 || request == null
@@ -2272,18 +2270,12 @@ public class AgenticAuthoringIntentResolverService {
         if (candidates.isEmpty()) {
             return false;
         }
-        String artifactKind = materializableResourceDiscoveryArtifactKind(request, "unknown");
         return candidates.stream()
                 .filter(Objects::nonNull)
                 .filter(candidate -> hasEvidence(candidate, "tool-search-api-resources"))
                 .filter(this::hasTrustedSelectionEvidence)
                 .filter(candidate -> !isWeakLexicalCandidate(candidate))
-                .anyMatch(candidate -> hasSafeFocusedResourceDiscoveryLead(
-                        request,
-                        prompt,
-                        artifactKind,
-                        candidate,
-                        candidates));
+                .anyMatch(candidate -> hasResourceDiscoveryCandidate(request, candidate));
     }
 
     private boolean hasBusinessDataAuthoringSignal(
