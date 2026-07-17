@@ -6,7 +6,7 @@ param(
     [string] $Provider = "openai",
     [string] $QuickstartRef = "cbc5cec318a77e998e786e486861a3c92727519e",
     [string] $MetadataRef = "567b35bce2fa229bb06c5662c57fc96902e04f09",
-    [string] $UiRef = "2ec8ff6c0c83cc3e284ff1c19e05d6ec72224b44",
+    [string] $UiRef = "03786b9513b10b37898035dfa71f1598db3b87df",
     [int] $QuickstartStartupTimeoutSeconds = 180,
     [switch] $RunPageBuilderFullE2E,
     [ValidateSet("smoke", "full")]
