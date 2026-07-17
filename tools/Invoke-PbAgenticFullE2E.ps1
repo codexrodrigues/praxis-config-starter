@@ -2,20 +2,21 @@ param(
     [ValidateSet("openai", "gemini")]
     [string] $Provider = "openai",
     [string] $QuickstartRoot = "",
+    [string] $MetadataRoot = "",
     [string] $UiRoot = "",
     [string] $JarPath = "",
     [string] $EnvFile = ".env.openai.local.ps1",
-    [string] $JavaHome = "D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21",
+    [string] $JavaHome = $env:JAVA_HOME,
     [string] $EmbeddingProvider = "",
     [int] $BackendPort = 8088,
     [int] $UiPort = 4003,
     [int] $StartupTimeoutSec = 180,
     [int] $UiStartupTimeoutSec = 600,
-    [int] $StreamProcessingTimeoutSeconds = 180,
+    [int] $StreamProcessingTimeoutSeconds = 0,
     [ValidateSet("smoke", "full")]
     [string] $ValidationMode = "smoke",
-    [int] $PlaywrightTestTimeoutMs = 600000,
-    [int] $Retries = 1
+    [int] $PlaywrightTestTimeoutMs = 0,
+    [int] $Retries = -1
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,6 +30,168 @@ function Get-ListenPid([int] $Port) {
     $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -eq $conn) { return $null }
     return [int] $conn.OwningProcess
+}
+
+function Get-ListenConnections([int] $Port) {
+    return @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+}
+
+function Assert-LoopbackListener([int] $Port, [string] $Name) {
+    $connections = Get-ListenConnections $Port
+    if ($connections.Count -eq 0) { throw "$Name has no listener on port $Port." }
+    $nonLoopback = @($connections | Where-Object { $_.LocalAddress -notin @("127.0.0.1", "::1") })
+    if ($nonLoopback.Count -gt 0) {
+        $addresses = ($nonLoopback | ForEach-Object { $_.LocalAddress } | Sort-Object -Unique) -join ","
+        throw "$Name must listen only on loopback. port=$Port unexpectedAddresses=$addresses"
+    }
+}
+
+function Assert-PortReleased([int] $Port, [string] $Name) {
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        if ((Get-ListenConnections $Port).Count -eq 0) { return }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+    throw "$Name left a listener on port $Port after cleanup."
+}
+
+function Assert-RequiredValue([string] $Name, [string] $Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) { throw "Missing required production-like setting: $Name" }
+}
+
+function Assert-PostgresUrl([string] $Name, [string] $Value) {
+    Assert-RequiredValue $Name $Value
+    if (-not $Value.StartsWith("jdbc:postgresql://", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "$Name must use jdbc:postgresql for the production-like gate."
+    }
+}
+
+function Get-GitIdentity([string] $Root, [string] $Name) {
+    $sha = (& git -C $Root rev-parse HEAD 2>$null).Trim()
+    if ($LASTEXITCODE -ne 0 -or $sha -notmatch "^[0-9a-f]{40}$") {
+        throw "Cannot resolve immutable Git SHA for $Name at $Root."
+    }
+    $dirty = @(& git -C $Root status --porcelain 2>$null).Count -gt 0
+    return [ordered]@{ name = $Name; sha = $sha; dirty = $dirty }
+}
+
+function New-EphemeralStreamSecret {
+    $bytes = New-Object byte[] 48
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    return [Convert]::ToBase64String($bytes)
+}
+
+function Get-QuickstartConfigDependencyVersion([string] $Path) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $outer = [IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        $starterEntry = $outer.Entries |
+            Where-Object { $_.FullName -match '^BOOT-INF/lib/praxis-config-starter-[^/]+\.jar$' } |
+            Select-Object -First 1
+        if ($null -eq $starterEntry) { throw "Quickstart jar does not contain praxis-config-starter under BOOT-INF/lib." }
+        $versionMatch = [regex]::Match($starterEntry.Name, '^praxis-config-starter-(?<version>.+)\.jar$')
+        if (-not $versionMatch.Success) { throw "Cannot resolve praxis-config-starter version from Quickstart jar." }
+        return $versionMatch.Groups['version'].Value.Trim()
+    } finally { $outer.Dispose() }
+}
+
+function Get-PlaywrightSummary([string] $ReportPath) {
+    if (-not (Test-Path -LiteralPath $ReportPath)) { throw "Playwright JSON report was not generated: $ReportPath" }
+    $report = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json
+    $stats = $report.stats
+    if ($null -eq $stats) { throw "Playwright JSON report does not contain stats." }
+    $expected = [int] $stats.expected
+    $skipped = [int] $stats.skipped
+    $unexpected = [int] $stats.unexpected
+    $flaky = [int] $stats.flaky
+    return [ordered]@{
+        discovered = $expected + $skipped + $unexpected + $flaky
+        executed = $expected + $unexpected + $flaky
+        passed = $expected
+        skipped = $skipped
+        failed = $unexpected
+        flaky = $flaky
+        durationMs = [int64] $stats.duration
+    }
+}
+
+function Invoke-PgvectorPreflight(
+    [string] $QuickstartPath,
+    [string] $JavaPath,
+    [string] $SourcePath,
+    [string] $OutputRoot
+) {
+    $classpathFile = Join-Path $QuickstartPath "target\runtime-classpath.txt"
+    Push-Location $QuickstartPath
+    try {
+        & mvn -q dependency:build-classpath "-Dmdep.outputFile=target/runtime-classpath.txt" "-DincludeScope=runtime"
+        if ($LASTEXITCODE -ne 0) { throw "Cannot build Quickstart runtime classpath for pgvector preflight." }
+    } finally {
+        Pop-Location
+    }
+    $classpath = (Get-Content -LiteralPath $classpathFile -Raw).Trim()
+    Assert-RequiredValue "Quickstart runtime classpath" $classpath
+    $classesRoot = Join-Path $OutputRoot "pgvector-preflight-classes"
+    New-Item -ItemType Directory -Force -Path $classesRoot | Out-Null
+    $argClasspath = $classpath.Replace('\', '/')
+    $argClassesRoot = $classesRoot.Replace('\', '/')
+    $argSourcePath = $SourcePath.Replace('\', '/')
+    $javacArgsFile = Join-Path $OutputRoot "pgvector-preflight-javac.args"
+    @(
+        '-cp'
+        "`"$argClasspath`""
+        '-d'
+        "`"$argClassesRoot`""
+        "`"$argSourcePath`""
+    ) | Set-Content -LiteralPath $javacArgsFile -Encoding ascii
+    $javacOutput = [IO.Path]::GetTempFileName()
+    $javacError = [IO.Path]::GetTempFileName()
+    try {
+        $javacProcess = Start-Process `
+            -FilePath (Join-Path $JavaPath "bin\javac.exe") `
+            -ArgumentList "@$javacArgsFile" `
+            -RedirectStandardOutput $javacOutput `
+            -RedirectStandardError $javacError `
+            -Wait `
+            -PassThru `
+            -WindowStyle Hidden
+        if ($javacProcess.ExitCode -ne 0) { throw "Cannot compile PgvectorPreflight.java." }
+    } finally {
+        Remove-Item -LiteralPath $javacOutput, $javacError -Force -ErrorAction SilentlyContinue
+    }
+    $runtimeClasspath = "$classesRoot$([IO.Path]::PathSeparator)$classpath"
+    $argRuntimeClasspath = $runtimeClasspath.Replace('\', '/')
+    $javaExecutable = Join-Path $JavaPath "bin\java.exe"
+    $javaArgsFile = Join-Path $OutputRoot "pgvector-preflight-java.args"
+    @(
+        '-cp'
+        "`"$argRuntimeClasspath`""
+        'PgvectorPreflight'
+    ) | Set-Content -LiteralPath $javaArgsFile -Encoding ascii
+    $javaOutput = [IO.Path]::GetTempFileName()
+    $javaError = [IO.Path]::GetTempFileName()
+    try {
+        $javaProcess = Start-Process `
+            -FilePath $javaExecutable `
+            -ArgumentList "@$javaArgsFile" `
+            -RedirectStandardOutput $javaOutput `
+            -RedirectStandardError $javaError `
+            -Wait `
+            -PassThru `
+            -WindowStyle Hidden
+        if ($javaProcess.ExitCode -ne 0) {
+            throw "Pgvector preflight failed without exposing database connection details."
+        }
+        $output = (Get-Content -LiteralPath $javaOutput -Raw).Trim()
+    } finally {
+        Remove-Item -LiteralPath $javaOutput, $javaError -Force -ErrorAction SilentlyContinue
+    }
+    $result = $output | ConvertFrom-Json
+    if ($result.ready -ne $true -or $result.table -ne "vector_store") {
+        throw "Pgvector preflight did not produce governed readiness evidence."
+    }
+    return $result
 }
 
 function Wait-Url([string] $Url, [int] $TimeoutSec, [string] $Name) {
@@ -96,11 +259,67 @@ function Invoke-DomainCatalogIngest {
 $starterRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $starterRoot
 if ([string]::IsNullOrWhiteSpace($QuickstartRoot)) { $QuickstartRoot = Join-Path $workspaceRoot "praxis-api-quickstart" }
+if ([string]::IsNullOrWhiteSpace($MetadataRoot)) { $MetadataRoot = Join-Path $workspaceRoot "praxis-metadata-starter" }
 if ([string]::IsNullOrWhiteSpace($UiRoot)) { $UiRoot = Join-Path $workspaceRoot "praxis-ui-angular" }
 if (-not [System.IO.Path]::IsPathRooted($EnvFile)) { $EnvFile = Join-Path $starterRoot $EnvFile }
+$matrixPath = Join-Path $starterRoot "tools\e2e\page-builder-agentic-gate-matrix.json"
 
-foreach ($requiredPath in @($QuickstartRoot, $UiRoot, $EnvFile, (Join-Path $JavaHome "bin\java.exe"))) {
+Assert-RequiredValue "JAVA_HOME/-JavaHome" $JavaHome
+foreach ($requiredPath in @($QuickstartRoot, $MetadataRoot, $UiRoot, $EnvFile, $matrixPath, (Join-Path $JavaHome "bin\java.exe"))) {
     if (-not (Test-Path -LiteralPath $requiredPath)) { throw "Required path not found: $requiredPath" }
+}
+
+$gateMatrix = Get-Content -LiteralPath $matrixPath -Raw | ConvertFrom-Json
+$modeMatrix = $gateMatrix.modes.$ValidationMode
+if ($null -eq $modeMatrix) { throw "Validation mode is missing from the canonical gate matrix: $ValidationMode" }
+if ($StreamProcessingTimeoutSeconds -le 0) {
+    $StreamProcessingTimeoutSeconds = [int] $gateMatrix.defaults.streamProcessingTimeoutSeconds
+}
+if ($PlaywrightTestTimeoutMs -le 0) {
+    $PlaywrightTestTimeoutMs = [int] $gateMatrix.defaults.playwrightTestTimeoutMs
+}
+if ($Retries -lt 0) { $Retries = [int] $gateMatrix.defaults.retries }
+
+$null = . $EnvFile
+$resolvedEmbeddingProvider = if ([string]::IsNullOrWhiteSpace($EmbeddingProvider)) { $Provider } else { $EmbeddingProvider }
+if ($resolvedEmbeddingProvider -ieq "mock") {
+    throw "EMBEDDING_PROVIDER=mock is not valid for the production-like Page Builder gate."
+}
+Assert-PostgresUrl "SPRING_DATASOURCE_URL" $env:SPRING_DATASOURCE_URL
+Assert-RequiredValue "SPRING_DATASOURCE_USERNAME" $env:SPRING_DATASOURCE_USERNAME
+Assert-RequiredValue "SPRING_DATASOURCE_PASSWORD" $env:SPRING_DATASOURCE_PASSWORD
+Assert-PostgresUrl "CONFIG_DATASOURCE_URL" $env:CONFIG_DATASOURCE_URL
+Assert-RequiredValue "CONFIG_DATASOURCE_USERNAME" $env:CONFIG_DATASOURCE_USERNAME
+Assert-RequiredValue "CONFIG_DATASOURCE_PASSWORD" $env:CONFIG_DATASOURCE_PASSWORD
+$providerKeyName = if ($Provider -eq "openai") { "PRAXIS_AI_OPENAI_API_KEY" } else { "PRAXIS_AI_GEMINI_API_KEY" }
+$providerKeyValue = [Environment]::GetEnvironmentVariable($providerKeyName)
+Assert-RequiredValue $providerKeyName $providerKeyValue
+
+$javaExecutable = Join-Path $JavaHome "bin\java.exe"
+$javaVersion = (& cmd.exe /d /c "`"$javaExecutable`" -version 2>&1" | Out-String)
+if ($LASTEXITCODE -ne 0) { throw "Cannot execute the configured Java runtime." }
+if ($javaVersion -notmatch '(?m)version "21(?:\.|\")') { throw "Java 21 is required by the production-like gate." }
+$nodeVersion = (& node --version 2>$null).Trim()
+if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v(?<major>\d+)\.' -or [int] $Matches['major'] -lt 20) {
+    throw "Node.js 20 or newer is required by the production-like gate."
+}
+if ($null -eq (Get-Command mvn -ErrorAction SilentlyContinue)) {
+    throw "Maven is required by the production-like gate."
+}
+$playwrightVersion = $null
+$chromiumVersion = $null
+Push-Location $UiRoot
+try {
+    $playwrightVersionText = (& cmd.exe /c "npx.cmd playwright --version" 2>$null | Out-String).Trim()
+    $playwrightVersionMatch = [regex]::Match($playwrightVersionText, 'Version\s+(?<version>\S+)')
+    if (-not $playwrightVersionMatch.Success) { throw "Cannot resolve Playwright version." }
+    $playwrightVersion = $playwrightVersionMatch.Groups['version'].Value
+    $browserDryRun = (& cmd.exe /c "npx.cmd playwright install --dry-run" 2>$null | Out-String)
+    $chromiumVersionMatch = [regex]::Match($browserDryRun, 'browser:\s+chromium\s+version\s+(?<version>\S+)')
+    if (-not $chromiumVersionMatch.Success) { throw "Cannot resolve Playwright Chromium version." }
+    $chromiumVersion = $chromiumVersionMatch.Groups['version'].Value
+} finally {
+    Pop-Location
 }
 
 if ([string]::IsNullOrWhiteSpace($JarPath)) {
@@ -112,22 +331,68 @@ if ([string]::IsNullOrWhiteSpace($JarPath)) {
     $JarPath = $jar.FullName
 }
 
-$backendUrl = "http://localhost:$BackendPort"
+[xml] $starterPom = Get-Content -LiteralPath (Join-Path $starterRoot "pom.xml") -Raw
+$expectedStarterVersion = [string] $starterPom.project.version
+$jarStarterVersion = Get-QuickstartConfigDependencyVersion $JarPath
+if ($jarStarterVersion -ne $expectedStarterVersion) {
+    throw "Quickstart jar uses praxis-config-starter $jarStarterVersion, expected $expectedStarterVersion. Repackage it against the current starter."
+}
+
+$gitIdentities = @(
+    Get-GitIdentity $starterRoot "praxis-config-starter"
+    Get-GitIdentity $MetadataRoot "praxis-metadata-starter"
+    Get-GitIdentity $QuickstartRoot "praxis-api-quickstart"
+    Get-GitIdentity $UiRoot "praxis-ui-angular"
+)
+$configContractText = Get-Content -LiteralPath (Join-Path $starterRoot "docs\ai\contracts\praxis-ai-api-contract-v1.1.openapi.yaml") -Raw
+$configContractMatch = [regex]::Match($configContractText, 'ContractSchemaHashHeader:[\s\S]*?default:\s+(?<hash>[0-9a-f]{64})')
+$uiContractText = Get-Content -LiteralPath (Join-Path $UiRoot "projects\praxis-ai\src\lib\core\contracts\ai-contract.generated.ts") -Raw
+$uiContractMatch = [regex]::Match($uiContractText, "AI_CONTRACT_SCHEMA_HASH\s*=\s*'(?<hash>[0-9a-f]{64})'")
+if (-not $configContractMatch.Success -or -not $uiContractMatch.Success) {
+    throw "Cannot resolve Config/Angular AI contract hashes."
+}
+$contractHash = $configContractMatch.Groups['hash'].Value
+if ($uiContractMatch.Groups['hash'].Value -ne $contractHash) {
+    throw "Config and Angular AI contract hashes diverge."
+}
+
+$backendUrl = "http://127.0.0.1:$BackendPort"
 $uiUrl = "http://localhost:$UiPort"
 $artifactRoot = Join-Path $starterRoot ("artifacts\page-builder-agentic-e2e\$ValidationMode\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 $quickstartLogs = Join-Path $QuickstartRoot "logs"
 New-Item -ItemType Directory -Force -Path $artifactRoot, $quickstartLogs | Out-Null
 $backendProcess = $null
 $uiProcess = $null
+$playwrightSummary = $null
+$capabilitiesEvidence = $null
+$streamSecret = New-EphemeralStreamSecret
+$resultPath = Join-Path $artifactRoot "result.json"
+$sourceAuditPath = Join-Path $artifactRoot "source-audit.json"
+$playwrightReportPath = Join-Path $artifactRoot "playwright-results.json"
+$gateFailure = $null
+$pgvectorEvidence = $null
+$loopbackVerified = $false
 
 try {
     Write-Phase "Starting Page Builder agentic E2E gate. provider=$Provider validationMode=$ValidationMode backend=$backendUrl ui=$uiUrl artifactRoot=$artifactRoot."
     if ($null -ne (Get-ListenPid $BackendPort)) { throw "Port $BackendPort is already in use." }
     if ($null -ne (Get-ListenPid $UiPort)) { throw "Port $UiPort is already in use." }
 
-    $resolvedEmbeddingProvider = if ([string]::IsNullOrWhiteSpace($EmbeddingProvider)) { $Provider } else { $EmbeddingProvider }
-    if ($resolvedEmbeddingProvider -ieq "mock") {
-        throw "EMBEDDING_PROVIDER=mock is not valid for the Page Builder live LLM/browser E2E. Use -EmbeddingProvider $Provider, or a documented deterministic non-LLM runner."
+    Write-Phase "Verifying PostgreSQL pgvector extension and vector_store schema."
+    $pgvectorEvidence = Invoke-PgvectorPreflight `
+        $QuickstartRoot `
+        $JavaHome `
+        (Join-Path $starterRoot "tools\e2e\PgvectorPreflight.java") `
+        $artifactRoot
+
+    Write-Phase "Auditing real Angular authoring sources before starting services."
+    Push-Location $UiRoot
+    try {
+        $sourceAuditOutput = & node "tools/e2e/audit-agentic-production-like-source.mjs" --workspace $UiRoot
+        if ($LASTEXITCODE -ne 0) { throw "Production-like source audit failed." }
+        $sourceAuditOutput | Set-Content -LiteralPath $sourceAuditPath -Encoding utf8
+    } finally {
+        Pop-Location
     }
 
     $starterAuthoringRoot = Join-Path $starterRoot "docs\ai\agentic-authoring"
@@ -147,6 +412,7 @@ Set-Location '$QuickstartRoot'
 `$env:Path = '$JavaHome\bin;' + `$env:Path
 `$env:PORT = '$BackendPort'
 `$env:SERVER_PORT = '$BackendPort'
+`$env:SERVER_ADDRESS = '127.0.0.1'
 `$env:SPRING_PROFILES_ACTIVE = 'local'
 `$env:PRAXIS_AI_PROVIDER = '$Provider'
 `$env:PRAXIS_AI_GEMINI_PREFER_GENAI_API = 'false'
@@ -165,7 +431,6 @@ Set-Location '$QuickstartRoot'
 `$env:PRAXIS_AI_SECURITY_LOCAL_DEFAULT_USER = 'codex-e2e'
 `$env:PRAXIS_AI_SECURITY_LOCAL_DEFAULT_ENVIRONMENT = 'local'
 `$env:PRAXIS_AI_STREAM_AUTH_MODE = 'signed-url-token'
-`$env:PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET = 'codex-local-e2e-token-secret-20260421'
 `$env:EMBEDDING_PROVIDER = '$resolvedEmbeddingProvider'
 `$env:PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ENABLED = 'false'
 `$env:PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ASYNC_ENABLED = 'true'
@@ -174,8 +439,10 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
 "@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($backendScript))
     Write-Phase "Starting Quickstart backend on $backendUrl."
+    $env:PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET = $streamSecret
     $backendProcess = Start-Process powershell.exe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encoded) -RedirectStandardOutput (Join-Path $quickstartLogs "page-builder-agentic-e2e.out.log") -RedirectStandardError (Join-Path $quickstartLogs "page-builder-agentic-e2e.err.log") -PassThru -WindowStyle Hidden
     Wait-Url "$backendUrl/actuator/health" $StartupTimeoutSec "Quickstart backend"
+    Assert-LoopbackListener $BackendPort "Quickstart backend"
     Write-Phase "Quickstart backend is healthy."
 
     Invoke-DomainCatalogIngest $backendUrl $uiUrl "desenv" "local"
@@ -215,6 +482,32 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         Pop-Location
     }
 
+    Write-Phase "Verifying governed component capabilities without browser interception."
+    $capabilities = Invoke-RestMethod `
+        -Method Get `
+        -Uri "$backendUrl/api/praxis/config/ai/authoring/component-capabilities" `
+        -Headers @{
+            "Origin" = $uiUrl
+            "X-Tenant-ID" = "desenv"
+            "X-User-ID" = "demo"
+            "X-Env" = "local"
+        } `
+        -TimeoutSec 90
+    if ($capabilities.diagnostics.source -ne "registry" -or $capabilities.diagnostics.degraded -ne $false) {
+        throw "Component capabilities must be registry-backed and non-degraded in the production-like gate."
+    }
+    $chartCatalog = @($capabilities.catalogs | Where-Object { $_.componentId -eq "praxis-chart" }) | Select-Object -First 1
+    $chartCapabilityIds = @($chartCatalog.capabilities | ForEach-Object { $_.id })
+    if ($chartCapabilityIds -notcontains "data.resource.bind") {
+        throw "Registry-backed praxis-chart capability data.resource.bind is missing."
+    }
+    $capabilitiesEvidence = [ordered]@{
+        source = "registry"
+        degraded = $false
+        catalogCount = @($capabilities.catalogs).Count
+        chartResourceBinding = $true
+    }
+
     $cmd = "set PAX_PROXY_TARGET=$backendUrl&& set PLAYWRIGHT_BASE_URL=$uiUrl&& npx.cmd ng serve praxis-ui-workspace --port $UiPort --host localhost --proxy-config proxy.conf.js"
     Write-Phase "Starting Angular dev server on $uiUrl."
     $angularOutLog = Join-Path $artifactRoot "angular.out.log"
@@ -234,6 +527,8 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         }
         throw
     }
+    Assert-LoopbackListener $UiPort "Angular dev server"
+    $loopbackVerified = $true
     Write-Phase "Angular dev server is reachable."
 
     Push-Location $UiRoot
@@ -241,23 +536,88 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         Write-Phase "Running Playwright Page Builder validation. mode=$ValidationMode retries=$Retries timeoutMs=$PlaywrightTestTimeoutMs."
         $env:PLAYWRIGHT_BASE_URL = $uiUrl
         $env:PRAXIS_E2E_AGENTIC_VALIDATION_MODE = $ValidationMode
+        $env:PRAXIS_E2E_AGENTIC_EXECUTION_LANE = "live"
+        $env:PRAXIS_E2E_JSON_REPORT_PATH = $playwrightReportPath
         if ($PlaywrightTestTimeoutMs -gt 0) {
             $env:PRAXIS_E2E_TEST_TIMEOUT_MS = "$PlaywrightTestTimeoutMs"
         } else {
             Remove-Item Env:\PRAXIS_E2E_TEST_TIMEOUT_MS -ErrorAction SilentlyContinue
         }
-        & cmd.exe /c "npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-validation.playwright.config.ts --retries=$Retries"
-        if ($LASTEXITCODE -ne 0) { throw "Page-builder agentic $ValidationMode E2E failed with exit code $LASTEXITCODE." }
+        & cmd.exe /c "npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-production-like.playwright.config.ts --retries=$Retries"
+        $playwrightExitCode = $LASTEXITCODE
+        if (Test-Path -LiteralPath $playwrightReportPath) {
+            $playwrightSummary = Get-PlaywrightSummary $playwrightReportPath
+        }
+        if ($playwrightExitCode -ne 0) { throw "Page-builder agentic $ValidationMode E2E failed with exit code $playwrightExitCode." }
+        if ($null -eq $playwrightSummary) { throw "Playwright summary is unavailable after a successful execution." }
+        if ($playwrightSummary.discovered -ne [int] $modeMatrix.expectedDiscovered) {
+            throw "Playwright discovered $($playwrightSummary.discovered) tests; matrix expects $($modeMatrix.expectedDiscovered)."
+        }
+        if ($playwrightSummary.executed -lt [int] $modeMatrix.minimumExecuted) {
+            throw "Playwright executed $($playwrightSummary.executed) tests; matrix requires at least $($modeMatrix.minimumExecuted)."
+        }
+        if ($playwrightSummary.skipped -ne [int] $modeMatrix.expectedSkipped) {
+            throw "Playwright skipped $($playwrightSummary.skipped) tests; matrix expects $($modeMatrix.expectedSkipped)."
+        }
         Write-Phase "Playwright Page Builder validation completed."
     } finally {
         Pop-Location
     }
 
-    [pscustomobject]@{ provider = $Provider; validationMode = $ValidationMode; backendBaseUrl = $backendUrl; uiBaseUrl = $uiUrl; artifactRoot = $artifactRoot; e2ePassed = $true } |
-        ConvertTo-Json -Depth 4 |
-        Tee-Object -FilePath (Join-Path $artifactRoot "result.json")
+} catch {
+    $gateFailure = $_
 } finally {
     Write-Phase "Stopping Page Builder E2E processes."
     Stop-ProcAndPort $uiProcess $UiPort
     Stop-ProcAndPort $backendProcess $BackendPort
+    Remove-Item Env:\PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET -ErrorAction SilentlyContinue
+    try {
+        Assert-PortReleased $UiPort "Angular dev server"
+        Assert-PortReleased $BackendPort "Quickstart backend"
+    } catch {
+        if ($null -eq $gateFailure) { $gateFailure = $_ }
+    }
+
+    $modelId = if ($Provider -eq "openai") { $env:PRAXIS_AI_OPENAI_MODEL } else { $env:PRAXIS_AI_GEMINI_MODEL }
+    [pscustomobject]@{
+        schemaVersion = "praxis.page-builder-agentic-production-like-result/v1"
+        productionLike = ($null -eq $gateFailure)
+        criticalEndpointMocks = 0
+        executionLane = "live"
+        validationMode = $ValidationMode
+        e2ePassed = ($null -eq $gateFailure)
+        provider = $Provider
+        model = $modelId
+        embeddingProvider = $resolvedEmbeddingProvider
+        datasourceKinds = [ordered]@{ application = "postgresql"; config = "postgresql" }
+        pgvector = $pgvectorEvidence
+        backendBaseUrl = $backendUrl
+        uiBaseUrl = $uiUrl
+        loopbackOnly = $loopbackVerified
+        cleanupVerified = ((Get-ListenConnections $UiPort).Count -eq 0 -and (Get-ListenConnections $BackendPort).Count -eq 0)
+        artifactRoot = $artifactRoot
+        sourceAudit = [ordered]@{ passed = (Test-Path -LiteralPath $sourceAuditPath); artifact = "source-audit.json" }
+        git = $gitIdentities
+        versions = [ordered]@{
+            configStarter = $expectedStarterVersion
+            quickstartConfigDependency = $jarStarterVersion
+            java = 21
+            node = $nodeVersion
+            playwright = $playwrightVersion
+            chromium = $chromiumVersion
+        }
+        contractHash = $contractHash
+        capabilities = $capabilitiesEvidence
+        matrix = [ordered]@{
+            schemaVersion = $gateMatrix.schemaVersion
+            streamProcessingTimeoutSeconds = $StreamProcessingTimeoutSeconds
+            playwrightTestTimeoutMs = $PlaywrightTestTimeoutMs
+            retries = $Retries
+        }
+        playwright = $playwrightSummary
+        failureType = if ($null -eq $gateFailure) { $null } else { $gateFailure.Exception.GetType().FullName }
+    } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $resultPath -Encoding utf8
 }
+
+if ($null -ne $gateFailure) { throw $gateFailure }
+Get-Content -LiteralPath $resultPath -Raw

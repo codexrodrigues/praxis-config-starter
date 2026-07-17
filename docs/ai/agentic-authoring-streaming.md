@@ -782,29 +782,34 @@ O Page Builder deve:
   terminal, para que o backend rejeite materializacoes que nao cumpram a
   decisao canonica authorada ou que nao derivem do resultado revisado.
 
-## Evidencia de validacao ponta a ponta
+## Evidencia historica de validacao ponta a ponta
 
-Em 2026-04-23, o fluxo full local foi validado com o runner canonico:
+Em 2026-04-23, o fluxo full local foi validado com a versao entao vigente do
+runner:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\tools\Invoke-PbAgenticFullE2E.ps1 `
   -Provider openai `
   -QuickstartRoot ..\praxis-api-quickstart `
-  -UiRoot ..\praxis-ui-angular `
-  -StreamProcessingTimeoutSeconds 360
+  -UiRoot ..\praxis-ui-angular
 ```
 
 Resultado:
 
-- `praxis-api-quickstart` subiu em `http://localhost:8088` com `PRAXIS_AI_STREAM_AUTH_MODE=signed-url-token`;
+- `praxis-api-quickstart` subiu com `PRAXIS_AI_STREAM_AUTH_MODE=signed-url-token`;
 - `praxis-ui-angular` subiu em `http://localhost:4003`;
-- o Playwright executou `praxis-page-builder-agentic-validation.playwright.config.ts`;
+- o Playwright executou a config de validacao disponivel naquele momento;
 - os fluxos de dashboard de pagamentos e formulario de funcionarios passaram usando browser real, backend SSE real e provider OpenAI real;
-- a auditoria confirmou que `praxis-ai.service.ts` nao continha `getMockPatch` nem `extractUserIntent`;
 - total: `3 passed`.
 
-Essa validacao fecha o marco operacional do primeiro ciclo backend-driven: o frontend nao dependeu de caminho mockado de authoring e o resultado aplicado veio do contrato retornado pelo backend.
+Essa contagem e historica e nao descreve a matriz atual. Desde o gate
+`praxis.page-builder-agentic-gate-matrix/v1`, evidencia production-like exige a
+config `praxis-page-builder-agentic-production-like.playwright.config.ts`,
+auditoria estatica que le os servicos reais, `criticalEndpointMocks=0`,
+capabilities `source=registry`/`degraded=false`, SHAs imutaveis, PostgreSQL e
+pgvector reais, provider/embeddings reais, bind loopback e cleanup comprovado.
+Testes deterministas da config `mocked` nao entram nessa contagem.
 
 ## Fora de escopo
 

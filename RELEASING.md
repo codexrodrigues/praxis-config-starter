@@ -38,7 +38,7 @@ aplicacao de config e streaming SSE.
 
 Fluxo recomendado:
 1) Entrar em **Actions -> Agentic Authoring HTTP Smoke -> Run workflow**.
-2) Executar com `provider=openai` e manter o `quickstart_ref` padrao do workflow, salvo quando a validacao exigir explicitamente outro ref.
+2) Executar com `provider=openai` e confirmar os SHAs imutaveis sugeridos para Quickstart, Metadata e Angular. Branches como `main` nao sao aceitas pelo gate.
 3) Para releases que alterem authoring, page-builder, manifestos executaveis, SSE ou compilacao de patches, marcar `run_page_builder_full_e2e=true` e manter `page_builder_e2e_mode=smoke`.
 4) Confirmar que o job `Quickstart HTTP/SSE smoke` terminou com sucesso. Quando `run_page_builder_full_e2e=true`, confirmar tambem que o gate Playwright do page-builder terminou com sucesso e publicou artefatos de diagnostico.
 5) Somente depois executar **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow** para criar a tag.
@@ -52,7 +52,9 @@ O smoke manual:
 - confirma que o plano intermediario e o preview usam a mesma materializacao por `/schemas/filtered`, preservam os campos obrigatorios `descricao` e `ocorridoEm` e rejeitam campos inexistentes como `titulo`;
 - valida `minimal-form-plan`, `compiled-form-patch`, `page-preview`, `page-apply`, SSE, replay e cleanup.
 - quando `run_page_builder_full_e2e=true`, valida tambem o fluxo agentic do page-builder com browser real; use `page_builder_e2e_mode=smoke` como gate de release e `page_builder_e2e_mode=full` apenas para investigacoes deliberadas da matriz completa;
-- usa `praxis.ai.stream.processing-timeout-seconds=360` por padrao para acomodar turnos reais com discovery, RAG, multiplas chamadas LLM e materializacao.
+- usa os defaults de `tools/e2e/page-builder-agentic-gate-matrix.json`, atualmente com `praxis.ai.stream.processing-timeout-seconds=360`, para acomodar turnos reais com discovery, RAG, multiplas chamadas LLM e materializacao;
+- executa apenas a config Playwright `production-like`, que bloqueia mocks de endpoints criticos, exige capabilities provenientes do registry e produz JSON com discovered/executed/skipped/failed, SHAs, versoes, provider/model sanitizado e cleanup;
+- mantem cenarios com mocks em uma config separada, sem contabiliza-los como gate live.
 
 Para reproduzir localmente, primeiro empacote o quickstart e depois rode:
 

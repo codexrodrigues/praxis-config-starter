@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "praxis.page-builder-agentic-gate-matrix/v1",
+  "defaults": {
+    "streamProcessingTimeoutSeconds": 360,
+    "playwrightTestTimeoutMs": 600000,
+    "retries": 1
+  },
+  "modes": {
+    "smoke": {
+      "description": "Release gate with one live LLM authoring journey plus real dependency and transport proofs.",
+      "expectedDiscovered": 10,
+      "minimumExecuted": 5,
+      "expectedSkipped": 5
+    },
+    "full": {
+      "description": "Deliberate live LLM matrix with all non-mocked browser scenarios.",
+      "expectedDiscovered": 10,
+      "minimumExecuted": 7,
+      "expectedSkipped": 3
+    }
+  }
+}
