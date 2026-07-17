@@ -79,7 +79,7 @@ public class AiRegistryBootstrapAutoConfiguration {
         return args -> {
             bootstrapService.bootstrapIfNeeded();
             componentCapabilitiesService.ifAvailable(
-                    AgenticAuthoringComponentCapabilitiesService::invalidateCapabilitiesCache);
+                    AgenticAuthoringComponentCapabilitiesService::refreshCapabilitiesCache);
         };
     }
 

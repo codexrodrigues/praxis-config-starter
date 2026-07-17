@@ -6,6 +6,8 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringApplyService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesProperties;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesRefreshListener;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentEditPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeAnswerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeApiCatalogProjectionService;
@@ -74,7 +76,10 @@ import org.springframework.core.annotation.Order;
 
 @AutoConfiguration
 @ConditionalOnClass(AgenticAuthoringDryRunService.class)
-@EnableConfigurationProperties(AgenticAuthoringArtifactProperties.class)
+@EnableConfigurationProperties({
+        AgenticAuthoringArtifactProperties.class,
+        AgenticAuthoringComponentCapabilitiesProperties.class
+})
 public class AgenticAuthoringAutoConfiguration {
 
     @Bean
@@ -171,11 +176,20 @@ public class AgenticAuthoringAutoConfiguration {
     public AgenticAuthoringComponentCapabilitiesService agenticAuthoringComponentCapabilitiesService(
             ObjectProvider<AiRegistryRepository> aiRegistryRepository,
             ObjectMapper objectMapper,
-            @Value("${praxis.ai.authoring.component-capabilities.cache-ttl-ms:600000}") long cacheTtlMs) {
+            AgenticAuthoringComponentCapabilitiesProperties properties) {
         return new AgenticAuthoringComponentCapabilitiesService(
                 aiRegistryRepository.getIfAvailable(),
                 objectMapper,
-                cacheTtlMs);
+                properties.getCacheTtlMs(),
+                properties.getRegistryLoadTimeoutMs(),
+                properties.getDegradedRetryMs());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public AgenticAuthoringComponentCapabilitiesRefreshListener agenticAuthoringComponentCapabilitiesRefreshListener(
+            AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService) {
+        return new AgenticAuthoringComponentCapabilitiesRefreshListener(componentCapabilitiesService);
     }
 
     @Bean
@@ -507,6 +521,7 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectProvider<AgenticAuthoringConsultativeAnswerService> consultativeAnswerService,
             ObjectProvider<AgenticAuthoringPreIntentToolPlanningService> preIntentToolPlanningService,
             AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
+            AgenticAuthoringComponentCapabilitiesProperties componentCapabilitiesProperties,
             ObjectMapper objectMapper) {
         return new AgenticAuthoringTurnEngine(
                 intentResolverService,
@@ -519,7 +534,8 @@ public class AgenticAuthoringAutoConfiguration {
                 schemaRetrievalService.getIfAvailable(),
                 componentCapabilitiesService,
                 consultativeAnswerService.getIfAvailable(),
-                preIntentToolPlanningService.getIfAvailable());
+                preIntentToolPlanningService.getIfAvailable(),
+                componentCapabilitiesProperties.effectivePreloadTimeoutMs());
     }
 
     @Bean

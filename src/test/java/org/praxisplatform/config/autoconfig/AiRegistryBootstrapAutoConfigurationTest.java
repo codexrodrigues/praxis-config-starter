@@ -19,7 +19,7 @@ class AiRegistryBootstrapAutoConfigurationTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void invalidatesCapabilitiesLoadedBeforeRegistryBootstrapCompleted() throws Exception {
+    void refreshesCapabilitiesAfterRegistryBootstrapCompleted() throws Exception {
         AiRegistryBootstrapService bootstrapService = mock(AiRegistryBootstrapService.class);
         AgenticAuthoringComponentCapabilitiesService capabilitiesService =
                 mock(AgenticAuthoringComponentCapabilitiesService.class);
@@ -35,6 +35,6 @@ class AiRegistryBootstrapAutoConfigurationTest {
         runner.run(mock(ApplicationArguments.class));
 
         verify(bootstrapService).bootstrapIfNeeded();
-        verify(capabilitiesService).invalidateCapabilitiesCache();
+        verify(capabilitiesService).refreshCapabilitiesCache();
     }
 }

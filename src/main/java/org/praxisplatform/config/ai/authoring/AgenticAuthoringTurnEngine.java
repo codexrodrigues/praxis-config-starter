@@ -33,7 +33,7 @@ public class AgenticAuthoringTurnEngine {
 
     private static final int MAX_TOOL_CALLS_PER_TURN = 1;
     private static final int MAX_REPAIR_ATTEMPTS_PER_PHASE = 1;
-    private static final long DEFAULT_COMPONENT_CAPABILITIES_PRELOAD_TIMEOUT_MS = 7_000L;
+    private static final long DEFAULT_COMPONENT_CAPABILITIES_PRELOAD_TIMEOUT_MS = 35_000L;
 
     private final AgenticAuthoringIntentResolverService intentResolverService;
     private final AgenticAuthoringPreviewService previewService;
@@ -206,7 +206,7 @@ public class AgenticAuthoringTurnEngine {
                 DEFAULT_COMPONENT_CAPABILITIES_PRELOAD_TIMEOUT_MS);
     }
 
-    AgenticAuthoringTurnEngine(
+    public AgenticAuthoringTurnEngine(
             AgenticAuthoringIntentResolverService intentResolverService,
             AgenticAuthoringPreviewService previewService,
             ObjectMapper objectMapper,
@@ -1781,22 +1781,41 @@ public class AgenticAuthoringTurnEngine {
                 awaitServerComponentCapabilities(preloadedCapabilities);
         AgenticAuthoringComponentCapabilitiesResult componentCapabilities = componentCapabilitiesLoad.result();
         if (emitProgress) {
+            AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics catalogDiagnostics =
+                    componentCapabilities == null ? null : componentCapabilities.diagnostics();
+            boolean catalogDegraded = catalogDiagnostics != null && catalogDiagnostics.degraded();
             eventSink.append("thought.step", thoughtStepPayload(
                     "component.capabilities",
-                    "Capacidades governadas dos componentes carregadas; vou usar isso na decisao de materializacao.",
-                    "Loaded governed component capabilities.",
-                    Map.of(
-                            "catalogCount", componentCapabilities != null && componentCapabilities.catalogs() != null
-                                    ? componentCapabilities.catalogs().size()
-                                    : 0,
-                            "preloaded", componentCapabilitiesLoad.preloaded(),
-                            "preloadCompletedBeforeAwait", componentCapabilitiesLoad.completedBeforeAwait(),
-                            "fallbackSynchronousLoad", componentCapabilitiesLoad.fallbackSynchronousLoad(),
-                            "timedOut", componentCapabilitiesLoad.timedOut(),
-                            "fallbackBuiltIn", componentCapabilitiesLoad.fallbackBuiltIn(),
-                            "awaitElapsedMs", componentCapabilitiesLoad.awaitElapsedMs(),
-                            "preloadAgeMs", componentCapabilitiesLoad.preloadAgeMs(),
-                            "source", componentCapabilitiesService == null ? "built-in" : "service")));
+                    catalogDegraded
+                            ? "O catálogo governado está temporariamente degradado; vou preservar essa limitação na decisão de materialização."
+                            : "Capacidades governadas dos componentes carregadas; vou usar isso na decisão de materialização.",
+                    catalogDegraded
+                            ? "Component capability catalog is degraded and will remain visible in materialization diagnostics."
+                            : "Loaded governed component capabilities.",
+                    Map.ofEntries(
+                            Map.entry(
+                                    "catalogCount",
+                                    componentCapabilities != null && componentCapabilities.catalogs() != null
+                                            ? componentCapabilities.catalogs().size()
+                                            : 0),
+                            Map.entry("preloaded", componentCapabilitiesLoad.preloaded()),
+                            Map.entry("preloadCompletedBeforeAwait", componentCapabilitiesLoad.completedBeforeAwait()),
+                            Map.entry("fallbackSynchronousLoad", componentCapabilitiesLoad.fallbackSynchronousLoad()),
+                            Map.entry("timedOut", componentCapabilitiesLoad.timedOut()),
+                            Map.entry("fallbackBuiltIn", componentCapabilitiesLoad.fallbackBuiltIn()),
+                            Map.entry("awaitElapsedMs", componentCapabilitiesLoad.awaitElapsedMs()),
+                            Map.entry("preloadAgeMs", componentCapabilitiesLoad.preloadAgeMs()),
+                            Map.entry(
+                                    "source",
+                                    catalogDiagnostics == null
+                                            ? componentCapabilitiesService == null ? "built-in" : "unknown"
+                                            : catalogDiagnostics.source()),
+                            Map.entry("degraded", catalogDegraded),
+                            Map.entry(
+                                    "degradationReason",
+                                    catalogDiagnostics == null || catalogDiagnostics.degradationReason() == null
+                                            ? ""
+                                            : catalogDiagnostics.degradationReason()))));
         }
         return new AgenticAuthoringTurnStreamRequest(
                 request.userPrompt(),
@@ -1844,12 +1863,14 @@ public class AgenticAuthoringTurnEngine {
                 result = loadServerComponentCapabilities();
             } catch (RuntimeException ex) {
                 log.warn("Component capabilities failed before preload; using built-in catalogs.", ex);
-                result = loadBuiltInComponentCapabilities();
+                result = loadBuiltInComponentCapabilities("preload-failed");
                 fallbackBuiltIn = true;
             }
             if (result == null) {
-                result = loadBuiltInComponentCapabilities();
+                result = loadBuiltInComponentCapabilities("preload-empty");
                 fallbackBuiltIn = true;
+            } else {
+                fallbackBuiltIn = isBuiltInFallback(result);
             }
             return new ComponentCapabilitiesLoadResult(
                     result,
@@ -1873,9 +1894,9 @@ public class AgenticAuthoringTurnEngine {
             } else {
                 throw new TimeoutException("Component capability preload deadline elapsed.");
             }
-            boolean fallbackBuiltIn = result == null;
-            if (fallbackBuiltIn) {
-                result = loadBuiltInComponentCapabilities();
+            boolean fallbackBuiltIn = result == null || isBuiltInFallback(result);
+            if (result == null) {
+                result = loadBuiltInComponentCapabilities("preload-empty");
             }
             return new ComponentCapabilitiesLoadResult(
                     result,
@@ -1892,7 +1913,7 @@ public class AgenticAuthoringTurnEngine {
                     "Component capability preload exceeded {} ms; continuing with built-in catalogs.",
                     componentCapabilitiesPreloadTimeoutMs);
             return new ComponentCapabilitiesLoadResult(
-                    loadBuiltInComponentCapabilities(),
+                    loadBuiltInComponentCapabilities("preload-timeout"),
                     true,
                     completedBeforeAwait,
                     false,
@@ -1905,7 +1926,7 @@ public class AgenticAuthoringTurnEngine {
             Thread.currentThread().interrupt();
             log.warn("Component capability preload was interrupted; continuing with built-in catalogs.");
             return new ComponentCapabilitiesLoadResult(
-                    loadBuiltInComponentCapabilities(),
+                    loadBuiltInComponentCapabilities("preload-interrupted"),
                     true,
                     completedBeforeAwait,
                     false,
@@ -1916,7 +1937,7 @@ public class AgenticAuthoringTurnEngine {
         } catch (ExecutionException | CancellationException ex) {
             log.warn("Component capability preload failed; continuing with built-in catalogs.", ex);
             return new ComponentCapabilitiesLoadResult(
-                    loadBuiltInComponentCapabilities(),
+                    loadBuiltInComponentCapabilities("preload-failed"),
                     true,
                     completedBeforeAwait,
                     false,
@@ -1959,13 +1980,19 @@ public class AgenticAuthoringTurnEngine {
                 : componentCapabilitiesService.listCapabilities();
     }
 
-    private AgenticAuthoringComponentCapabilitiesResult loadBuiltInComponentCapabilities() {
+    private AgenticAuthoringComponentCapabilitiesResult loadBuiltInComponentCapabilities(String reason) {
         AgenticAuthoringComponentCapabilitiesResult result = componentCapabilitiesService == null
                 ? null
-                : componentCapabilitiesService.listBuiltInCapabilities();
+                : componentCapabilitiesService.listBuiltInFallback(reason);
         return result == null
-                ? new AgenticAuthoringComponentCapabilitiesService().listBuiltInCapabilities()
+                ? new AgenticAuthoringComponentCapabilitiesService().listBuiltInFallback(reason)
                 : result;
+    }
+
+    private boolean isBuiltInFallback(AgenticAuthoringComponentCapabilitiesResult result) {
+        return result != null
+                && result.diagnostics() != null
+                && "built-in-fallback".equals(result.diagnostics().source());
     }
 
     private AgenticAuthoringTurnStreamRequest withGroundedRuntimeComponentContext(
