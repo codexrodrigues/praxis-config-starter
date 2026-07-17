@@ -144,6 +144,11 @@ try {
         $streamContent = Read-ErrorBody $_
     }
     $events = @(ConvertFrom-SseContent $streamContent)
+    $artifactDir = Join-Path $root "target\agentic-authoring\apply-http-e2e"
+    New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+    $events |
+        ConvertTo-Json -Depth 40 |
+        Set-Content -LiteralPath (Join-Path $artifactDir "stream-events.json") -Encoding utf8
     $errorEvent = @($events | Where-Object { "$($_.type)".ToLowerInvariant() -eq "error" } | Select-Object -First 1)[0]
     if ($null -ne $errorEvent) {
         throw "Authoring turn ended with error: $($errorEvent.payload.message)"
@@ -152,6 +157,9 @@ try {
     if ($null -eq $terminal) {
         throw "Authoring turn did not produce a terminal result event."
     }
+    $terminal |
+        ConvertTo-Json -Depth 40 |
+        Set-Content -LiteralPath (Join-Path $artifactDir "terminal-result.json") -Encoding utf8
     if ([string]::IsNullOrWhiteSpace($terminal.streamId) -or [string]::IsNullOrWhiteSpace($terminal.eventId)) {
         throw "Authoring terminal result did not include streamId and eventId lineage."
     }
