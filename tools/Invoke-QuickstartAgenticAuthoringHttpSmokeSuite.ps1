@@ -112,6 +112,7 @@ $governanceLabEnvironment = @"
 "@
 if ($DomainRuleLifecycleOnly) {
 $governanceLabEnvironment += @"
+
 `$env:PRAXIS_AI_SECURITY_ALLOW_DEFAULT_TENANT_IN_CORPORATE = 'true'
 `$env:PRAXIS_AI_SECURITY_SERVER_DEFAULT_TENANT = '$TenantId'
 `$env:PRAXIS_AI_SECURITY_SERVER_DEFAULT_ENVIRONMENT = '$Environment'
@@ -163,6 +164,16 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
 }
 & '$JavaHome\bin\java.exe' -jar '$JarPath'
 "@
+        $launchTokens = $null
+        $launchParseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseInput(
+            $startScript,
+            [ref] $launchTokens,
+            [ref] $launchParseErrors
+        ) | Out-Null
+        if ($launchParseErrors.Count -gt 0) {
+            throw "Generated Quickstart launch script is invalid."
+        }
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($startScript))
         $quickstartProcess = Start-Process `
             -FilePath "powershell.exe" `

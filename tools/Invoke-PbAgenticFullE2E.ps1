@@ -99,20 +99,54 @@ function Get-QuickstartConfigDependencyVersion([string] $Path) {
 function Get-PlaywrightSummary([string] $ReportPath) {
     if (-not (Test-Path -LiteralPath $ReportPath)) { throw "Playwright JSON report was not generated: $ReportPath" }
     $report = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json
+    return Get-PlaywrightSummaryFromReport $report
+}
+
+function Get-PlaywrightSummaryFromReport([object] $Report) {
+    $report = $Report
     $stats = $report.stats
     if ($null -eq $stats) { throw "Playwright JSON report does not contain stats." }
     $expected = [int] $stats.expected
     $skipped = [int] $stats.skipped
     $unexpected = [int] $stats.unexpected
     $flaky = [int] $stats.flaky
+    $specs = @(Get-PlaywrightSpecs @($report.suites))
+    $tests = @($specs | ForEach-Object {
+        $spec = $_
+        foreach ($testCase in @($spec.tests)) {
+            $results = @($testCase.results)
+            [ordered]@{
+                title = [string] $spec.title
+                status = [string] $testCase.status
+                attempts = $results.Count
+                retryAttempts = @($results | Where-Object { [int] $_.retry -gt 0 }).Count
+            }
+        }
+    })
+    $attempts = 0
+    $retryAttempts = 0
+    foreach ($testResult in $tests) {
+        $attempts += [int] $testResult.attempts
+        $retryAttempts += [int] $testResult.retryAttempts
+    }
     return [ordered]@{
-        discovered = $expected + $skipped + $unexpected + $flaky
+        discovered = $specs.Count
         executed = $expected + $unexpected + $flaky
         passed = $expected
         skipped = $skipped
         failed = $unexpected
         flaky = $flaky
+        attempts = $attempts
+        retryAttempts = $retryAttempts
+        tests = $tests
         durationMs = [int64] $stats.duration
+    }
+}
+
+function Get-PlaywrightSpecs([object[]] $Suites) {
+    foreach ($suite in @($Suites)) {
+        foreach ($spec in @($suite.specs)) { $spec }
+        Get-PlaywrightSpecs @($suite.suites)
     }
 }
 
@@ -559,6 +593,14 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         if ($playwrightSummary.skipped -ne [int] $modeMatrix.expectedSkipped) {
             throw "Playwright skipped $($playwrightSummary.skipped) tests; matrix expects $($modeMatrix.expectedSkipped)."
         }
+        foreach ($requiredTitle in @($modeMatrix.requiredPassedTests)) {
+            $requiredTest = @($playwrightSummary.tests | Where-Object {
+                $_.title -eq $requiredTitle -and $_.status -eq "expected"
+            })
+            if ($requiredTest.Count -ne 1) {
+                throw "Required production-like Playwright proof did not pass exactly once: $requiredTitle"
+            }
+        }
         Write-Phase "Playwright Page Builder validation completed."
     } finally {
         Pop-Location
@@ -579,10 +621,18 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
     }
 
     $modelId = if ($Provider -eq "openai") { $env:PRAXIS_AI_OPENAI_MODEL } else { $env:PRAXIS_AI_GEMINI_MODEL }
+    $criticalGuardTitle = [string] $gateMatrix.evidence.criticalInterceptionGuardTest
+    $criticalGuardPassed = @($playwrightSummary.tests | Where-Object {
+        $_.title -eq $criticalGuardTitle -and $_.status -eq "expected"
+    }).Count -eq 1
     [pscustomobject]@{
         schemaVersion = "praxis.page-builder-agentic-production-like-result/v1"
         productionLike = ($null -eq $gateFailure)
-        criticalEndpointMocks = 0
+        criticalEndpointMocks = if ($criticalGuardPassed) { 0 } else { $null }
+        criticalInterceptionGuard = [ordered]@{
+            testTitle = $criticalGuardTitle
+            passed = $criticalGuardPassed
+        }
         executionLane = "live"
         validationMode = $ValidationMode
         e2ePassed = ($null -eq $gateFailure)
@@ -610,6 +660,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         capabilities = $capabilitiesEvidence
         matrix = [ordered]@{
             schemaVersion = $gateMatrix.schemaVersion
+            scenarios = @($modeMatrix.scenarios)
             streamProcessingTimeoutSeconds = $StreamProcessingTimeoutSeconds
             playwrightTestTimeoutMs = $PlaywrightTestTimeoutMs
             retries = $Retries
