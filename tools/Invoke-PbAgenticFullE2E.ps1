@@ -242,7 +242,10 @@ function Wait-Url([string] $Url, [int] $TimeoutSec, [string] $Name) {
 }
 
 function Stop-ProcAndPort($Process, [int] $Port) {
-    if ($null -ne $Process -and -not $Process.HasExited) {
+    if ($null -eq $Process) {
+        return
+    }
+    if (-not $Process.HasExited) {
         Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 2
     }
@@ -610,12 +613,14 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
     $gateFailure = $_
 } finally {
     Write-Phase "Stopping Page Builder E2E processes."
+    $uiProcessWasStarted = $null -ne $uiProcess
+    $backendProcessWasStarted = $null -ne $backendProcess
     Stop-ProcAndPort $uiProcess $UiPort
     Stop-ProcAndPort $backendProcess $BackendPort
     Remove-Item Env:\PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET -ErrorAction SilentlyContinue
     try {
-        Assert-PortReleased $UiPort "Angular dev server"
-        Assert-PortReleased $BackendPort "Quickstart backend"
+        if ($uiProcessWasStarted) { Assert-PortReleased $UiPort "Angular dev server" }
+        if ($backendProcessWasStarted) { Assert-PortReleased $BackendPort "Quickstart backend" }
     } catch {
         if ($null -eq $gateFailure) { $gateFailure = $_ }
     }
@@ -644,7 +649,10 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         backendBaseUrl = $backendUrl
         uiBaseUrl = $uiUrl
         loopbackOnly = $loopbackVerified
-        cleanupVerified = ((Get-ListenConnections $UiPort).Count -eq 0 -and (Get-ListenConnections $BackendPort).Count -eq 0)
+        cleanupVerified = (
+            (-not $uiProcessWasStarted -or (Get-ListenConnections $UiPort).Count -eq 0) -and
+            (-not $backendProcessWasStarted -or (Get-ListenConnections $BackendPort).Count -eq 0)
+        )
         artifactRoot = $artifactRoot
         sourceAudit = [ordered]@{ passed = (Test-Path -LiteralPath $sourceAuditPath); artifact = "source-audit.json" }
         git = $gitIdentities
