@@ -41,35 +41,40 @@ function Invoke-ExpectedFailure(
     [object] $Body,
     [string] $ExpectedMessage,
     [int] $ExpectedStatusCode = 0,
-    [switch] $AllowEmptyResponseMessage
+    [switch] $StatusOnly
 ) {
     try {
         Invoke-JsonRequest -Method $Method -Uri $Uri -Headers $Headers -Body $Body | Out-Null
     } catch {
-        $response = $_.Exception.Response
+        $failure = $_
+        $response = $failure.Exception.Response
         $actualStatusCode = 0
         $responseBody = ""
         if ($null -ne $response) {
             if ($null -ne $response.StatusCode) {
                 $actualStatusCode = [int] $response.StatusCode
             }
-            if ($null -ne $response.Content) {
-                $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-            }
         }
         if ($ExpectedStatusCode -gt 0 -and $actualStatusCode -ne $ExpectedStatusCode) {
             throw "Expected HTTP status $ExpectedStatusCode, got $actualStatusCode for $Method $Uri."
         }
+        if ($StatusOnly) {
+            return $true
+        }
+        if ($null -ne $response -and $null -ne $response.Content) {
+            try {
+                $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            } catch {
+                $responseBody = ""
+            }
+        }
 
         $text = $responseBody
         if ([string]::IsNullOrWhiteSpace($text)) {
-            $text = $_.ErrorDetails.Message
+            $text = $failure.ErrorDetails.Message
         }
         if ([string]::IsNullOrWhiteSpace($text)) {
-            $text = $_.Exception.Message
-        }
-        if ($AllowEmptyResponseMessage -and [string]::IsNullOrWhiteSpace($responseBody)) {
-            return $true
+            $text = $failure.Exception.Message
         }
         $normalizedText = $text.Replace("\u003E", ">").Replace("\u003C", "<")
         if ($normalizedText -notlike "*$ExpectedMessage*") {
@@ -431,7 +436,7 @@ $selfApprovalBlocked = Invoke-ExpectedFailure `
     } `
     -ExpectedMessage $selfApprovalExpectedMessage `
     -ExpectedStatusCode $(if ($ExpectAuthorApprovalIamRejection) { 403 } else { 0 }) `
-    -AllowEmptyResponseMessage:$ExpectAuthorApprovalIamRejection
+    -StatusOnly:$ExpectAuthorApprovalIamRejection
 
 $definition = Set-DefinitionStatus `
     -BaseUrl $base `
