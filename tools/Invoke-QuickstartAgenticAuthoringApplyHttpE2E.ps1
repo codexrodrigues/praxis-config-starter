@@ -103,6 +103,13 @@ $deleted = $false
 $persistedEtag = $null
 
 try {
+    $applyTarget = @{
+        schemaVersion = "praxis-agentic-authoring-apply-target.v1"
+        componentType = $ComponentType
+        componentId = $ComponentId
+        scope = "user"
+        mode = "create"
+    }
     $turnBody = @{
         userPrompt = $UserPrompt
         provider = $Provider
@@ -113,6 +120,9 @@ try {
         targetComponentId = "praxis-dynamic-page-builder"
         currentPage = @{
             widgets = @()
+        }
+        contextHints = @{
+            agenticApplyTarget = $applyTarget
         }
     } | ConvertTo-Json -Depth 10 -Compress
 
@@ -164,7 +174,14 @@ try {
         throw "Authoring terminal result did not include streamId and eventId lineage."
     }
     if (-not [bool] $terminal.payload.canApply) {
-        throw "Authoring turn result is not applicable: $($terminal.payload.reviewReason)"
+        $blockReason = "$($terminal.payload.decisionDiagnostics.terminalPreviewApplyBlockReason)"
+        if ([string]::IsNullOrWhiteSpace($blockReason)) {
+            $blockReason = "$($terminal.payload.decisionDiagnostics.reviewReason)"
+        }
+        if ([string]::IsNullOrWhiteSpace($blockReason)) {
+            $blockReason = "unspecified-terminal-apply-block"
+        }
+        throw "Authoring turn result is not applicable: $blockReason"
     }
     $preview = $terminal.payload.preview
     $intent = $terminal.payload.intentResolution
