@@ -686,12 +686,15 @@ transacional P0.6 do authoring turn**.
 - [x] adapter OpenAI usa SDK oficial 4.43/Responses, Structured Outputs estrito
   e streaming tipado em testes contratuais locais;
 - [x] caminho manual de Chat Completions removido sem trilha paralela;
-- [ ] repetir `must-pass` e `extended` contra a API real no novo transporte e
+- [x] repetir `must-pass` e `extended` contra a API real no novo transporte e
   comparar assertividade, P95, tokens e custo;
 - policy de modelo/custo observavel esta ativa;
 
 ### Gate D - Produto apresentavel
 
+- baseline browser live aberto em 2026-07-16: `7 passed`, `2 skipped` e `1
+  flaky` recuperado; evidencia em
+  [`38-page-builder-browser-gate-baseline-evidence.md`](38-page-builder-browser-gate-baseline-evidence.md);
 - Page Builder, Table e Dynamic Form certificados;
 - golden journeys passam tres vezes;
 - UX, acessibilidade, seguranca, auditoria e dashboard de qualidade estao
@@ -807,6 +810,10 @@ repetivel antes de iniciar uma migracao ampla de SDK, nesta ordem:
     no novo transporte, comparando assertividade, P95, tokens e custo antes de
     fechar operacionalmente o Gate C; o gate oficial fechou `42/42` no workflow
     `29541634715`.
+12. [x] promover o runner Node existente como gate local multiplataforma e
+    registrar o primeiro baseline browser live do Page Builder;
+13. [ ] corrigir overflow, hierarquia loading/review, dark theme, i18n,
+    teclado, AXE e narrow viewport antes da matriz browser `full`.
 
 ## Referencias oficiais para a frente de SDK
 

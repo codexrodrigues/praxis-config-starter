@@ -37,6 +37,20 @@ Esse runner:
 - executa `npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-validation.playwright.config.ts`;
 - usa `-ValidationMode smoke` como gate de release e reserva `-ValidationMode full` para investigacao deliberada da matriz completa.
 
+Em macOS/Linux, o runner local gerenciado equivalente vive no workspace
+Angular e orquestra Config Starter, Quickstart, catalogos, Angular, Playwright e
+teardown pelo mesmo comando:
+
+```bash
+cd ../praxis-ui-angular
+./tools/local-e2e/run-page-builder-agentic-full-local.sh
+```
+
+O default e `smoke`. Use
+`PRAXIS_E2E_AGENTIC_VALIDATION_MODE=full` apenas para a matriz deliberada. O
+smoke atualiza o API catalog escopado e uma projecao minima do Domain Catalog;
+Vector RAG e reingestao group-wide nao fazem parte do preparo visual normal.
+
 ### Gate em GitHub Actions
 
 Workflow canonico:
