@@ -39,17 +39,26 @@ function Invoke-ExpectedFailure(
     [string] $Uri,
     [hashtable] $Headers,
     [object] $Body,
-    [string] $ExpectedMessage
+    [string] $ExpectedMessage = "",
+    [int] $ExpectedStatus = 0
 ) {
     try {
         Invoke-JsonRequest -Method $Method -Uri $Uri -Headers $Headers -Body $Body | Out-Null
     } catch {
+        $actualStatus = 0
+        if ($null -ne $_.Exception.Response -and $null -ne $_.Exception.Response.StatusCode) {
+            $actualStatus = [int] $_.Exception.Response.StatusCode
+        }
+        if ($ExpectedStatus -gt 0 -and $actualStatus -ne $ExpectedStatus) {
+            throw "Expected HTTP $ExpectedStatus, got HTTP $actualStatus for: $Method $Uri"
+        }
         $text = $_.ErrorDetails.Message
         if ([string]::IsNullOrWhiteSpace($text)) {
             $text = $_.Exception.Message
         }
         $normalizedText = $text.Replace("\u003E", ">").Replace("\u003C", "<")
-        if ($normalizedText -notlike "*$ExpectedMessage*") {
+        if (-not [string]::IsNullOrWhiteSpace($ExpectedMessage) -and
+            $normalizedText -notlike "*$ExpectedMessage*") {
             throw "Expected failure containing '$ExpectedMessage', got: $text"
         }
         return $true
@@ -392,10 +401,11 @@ if ($definition.createdByType -ne "authenticated" -or $definition.createdBy -ne 
 }
 
 $selfApprovalExpectedMessage = if ($ExpectAuthorApprovalIamRejection) {
-    "Authenticated principal requires IAM role RULE_DEFINITION_APPROVER."
+    ""
 } else {
     "Rule definition approver must be different from its author"
 }
+$selfApprovalExpectedStatus = if ($ExpectAuthorApprovalIamRejection) { 403 } else { 0 }
 $selfApprovalBlocked = Invoke-ExpectedFailure `
     -Method Patch `
     -Uri "$base/api/praxis/config/domain-rules/definitions/$($definition.id)/status" `
@@ -406,7 +416,8 @@ $selfApprovalBlocked = Invoke-ExpectedFailure `
             checks = @("http-lifecycle-self-approval-rejection")
         }
     } `
-    -ExpectedMessage $selfApprovalExpectedMessage
+    -ExpectedMessage $selfApprovalExpectedMessage `
+    -ExpectedStatus $selfApprovalExpectedStatus
 
 $definition = Set-DefinitionStatus `
     -BaseUrl $base `
