@@ -443,6 +443,12 @@ class AgenticAuthoringTurnEngineTest {
                             .isTrue();
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("fallbackSynchronousLoad").asBoolean())
                             .isFalse();
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("source").asText())
+                            .isEqualTo("built-in-fallback");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("degraded").asBoolean())
+                            .isTrue();
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("degradationReason").asText())
+                            .isEqualTo("preload-timeout");
                 });
         verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
         verify(previewService, never()).preview(any(), any(), any(), any());

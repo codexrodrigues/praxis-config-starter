@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactProperties;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringArtifactSource;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentCapabilitiesProperties;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringComponentEditPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringConsultativeAnswerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringDryRunReportService;
@@ -68,26 +69,42 @@ class AgenticAuthoringAutoConfigurationTest {
     }
 
     @Test
-    void shouldUseLongerDefaultComponentCapabilitiesCacheTtlForAuthoringSessions() {
+    void shouldUseDocumentedDefaultComponentCapabilitiesBudgets() {
         contextRunner.run(context -> {
             AgenticAuthoringComponentCapabilitiesService service =
                     context.getBean(AgenticAuthoringComponentCapabilitiesService.class);
 
             assertThat(ReflectionTestUtils.getField(service, "cacheTtlMs"))
-                    .isEqualTo(600_000L);
+                    .isEqualTo(60_000L);
+            assertThat(ReflectionTestUtils.getField(service, "registryLoadTimeoutMs"))
+                    .isEqualTo(30_000L);
+            assertThat(ReflectionTestUtils.getField(service, "degradedRetryMs"))
+                    .isEqualTo(5_000L);
+            assertThat(context.getBean(AgenticAuthoringComponentCapabilitiesProperties.class)
+                    .effectivePreloadTimeoutMs()).isEqualTo(35_000L);
         });
     }
 
     @Test
     void shouldAllowComponentCapabilitiesCacheTtlOverride() {
         contextRunner
-                .withPropertyValues("praxis.ai.authoring.component-capabilities.cache-ttl-ms=1234")
+                .withPropertyValues(
+                        "praxis.ai.authoring.component-capabilities.cache-ttl-ms=1234",
+                        "praxis.ai.authoring.component-capabilities.registry-load-timeout-ms=4321",
+                        "praxis.ai.authoring.component-capabilities.degraded-retry-ms=321",
+                        "praxis.ai.authoring.component-capabilities.preload-timeout-ms=1000")
                 .run(context -> {
                     AgenticAuthoringComponentCapabilitiesService service =
                             context.getBean(AgenticAuthoringComponentCapabilitiesService.class);
 
                     assertThat(ReflectionTestUtils.getField(service, "cacheTtlMs"))
                             .isEqualTo(1_234L);
+                    assertThat(ReflectionTestUtils.getField(service, "registryLoadTimeoutMs"))
+                            .isEqualTo(4_321L);
+                    assertThat(ReflectionTestUtils.getField(service, "degradedRetryMs"))
+                            .isEqualTo(321L);
+                    assertThat(context.getBean(AgenticAuthoringComponentCapabilitiesProperties.class)
+                            .effectivePreloadTimeoutMs()).isEqualTo(5_321L);
                 });
     }
 

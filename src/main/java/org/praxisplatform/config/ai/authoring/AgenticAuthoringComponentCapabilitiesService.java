@@ -3,6 +3,7 @@ package org.praxisplatform.config.ai.authoring;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutionException;
@@ -21,8 +22,8 @@ import java.util.Objects;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.domain.Scope;
+import org.praxisplatform.config.projection.AiRegistryComponentCapabilityProjection;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.springframework.util.StringUtils;
 
@@ -35,8 +36,9 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private static final String SYSTEM_SCOPE_KEY = "GLOBAL";
     private static final int MAX_TRIGGER_TERMS = 18;
     private static final int MAX_OPERATION_CAPABILITIES = 128;
-    private static final long DEFAULT_CACHE_TTL_MS = 300_000L;
-    private static final long DEFAULT_REGISTRY_LOAD_TIMEOUT_MS = 5_000L;
+    private static final long DEFAULT_CACHE_TTL_MS = 60_000L;
+    private static final long DEFAULT_REGISTRY_LOAD_TIMEOUT_MS = 30_000L;
+    private static final long DEFAULT_DEGRADED_RETRY_MS = 5_000L;
     private static final int REGISTRY_LOAD_QUEUE_CAPACITY = 1;
     private static final AtomicInteger REGISTRY_LOADER_SEQUENCE = new AtomicInteger();
 
@@ -48,8 +50,12 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private final ObjectMapper objectMapper;
     private final long cacheTtlMs;
     private final long registryLoadTimeoutMs;
+    private final long degradedRetryMs;
     private final ThreadPoolExecutor registryLoadExecutor;
     private volatile CachedCapabilities cachedCapabilities;
+    private volatile CachedCapabilities degradedCapabilities;
+    private volatile AgenticAuthoringComponentCapabilitiesResult lastKnownGood;
+    private volatile Instant lastSuccessfulRegistryLoadAt;
 
     public AgenticAuthoringComponentCapabilitiesService() {
         this(null, new ObjectMapper());
@@ -69,7 +75,8 @@ public class AgenticAuthoringComponentCapabilitiesService {
                 aiRegistryRepository,
                 objectMapper,
                 cacheTtlMs,
-                DEFAULT_REGISTRY_LOAD_TIMEOUT_MS);
+                DEFAULT_REGISTRY_LOAD_TIMEOUT_MS,
+                DEFAULT_DEGRADED_RETRY_MS);
     }
 
     AgenticAuthoringComponentCapabilitiesService(
@@ -77,57 +84,180 @@ public class AgenticAuthoringComponentCapabilitiesService {
             ObjectMapper objectMapper,
             long cacheTtlMs,
             long registryLoadTimeoutMs) {
+        this(
+                aiRegistryRepository,
+                objectMapper,
+                cacheTtlMs,
+                registryLoadTimeoutMs,
+                DEFAULT_DEGRADED_RETRY_MS);
+    }
+
+    public AgenticAuthoringComponentCapabilitiesService(
+            AiRegistryRepository aiRegistryRepository,
+            ObjectMapper objectMapper,
+            long cacheTtlMs,
+            long registryLoadTimeoutMs,
+            long degradedRetryMs) {
         this.aiRegistryRepository = aiRegistryRepository;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
         this.cacheTtlMs = Math.max(0L, cacheTtlMs);
         this.registryLoadTimeoutMs = Math.max(1L, registryLoadTimeoutMs);
+        this.degradedRetryMs = Math.max(0L, degradedRetryMs);
         this.registryLoadExecutor = aiRegistryRepository == null ? null : createRegistryLoadExecutor();
     }
 
     public AgenticAuthoringComponentCapabilitiesResult listCapabilities() {
-        if (cacheTtlMs <= 0L) {
-            return buildCapabilities();
-        }
-        CachedCapabilities cached = cachedCapabilities;
         long now = System.currentTimeMillis();
-        if (cached != null && cached.expiresAtEpochMs() >= now) {
+        CachedCapabilities cached = cacheTtlMs > 0L ? cachedCapabilities : null;
+        if (isCurrent(cached, now)) {
             return cached.result();
+        }
+        CachedCapabilities degraded = cacheTtlMs > 0L ? degradedCapabilities : null;
+        if (isCurrent(degraded, now)) {
+            return degraded.result();
         }
         synchronized (this) {
-            cached = cachedCapabilities;
+            cached = cacheTtlMs > 0L ? cachedCapabilities : null;
             now = System.currentTimeMillis();
-            if (cached == null || cached.expiresAtEpochMs() < now) {
-                cached = new CachedCapabilities(
-                        buildCapabilities(),
-                        now + cacheTtlMs);
-                cachedCapabilities = cached;
+            if (isCurrent(cached, now)) {
+                return cached.result();
             }
-            return cached.result();
+            degraded = cacheTtlMs > 0L ? degradedCapabilities : null;
+            if (isCurrent(degraded, now)) {
+                return degraded.result();
+            }
+            return refreshCapabilities();
         }
     }
 
-    public void invalidateCapabilitiesCache() {
+    public synchronized void invalidateCapabilitiesCache() {
         cachedCapabilities = null;
+        degradedCapabilities = null;
+    }
+
+    public synchronized AgenticAuthoringComponentCapabilitiesResult refreshCapabilitiesCache() {
+        cachedCapabilities = null;
+        degradedCapabilities = null;
+        return refreshCapabilities();
     }
 
     AgenticAuthoringComponentCapabilitiesResult listBuiltInCapabilities() {
+        return builtInCapabilities(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics(
+                "built-in",
+                false,
+                null,
+                Instant.now(),
+                lastSuccessfulRegistryLoadAt));
+    }
+
+    AgenticAuthoringComponentCapabilitiesResult listBuiltInFallback(String reason) {
+        return builtInCapabilities(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics(
+                "built-in-fallback",
+                true,
+                reason,
+                Instant.now(),
+                lastSuccessfulRegistryLoadAt));
+    }
+
+    private AgenticAuthoringComponentCapabilitiesResult refreshCapabilities() {
+        if (aiRegistryRepository == null || registryLoadExecutor == null) {
+            AgenticAuthoringComponentCapabilitiesResult builtIn = listBuiltInCapabilities();
+            cacheSuccessfulResult(builtIn, System.currentTimeMillis());
+            return builtIn;
+        }
+
+        long loadStartedAtNanos = System.nanoTime();
+        RegistryCatalogLoad load = registryCatalogs();
+        long loadElapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - loadStartedAtNanos);
+        if (load.successful()) {
+            Instant loadedAt = Instant.now();
+            lastSuccessfulRegistryLoadAt = loadedAt;
+            AgenticAuthoringComponentCapabilitiesResult governed = mergeCapabilities(
+                    load.catalogs(),
+                    new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics(
+                            "registry",
+                            false,
+                            null,
+                            loadedAt,
+                            loadedAt));
+            lastKnownGood = governed;
+            degradedCapabilities = null;
+            cacheSuccessfulResult(governed, System.currentTimeMillis());
+            log.info(
+                    "Governed component capability catalog warmed (catalogs={}, loadElapsedMs={}, source=registry).",
+                    governed.catalogs().size(),
+                    loadElapsedMs);
+            return governed;
+        }
+
+        cachedCapabilities = null;
+        AgenticAuthoringComponentCapabilitiesResult degraded = degradedResult(load.failureReason());
+        if (cacheTtlMs > 0L && degradedRetryMs > 0L) {
+            degradedCapabilities = new CachedCapabilities(
+                    degraded,
+                    System.currentTimeMillis() + degradedRetryMs);
+        } else {
+            degradedCapabilities = null;
+        }
+        return degraded;
+    }
+
+    private void cacheSuccessfulResult(
+            AgenticAuthoringComponentCapabilitiesResult result,
+            long nowEpochMs) {
+        cachedCapabilities = cacheTtlMs > 0L
+                ? new CachedCapabilities(result, nowEpochMs + cacheTtlMs)
+                : null;
+    }
+
+    private AgenticAuthoringComponentCapabilitiesResult degradedResult(String reason) {
+        Instant resolvedAt = Instant.now();
+        AgenticAuthoringComponentCapabilitiesResult governed = lastKnownGood;
+        if (governed != null && isTransientFailure(reason)) {
+            return new AgenticAuthoringComponentCapabilitiesResult(
+                    RESULT_VERSION,
+                    governed.catalogs(),
+                    new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics(
+                            "last-known-good",
+                            true,
+                            reason,
+                            resolvedAt,
+                            lastSuccessfulRegistryLoadAt));
+        }
+        if (!isTransientFailure(reason)) {
+            lastKnownGood = null;
+        }
+        return builtInCapabilities(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics(
+                "built-in-fallback",
+                true,
+                reason,
+                resolvedAt,
+                lastSuccessfulRegistryLoadAt));
+    }
+
+    private AgenticAuthoringComponentCapabilitiesResult builtInCapabilities(
+            AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics diagnostics) {
         return new AgenticAuthoringComponentCapabilitiesResult(
                 RESULT_VERSION,
                 List.of(
                         toCatalog(formCatalog.componentId(), formCatalog.version(), formCatalog.capabilities()),
                         toCatalog(tableCatalog.componentId(), tableCatalog.version(), tableCatalog.capabilities()),
                         toCatalog(chartCatalog.componentId(), chartCatalog.version(), chartCatalog.capabilities()),
-                        toCatalog(filterCatalog.componentId(), filterCatalog.version(), filterCatalog.capabilities())));
+                        toCatalog(filterCatalog.componentId(), filterCatalog.version(), filterCatalog.capabilities())),
+                diagnostics);
     }
 
-    private AgenticAuthoringComponentCapabilitiesResult buildCapabilities() {
+    private AgenticAuthoringComponentCapabilitiesResult mergeCapabilities(
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> registryCatalogs,
+            AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics diagnostics) {
         Map<String, AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> catalogs =
                 new LinkedHashMap<>();
-        listBuiltInCapabilities().catalogs().forEach(catalog -> putCatalog(catalogs, catalog));
-        registryCatalogs().forEach(catalog -> putCatalog(catalogs, catalog));
+        builtInCapabilities(diagnostics).catalogs().forEach(catalog -> putCatalog(catalogs, catalog));
+        registryCatalogs.forEach(catalog -> putCatalog(catalogs, catalog));
         return new AgenticAuthoringComponentCapabilitiesResult(
                 RESULT_VERSION,
-                List.copyOf(catalogs.values()));
+                List.copyOf(catalogs.values()),
+                diagnostics);
     }
 
     private void putCatalog(
@@ -160,46 +290,54 @@ public class AgenticAuthoringComponentCapabilitiesService {
                 List.copyOf(capabilities)));
     }
 
-    private List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> registryCatalogs() {
-        if (aiRegistryRepository == null || registryLoadExecutor == null) {
-            return List.of();
-        }
-        Future<List<AiRegistry>> registryLoad;
+    private RegistryCatalogLoad registryCatalogs() {
+        Future<List<AiRegistryComponentCapabilityProjection>> registryLoad;
         try {
             registryLoad = registryLoadExecutor.submit(() ->
-                    aiRegistryRepository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                    aiRegistryRepository.findComponentCapabilityProjections(
                             REGISTRY_TYPE_COMPONENT_DEF,
                             COMPONENT_DEF_COMPONENT_TYPE,
-                            Scope.SYSTEM,
-                            SYSTEM_SCOPE_KEY));
+                            Scope.SYSTEM.name(),
+                            SYSTEM_SCOPE_KEY,
+                            registryLoadTimeoutMs));
         } catch (RejectedExecutionException ex) {
             log.warn("Governed component capability loading is saturated; using built-in authoring catalogs only.");
-            return List.of();
+            return RegistryCatalogLoad.failed("registry-load-saturated");
         }
         try {
-            List<AiRegistry> registries = registryLoad.get(registryLoadTimeoutMs, TimeUnit.MILLISECONDS);
-            return (registries == null ? List.<AiRegistry>of() : registries).stream()
+            List<AiRegistryComponentCapabilityProjection> registries =
+                    registryLoad.get(registryLoadTimeoutMs, TimeUnit.MILLISECONDS);
+            if (registries == null || registries.isEmpty()) {
+                log.warn("Governed component capability query returned no authoring manifests; using built-in catalogs.");
+                return RegistryCatalogLoad.failed("registry-empty");
+            }
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> catalogs = registries.stream()
                     .map(this::toRegistryCatalog)
                     .filter(Objects::nonNull)
                     .toList();
+            if (catalogs.isEmpty()) {
+                log.warn("Governed component capability query returned no valid catalogs; using built-in catalogs.");
+                return RegistryCatalogLoad.failed("registry-catalog-empty");
+            }
+            return RegistryCatalogLoad.successful(catalogs);
         } catch (TimeoutException ex) {
             registryLoad.cancel(true);
             registryLoadExecutor.purge();
             log.warn(
                     "Governed component capability loading exceeded {} ms; using built-in authoring catalogs only.",
                     registryLoadTimeoutMs);
-            return List.of();
+            return RegistryCatalogLoad.failed("registry-load-timeout");
         } catch (InterruptedException ex) {
             registryLoad.cancel(true);
             registryLoadExecutor.purge();
             Thread.currentThread().interrupt();
             log.warn("Governed component capability loading was interrupted; using built-in authoring catalogs only.");
-            return List.of();
+            return RegistryCatalogLoad.failed("registry-load-interrupted");
         } catch (ExecutionException | RuntimeException ex) {
             log.warn(
                     "Failed to load governed component capabilities from ai_registry; using built-in authoring catalogs only.",
                     ex.getCause() == null ? ex : ex.getCause());
-            return List.of();
+            return RegistryCatalogLoad.failed("registry-load-failed");
         }
     }
 
@@ -230,20 +368,21 @@ public class AgenticAuthoringComponentCapabilitiesService {
         return executor;
     }
 
-    private AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog toRegistryCatalog(AiRegistry registry) {
-        JsonNode payload = readPayload(registry == null ? null : registry.getPayload());
-        JsonNode definition = payload.path("componentDefinition");
-        JsonNode schema = definition.path("jsonSchema");
-        JsonNode manifest = schema.path("authoringManifest");
+    private AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog toRegistryCatalog(
+            AiRegistryComponentCapabilityProjection registry) {
+        JsonNode manifest = readJson(registry == null ? null : registry.authoringManifestJson());
         if (!manifest.isObject()) {
             return null;
         }
-        String componentId = firstText(manifest, "componentId", registry == null ? null : registry.getRegistryKey());
+        String componentId = firstText(
+                manifest,
+                "componentId",
+                registry == null ? null : registry.registryKey());
         if (!StringUtils.hasText(componentId)) {
             return null;
         }
         List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> capabilities = new ArrayList<>();
-        capabilities.add(componentCapability(componentId, definition, schema, manifest));
+        capabilities.add(componentCapability(componentId, registry, manifest));
         int operationCount = 0;
         for (JsonNode operation : manifest.path("operations")) {
             if (!operation.isObject() || operationCount >= MAX_OPERATION_CAPABILITIES) {
@@ -264,15 +403,14 @@ public class AgenticAuthoringComponentCapabilitiesService {
 
     private AgenticAuthoringComponentCapabilitiesResult.ComponentCapability componentCapability(
             String componentId,
-            JsonNode definition,
-            JsonNode schema,
+            AiRegistryComponentCapabilityProjection registry,
             JsonNode manifest) {
         LinkedHashSet<String> terms = new LinkedHashSet<>();
         addTerm(terms, componentId);
-        addTerm(terms, text(definition, "description"));
-        addTerm(terms, text(schema, "friendlyName"));
-        addTerm(terms, text(schema, "selector"));
-        addTerms(terms, schema.path("tags"));
+        addTerm(terms, registry == null ? null : registry.componentDescription());
+        addTerm(terms, registry == null ? null : registry.friendlyName());
+        addTerm(terms, registry == null ? null : registry.selector());
+        addTerms(terms, readJson(registry == null ? null : registry.tagsJson()));
         addTerms(terms, manifest.path("editableTargets"), "kind");
         return new AgenticAuthoringComponentCapabilitiesResult.ComponentCapability(
                 "component.author",
@@ -359,7 +497,7 @@ public class AgenticAuthoringComponentCapabilitiesService {
         }
     }
 
-    private JsonNode readPayload(String payload) {
+    private JsonNode readJson(String payload) {
         if (!StringUtils.hasText(payload)) {
             return objectMapper.createObjectNode();
         }
@@ -460,5 +598,36 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private record CachedCapabilities(
             AgenticAuthoringComponentCapabilitiesResult result,
             long expiresAtEpochMs) {
+    }
+
+    private boolean isCurrent(CachedCapabilities cached, long nowEpochMs) {
+        return cached != null && cached.expiresAtEpochMs() >= nowEpochMs;
+    }
+
+    private boolean isTransientFailure(String reason) {
+        return Set.of(
+                        "registry-load-saturated",
+                        "registry-load-timeout",
+                        "registry-load-interrupted",
+                        "registry-load-failed")
+                .contains(reason);
+    }
+
+    private record RegistryCatalogLoad(
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> catalogs,
+            String failureReason) {
+
+        static RegistryCatalogLoad successful(
+                List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> catalogs) {
+            return new RegistryCatalogLoad(catalogs == null ? List.of() : List.copyOf(catalogs), null);
+        }
+
+        static RegistryCatalogLoad failed(String reason) {
+            return new RegistryCatalogLoad(List.of(), reason);
+        }
+
+        boolean successful() {
+            return failureReason == null;
+        }
     }
 }

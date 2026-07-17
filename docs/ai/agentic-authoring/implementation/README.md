@@ -393,6 +393,14 @@ O fluxo local-first atual ja prova os seguintes pontos:
   capabilities saiu do caminho critico do engine; o tempo total restante ainda
   deve ser investigado em planner LLM, busca semantica/schema grounding,
   preview e transporte SSE.
+- O hardening de 2026-07-16 removeu o timeout fixo e o fallback silencioso desse
+  slice. O catálogo agora lê do PostgreSQL somente os fragmentos usados do
+  manifesto, compartilha orçamento configurável com o preload, invalida após
+  reindex e aquece uma única vez ao concluir o bootstrap. O resultado publica
+  `source`, `degraded`, `degradationReason`,
+  `resolvedAt` e `lastSuccessfulRegistryLoadAt`. Falhas usam retry curto e
+  preservam o último catálogo governado válido; o fallback embutido nunca ocupa
+  o cache normal de sucesso.
 - A matriz agora separa o tempo percebido no stream
   `componentCapabilitiesSeconds` do tempo interno de espera do engine
   `componentCapabilitiesAwaitSeconds`, permitindo distinguir atraso de

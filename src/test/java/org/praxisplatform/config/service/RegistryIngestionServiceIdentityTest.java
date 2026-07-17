@@ -31,6 +31,7 @@ import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.springframework.ai.document.Document;
+import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 @Tag("unit")
@@ -45,6 +46,9 @@ class RegistryIngestionServiceIdentityTest {
     @Mock
     private RagVectorStoreService ragVectorStoreService;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private RegistryIngestionService service;
 
     @BeforeEach
@@ -54,7 +58,8 @@ class RegistryIngestionServiceIdentityTest {
                 new ObjectMapper(),
                 embeddingService,
                 ragVectorStoreService,
-                new AgenticAuthoringManifestContractValidator());
+                new AgenticAuthoringManifestContractValidator(),
+                eventPublisher);
     }
 
     @Test

@@ -1,6 +1,7 @@
 package org.praxisplatform.config.controller;
 
 import jakarta.servlet.http.HttpServletRequest;
+import io.swagger.v3.oas.annotations.Operation;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import java.io.IOException;
 import java.util.List;
@@ -162,6 +163,9 @@ public class AgenticAuthoringController {
     }
 
     @GetMapping("/component-capabilities")
+    @Operation(
+            summary = "Consultar capacidades governadas de authoring por componente",
+            description = "Publica as operações declaradas pelos manifests de componentes e informa se a resposta veio da revisão corrente do AI Registry, do último catálogo governado válido ou de uma contingência embutida.")
     public ResponseEntity<AgenticAuthoringComponentCapabilitiesResult> listComponentCapabilities() {
         return ResponseEntity.ok(componentCapabilitiesService.listCapabilities());
     }

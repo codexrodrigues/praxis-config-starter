@@ -1551,7 +1551,7 @@ components:
       required: false
       schema:
         type: string
-        default: 42c2cf6441397e87270fac2eeb7ce0c9a69ef6b069aa691e839556d4f06fedfa
+        default: 4104d595192c9ef862edcc1b899a9d9767338e8cdcdf9d3c3d8eb7507ff00bcf
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1581,7 +1581,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 42c2cf6441397e87270fac2eeb7ce0c9a69ef6b069aa691e839556d4f06fedfa
+        example: 4104d595192c9ef862edcc1b899a9d9767338e8cdcdf9d3c3d8eb7507ff00bcf
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -2416,13 +2416,39 @@ components:
 
     AgenticAuthoringComponentCapabilitiesResult:
       type: object
+      description: Catalogo de operacoes de authoring por componente com a proveniencia operacional da leitura governada.
       properties:
         version:
           type: string
+          description: Versao do formato do catalogo devolvido pelo servico de authoring.
         catalogs:
           type: array
+          description: Capacidades agrupadas pelo identificador canonico do componente.
           items:
             $ref: '#/components/schemas/AgenticAuthoringComponentCapabilityCatalog'
+        diagnostics:
+          $ref: '#/components/schemas/AgenticAuthoringComponentCapabilityDiagnostics'
+      additionalProperties: true
+
+    AgenticAuthoringComponentCapabilityDiagnostics:
+      type: object
+      description: Proveniencia que distingue a revisao corrente do AI Registry de respostas degradadas ou contingenciais.
+      properties:
+        source:
+          type: string
+          enum: [registry, last-known-good, built-in-fallback, built-in]
+        degraded:
+          type: boolean
+        degradationReason:
+          type: string
+          nullable: true
+        resolvedAt:
+          type: string
+          format: date-time
+        lastSuccessfulRegistryLoadAt:
+          type: string
+          format: date-time
+          nullable: true
       additionalProperties: true
 
     AgenticAuthoringComponentCapabilityCatalog:

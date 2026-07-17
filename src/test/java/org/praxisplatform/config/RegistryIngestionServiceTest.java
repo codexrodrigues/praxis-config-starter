@@ -15,9 +15,11 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractVa
 import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.dto.RegistryIngestionRequest;
 import org.praxisplatform.config.rag.RagVectorStoreService;
+import org.praxisplatform.config.registry.AiRegistryComponentDefinitionsChangedEvent;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.service.EmbeddingService;
 import org.praxisplatform.config.service.RegistryIngestionService;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.io.ClassPathResource;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -44,6 +46,9 @@ class RegistryIngestionServiceTest {
     @Mock
     private RagVectorStoreService ragVectorStoreService;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private static final String COMPONENT_ID = "demo-component";
 
     @BeforeEach
@@ -53,7 +58,8 @@ class RegistryIngestionServiceTest {
                 objectMapper,
                 embeddingService,
                 ragVectorStoreService,
-                new AgenticAuthoringManifestContractValidator());
+                new AgenticAuthoringManifestContractValidator(),
+                eventPublisher);
         setupMocks();
     }
 
@@ -88,6 +94,7 @@ class RegistryIngestionServiceTest {
 
         verify(repository, times(1)).save(any(AiRegistry.class));
         verify(ragVectorStoreService, times(1)).upsertDocuments(any());
+        verify(eventPublisher).publishEvent(any(AiRegistryComponentDefinitionsChangedEvent.class));
     }
 
     @Test

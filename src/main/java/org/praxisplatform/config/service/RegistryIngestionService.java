@@ -3,6 +3,7 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -22,9 +23,11 @@ import org.praxisplatform.config.rag.RagDocumentIdentity;
 import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
+import org.praxisplatform.config.registry.AiRegistryComponentDefinitionsChangedEvent;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.ai.document.Document;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,6 +49,7 @@ public class RegistryIngestionService {
     private final EmbeddingService embeddingService;
     private final RagVectorStoreService ragVectorStoreService;
     private final AgenticAuthoringManifestContractValidator manifestContractValidator;
+    private final ApplicationEventPublisher eventPublisher;
     private static final String REGISTRY_TYPE_COMPONENT_DEF = "component_definition";
     private static final String COMPONENT_DEF_COMPONENT_TYPE = "component-definition";
 
@@ -107,7 +111,7 @@ public class RegistryIngestionService {
         }
         RagVectorStoreService.RagCorpusReleaseStatus corpusStatus =
                 ragVectorStoreService.corpusReleaseStatus(resolvedTenant, resolvedEnv, releaseId, expectedChunkCount);
-        return new RegistryReindexResult(
+        RegistryReindexResult result = new RegistryReindexResult(
                 resolvedTenant,
                 resolvedEnv,
                 releaseId,
@@ -117,6 +121,11 @@ public class RegistryIngestionService {
                 publishedChunkCount,
                 List.copyOf(componentStatuses),
                 corpusStatus);
+        eventPublisher.publishEvent(new AiRegistryComponentDefinitionsChangedEvent(
+                releaseId,
+                componentStatuses.size(),
+                Instant.now()));
+        return result;
     }
 
     private AiRegistry toComponentDefinition(

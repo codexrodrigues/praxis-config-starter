@@ -13,7 +13,9 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface AiRegistryRepository extends JpaRepository<AiRegistry, UUID> {
+public interface AiRegistryRepository extends
+    JpaRepository<AiRegistry, UUID>,
+    AiRegistryComponentCapabilityRepository {
 
   Optional<AiRegistry> findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
       String registryType, String registryKey, String componentType, Scope scope, String scopeKey);

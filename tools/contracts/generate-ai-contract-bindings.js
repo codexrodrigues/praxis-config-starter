@@ -781,10 +781,20 @@ export interface AgenticAuthoringComponentCapabilityCatalogContract {
   [key: string]: AiJsonValue | AgenticAuthoringComponentCapabilityContract[] | undefined;
 }
 
+export interface AgenticAuthoringComponentCapabilityDiagnosticsContract {
+  source?: 'registry' | 'last-known-good' | 'built-in-fallback' | 'built-in' | null;
+  degraded?: boolean | null;
+  degradationReason?: string | null;
+  resolvedAt?: string | null;
+  lastSuccessfulRegistryLoadAt?: string | null;
+  [key: string]: AiJsonValue | undefined;
+}
+
 export interface AgenticAuthoringComponentCapabilitiesResultContract {
   version?: string | null;
   catalogs?: AgenticAuthoringComponentCapabilityCatalogContract[];
-  [key: string]: AiJsonValue | AgenticAuthoringComponentCapabilityCatalogContract[] | undefined;
+  diagnostics?: AgenticAuthoringComponentCapabilityDiagnosticsContract | null;
+  [key: string]: AiJsonValue | AgenticAuthoringComponentCapabilityCatalogContract[] | AgenticAuthoringComponentCapabilityDiagnosticsContract | undefined;
 }
 
 export interface AgenticAuthoringManifestEditPlanRequestContract {
