@@ -91,6 +91,49 @@ public class UserConfigService {
     return resolved.map(cfg -> new ResolvedConfig(cfg, scope));
   }
 
+  /** Creates a scoped configuration and fails when that exact identity already exists. */
+  public UiUserConfig create(
+      Scope scope,
+      String tenantId,
+      String userId,
+      String componentType,
+      String componentId,
+      String environment,
+      JsonNode payload,
+      JsonNode tags,
+      String updatedBy) {
+    ConfigIdentity identity = normalizeIdentity(tenantId, userId, componentType, componentId, environment);
+    String normalizedUpdatedBy = optionalIdentityValue(updatedBy, "updatedBy", MAX_SCOPE_ID_LENGTH);
+    if (scope == Scope.USER && identity.userId() == null) {
+      throw new IllegalArgumentException("User scope requires X-User-ID header");
+    }
+    ConfigIdentity effectiveIdentity = scope == Scope.USER ? identity : identity.withUserId(null);
+    if (findConfig(effectiveIdentity).isPresent()) {
+      throw new PreconditionFailedException("Create precondition failed: configuration already exists");
+    }
+
+    JsonNode sanitizedPayload = apiKeyProtectionService.sanitizeForStorage(payload, null);
+    validatePayloadSize(sanitizedPayload);
+    UiUserConfig created =
+        UiUserConfig.builder()
+            .tenantId(effectiveIdentity.tenantId())
+            .userId(effectiveIdentity.userId())
+            .componentType(effectiveIdentity.componentType())
+            .componentId(effectiveIdentity.componentId())
+            .environment(effectiveIdentity.environment())
+            .payload(writeJson(sanitizedPayload))
+            .tags(tags != null ? writeJson(tags) : null)
+            .version(1L)
+            .etag(UUID.randomUUID())
+            .updatedBy(normalizedUpdatedBy)
+            .build();
+    try {
+      return repository.saveAndFlush(created);
+    } catch (DataIntegrityViolationException ex) {
+      throw new PreconditionFailedException("Create precondition failed: configuration already exists");
+    }
+  }
+
   public UiUserConfig upsert(
       Scope scope,
       String tenantId,
@@ -265,12 +308,30 @@ public class UserConfigService {
 
   private UiUserConfig updateExisting(
       UiUserConfig current, String payloadJson, String tagsJson, String updatedBy) {
+    UUID expectedEtag = current.getEtag();
+    UUID nextEtag = UUID.randomUUID();
+    long nextVersion = current.getVersion() + 1;
+    Instant updatedAt = Instant.now();
+    int updated = repository.updateIfCurrent(
+        current.getId(),
+        payloadJson,
+        tagsJson,
+        nextVersion,
+        expectedEtag,
+        nextEtag,
+        updatedAt,
+        updatedBy);
+    if (updated != 1) {
+      throw new PreconditionFailedException(
+          "If-Match precondition failed: configuration changed concurrently");
+    }
     current.setPayload(payloadJson);
     current.setTags(tagsJson);
-    current.setVersion(current.getVersion() + 1);
-    current.setEtag(UUID.randomUUID());
+    current.setVersion(nextVersion);
+    current.setEtag(nextEtag);
+    current.setUpdatedAt(updatedAt);
     current.setUpdatedBy(updatedBy);
-    return repository.saveAndFlush(current);
+    return current;
   }
 
   public void delete(

@@ -489,10 +489,13 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.minimalFormPlan().isMissingNode()).isTrue();
         assertThat(result.uiCompositionPlan()).isSameAs(plan);
-        assertThat(result.compiledFormPatch()).isSameAs(compiledFormPatch);
+        assertThat(result.compiledFormPatch()).isNotSameAs(compiledFormPatch);
+        assertThat(result.compiledFormPatch().at("/patch/page/widgets/0/definition/id").asText())
+                .isEqualTo("praxis-list");
+        assertThat(compiledFormPatch.at("/patch/page").isMissingNode()).isTrue();
         assertThat(result.warnings()).contains(
                 "ui-composition-plan-provider:quickstart-human-resources",
-                "compiled-form-patch-materialized-by-page-builder");
+                "ui-composition-plan-compiled-by-config");
     }
 
     @Test
@@ -1112,7 +1115,7 @@ class AgenticAuthoringPreviewServiceTest {
                 .doesNotContain("- Tabela: conectada ao recurso para carregar schema e dados");
         assertThat(result.warnings()).contains(
                 "ui-composition-plan-provider:selected-resource-dashboard",
-                "compiled-form-patch-materialized-by-page-builder");
+                "ui-composition-plan-compiled-by-config");
         assertThat(result.failureCodes()).doesNotContain(
                 "semantic-preview-chart-required",
                 "semantic-preview-dashboard-required");
@@ -4243,6 +4246,8 @@ class AgenticAuthoringPreviewServiceTest {
     @Test
     void previewMessageDescribesChartDrilldownDetailAsRichList() throws Exception {
         ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0");
+        plan.put("kind", "praxis.ui-composition-plan");
         plan.put("layoutPreset", "chart-drilldown-dashboard");
         ArrayNode widgets = plan.putArray("widgets");
         widgets.addObject().put("key", "payroll-by-department-chart").put("componentId", "praxis-chart");
@@ -4296,7 +4301,9 @@ class AgenticAuthoringPreviewServiceTest {
                 List.of(new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper)))
                 .preview(request, "tenant", "user", "local");
 
-        assertThat(result.valid()).isTrue();
+        assertThat(result.valid())
+                .withFailMessage("Preview failure codes: %s", result.failureCodes())
+                .isTrue();
         assertThat(result.failureCodes()).doesNotContain("intent-resolution-artifact-must-be-form");
         assertThat(result.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("resource-master-detail");
         assertThat(result.uiCompositionPlan().path("widgets")).hasSize(2);
@@ -4331,7 +4338,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(bindings.path(1).has("target")).isFalse();
         assertThat(result.warnings()).contains(
                 "ui-composition-plan-provider:selected-resource-master-detail",
-                "compiled-form-patch-materialized-by-page-builder");
+                "ui-composition-plan-compiled-by-config");
     }
 
     @Test
@@ -4975,6 +4982,8 @@ class AgenticAuthoringPreviewServiceTest {
 
     private ObjectNode payrollTimeseriesPlanWithMonthAxis() {
         ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("version", "1.0");
+        plan.put("kind", "praxis.ui-composition-plan");
         plan.put("schemaVersion", "praxis-ui-composition-plan.v1");
         plan.put("layoutPreset", "single-chart-page");
         ArrayNode widgets = plan.putArray("widgets");

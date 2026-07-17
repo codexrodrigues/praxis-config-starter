@@ -3,6 +3,7 @@ package org.praxisplatform.config.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -26,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.domain.UiUserConfig;
 import org.praxisplatform.config.repository.UiUserConfigRepository;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -45,6 +47,114 @@ class UserConfigServiceTest {
   void setUp() {
     lenient().when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
     service = new UserConfigService(repository, new ObjectMapper(), apiKeyProtectionService, jdbcTemplateProvider);
+  }
+
+  @Test
+  void shouldCreateUserConfigWithInsertOnlySemantics() throws Exception {
+    JsonNode payload = readJson("{\"widgets\":[{\"key\":\"critical-employees\"}]}");
+    JsonNode sanitizedPayload = readJson("{\"widgets\":[{\"key\":\"critical-employees\"}]}");
+    JsonNode tags = readJson("{\"source\":\"agentic-authoring\"}");
+
+    when(repository
+            .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdOrderByUpdatedAtDesc(
+                "tenant-a", "praxis-dynamic-page", "absence-dashboard", "user-1"))
+        .thenReturn(Optional.empty());
+    when(apiKeyProtectionService.sanitizeForStorage(payload, null)).thenReturn(sanitizedPayload);
+    when(repository.saveAndFlush(any(UiUserConfig.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    UiUserConfig created =
+        service.create(
+            UserConfigService.Scope.USER,
+            " tenant-a ",
+            " user-1 ",
+            " praxis-dynamic-page ",
+            " absence-dashboard ",
+            null,
+            payload,
+            tags,
+            " authoring-user ");
+
+    assertThat(created.getTenantId()).isEqualTo("tenant-a");
+    assertThat(created.getUserId()).isEqualTo("user-1");
+    assertThat(created.getComponentType()).isEqualTo("praxis-dynamic-page");
+    assertThat(created.getComponentId()).isEqualTo("absence-dashboard");
+    assertThat(created.getVersion()).isEqualTo(1L);
+    assertThat(created.getEtag()).isNotNull();
+    assertThat(created.getPayload()).isEqualTo(sanitizedPayload.toString());
+    assertThat(created.getTags()).isEqualTo(tags.toString());
+    assertThat(created.getUpdatedBy()).isEqualTo("authoring-user");
+    verify(repository).saveAndFlush(created);
+  }
+
+  @Test
+  void shouldRejectCreateReplayWhenExactConfigAlreadyExists() throws Exception {
+    JsonNode payload = readJson("{\"widgets\":[]}");
+    UiUserConfig existing =
+        UiUserConfig.builder()
+            .tenantId("tenant-a")
+            .componentType("praxis-dynamic-page")
+            .componentId("absence-dashboard")
+            .payload("{\"widgets\":[{\"key\":\"existing\"}]}")
+            .version(3L)
+            .etag(UUID.fromString("123e4567-e89b-12d3-a456-426614174020"))
+            .build();
+    when(repository
+            .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdIsNullOrderByUpdatedAtDesc(
+                "tenant-a", "praxis-dynamic-page", "absence-dashboard"))
+        .thenReturn(Optional.of(existing));
+
+    assertThatThrownBy(
+            () ->
+                service.create(
+                    UserConfigService.Scope.TENANT,
+                    "tenant-a",
+                    null,
+                    "praxis-dynamic-page",
+                    "absence-dashboard",
+                    null,
+                    payload,
+                    null,
+                    "authoring-user"))
+        .isInstanceOf(UserConfigService.PreconditionFailedException.class)
+        .hasMessageContaining("configuration already exists");
+
+    verify(repository, never()).saveAndFlush(any(UiUserConfig.class));
+    verifyNoInteractions(apiKeyProtectionService);
+  }
+
+  @Test
+  void shouldConvertConcurrentCreateConflictWithoutOverwritingWinner() throws Exception {
+    JsonNode payload = readJson("{\"widgets\":[{\"key\":\"candidate\"}]}");
+    when(repository
+            .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdOrderByUpdatedAtDesc(
+                "tenant-a", "praxis-dynamic-page", "absence-dashboard", "user-1"))
+        .thenReturn(Optional.empty());
+    when(apiKeyProtectionService.sanitizeForStorage(payload, null)).thenReturn(payload);
+    when(repository.saveAndFlush(any(UiUserConfig.class)))
+        .thenThrow(new DataIntegrityViolationException("unique config identity"));
+
+    assertThatThrownBy(
+            () ->
+                service.create(
+                    UserConfigService.Scope.USER,
+                    "tenant-a",
+                    "user-1",
+                    "praxis-dynamic-page",
+                    "absence-dashboard",
+                    null,
+                    payload,
+                    null,
+                    "authoring-user"))
+        .isInstanceOf(UserConfigService.PreconditionFailedException.class)
+        .hasMessageContaining("configuration already exists");
+
+    verify(repository).saveAndFlush(any(UiUserConfig.class));
+    verify(jdbcTemplate, never())
+        .queryForObject(
+            anyString(),
+            any(MapSqlParameterSource.class),
+            ArgumentMatchers.<RowMapper<UiUserConfig>>any());
   }
 
   @Test
@@ -75,6 +185,7 @@ class UserConfigServiceTest {
     JsonNode payload = new ObjectMapper().readTree("{\"columns\":[\"id\"]}");
     UiUserConfig current =
         UiUserConfig.builder()
+            .id(UUID.fromString("123e4567-e89b-12d3-a456-426614174099"))
             .tenantId("tenant-a")
             .userId("user-1")
             .componentType("praxis-table")
@@ -112,6 +223,7 @@ class UserConfigServiceTest {
     JsonNode payload = new ObjectMapper().readTree("{\"columns\":[\"id\"]}");
     UiUserConfig current =
         UiUserConfig.builder()
+            .id(UUID.fromString("123e4567-e89b-12d3-a456-426614174097"))
             .tenantId("tenant-a")
             .userId("user-1")
             .componentType("praxis-table")
@@ -126,7 +238,16 @@ class UserConfigServiceTest {
                 "tenant-a", "praxis-table", "table-config:employees", "user-1"))
         .thenReturn(Optional.of(current));
     when(apiKeyProtectionService.sanitizeForStorage(payload, readJson("{\"columns\":[]}"))).thenReturn(payload);
-    when(repository.saveAndFlush(current)).thenReturn(current);
+    when(repository.updateIfCurrent(
+            any(UUID.class),
+            anyString(),
+            any(),
+            anyLong(),
+            any(UUID.class),
+            any(UUID.class),
+            any(),
+            anyString()))
+        .thenReturn(1);
 
     UiUserConfig saved =
         service.upsert(
@@ -144,7 +265,63 @@ class UserConfigServiceTest {
     assertThat(saved).isSameAs(current);
     assertThat(saved.getVersion()).isEqualTo(3L);
     assertThat(saved.getEtag()).isNotEqualTo(UUID.fromString("123e4567-e89b-12d3-a456-426614174000"));
-    verify(repository).saveAndFlush(current);
+    verify(repository).updateIfCurrent(
+        any(UUID.class),
+        anyString(),
+        any(),
+        anyLong(),
+        any(UUID.class),
+        any(UUID.class),
+        any(),
+        anyString());
+  }
+
+  @Test
+  void shouldRejectUpdateWhenAnotherWriterConsumesTheMatchedEtagFirst() throws Exception {
+    JsonNode payload = readJson("{\"columns\":[\"id\"]}");
+    UUID currentEtag = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+    UiUserConfig current = UiUserConfig.builder()
+        .id(UUID.fromString("123e4567-e89b-12d3-a456-426614174098"))
+        .tenantId("tenant-a")
+        .userId("user-1")
+        .componentType("praxis-table")
+        .componentId("table-config:employees")
+        .payload("{\"columns\":[]}")
+        .version(2L)
+        .etag(currentEtag)
+        .build();
+    when(repository
+            .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdOrderByUpdatedAtDesc(
+                "tenant-a", "praxis-table", "table-config:employees", "user-1"))
+        .thenReturn(Optional.of(current));
+    when(apiKeyProtectionService.sanitizeForStorage(payload, readJson("{\"columns\":[]}"))).thenReturn(payload);
+    when(repository.updateIfCurrent(
+            any(UUID.class),
+            anyString(),
+            any(),
+            anyLong(),
+            any(UUID.class),
+            any(UUID.class),
+            any(),
+            anyString()))
+        .thenReturn(0);
+
+    assertThatThrownBy(() -> service.upsert(
+        UserConfigService.Scope.USER,
+        "tenant-a",
+        "user-1",
+        "praxis-table",
+        "table-config:employees",
+        null,
+        payload,
+        null,
+        "\"" + currentEtag + "\"",
+        "qa-user"))
+        .isInstanceOf(UserConfigService.PreconditionFailedException.class)
+        .hasMessageContaining("changed concurrently");
+
+    assertThat(current.getVersion()).isEqualTo(2L);
+    assertThat(current.getEtag()).isEqualTo(currentEtag);
   }
 
   @Test

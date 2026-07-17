@@ -7607,7 +7607,7 @@ class AgenticAuthoringTurnEngineTest {
                         List.of(),
                         List.of(),
                         objectMapper.createObjectNode(),
-                        objectMapper.createObjectNode(),
+                        compiledPagePatch(),
                         null,
                         uiCompositionPlanWithResourceSchemaGrounding(),
                         "Preview ready."));
@@ -7619,6 +7619,9 @@ class AgenticAuthoringTurnEngineTest {
 
         com.fasterxml.jackson.databind.JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
         org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isTrue();
+        JsonNode applyTarget = result.path("applyTarget");
+        org.assertj.core.api.Assertions.assertThat(applyTarget.path("mode").asText()).isEqualTo("create");
+        org.assertj.core.api.Assertions.assertThat(applyTarget.has("baseEtag")).isFalse();
         com.fasterxml.jackson.databind.JsonNode diagnostics = result.path("decisionDiagnostics");
         org.assertj.core.api.Assertions.assertThat(diagnostics.path("semanticDecisionReviewGroundedByPreview").asBoolean())
                 .isTrue();
@@ -7720,7 +7723,7 @@ class AgenticAuthoringTurnEngineTest {
                         List.of(),
                         List.of("semantic-decision-review-required:keyword-fallback-fail-safe"),
                         objectMapper.createObjectNode(),
-                        objectMapper.createObjectNode(),
+                        compiledPagePatch(),
                         null,
                         uiCompositionPlanWithResourceSchemaGrounding(),
                         "Materializei a pre-visualizacao, mas a decisao semantica ainda exige revisao de governanca antes da aplicacao."));
@@ -7789,7 +7792,7 @@ class AgenticAuthoringTurnEngineTest {
                         List.of(),
                         List.of(),
                         objectMapper.createObjectNode(),
-                        objectMapper.createObjectNode(),
+                        compiledPagePatch(),
                         null,
                         uiCompositionPlanWithResourceSchemaGrounding(),
                         "Preview ready."));
@@ -7913,7 +7916,7 @@ class AgenticAuthoringTurnEngineTest {
                         List.of(),
                         List.of(),
                         objectMapper.createObjectNode(),
-                        objectMapper.createObjectNode(),
+                        compiledPagePatch(),
                         null,
                         uiCompositionPlanWithResourceSchemaGrounding(),
                         "Preview ready."));
@@ -7986,7 +7989,7 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void exposesVerifiedSemanticAxesInDecisionDiagnostics() throws Exception {
+    void blocksTerminalDashboardApplyWhenCompiledPagePatchIsMissing() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
 
@@ -7999,6 +8002,198 @@ class AgenticAuthoringTurnEngineTest {
                         List.of(),
                         objectMapper.createObjectNode(),
                         objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(
+                request("Crie um dashboard por gravidade"),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(
+                result.path("decisionDiagnostics").path("terminalPreviewApplyEligible").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(
+                result.path("decisionDiagnostics").path("terminalPreviewApplyBlockReason").asText())
+                .isEqualTo("compiled-page-patch-missing");
+    }
+
+    @Test
+    void blocksTerminalApplyWhenCompiledPageWidgetsAreMissing() throws Exception {
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        compiledFormPatch.putObject("patch").putObject("page");
+        assertTerminalPreviewApplyBlocked(
+                compiledFormPatch,
+                "compiled-page-widgets-missing");
+    }
+
+    @Test
+    void blocksTerminalApplyWhenCompiledPageWidgetsAreEmpty() throws Exception {
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        compiledFormPatch.putObject("patch").putObject("page").putArray("widgets");
+        assertTerminalPreviewApplyBlocked(compiledFormPatch, "compiled-page-widgets-empty");
+    }
+
+    @Test
+    void blocksTerminalApplyWhenCanonicalCanvasIsIncomplete() throws Exception {
+        ObjectNode compiledFormPatch = compiledPagePatchWithValidWidget();
+        ((ObjectNode) compiledFormPatch.path("patch").path("page")).putObject("canvas");
+
+        assertTerminalPreviewApplyBlocked(compiledFormPatch, "compiled-page-canvas-mode-invalid");
+    }
+
+    @Test
+    void blocksTerminalApplyWhenCompositionLinkIsNotAnObject() throws Exception {
+        ObjectNode compiledFormPatch = compiledPagePatchWithValidWidget();
+        ((ObjectNode) compiledFormPatch.path("patch").path("page"))
+                .putObject("composition")
+                .putArray("links")
+                .add(42);
+
+        assertTerminalPreviewApplyBlocked(compiledFormPatch, "compiled-page-composition-link-object-required");
+    }
+
+    @Test
+    void blocksTerminalApplyWhenPersistenceTargetIsMissing() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        compiledPagePatch(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnStreamRequest request = request("Crie um dashboard por gravidade");
+        AgenticAuthoringTurnStreamRequest withoutTarget = new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                null,
+                request.componentCapabilities(),
+                request.activeSemanticDecision(),
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(withoutTarget, principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(
+                result.path("decisionDiagnostics").path("terminalPreviewApplyBlockReason").asText())
+                .isEqualTo("apply-target-missing");
+        org.assertj.core.api.Assertions.assertThat(result.path("applyTarget").isMissingNode()).isTrue();
+    }
+
+    @Test
+    void blocksCreateTargetWhenBaseEtagPropertyIsPresentEvenAsNull() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        compiledPagePatch(),
+                        null,
+                        null,
+                        "Preview ready."));
+        AgenticAuthoringTurnStreamRequest request = request("Crie um dashboard por gravidade");
+        ((ObjectNode) request.contextHints().path("agenticApplyTarget")).putNull("baseEtag");
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(request, principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(
+                result.path("decisionDiagnostics").path("terminalPreviewApplyBlockReason").asText())
+                .isEqualTo("apply-target-create-base-etag-forbidden");
+        org.assertj.core.api.Assertions.assertThat(result.path("applyTarget").isMissingNode()).isTrue();
+    }
+
+    private void assertTerminalPreviewApplyBlocked(
+            JsonNode compiledFormPatch,
+            String expectedReason) throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        compiledFormPatch,
+                        null,
+                        null,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(
+                request("Crie um dashboard por gravidade"),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(
+                result.path("decisionDiagnostics").path("terminalPreviewApplyEligible").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(
+                result.path("decisionDiagnostics").path("terminalPreviewApplyBlockReason").asText())
+                .isEqualTo(expectedReason);
+    }
+
+    private ObjectNode compiledPagePatchWithValidWidget() {
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        ObjectNode page = compiledFormPatch.putObject("patch").putObject("page");
+        ObjectNode widget = page.putArray("widgets").addObject();
+        widget.put("key", "critical-employees");
+        widget.putObject("definition").put("id", "praxis-table");
+        return compiledFormPatch;
+    }
+
+    @Test
+    void exposesVerifiedSemanticAxesInDecisionDiagnostics() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        compiledPagePatch(),
                         null,
                         uiCompositionPlanWithSemanticAxis(true, "verified"),
                         "Preview ready."));
@@ -8078,7 +8273,7 @@ class AgenticAuthoringTurnEngineTest {
                         List.of(),
                         List.of(),
                         objectMapper.createObjectNode(),
-                        objectMapper.createObjectNode(),
+                        compiledPagePatch(),
                         null,
                         uiCompositionPlan,
                         "Preview ready."));
@@ -8651,7 +8846,10 @@ class AgenticAuthoringTurnEngineTest {
         ArgumentCaptor<AgenticAuthoringPlanRequest> planRequest =
                 ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
         verify(previewService).preview(planRequest.capture(), eq("tenant"), eq("user"), eq("local"));
-        org.assertj.core.api.Assertions.assertThat(planRequest.getValue().contextHints().path("authoringEvidence").isMissingNode())
+        JsonNode forwardedContextHints = planRequest.getValue().contextHints();
+        org.assertj.core.api.Assertions.assertThat(
+                forwardedContextHints == null
+                        || forwardedContextHints.path("authoringEvidence").isMissingNode())
                 .isTrue();
         org.assertj.core.api.Assertions.assertThat(sink.payloads)
                 .anySatisfy(payload -> {
@@ -8932,7 +9130,7 @@ class AgenticAuthoringTurnEngineTest {
                                 List.of(),
                                 List.of(),
                                 objectMapper.createObjectNode(),
-                                objectMapper.createObjectNode(),
+                                compiledPagePatch(),
                                 null,
                                 null,
                                 "Preview repaired."));
@@ -10267,7 +10465,10 @@ class AgenticAuthoringTurnEngineTest {
                     org.assertj.core.api.Assertions.assertThat(preview.path("valid").asBoolean()).isTrue();
                     org.assertj.core.api.Assertions.assertThat(preview.path("warnings").toString())
                             .contains("ui-composition-plan-provider:local-editorial-tabbed-workspace")
-                            .contains("compiled-form-patch-materialized-by-page-builder");
+                            .contains("ui-composition-plan-compiled-by-config");
+                    org.assertj.core.api.Assertions.assertThat(
+                            preview.path("compiledFormPatch").path("patch").path("page").path("widgets"))
+                            .isNotEmpty();
                     org.assertj.core.api.Assertions.assertThat(preview.path("uiCompositionPlan").path("layoutPreset").asText())
                             .isEqualTo("local-editorial-tabbed-workspace");
                     org.assertj.core.api.Assertions.assertThat(preview.path("uiCompositionPlan").toString())
@@ -10427,7 +10628,7 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 null,
                 List.of(),
-                null,
+                withApplyTarget(null),
                 null);
     }
 
@@ -10447,7 +10648,7 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 null,
                 List.of(),
-                null,
+                withApplyTarget(null),
                 null);
     }
 
@@ -10497,7 +10698,7 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 null,
                 List.of(),
-                contextHints,
+                withApplyTarget(contextHints),
                 null);
     }
 
@@ -10519,7 +10720,7 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 null,
                 List.of(),
-                contextHints,
+                withApplyTarget(contextHints),
                 null);
     }
 
@@ -10562,7 +10763,7 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 null,
                 List.of(),
-                contextHints,
+                withApplyTarget(contextHints),
                 null,
                 null,
                 diagnostics,
@@ -10617,7 +10818,7 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 null,
                 List.of(),
-                contextHints,
+                withApplyTarget(contextHints),
                 null,
                 activeSemanticDecision);
     }
@@ -10695,7 +10896,7 @@ class AgenticAuthoringTurnEngineTest {
                 conversationMessages,
                 null,
                 List.of(),
-                contextHints,
+                withApplyTarget(contextHints),
                 null);
     }
 
@@ -10853,11 +11054,24 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 null,
                 List.of(),
-                contextHints,
+                withApplyTarget(contextHints),
                 null,
                 null,
                 List.of(runtimeObservation),
                 AgenticAuthoringRuntimeComponentGroundingService.TRUST_BOUNDARY_UNTRUSTED_FRONTEND_OBSERVATION);
+    }
+
+    private ObjectNode withApplyTarget(JsonNode contextHints) {
+        ObjectNode merged = contextHints != null && contextHints.isObject()
+                ? ((ObjectNode) contextHints).deepCopy()
+                : objectMapper.createObjectNode();
+        ObjectNode target = merged.putObject("agenticApplyTarget");
+        target.put("schemaVersion", AgenticAuthoringApplyTarget.SCHEMA_VERSION);
+        target.put("componentType", "praxis-dynamic-page");
+        target.put("componentId", "page-builder-ia");
+        target.put("scope", "user");
+        target.put("mode", "create");
+        return merged;
     }
 
     private JsonNode missionRuntimeObservation() throws Exception {
@@ -11533,6 +11747,18 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 List.of(),
                 objectMapper.createObjectNode());
+    }
+
+    private ObjectNode compiledPagePatch() {
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        compiledFormPatch.putObject("patch")
+                .putObject("page")
+                .putArray("widgets")
+                .addObject()
+                .put("key", "dashboard-summary")
+                .putObject("definition")
+                .put("id", "praxis-rich-content");
+        return compiledFormPatch;
     }
 
     private AgenticAuthoringIntentResolutionResult profileIntentWithEvidenceSummary() {

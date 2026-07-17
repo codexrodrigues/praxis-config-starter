@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import org.praxisplatform.config.domain.UiUserConfig;
 import org.praxisplatform.config.dto.AiTurnEventEnvelope;
@@ -55,20 +56,38 @@ public class AgenticAuthoringApplyService {
                 requireUuid(request.streamId(), "streamId is required"),
                 principalContext);
         AiTurnEventEnvelope terminalResult = requireTerminalResult(request, ownership);
-        validateTerminalMaterialization(request, terminalResult);
-        JsonNode tags = buildTags(request, terminalResult);
-
-        UiUserConfig saved = userConfigService.upsert(
-                scope,
-                principalContext.tenantId(),
-                principalContext.userId(),
+        AgenticAuthoringApplyTarget applyTarget = validateTerminalMaterialization(
+                request,
+                terminalResult,
+                principalContext,
                 componentType,
                 componentId,
-                principalContext.environment(),
-                payload,
-                tags,
-                ifMatch,
-                updatedBy);
+                scope,
+                ifMatch);
+        JsonNode tags = buildTags(request, terminalResult);
+
+        UiUserConfig saved = "create".equals(applyTarget.mode())
+                ? userConfigService.create(
+                        scope,
+                        principalContext.tenantId(),
+                        principalContext.userId(),
+                        componentType,
+                        componentId,
+                        principalContext.environment(),
+                        payload,
+                        tags,
+                        updatedBy)
+                : userConfigService.upsert(
+                        scope,
+                        principalContext.tenantId(),
+                        principalContext.userId(),
+                        componentType,
+                        componentId,
+                        principalContext.environment(),
+                        payload,
+                        tags,
+                        ifMatch,
+                        updatedBy);
 
         String etag = saved.getEtag() != null ? saved.getEtag().toString() : null;
         JsonNode savedPayload = apiKeyProtectionService.sanitizeForResponse(readJson(saved.getPayload()));
@@ -108,9 +127,14 @@ public class AgenticAuthoringApplyService {
         return terminal;
     }
 
-    private void validateTerminalMaterialization(
+    private AgenticAuthoringApplyTarget validateTerminalMaterialization(
             AgenticAuthoringApplyRequest request,
-            AiTurnEventEnvelope terminalResult) {
+            AiTurnEventEnvelope terminalResult,
+            AiPrincipalContext principalContext,
+            String componentType,
+            String componentId,
+            UserConfigService.Scope scope,
+            String ifMatch) {
         JsonNode payload = terminalResult.getPayload();
         if (payload == null || !payload.isObject() || !payload.path("canApply").asBoolean(false)) {
             throw new IllegalStateException("agentic-turn-result-is-not-applicable");
@@ -126,21 +150,41 @@ public class AgenticAuthoringApplyService {
         if (!issuedDecision.isObject() || requestedDecision == null || !issuedDecision.equals(requestedDecision)) {
             throw new IllegalStateException("agentic-turn-result-semantic-decision-mismatch");
         }
+        AgenticAuthoringApplyTarget applyTarget =
+                AgenticAuthoringApplyTarget.fromTerminal(payload.path("applyTarget"));
+        validateApplyTarget(applyTarget, principalContext, componentType, componentId, scope, ifMatch);
+        return applyTarget;
+    }
+
+    private void validateApplyTarget(
+            AgenticAuthoringApplyTarget applyTarget,
+            AiPrincipalContext principalContext,
+            String componentType,
+            String componentId,
+            UserConfigService.Scope scope,
+            String ifMatch) {
+        if (!componentType.equals(applyTarget.componentType())
+                || !componentId.equals(applyTarget.componentId())
+                || !scope.name().equalsIgnoreCase(applyTarget.scope())
+                || !Objects.equals(
+                        blankToNull(principalContext.environment()),
+                        blankToNull(applyTarget.environment()))) {
+            throw new IllegalStateException("agentic-turn-result-apply-target-mismatch");
+        }
+        String requestedEtag = AgenticAuthoringApplyTarget.normalizeEtag(ifMatch);
+        if ("create".equals(applyTarget.mode())) {
+            if (!requestedEtag.isBlank()) {
+                throw new IllegalStateException("agentic-turn-result-create-precondition-mismatch");
+            }
+            return;
+        }
+        if (!Objects.equals(applyTarget.baseEtag(), requestedEtag)) {
+            throw new IllegalStateException("agentic-turn-result-base-etag-mismatch");
+        }
     }
 
     private JsonNode extractPagePayload(JsonNode compiledFormPatch) {
-        if (compiledFormPatch == null || !compiledFormPatch.isObject()) {
-            throw new IllegalArgumentException("compiledFormPatch is required");
-        }
-        JsonNode page = compiledFormPatch.path("patch").path("page");
-        if (!page.isObject()) {
-            throw new IllegalArgumentException("compiledFormPatch.patch.page must be an object");
-        }
-        JsonNode widgets = page.path("widgets");
-        if (!widgets.isArray() || widgets.isEmpty()) {
-            throw new IllegalArgumentException("compiledFormPatch.patch.page.widgets must not be empty");
-        }
-        return page;
+        return AgenticAuthoringCompiledPagePatchValidator.requireApplicablePage(compiledFormPatch);
     }
 
     private void validateSemanticMaterialization(
@@ -196,6 +240,10 @@ public class AgenticAuthoringApplyService {
 
     private String defaultIfBlank(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private String requireText(String value, String message) {

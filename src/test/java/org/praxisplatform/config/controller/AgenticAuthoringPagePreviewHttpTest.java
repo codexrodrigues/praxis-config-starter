@@ -381,7 +381,9 @@ class AgenticAuthoringPagePreviewHttpTest {
                 .getContentAsString();
 
         JsonNode body = objectMapper.readTree(response);
-        assertThat(body.path("valid").asBoolean()).isTrue();
+        assertThat(body.path("valid").asBoolean())
+                .withFailMessage("Preview response: %s", body)
+                .isTrue();
         assertThat(body.path("uiCompositionPlan").path("layoutPreset").asText())
                 .isEqualTo("chart-drilldown-dashboard");
         assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(4);
@@ -675,7 +677,9 @@ class AgenticAuthoringPagePreviewHttpTest {
                 .getContentAsString();
 
         JsonNode body = objectMapper.readTree(response);
-        assertThat(body.path("valid").asBoolean()).isTrue();
+        assertThat(body.path("valid").asBoolean())
+                .withFailMessage("Preview response: %s", body)
+                .isTrue();
         assertThat(body.path("uiCompositionPlan").path("layoutPreset").asText())
                 .isEqualTo("chart-drilldown-dashboard");
         assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(4);
@@ -866,7 +870,9 @@ class AgenticAuthoringPagePreviewHttpTest {
                 .getContentAsString();
 
         JsonNode body = objectMapper.readTree(response);
-        assertThat(body.path("valid").asBoolean()).isTrue();
+        assertThat(body.path("valid").asBoolean())
+                .withFailMessage("Preview response: %s", body)
+                .isTrue();
         assertThat(body.path("uiCompositionPlan").path("layoutPreset").asText())
                 .isEqualTo("chart-drilldown-dashboard");
         assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(4);
@@ -1180,14 +1186,17 @@ class AgenticAuthoringPagePreviewHttpTest {
                 .getContentAsString();
 
         JsonNode body = objectMapper.readTree(response);
-        assertThat(body.path("valid").asBoolean()).isTrue();
+        assertThat(body.path("valid").asBoolean())
+                .withFailMessage("Preview response: %s", body)
+                .isTrue();
         assertThat(body.path("minimalFormPlan").isMissingNode() || body.path("minimalFormPlan").isNull()).isTrue();
         assertThat(body.path("uiCompositionPlan").path("kind").asText()).isEqualTo("praxis.ui-composition-plan");
         assertThat(body.path("uiCompositionPlan").path("widgets")).hasSize(4);
         assertThat(body.path("uiCompositionPlan").path("bindings")).hasSize(5);
         assertThat(body.path("compiledFormPatch").path("patch").isObject()).isTrue();
         assertThat(body.path("warnings")).extracting(JsonNode::asText)
-                .contains("compiled-form-patch-materialized-by-page-builder");
+                .contains("ui-composition-plan-compiled-by-config")
+                .doesNotContain("compiled-form-patch-materialized-by-page-builder");
     }
 
     private AgenticAuthoringArtifactProperties properties() {

@@ -704,6 +704,27 @@ Regra de aplicacao:
   igualdade exata da decisao semantica e do patch compilado emitidos naquele
   evento. A materializacao deve preservar `stream/thread/turn/event/decision`
   como tags auditaveis, sem payload sensivel.
+- O evento terminal so pode publicar `canApply=true` quando a preview possuir
+  `compiledFormPatch.patch.page`. Quando a materializacao partir de um
+  `uiCompositionPlan`, o Config deve compilar o plano antes do resultado
+  terminal e preservar ambos no mesmo payload auditavel; a ausencia do plano
+  nao invalida, por si so, um patch de pagina completo produzido por outro
+  fluxo governado. O diagnostico `terminalPreviewApplyEligible=false` deve
+  expor `terminalPreviewApplyBlockReason` quando o patch terminal estiver
+  incompleto.
+- O consumidor pode projetar localmente uma preview incompleta para revisao,
+  mas nao pode regenera-la e reutilizar `resultEventId` do resultado anterior.
+  Uma materializacao diferente exige um novo evento terminal backend-owned.
+- Um resultado terminal aplicavel tambem publica `applyTarget` com
+  `componentType`, `componentId`, `scope`, ambiente backend-owned e o modo de
+  concorrencia. `mode=create` exige ausencia da configuracao; `mode=update`
+  exige que o `If-Match` coincida com o `baseEtag` atestado. `page-apply`
+  rejeita destino, escopo, ambiente ou ETag diferentes, e um segundo uso do
+  mesmo evento falha pela precondicao ja consumida.
+- `contextHints.agenticApplyTarget` pertence exclusivamente ao request do turn
+  stream e nao faz parte dos hints compartilhados por intent/plan/preview. Ele e
+  metadado de transporte: o engine o
+  remove antes de discovery, planejamento ou qualquer chamada a LLM.
 - `page-apply` deve rejeitar `semanticDecision.reviewRequired=true`, mesmo que
   a materializacao seja estruturalmente valida, exceto pelo caso estrito
   `reviewReason=weak-lexical-evidence` quando o `compiledFormPatch` carrega

@@ -3415,7 +3415,7 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
 
     private void addMetadata(ObjectNode binding, String tag) {
         ObjectNode metadata = binding.putObject("metadata");
-        metadata.put("source", "ui-composition-plan");
+        metadata.put("source", "native-composition-link");
         ArrayNode tags = metadata.putArray("tags");
         tags.add("composition");
         tags.add(tag);

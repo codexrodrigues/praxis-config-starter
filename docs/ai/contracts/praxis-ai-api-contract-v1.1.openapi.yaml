@@ -727,9 +727,9 @@ paths:
           in: header
           required: false
           description: >
-            Condicao de concorrencia delegada a ui_user_config. Aceita *, entity tags fortes
-            entre aspas ou lista separada por virgula; validadores fracos sao sintaticamente
-            aceitos, mas nao satisfazem If-Match.
+            Precondicao exata vinculada ao resultado terminal. Em update deve conter o unico
+            UUID forte atestado em applyTarget.baseEtag; wildcard, listas, validadores fracos
+            ou qualquer outro valor sao rejeitados. Em create deve ser omitida.
           schema:
             type: string
       requestBody:
@@ -752,7 +752,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
         '412':
-          description: ETag divergente
+          description: Precondicao terminal falhou por ETag obsoleto, concorrencia ou replay/conflito de create
           content:
             text/plain:
               schema:
@@ -1551,7 +1551,7 @@ components:
       required: false
       schema:
         type: string
-        default: 4104d595192c9ef862edcc1b899a9d9767338e8cdcdf9d3c3d8eb7507ff00bcf
+        default: 8120c06a6daa75a0ddad250da394bbc54f92128fb2d229e6c3ea848841fc768c
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1581,7 +1581,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 4104d595192c9ef862edcc1b899a9d9767338e8cdcdf9d3c3d8eb7507ff00bcf
+        example: 8120c06a6daa75a0ddad250da394bbc54f92128fb2d229e6c3ea848841fc768c
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -2046,6 +2046,10 @@ components:
               type: object
               nullable: true
               additionalProperties: true
+              properties:
+                agenticApplyTarget:
+                  $ref: '#/components/schemas/AgenticAuthoringApplyTarget'
+              description: Hints governados do turno. agenticApplyTarget e metadado de transporte, removido antes de qualquer contexto enviado a LLM, e vincula o resultado terminal ao destino de persistencia.
             componentCapabilities:
               $ref: '#/components/schemas/AgenticAuthoringComponentCapabilitiesResult'
             activeSemanticDecision:
@@ -2214,7 +2218,78 @@ components:
         reviewReason:
           type: string
           nullable: true
+        terminalPreviewApplyEligible:
+          type: boolean
+          nullable: true
+        terminalPreviewApplyBlockReason:
+          type: string
+          nullable: true
+        terminalApplyTargetEligible:
+          type: boolean
+          nullable: true
       additionalProperties: true
+
+    AgenticAuthoringApplyTarget:
+      type: object
+      required:
+        - schemaVersion
+        - componentType
+        - componentId
+        - scope
+        - mode
+      properties:
+        schemaVersion:
+          type: string
+          enum:
+            - praxis-agentic-authoring-apply-target.v1
+        componentType:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Tipo canonico da configuracao que pode receber o patch terminal.
+        componentId:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Identidade canonica da configuracao que pode receber o patch terminal.
+        scope:
+          type: string
+          enum:
+            - user
+            - tenant
+        environment:
+          type: string
+          nullable: true
+          description: Ambiente atestado pelo principal backend; o frontend nao escolhe este valor.
+        mode:
+          type: string
+          enum:
+            - create
+            - update
+          description: create exige ausencia da configuracao e baseEtag ausente; update exige baseEtag exato e obrigatorio.
+        baseEtag:
+          type: string
+          format: uuid
+          description: ETag forte da configuracao revisada. Obrigatorio em update e proibido em create.
+      oneOf:
+        - title: Create target
+          properties:
+            mode:
+              type: string
+              enum:
+                - create
+          not:
+            required:
+              - baseEtag
+        - title: Update target
+          required:
+            - baseEtag
+          properties:
+            mode:
+              type: string
+              enum:
+                - update
+      additionalProperties: false
 
     AgenticAuthoringTurnResultPayload:
       type: object
@@ -2240,6 +2315,10 @@ components:
         canApply:
           type: boolean
           nullable: true
+        applyTarget:
+          $ref: '#/components/schemas/AgenticAuthoringApplyTarget'
+          nullable: true
+          description: Destino e precondicao de concorrencia atestados pelo mesmo evento terminal. page-apply rejeita qualquer divergencia de identidade, escopo, ambiente ou ETag.
         decisionDiagnostics:
           $ref: '#/components/schemas/AgenticAuthoringDecisionDiagnostics'
           nullable: true
@@ -2411,7 +2490,7 @@ components:
         resultEventId:
           type: string
           format: uuid
-          description: eventId do evento terminal result recebido no envelope SSE. A decisao semantica e o compiledFormPatch devem coincidir exatamente com o payload persistido deste evento.
+          description: eventId do evento terminal result recebido no envelope SSE. A decisao semantica, o compiledFormPatch e componentType/componentId/scope/If-Match devem coincidir exatamente com o payload persistido deste evento.
       additionalProperties: true
 
     AgenticAuthoringComponentCapabilitiesResult:
