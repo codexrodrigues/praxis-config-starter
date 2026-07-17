@@ -103,6 +103,13 @@ $deleted = $false
 $persistedEtag = $null
 
 try {
+    $applyTarget = @{
+        schemaVersion = "praxis-agentic-authoring-apply-target.v1"
+        componentType = $ComponentType
+        componentId = $ComponentId
+        scope = "user"
+        mode = "create"
+    }
     $turnBody = @{
         userPrompt = $UserPrompt
         provider = $Provider
@@ -113,6 +120,9 @@ try {
         targetComponentId = "praxis-dynamic-page-builder"
         currentPage = @{
             widgets = @()
+        }
+        contextHints = @{
+            agenticApplyTarget = $applyTarget
         }
     } | ConvertTo-Json -Depth 10 -Compress
 
@@ -144,6 +154,11 @@ try {
         $streamContent = Read-ErrorBody $_
     }
     $events = @(ConvertFrom-SseContent $streamContent)
+    $artifactDir = Join-Path $root "target\agentic-authoring\apply-http-e2e"
+    New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+    $events |
+        ConvertTo-Json -Depth 40 |
+        Set-Content -LiteralPath (Join-Path $artifactDir "stream-events.json") -Encoding utf8
     $errorEvent = @($events | Where-Object { "$($_.type)".ToLowerInvariant() -eq "error" } | Select-Object -First 1)[0]
     if ($null -ne $errorEvent) {
         throw "Authoring turn ended with error: $($errorEvent.payload.message)"
@@ -152,11 +167,21 @@ try {
     if ($null -eq $terminal) {
         throw "Authoring turn did not produce a terminal result event."
     }
+    $terminal |
+        ConvertTo-Json -Depth 40 |
+        Set-Content -LiteralPath (Join-Path $artifactDir "terminal-result.json") -Encoding utf8
     if ([string]::IsNullOrWhiteSpace($terminal.streamId) -or [string]::IsNullOrWhiteSpace($terminal.eventId)) {
         throw "Authoring terminal result did not include streamId and eventId lineage."
     }
     if (-not [bool] $terminal.payload.canApply) {
-        throw "Authoring turn result is not applicable: $($terminal.payload.reviewReason)"
+        $blockReason = "$($terminal.payload.decisionDiagnostics.terminalPreviewApplyBlockReason)"
+        if ([string]::IsNullOrWhiteSpace($blockReason)) {
+            $blockReason = "$($terminal.payload.decisionDiagnostics.reviewReason)"
+        }
+        if ([string]::IsNullOrWhiteSpace($blockReason)) {
+            $blockReason = "unspecified-terminal-apply-block"
+        }
+        throw "Authoring turn result is not applicable: $blockReason"
     }
     $preview = $terminal.payload.preview
     $intent = $terminal.payload.intentResolution
