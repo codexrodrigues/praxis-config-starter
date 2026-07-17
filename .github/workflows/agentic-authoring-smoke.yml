@@ -22,19 +22,19 @@ on:
         default: ''
         type: string
       quickstart_ref:
-        description: 'praxis-api-quickstart ref to test against.'
-        required: false
-        default: main
+        description: 'Immutable praxis-api-quickstart commit SHA to test against.'
+        required: true
+        default: cbc5cec318a77e998e786e486861a3c92727519e
         type: string
       metadata_ref:
-        description: 'praxis-metadata-starter ref to install locally for metadata/domain catalog contracts.'
-        required: false
-        default: main
+        description: 'Immutable praxis-metadata-starter commit SHA to install locally.'
+        required: true
+        default: 567b35bce2fa229bb06c5662c57fc96902e04f09
         type: string
       ui_ref:
-        description: 'praxis-ui-angular ref to test against when the page-builder E2E gate is enabled.'
-        required: false
-        default: main
+        description: 'Immutable praxis-ui-angular commit SHA used by the page-builder E2E gate.'
+        required: true
+        default: 2ec8ff6c0c83cc3e284ff1c19e05d6ec72224b44
         type: string
       run_page_builder_full_e2e:
         description: 'Run the page-builder agentic Playwright gate after the HTTP/SSE smoke.'
@@ -53,11 +53,6 @@ on:
         description: 'Timeout for the Page Builder Playwright gate step.'
         required: false
         default: '30'
-        type: string
-      page_builder_playwright_test_timeout_ms:
-        description: 'Per-test timeout passed to the Page Builder Playwright gate. Use 0 to keep the spec default.'
-        required: false
-        default: '600000'
         type: string
       run_quickstart_http_smoke:
         description: 'Run the quickstart agentic authoring HTTP/SSE smoke.'
@@ -84,11 +79,6 @@ on:
         required: false
         default: false
         type: boolean
-      stream_processing_timeout_seconds:
-        description: 'Backend LLM stream processing timeout used by HTTP smoke and page-builder E2E.'
-        required: false
-        default: '180'
-        type: string
       quickstart_startup_timeout_seconds:
         description: 'Quickstart startup timeout used by HTTP smoke, domain catalog smoke and page-builder E2E.'
         required: false
@@ -127,6 +117,23 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: praxis-config-starter
+
+      - name: Validate immutable refs and load canonical gate matrix
+        shell: pwsh
+        working-directory: praxis-config-starter
+        run: |
+          $refs = @{
+            quickstart = '${{ inputs.quickstart_ref }}'
+            metadata = '${{ inputs.metadata_ref }}'
+            ui = '${{ inputs.ui_ref }}'
+          }
+          foreach ($entry in $refs.GetEnumerator()) {
+            if ($entry.Value -notmatch '^[0-9a-fA-F]{40}$') {
+              throw "$($entry.Key) ref must be an immutable 40-character commit SHA."
+            }
+          }
+          $matrix = Get-Content -LiteralPath tools/e2e/page-builder-agentic-gate-matrix.json -Raw | ConvertFrom-Json
+          "PB_STREAM_PROCESSING_TIMEOUT_SECONDS=$($matrix.defaults.streamProcessingTimeoutSeconds)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Checkout praxis-api-quickstart
         uses: actions/checkout@v5
@@ -259,7 +266,7 @@ jobs:
             QuickstartRoot = "$env:GITHUB_WORKSPACE\praxis-api-quickstart"
             EnvFile = "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1"
             StartupTimeoutSec = [int]'${{ inputs.quickstart_startup_timeout_seconds }}'
-            StreamProcessingTimeoutSeconds = [int]'${{ inputs.stream_processing_timeout_seconds }}'
+            StreamProcessingTimeoutSeconds = [int]$env:PB_STREAM_PROCESSING_TIMEOUT_SECONDS
           }
           if ('${{ inputs.domain_rule_lifecycle_only }}' -eq 'true') {
             $smokeArgs.DomainRuleLifecycleOnly = $true
@@ -297,13 +304,12 @@ jobs:
             -Provider '${{ inputs.provider }}' `
             -JavaHome "$env:JAVA_HOME" `
             -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
+            -MetadataRoot "$env:GITHUB_WORKSPACE\praxis-metadata-starter" `
             -UiRoot "$env:GITHUB_WORKSPACE\praxis-ui-angular" `
             -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
             -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}') `
             -UiStartupTimeoutSec ([int]'${{ inputs.page_builder_ui_startup_timeout_seconds }}') `
-            -StreamProcessingTimeoutSeconds ([int]'${{ inputs.stream_processing_timeout_seconds }}') `
-            -ValidationMode '${{ inputs.page_builder_e2e_mode }}' `
-            -PlaywrightTestTimeoutMs ([int]'${{ inputs.page_builder_playwright_test_timeout_ms }}')
+            -ValidationMode '${{ inputs.page_builder_e2e_mode }}'
 
       - name: Upload smoke artifacts
         if: always()
@@ -317,5 +323,5 @@ jobs:
             praxis-config-starter/artifacts/page-builder-agentic-e2e/**
             praxis-api-quickstart/logs/**
             praxis-ui-angular/test-results/**
-            praxis-ui-angular/tools/e2e/playwright/playwright-agentic-report/**
+            praxis-ui-angular/tools/e2e/playwright/playwright-agentic-production-like-report/**
           if-no-files-found: ignore

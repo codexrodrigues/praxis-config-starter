@@ -26,16 +26,22 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -Provider openai `
   -QuickstartRoot ..\praxis-api-quickstart `
   -UiRoot ..\praxis-ui-angular `
-  -StreamProcessingTimeoutSeconds 180 `
   -ValidationMode smoke
 ```
 
 Esse runner:
 
-- sobe o quickstart em `http://localhost:8088`;
+- sobe o quickstart exclusivamente em `http://127.0.0.1:8088`;
 - sobe o Angular em `http://localhost:4003`;
-- executa `npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-validation.playwright.config.ts`;
+- executa `npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-production-like.playwright.config.ts`;
 - usa `-ValidationMode smoke` como gate de release e reserva `-ValidationMode full` para investigacao deliberada da matriz completa.
+- le timeouts, retries e contagens esperadas de `tools/e2e/page-builder-agentic-gate-matrix.json`;
+- rejeita provider/embeddings mock, datasource nao PostgreSQL, JAR divergente, contrato Config/Angular divergente, capabilities degradadas e interceptacao de endpoint critico;
+- gera segredo de stream efemero, registra SHAs/versoes sem segredos e comprova o teardown dos listeners.
+
+Testes deterministas com interceptacao ficam na config
+`praxis-page-builder-agentic-mocked.playwright.config.ts`. Seus resultados nao
+podem ser somados ao artifact production-like.
 
 Em macOS/Linux, o runner local gerenciado equivalente vive no workspace
 Angular e orquestra Config Starter, Quickstart, catalogos, Angular, Playwright e
@@ -184,6 +190,10 @@ Use este checklist sempre que rodar um fluxo impactado:
 - [ ] houve progresso observavel no assistente
 - [ ] houve evento terminal coerente
 - [ ] o resultado veio do backend e nao de mock local
+- [ ] o artifact declara `productionLike=true` e `criticalEndpointMocks=0`
+- [ ] capabilities declaram `source=registry` e `degraded=false`
+- [ ] os SHAs efetivos de Config, Metadata, Quickstart e Angular foram registrados
+- [ ] nao restaram listeners nas portas `8088` e `4003`
 - [ ] o preview/aplicacao refletiu o pedido feito
 - [ ] `cancel` e `probe` continuaram funcionando se o fluxo mexeu em stream
 - [ ] nao houve regressao visual obvia no painel do assistente

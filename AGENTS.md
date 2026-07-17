@@ -71,10 +71,11 @@ Release e Gate de Authoring
 - Antes de criar tag/publicar no Maven Central, o gate recomendado e `Agentic Authoring HTTP Smoke`.
 - Workflow: `.github/workflows/agentic-authoring-smoke.yml`.
 - O workflow instala o starter do checkout no Maven local do runner, empacota `praxis-api-quickstart` contra essa versao local e roda o smoke HTTP/SSE completo.
-- O `quickstart_ref` padrao deve apontar para um ref conhecido com dependencias publicadas no Maven Central; nao usar `main` como default enquanto ele puder depender de releases ainda nao publicadas.
+- `quickstart_ref`, `metadata_ref` e `ui_ref` devem ser SHAs imutaveis de 40 caracteres. Branches moveis, inclusive `main`, falham antes dos checkouts downstream.
 - Para mudancas que toquem fluxo agentic do page-builder, SSE browser, patch/apply ou contrato ponta a ponta com Angular, habilitar tambem o input `run_page_builder_full_e2e=true` nesse mesmo workflow.
 - Para release, manter `page_builder_e2e_mode=smoke`. Usar `page_builder_e2e_mode=full` apenas quando a investigacao exigir deliberadamente a matriz browser/LLM completa.
-- O gate opcional faz checkout de `praxis-ui-angular`, sobe o quickstart em `8088`, Angular em `4003` e executa `praxis-page-builder-agentic-validation.playwright.config.ts` contra LLM real e stream em modo `signed-url-token`, com retry controlado para absorver variacao nao deterministica do provedor.
+- O gate opcional faz checkout de `praxis-ui-angular`, sobe o quickstart em loopback na porta `8088`, Angular em loopback na porta `4003` e executa `praxis-page-builder-agentic-production-like.playwright.config.ts` contra PostgreSQL/pgvector, LLM e embeddings reais, com stream em modo `signed-url-token` e segredo efemero.
+- A fonte unica de timeouts, retries e contagens esperadas e `tools/e2e/page-builder-agentic-gate-matrix.json`. Testes com mocks pertencem a lane/config `mocked` e nunca contam como evidencia production-like.
 - Secrets do gate:
   - `PRAXIS_AI_OPENAI_API_KEY` para `provider=openai`;
   - `PRAXIS_AI_GEMINI_API_KEY` para `provider=gemini`;
@@ -97,7 +98,7 @@ Comandos de Validacao Local
 - Smoke local completo com quickstart:
   - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart`
 - E2E local do page-builder agentic:
-  - smoke de release: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-PbAgenticFullE2E.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart -UiRoot ..\praxis-ui-angular -StreamProcessingTimeoutSeconds 180 -ValidationMode smoke`
+  - smoke de release: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-PbAgenticFullE2E.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart -UiRoot ..\praxis-ui-angular -ValidationMode smoke`
   - matriz completa deliberada: adicionar `-ValidationMode full`.
 - Disparo local do workflow GitHub quando `gh` estiver autenticado:
   - `gh workflow run agentic-authoring-smoke.yml --repo codexrodrigues/praxis-config-starter -f provider=openai`
