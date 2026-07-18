@@ -3,6 +3,7 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -52,6 +53,14 @@ public class RegistryIngestionService {
     private final ApplicationEventPublisher eventPublisher;
     private static final String REGISTRY_TYPE_COMPONENT_DEF = "component_definition";
     private static final String COMPONENT_DEF_COMPONENT_TYPE = "component-definition";
+    /**
+     * Provider-neutral chunk boundary published by the canonical Angular ingestion contract.
+     *
+     * <p>Source provenance: praxis-ui-angular commit
+     * {@code 8812d45563b4125599dd9ef4019f1502ef0b00db},
+     * {@code tools/ai-registry/registry-ingestion-contract.json}.
+     */
+    public static final int MAX_CHUNK_UTF8_BYTES = 8_000;
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public void ingestRegistry(RegistryIngestionRequest request, String tenantId, String environment) {
@@ -72,6 +81,8 @@ public class RegistryIngestionService {
                     RagDocumentIdentity.resolveReleaseId(null, request.getVersion(), request.getGeneratedAt()));
         }
 
+        preflight(request);
+
         String resolvedTenant = normalize(tenantId);
         String resolvedEnv = normalize(environment);
         String releaseId = RagDocumentIdentity.resolveReleaseId(null, request.getVersion(), request.getGeneratedAt());
@@ -82,7 +93,6 @@ public class RegistryIngestionService {
         long publishedChunkCount = 0;
         request.getComponents().forEach((componentId, entry) -> {
             try {
-                validateAuthoringManifest(componentId, entry);
                 AiRegistry def = toComponentDefinition(componentId, entry, definitions);
                 upsertDefinition(def);
                 List<Document> ragDocuments = toRagDocuments(def, entry, resolvedTenant, resolvedEnv, releaseId, requestVersion);
@@ -126,6 +136,77 @@ public class RegistryIngestionService {
                 componentStatuses.size(),
                 Instant.now()));
         return result;
+    }
+
+    /**
+     * Validates the complete corpus before ingestion is allowed to produce any persistence,
+     * vector-store or embedding-provider side effect.
+     *
+     * @param request aggregate registry corpus to validate
+     * @throws ConfigurationIngestionException when any component contract or chunk is invalid
+     */
+    public void preflight(RegistryIngestionRequest request) {
+        if (request == null || request.getComponents() == null || request.getComponents().isEmpty()) {
+            return;
+        }
+        request.getComponents().forEach((componentId, entry) -> {
+            if (entry == null) {
+                throw new ConfigurationIngestionException(
+                        "Invalid registry component: componentId=" + safeDiagnosticValue(componentId)
+                                + ", reason=component entry is null");
+            }
+            validateAuthoringManifest(componentId, entry);
+            validateChunks(componentId, entry);
+        });
+    }
+
+    private void validateChunks(String componentId, RegistryIngestionRequest.ComponentEntry entry) {
+        List<RegistryIngestionRequest.ChunkEntry> chunks = entry.getChunks();
+        if (chunks == null || chunks.isEmpty()) {
+            return;
+        }
+        for (int position = 0; position < chunks.size(); position++) {
+            RegistryIngestionRequest.ChunkEntry chunk = chunks.get(position);
+            if (chunk == null) {
+                throw new ConfigurationIngestionException(
+                        "Invalid registry chunk: componentId=" + safeDiagnosticValue(componentId)
+                                + ", chunkIndex=" + position
+                                + ", chunkKind=unknown, reason=chunk entry is null");
+            }
+            String content = chunk.getContent();
+            if (content == null) {
+                throw invalidChunkContent(componentId, chunk, "chunk content is null");
+            }
+            if (content.isBlank()) {
+                throw invalidChunkContent(componentId, chunk, "chunk content is blank");
+            }
+            int observedBytes = content.getBytes(StandardCharsets.UTF_8).length;
+            if (observedBytes > MAX_CHUNK_UTF8_BYTES) {
+                throw new ConfigurationIngestionException(
+                        "Registry chunk exceeds UTF-8 byte limit: componentId="
+                                + safeDiagnosticValue(componentId)
+                                + ", chunkIndex=" + chunk.getChunkIndex()
+                                + ", chunkKind=" + safeDiagnosticValue(firstNonBlank(chunk.getChunkKind(), "summary"))
+                                + ", observedBytes=" + observedBytes
+                                + ", maxBytes=" + MAX_CHUNK_UTF8_BYTES);
+            }
+        }
+    }
+
+    private ConfigurationIngestionException invalidChunkContent(
+            String componentId,
+            RegistryIngestionRequest.ChunkEntry chunk,
+            String reason) {
+        return new ConfigurationIngestionException(
+                "Invalid registry chunk: componentId=" + safeDiagnosticValue(componentId)
+                        + ", chunkIndex=" + chunk.getChunkIndex()
+                        + ", chunkKind=" + safeDiagnosticValue(firstNonBlank(chunk.getChunkKind(), "summary"))
+                        + ", reason=" + reason);
+    }
+
+    private String safeDiagnosticValue(String value) {
+        String sanitized = value == null ? "unknown" : value.replaceAll("[\\p{Cntrl}]", "?");
+        return sanitized.length() <= 160 ? sanitized : sanitized.substring(0, 160) + "...";
     }
 
     private AiRegistry toComponentDefinition(

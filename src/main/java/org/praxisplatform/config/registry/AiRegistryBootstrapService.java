@@ -82,6 +82,7 @@ public class AiRegistryBootstrapService {
             byte[] snapshotBytes = resolvedSnapshot.resource.getContentAsByteArray();
             String snapshotHash = sha256(snapshotBytes);
             RegistryIngestionRequest request = objectMapper.readValue(snapshotBytes, RegistryIngestionRequest.class);
+            ingestionService.preflight(request);
             long componentCount = request.getComponents() != null ? request.getComponents().size() : 0;
             long authoringManifestCount = authoringManifestCount(request);
             long chunkedComponentCount = chunkedComponentCount(request);

@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -183,6 +184,28 @@ class AiRegistryBootstrapServiceTest {
                 org.praxisplatform.config.rag.RagDocumentIdentity.sha256(obsolete.getPayload()),
                 0);
         assertThat(deletedIds.getValue()).containsExactly(expectedId);
+    }
+
+    @Test
+    void failsClosedWhenSnapshotPreflightRejectsCorpusAndDoesNotPublishMetadata() {
+        when(resourceLoader.getResource(anyString())).thenReturn(snapshotResource());
+        doThrow(new org.praxisplatform.config.exception.ConfigurationIngestionException(
+                "Registry chunk exceeds UTF-8 byte limit: componentId=praxis-table, chunkIndex=1, "
+                        + "chunkKind=authoring_manifest, observedBytes=8001, maxBytes=8000"))
+                .when(ingestionService).preflight(any(RegistryIngestionRequest.class));
+
+        service().bootstrapIfNeeded();
+
+        verify(ingestionService, never()).ingestRegistry(any(), isNull(), isNull());
+        verify(statusService, never()).getStatus();
+        verify(repository, never()).save(any());
+        verify(repository, never()).deleteAllInBatch(any());
+        verify(ragVectorStoreService, never()).deleteDocuments(any());
+        assertThat(state.isSucceeded()).isFalse();
+        assertThat(state.getError())
+                .contains("componentId=praxis-table")
+                .contains("observedBytes=8001")
+                .doesNotContain("Table authoring manifest");
     }
 
     private AiRegistryBootstrapService service() {

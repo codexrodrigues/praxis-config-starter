@@ -141,6 +141,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "metadata-renderer-configure".equals(handler)
                 || "metadata-validation-rule-add".equals(handler)
                 || "metadata-context-hint-set".equals(handler)
+                || "metadata-date-range-shortcuts-configure".equals(handler)
                 || "metadata-normalization-apply".equals(handler)
                 || "crud-resource-bind".equals(handler)
                 || "crud-list-surface-configure".equals(handler)
@@ -583,6 +584,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             case "metadata-validation-rule-add" -> compileMetadataValidationRuleAdd(
                     componentId, operation, effect, planOperation, proposedConfig, failures);
             case "metadata-context-hint-set" -> compileMetadataContextHintSet(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "metadata-date-range-shortcuts-configure" -> compileMetadataDateRangeShortcutsConfigure(
                     componentId, operation, effect, planOperation, proposedConfig, failures);
             case "metadata-normalization-apply" -> compileMetadataNormalizationApply(
                     componentId, operation, effect, planOperation, proposedConfig, failures);
@@ -3411,6 +3414,40 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return compiled;
     }
 
+    private ObjectNode compileMetadataDateRangeShortcutsConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (!input.path("shortcuts").isArray()) {
+            failures.add("metadata-date-range-shortcuts-configure requires input.shortcuts[]");
+            return null;
+        }
+        ObjectNode fieldMetadata = metadataFieldMetadata(proposedConfig, true);
+        JsonNode previousValue = fieldMetadata.deepCopy();
+        fieldMetadata.set("shortcuts", input.path("shortcuts").deepCopy());
+        if (input.has("inlineQuickPresets")) {
+            fieldMetadata.set("inlineQuickPresets", input.path("inlineQuickPresets").deepCopy());
+        }
+        if (input.has("applyMode")) {
+            ObjectNode inlineOverlay = fieldMetadata.path("inlineOverlay") instanceof ObjectNode object
+                    ? object
+                    : fieldMetadata.putObject("inlineOverlay");
+            inlineOverlay.set("applyMode", input.path("applyMode").deepCopy());
+        }
+        metadataWriteNormalizedSeed(proposedConfig);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-metadata-date-range-shortcuts");
+        compiled.put("path", "fieldMetadata.shortcuts");
+        compiled.set("previousValue", previousValue);
+        compiled.set("value", fieldMetadata.deepCopy());
+        return compiled;
+    }
+
     private ObjectNode compileMetadataNormalizationApply(
             String componentId,
             JsonNode operation,
@@ -5400,11 +5437,17 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         source.put("kind", sourceKind);
         copyIfPresent(input, source, "resource");
         copyIfPresent(input, source, "operation");
+        if (input.has("comparisonPeriod")) {
+            source.putObject("options").set("comparisonPeriod", input.path("comparisonPeriod").deepCopy());
+        }
 
         ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
         compiled.put("op", "bind-chart-data-resource");
         compiled.put("path", "chartDocument");
         addWriteDelta(compiled, "chartDocument.source", source);
+        if (input.has("comparisonPeriod")) {
+            addWriteDelta(compiled, "chartDocument.source.options.comparisonPeriod", input.path("comparisonPeriod"));
+        }
         if (input.path("dimensions").isArray()) {
             addWriteDelta(compiled, "chartDocument.dimensions[]", input.path("dimensions"));
         }
