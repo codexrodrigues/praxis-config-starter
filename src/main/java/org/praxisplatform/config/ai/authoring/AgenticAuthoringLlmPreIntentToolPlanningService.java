@@ -280,8 +280,32 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private AgenticAuthoringPreIntentToolPlanningResult toPlan(
             AgenticAuthoringTurnStreamRequest request,
             JsonNode result) {
+        String semanticIntentClass = text(result, "semanticIntentClass");
+        if (!List.of("platform_guidance", "authoring_or_other").contains(semanticIntentClass)) {
+            semanticIntentClass = "authoring_or_other";
+        }
+        String assistantMessage = "platform_guidance".equals(semanticIntentClass)
+                ? text(result, "assistantMessage")
+                : "";
+        if ("platform_guidance".equals(semanticIntentClass)) {
+            if (!StringUtils.hasText(assistantMessage)) {
+                return AgenticAuthoringPreIntentToolPlanningResult.skipped(
+                        "llm-platform-guidance-answer-empty");
+            }
+            return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
+                    textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v2"),
+                    text(result, "reason"),
+                    List.of(),
+                    semanticIntentClass,
+                    assistantMessage));
+        }
         if (!result.path("shouldRetrieveGovernedResources").asBoolean(false)) {
-            return AgenticAuthoringPreIntentToolPlanningResult.skipped("llm-no-tool-requested");
+            return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
+                    textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v2"),
+                    text(result, "reason"),
+                    List.of(),
+                    semanticIntentClass,
+                    ""));
         }
         String retrievalQuery = text(result, "retrievalQuery");
         if (!StringUtils.hasText(retrievalQuery)) {
@@ -305,9 +329,11 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                         6,
                         resourceSearchFocus));
         return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
-                textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v1"),
+                textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v2"),
                 text(result, "reason"),
-                List.of(toolCall)));
+                List.of(toolCall),
+                semanticIntentClass,
+                ""));
     }
 
     private boolean isRetryableProviderFailure(RuntimeException error) {
@@ -372,25 +398,33 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private String prompt(
             AgenticAuthoringTurnStreamRequest request,
             AiPrincipalContext principalContext) {
-        ObjectNode context = objectMapper.createObjectNode();
-        context.put("schemaVersion", "praxis-agentic-authoring-pre-intent-planning-context.v1");
-        putProjectedUserPrompt(context, request.userPrompt());
-        context.put("targetApp", valueOrEmpty(request.targetApp()));
-        context.put("targetComponentId", valueOrEmpty(request.targetComponentId()));
-        context.put("currentRoute", valueOrEmpty(request.currentRoute()));
-        context.set("currentPage", compactCurrentPage(request.currentPage()));
-        context.set("contextHints", compactContextHints(request.contextHints()));
         String governedDomainContext = governedDomainContext(request, principalContext);
+        ObjectNode context = planningContext(request, governedDomainContext);
         return """
-                Praxis pre-intent tool planner. Decide semantically and without keyword routing whether to run
-                searchApiResources before authoring. Use the tool when governed resources, fields, datasets or
+                Praxis first semantic orientation and pre-intent tool planner. Decide semantically and without keyword routing
+                whether this turn is platform guidance or should continue to governed authoring.
+                The minimum context is always Praxis itself, the governed host domain, the current surface, the
+                current page state, and the governed component catalog. A UI recommendedIntent is optional evidence
+                only: never require it, and never treat its absence as missing context.
+
+                Set semanticIntentClass=platform_guidance when the user asks what can be done here, how Praxis or
+                this assistant can help, what a useful next step is, or asks for general improvement guidance without
+                requesting a concrete change. In that case, set shouldRetrieveGovernedResources=false and answer in
+                assistantMessage naturally in the user's language. Ground the answer in platformGuide,
+                authorableComponents, governedDomainContext, runtimeContext and the components already on the page.
+                Be friendly and concrete. Do not claim a change was made and do not ask for technical endpoints.
+
+                Set semanticIntentClass=authoring_or_other when the user requests creation, editing, removal,
+                inspection, a concrete domain artifact, or another intent that needs the complete governed resolver.
+                For that class, leave assistantMessage empty and decide whether to run searchApiResources before
+                authoring. Use the tool when governed resources, fields, datasets or
                 API-backed sources are needed for a page, view, table, dashboard, form, overview, analysis,
                 monitoring surface, or data-source change. User wording may be vague, misspelled, colloquial, multilingual
                 or loosely related to domainDiscovery. If domainDiscovery exists and resourceDiscovery
                 is absent, use it as semantic context for retrievalQuery, not as a reason to skip.
                 Return false only for visual/local/editorial work, existing resourceDiscovery, or no data grounding need.
-                When true, author only retrievalQuery and resourceSearchFocus; do not choose resourcePath, endpoints,
-                configuration, patches, or a user answer.
+                When retrieval is true, author only retrievalQuery and resourceSearchFocus; do not choose resourcePath,
+                endpoints, configuration or patches.
                 Model resourceSearchFocus in two separate semantic layers. primaryBusinessEntity is the canonical
                 business subject explicitly requested by the user; it must not become the name of a view, projection,
                 visualization, profile, or dashboard merely because that presentation is available. desiredSurface
@@ -406,8 +440,63 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 regions such as filters, KPIs, multiple charts and a detail/list/table surface. Use artifactKind page
                 for general layout or content composition where analytics are not the dominant requested outcome.
                 Context JSON: %s
-                %s
-                """.formatted(context.toString(), governedDomainContext);
+                """.formatted(context.toString());
+    }
+
+    private ObjectNode planningContext(
+            AgenticAuthoringTurnStreamRequest request,
+            String governedDomainContext) {
+        JsonNode planningHints = compactContextHints(request.contextHints());
+        String projectedPrompt = compactUserPrompt(request.userPrompt());
+        AgenticAuthoringIntentResolutionRequest intentRequest = new AgenticAuthoringIntentResolutionRequest(
+                projectedPrompt,
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                planningHints,
+                request.activeSemanticDecision());
+        ObjectNode fullContext = AgenticAuthoringContextBundle.create(
+                objectMapper,
+                intentRequest,
+                projectedPrompt,
+                compactCurrentPage(request.currentPage()),
+                null,
+                List.of(),
+                request.componentCapabilities(),
+                governedDomainContext);
+        ObjectNode context = objectMapper.createObjectNode();
+        context.put("schemaVersion", "praxis-agentic-authoring-semantic-orientation-context.v1");
+        context.set("runtimeContext", fullContext.path("runtimeContext").deepCopy());
+        context.set("userIntent", fullContext.path("userIntent").deepCopy());
+        context.set("governedDomainContext", fullContext.path("governedDomainContext").deepCopy());
+        ObjectNode componentContext = context.putObject("componentContext");
+        componentContext.set(
+                "platformGuide",
+                fullContext.path("componentContext").path("platformGuide").deepCopy());
+        componentContext.set(
+                "authorableComponents",
+                fullContext.path("componentContext").path("authorableComponents").deepCopy());
+        JsonNode authoringScopePolicy = fullContext.path("componentContext").path("authoringScopePolicy");
+        if (!authoringScopePolicy.isMissingNode()) {
+            componentContext.set("authoringScopePolicy", authoringScopePolicy.deepCopy());
+        }
+        context.set("conversationContext", fullContext.path("conversationContext").deepCopy());
+        context.set("planningHints", planningHints);
+        if (request.userPrompt() != null && request.userPrompt().length() > MAX_PLANNER_USER_PROMPT_LENGTH) {
+            context.put("userPromptOriginalLength", request.userPrompt().length());
+            context.put("userPromptProjection", "head_tail_compacted");
+        }
+        return context;
     }
 
     private String governedDomainContext(
@@ -445,15 +534,6 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             governedHints.putObject("domainCatalog").put("enabled", true);
         }
         return governedHints;
-    }
-
-    private void putProjectedUserPrompt(ObjectNode context, String userPrompt) {
-        String safePrompt = valueOrEmpty(userPrompt);
-        context.put("userPrompt", compactUserPrompt(safePrompt));
-        if (safePrompt.length() > MAX_PLANNER_USER_PROMPT_LENGTH) {
-            context.put("userPromptOriginalLength", safePrompt.length());
-            context.put("userPromptProjection", "head_tail_compacted");
-        }
     }
 
     private String compactUserPrompt(String value) {
@@ -677,6 +757,12 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         root.put("type", "object");
         ObjectNode properties = root.putObject("properties");
         properties.putObject("schemaVersion").put("type", "string");
+        ObjectNode semanticIntentClass = properties.putObject("semanticIntentClass");
+        semanticIntentClass.put("type", "string");
+        semanticIntentClass.putArray("enum")
+                .add("platform_guidance")
+                .add("authoring_or_other");
+        properties.putObject("assistantMessage").put("type", "string");
         properties.putObject("shouldRetrieveGovernedResources").put("type", "boolean");
         ObjectNode artifactKind = properties.putObject("artifactKind");
         artifactKind.put("type", "string");
@@ -711,6 +797,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         focus.put("additionalProperties", false);
         ArrayNode required = root.putArray("required");
         required.add("schemaVersion")
+                .add("semanticIntentClass")
+                .add("assistantMessage")
                 .add("shouldRetrieveGovernedResources")
                 .add("artifactKind")
                 .add("retrievalQuery")

@@ -5,7 +5,9 @@ import java.util.List;
 public record AgenticAuthoringPreIntentToolPlan(
         String schemaVersion,
         String reason,
-        List<AgenticAuthoringToolCall> toolCalls
+        List<AgenticAuthoringToolCall> toolCalls,
+        String semanticIntentClass,
+        String assistantMessage
 ) {
 
     public AgenticAuthoringPreIntentToolPlan {
@@ -14,5 +16,20 @@ public record AgenticAuthoringPreIntentToolPlan(
                 : schemaVersion.trim();
         reason = reason == null ? "" : reason.trim();
         toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
+        semanticIntentClass = semanticIntentClass == null || semanticIntentClass.isBlank()
+                ? "authoring_or_other"
+                : semanticIntentClass.trim();
+        assistantMessage = assistantMessage == null ? "" : assistantMessage.trim();
+    }
+
+    public AgenticAuthoringPreIntentToolPlan(
+            String schemaVersion,
+            String reason,
+            List<AgenticAuthoringToolCall> toolCalls) {
+        this(schemaVersion, reason, toolCalls, "authoring_or_other", "");
+    }
+
+    public boolean resolvesPlatformGuidance() {
+        return "platform_guidance".equals(semanticIntentClass) && !assistantMessage.isBlank();
     }
 }

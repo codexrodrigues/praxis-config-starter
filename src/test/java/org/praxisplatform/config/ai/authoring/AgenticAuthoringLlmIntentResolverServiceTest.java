@@ -2250,6 +2250,51 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     }
 
     @Test
+    void diagnosticProjectionNeverRepeatsGovernedDomainRetrieval() {
+        DomainCatalogPromptContextService domainContextService =
+                Mockito.mock(DomainCatalogPromptContextService.class);
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper,
+                        domainContextService);
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("domainCatalog").put("enabled", true);
+
+        JsonNode diagnostics = service.diagnosticProjection(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "O que posso fazer aqui?",
+                        "page-builder",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        "session-1",
+                        "turn-1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints),
+                "O que posso fazer aqui?",
+                objectMapper.createObjectNode(),
+                null,
+                List.of(),
+                componentCapabilities());
+
+        assertThat(diagnostics.path("captureKind").asText())
+                .isEqualTo("non_retrieving_projection");
+        assertThat(diagnostics.path("exactProviderPromptIncluded").asBoolean()).isFalse();
+        assertThat(diagnostics.path("contextBundle")
+                .path("governedDomainContext")
+                .path("resolutionStatus")
+                .asText()).isEqualTo("not_recaptured_for_diagnostics");
+        Mockito.verifyNoInteractions(domainContextService);
+    }
+
+    @Test
     void replacesRedactedQuickReplyPromptWithHumanLabel() throws Exception {
         when(providerManagementService.generateJson(
                 any(),
@@ -2501,6 +2546,20 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                         "llm-intent-resolution-failed",
                         "llm-provider-error",
                         "platform-guidance-prior-semantic-scope-recovery-used");
+        assertThat(resolution.providerInvocations())
+                .extracting(
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::phase,
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::status)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        "platform_guidance_confirmation",
+                        "failure"));
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
     }
 
     @Test

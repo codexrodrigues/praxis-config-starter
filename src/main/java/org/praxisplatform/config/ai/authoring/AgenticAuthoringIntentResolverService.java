@@ -136,6 +136,15 @@ public class AgenticAuthoringIntentResolverService {
             String tenantId,
             String userId,
             String environment) {
+        return resolve(request, tenantId, userId, environment, null);
+    }
+
+    AgenticAuthoringIntentResolutionResult resolve(
+            AgenticAuthoringIntentResolutionRequest request,
+            String tenantId,
+            String userId,
+            String environment,
+            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
         if (request == null || request.userPrompt() == null || request.userPrompt().isBlank()) {
             throw new IllegalArgumentException("userPrompt must not be blank.");
         }
@@ -270,12 +279,17 @@ public class AgenticAuthoringIntentResolverService {
         }
         AgenticAuthoringComponentCapabilitiesResult componentCapabilities = componentCapabilities();
         List<AgenticAuthoringCandidate> llmCandidateOptions = candidatesForLlmIntent(prompt, candidates);
-        AgenticAuthoringLlmIntentResolution llmIntent = preIntentGovernedEvidenceResolution(
+        AgenticAuthoringLlmIntentResolution llmIntent = preIntentSemanticOrientationResolution(
                 shouldResolveLlmIntent,
-                llmResolutionRequest,
-                effectivePrompt,
-                target,
-                llmCandidateOptions);
+                semanticOrientation);
+        if (llmIntent == null) {
+            llmIntent = preIntentGovernedEvidenceResolution(
+                    shouldResolveLlmIntent,
+                    llmResolutionRequest,
+                    effectivePrompt,
+                    target,
+                    llmCandidateOptions);
+        }
         if (llmIntent == null) {
             llmIntent = resolveLlmIntent(
                     shouldResolveLlmIntent,
@@ -298,8 +312,7 @@ public class AgenticAuthoringIntentResolverService {
                 target,
                 llmCandidateOptions,
                 componentCapabilities,
-                tenantId,
-                environment);
+                llmIntent);
         boolean llmTreatsPendingAsContinuation = turn.answeredPendingClarification()
                 && (isLlmFollowUpKind(llmIntent, "clarification_answer")
                 || isLlmFollowUpKind(llmIntent, "refinement"));
@@ -2595,6 +2608,34 @@ public class AgenticAuthoringIntentResolverService {
                 false);
     }
 
+    private AgenticAuthoringLlmIntentResolution preIntentSemanticOrientationResolution(
+            boolean shouldResolveLlmIntent,
+            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
+        if (!shouldResolveLlmIntent
+                || semanticOrientation == null
+                || !semanticOrientation.resolvesPlatformGuidance()) {
+            return null;
+        }
+        return new AgenticAuthoringLlmIntentResolution(
+                true,
+                "explain",
+                "component",
+                "answer_component_catalog_question",
+                null,
+                null,
+                "none",
+                semanticOrientation.assistantMessage(),
+                List.of(),
+                List.of(),
+                List.of(
+                        "llm-semantic-orientation-used",
+                        "llm-platform-guidance-grounded-by-platform-domain-surface"),
+                null,
+                null,
+                false,
+                "platform_guidance");
+    }
+
     private AgenticAuthoringCandidate singleGovernedArtifactCandidate(
             AgenticAuthoringIntentResolutionRequest request,
             String artifactKind,
@@ -3171,8 +3212,7 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringTarget target,
             List<AgenticAuthoringCandidate> candidates,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
-            String tenantId,
-            String environment) {
+            AgenticAuthoringLlmIntentResolution llmIntent) {
         if (!includeLlmDiagnostics(request)) {
             return null;
         }
@@ -3183,15 +3223,18 @@ public class AgenticAuthoringIntentResolverService {
             diagnostics.put("reason", "llm-intent-resolver-unavailable");
             return diagnostics;
         }
-        diagnostics.set("request", llmIntentResolverService.diagnosticSnapshot(
+        diagnostics.set("request", llmIntentResolverService.diagnosticProjection(
                 request,
                 effectivePrompt,
                 currentPageSummary,
                 target,
                 candidates,
-                componentCapabilities,
-                tenantId,
-                environment));
+                componentCapabilities));
+        diagnostics.set(
+                "providerInvocations",
+                objectMapper.valueToTree(llmIntent == null || llmIntent.providerInvocations() == null
+                        ? List.of()
+                        : llmIntent.providerInvocations()));
         return diagnostics;
     }
 

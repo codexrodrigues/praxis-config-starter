@@ -144,3 +144,40 @@ tema e o lifecycle canonico do change-set. Os gates focais registraram `4/4`
 na paridade i18n e `126/127` no componente; a unica falha restante e o caso
 independente de descarte de preview invalido, que nao toca cockpit, tema ou
 i18n e permanece como regressao separada a corrigir.
+
+## Atualizacao de 2026-07-18 — contexto minimo do assistente
+
+A investigacao do Fluxo 0 confirmou que `recommendedIntent` vindo da UI estava
+sendo tratado, na pratica, como pre-condicao para a confirmacao semantica
+compacta. Essa dependencia era incorreta: uma pagina vazia continua tendo como
+contexto o proprio Praxis, o dominio governado do host, a superficie atual e o
+catalogo de componentes authoraveis. Rota, selecao, componentes existentes e
+recomendacoes da UI apenas refinam esse contexto minimo; nao o criam.
+
+O primeiro planner semantico do turno agora recebe esse contexto canonico e
+classifica `platform_guidance` versus `authoring_or_other` sem roteamento por
+palavras-chave. Para orientacao sobre a plataforma, a mesma chamada produz uma
+resposta fundamentada e encerra o caminho consultivo sem executar tools, gerar
+preview ou repetir a resolucao no provedor. Para authoring concreto, o fluxo
+continua no resolver completo e preserva a decisao governada sobre recuperacao
+de recursos. A captura de diagnostics tambem deixou de consultar novamente o
+Domain Catalog depois da resolucao.
+
+O Page Builder passou a propagar a rota canonica quando ela existe, mas essa
+informacao permanece opcional. Nenhum endpoint, DTO HTTP ou contrato publico
+Angular novo foi necessario; a aderencia foi classificada como
+`ja-suportado-mal-nomeado-ou-mal-materializado`.
+
+A prova production-like focal, com OpenAI `gpt-5.4-mini`, Quickstart, Config
+Starter, Neon, Domain Catalog, Angular e SSE reais, passou `1/1`. A pergunta
+`O que posso fazer aqui?`, sem `recommendedIntent`, retornou orientacao amigavel
+sobre formularios, tabelas, graficos, dashboards e proximos passos governados,
+com quick replies e sem patch aplicavel. O mesmo caso certificou viewport
+estreito e alcance por teclado.
+
+Esse resultado fecha a causa funcional isolada, mas ainda nao fecha o gate de
+consistencia. A amostra unica levou aproximadamente um minuto no navegador. O
+proximo corte deve impor um deadline compartilhado por turno, medir
+separadamente embeddings, Domain Catalog, component capabilities e provedor, e
+exigir ao menos tres execucoes consecutivas do Fluxo 0 dentro do SLO antes de
+declarar o basico pronto para demonstracao.

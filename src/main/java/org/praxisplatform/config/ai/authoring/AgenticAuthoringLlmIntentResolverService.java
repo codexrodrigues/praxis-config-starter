@@ -98,6 +98,11 @@ public class AgenticAuthoringLlmIntentResolverService {
         List<AgenticAuthoringCandidate> usableCandidates =
                 candidateOptions == null ? List.of() : candidateOptions;
         List<AiProviderInvocationTelemetry> providerInvocations = new ArrayList<>();
+        String governedDomainContext = governedDomainContext(
+                request,
+                effectivePrompt,
+                tenantId,
+                environment);
         try {
             Optional<AgenticAuthoringLlmIntentResolution> platformGuidanceConfirmation =
                     compactPlatformGuidanceConfirmation(
@@ -105,6 +110,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                             effectivePrompt,
                             target,
                             componentCapabilities,
+                            governedDomainContext,
                             tenantId,
                             userId,
                             environment,
@@ -132,6 +138,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                     target,
                     usableCandidates,
                     componentCapabilities,
+                    governedDomainContext,
                     tenantId,
                     userId,
                     environment,
@@ -146,8 +153,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                     target,
                     usableCandidates,
                     componentCapabilities,
-                    tenantId,
-                    environment);
+                    governedDomainContext);
             JsonNode result = invokeJson(
                     "intent_full",
                     promptInput.prompt(),
@@ -312,6 +318,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             AgenticAuthoringTarget target,
             List<AgenticAuthoringCandidate> candidateOptions,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            String governedDomainContext,
             String tenantId,
             String userId,
             String environment,
@@ -329,7 +336,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                             currentPageSummary,
                             target,
                             fastCandidates,
-                            componentCapabilities),
+                            componentCapabilities,
+                            governedDomainContext),
                     AiJsonSchema.ofSchema(schema()),
                     AiCallConfig.builder()
                             .provider(request.provider())
@@ -360,7 +368,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                                 currentPageSummary,
                                 target,
                                 fastCandidates,
-                                componentCapabilities),
+                                componentCapabilities,
+                                governedDomainContext),
                         AiJsonSchema.ofSchema(schema()),
                         AiCallConfig.builder()
                                 .provider(request.provider())
@@ -437,14 +446,16 @@ public class AgenticAuthoringLlmIntentResolverService {
             JsonNode currentPageSummary,
             AgenticAuthoringTarget target,
             List<AgenticAuthoringCandidate> candidateOptions,
-            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            String governedDomainContext) {
         return fastIntentPrompt(
                         request,
                         effectivePrompt,
                         currentPageSummary,
                         target,
                         candidateOptions,
-                        componentCapabilities)
+                        componentCapabilities,
+                        governedDomainContext)
                 + """
 
                 The previous compact resolution selected an analytical artifact but omitted a complete
@@ -463,6 +474,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             String effectivePrompt,
             AgenticAuthoringTarget target,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            String governedDomainContext,
             String tenantId,
             String userId,
             String environment,
@@ -477,7 +489,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                             request,
                             effectivePrompt,
                             target,
-                            componentCapabilities),
+                            componentCapabilities,
+                            governedDomainContext),
                     AiJsonSchema.ofSchema(compactPlatformGuidanceSchema()),
                     AiCallConfig.builder()
                             .provider(request.provider())
@@ -522,6 +535,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                     "[AgenticAuthoringLlmIntentResolver] Compact platform guidance confirmation fell back; kind={} cause={}",
                     providerFailureKind(rootCause(ex)),
                     safeProviderFailureSummary(rootCause(ex)));
+            if (hasPriorPlatformGuidanceSemanticScope(request)) {
+                return Optional.of(failedResolution(ex, request));
+            }
             return Optional.empty();
         }
     }
@@ -530,12 +546,26 @@ public class AgenticAuthoringLlmIntentResolverService {
             AgenticAuthoringIntentResolutionRequest request,
             String effectivePrompt,
             AgenticAuthoringTarget target,
-            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            String governedDomainContext) {
         ObjectNode context = objectMapper.createObjectNode();
         context.put("schemaVersion", "praxis-platform-guidance-confirmation-context.v1");
         context.put("userPrompt", valueOrDefault(effectivePrompt, request.userPrompt()));
         context.put("route", valueOrDefault(request.currentRoute(), ""));
         context.set("recommendedIntent", request.contextHints().path("recommendedIntent").deepCopy());
+        context.set(
+                "governedDomainContext",
+                AgenticAuthoringContextBundle.create(
+                                objectMapper,
+                                request,
+                                effectivePrompt,
+                                objectMapper.createObjectNode(),
+                                target,
+                                List.of(),
+                                componentCapabilities,
+                                governedDomainContext)
+                        .path("governedDomainContext")
+                        .deepCopy());
         if (target != null) {
             ObjectNode targetNode = context.putObject("target");
             targetNode.put("widgetKey", valueOrDefault(target.widgetKey(), ""));
@@ -1225,12 +1255,26 @@ public class AgenticAuthoringLlmIntentResolverService {
             JsonNode currentPageSummary,
             AgenticAuthoringTarget target,
             List<AgenticAuthoringCandidate> candidateOptions,
-            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
+            String governedDomainContext) {
         ObjectNode context = objectMapper.createObjectNode();
         context.put("schemaVersion", "praxis-agentic-authoring-fast-intent-context.v1");
         context.put("userPrompt", valueOrDefault(effectivePrompt, request.userPrompt()));
         context.put("route", valueOrDefault(request.currentRoute(), ""));
         context.set("currentPageSummary", currentPageSummary == null ? objectMapper.createObjectNode() : currentPageSummary);
+        context.set(
+                "governedDomainContext",
+                AgenticAuthoringContextBundle.create(
+                                objectMapper,
+                                request,
+                                effectivePrompt,
+                                currentPageSummary,
+                                target,
+                                candidateOptions,
+                                componentCapabilities,
+                                governedDomainContext)
+                        .path("governedDomainContext")
+                        .deepCopy());
         JsonNode authoringScopePolicy = AgenticAuthoringContextBundle.authoringScopePolicy(request);
         if (authoringScopePolicy != null) {
             context.set("authoringScopePolicy", authoringScopePolicy);
@@ -1350,7 +1394,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                         target,
                         candidateOptions,
                         componentCapabilities,
-                        "")
+                        governedDomainContext)
                 .path("componentContext")
                 .path("componentCapabilities");
         context.set("rankedComponentCapabilities", rankedCapabilities.deepCopy());
@@ -1527,13 +1571,47 @@ public class AgenticAuthoringLlmIntentResolverService {
                 target,
                 candidateOptions,
                 componentCapabilities,
-                tenantId,
-                environment);
+                governedDomainContext(request, effectivePrompt, tenantId, environment));
         ObjectNode diagnostics = objectMapper.createObjectNode();
         diagnostics.put("schemaVersion", "praxis-agentic-authoring-llm-diagnostics.v1");
         diagnostics.put("promptTemplateId", SYSTEM_PROMPT_TEMPLATE_ID);
         diagnostics.set("contextBundle", promptInput.contextBundle());
         diagnostics.put("prompt", promptInput.prompt());
+        return diagnostics;
+    }
+
+    JsonNode diagnosticProjection(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            JsonNode currentPageSummary,
+            AgenticAuthoringTarget target,
+            List<AgenticAuthoringCandidate> candidateOptions,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        ObjectNode contextBundle = AgenticAuthoringContextBundle.create(
+                objectMapper,
+                request,
+                effectivePrompt,
+                currentPageSummary,
+                target,
+                candidateOptions,
+                componentCapabilities,
+                "");
+        JsonNode governedDomainNode = contextBundle.path("governedDomainContext");
+        ObjectNode governedDomain = governedDomainNode instanceof ObjectNode objectNode
+                ? objectNode
+                : contextBundle.putObject("governedDomainContext");
+        governedDomain.put("available", false);
+        governedDomain.put("resolutionStatus", "not_recaptured_for_diagnostics");
+        governedDomain.put("diagnosticProjectionOnly", true);
+        governedDomain.put(
+                "usageRule",
+                "The governed domain context used during semantic execution is intentionally not queried again for diagnostics.");
+        ObjectNode diagnostics = objectMapper.createObjectNode();
+        diagnostics.put("schemaVersion", "praxis-agentic-authoring-llm-diagnostics.v1");
+        diagnostics.put("promptTemplateId", SYSTEM_PROMPT_TEMPLATE_ID);
+        diagnostics.put("captureKind", "non_retrieving_projection");
+        diagnostics.put("exactProviderPromptIncluded", false);
+        diagnostics.set("contextBundle", contextBundle);
         return diagnostics;
     }
 
@@ -1544,9 +1622,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             AgenticAuthoringTarget target,
             List<AgenticAuthoringCandidate> candidateOptions,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
-            String tenantId,
-            String environment) {
-        String governedDomainContext = governedDomainContext(request, effectivePrompt, tenantId, environment);
+            String governedDomainContext) {
         ObjectNode contextBundle = AgenticAuthoringContextBundle.create(
                 objectMapper,
                 request,
@@ -1566,14 +1642,21 @@ public class AgenticAuthoringLlmIntentResolverService {
             String effectivePrompt,
             String tenantId,
             String environment) {
-        if (domainCatalogPromptContextService == null || request == null || request.contextHints() == null) {
+        if (domainCatalogPromptContextService == null || request == null) {
             return "";
         }
         try {
+            ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                    ? request.contextHints().deepCopy()
+                    : objectMapper.createObjectNode();
+            if (!contextHints.path("domainCatalog").isObject()
+                    && !StringUtils.hasText(contextHints.path("domainCatalogServiceKey").asText(""))) {
+                contextHints.putObject("domainCatalog").put("enabled", true);
+            }
             return StringUtils.hasText(effectivePrompt)
                     ? domainCatalogPromptContextService.buildPromptContext(
                             effectivePrompt,
-                            request.contextHints(),
+                            contextHints,
                             tenantId,
                             environment)
                     : "";

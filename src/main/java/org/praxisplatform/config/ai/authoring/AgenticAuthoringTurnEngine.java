@@ -276,6 +276,11 @@ public class AgenticAuthoringTurnEngine {
                         "Preparing semantic intent resolution."));
             }
             request = withProjectKnowledgeContext(request, principalContext, eventSink, null);
+            request = withServerComponentCapabilities(
+                    request,
+                    eventSink,
+                    componentCapabilitiesFuture,
+                    !compactPlatformGuidanceOpportunity);
             PreIntentToolPlanExecution preIntentExecution =
                     maybeRunPreIntentToolPlan(request, principalContext, eventSink);
             AgenticAuthoringResourceCandidatesResult plannedResourceDiscovery =
@@ -286,11 +291,6 @@ public class AgenticAuthoringTurnEngine {
                     && !plannedResourceDiscovery.candidates().isEmpty()) {
                 request = withResourceDiscoveryContext(request, plannedResourceDiscovery);
             }
-            request = withServerComponentCapabilities(
-                    request,
-                    eventSink,
-                    componentCapabilitiesFuture,
-                    !compactPlatformGuidanceOpportunity);
             boolean resourceDiscoveryContextPresent = hasResourceDiscoveryContext(request);
             boolean compactIntentProgress = compactPlatformGuidanceOpportunity
                     && !resourceDiscoveryContextPresent;
@@ -316,11 +316,18 @@ public class AgenticAuthoringTurnEngine {
                                 "hasProjectKnowledge", request.contextHints() != null
                                         && request.contextHints().path("projectKnowledge").isObject())));
             }
-            AgenticAuthoringIntentResolutionResult intentResolution = intentResolverService.resolve(
-                    toIntentRequest(request),
-                    principalContext.tenantId(),
-                    principalContext.userId(),
-                    principalContext.environment());
+            AgenticAuthoringIntentResolutionResult intentResolution = preIntentExecution.semanticOrientation() == null
+                    ? intentResolverService.resolve(
+                            toIntentRequest(request),
+                            principalContext.tenantId(),
+                            principalContext.userId(),
+                            principalContext.environment())
+                    : intentResolverService.resolve(
+                            toIntentRequest(request),
+                            principalContext.tenantId(),
+                            principalContext.userId(),
+                            principalContext.environment(),
+                            preIntentExecution.semanticOrientation());
             turnProviderInvocations.addAll(providerInvocations(intentResolution));
             ArtifactReconciliationOutcome artifactReconciliation = reconcilePlannedArtifact(
                     request,
@@ -2065,10 +2072,6 @@ public class AgenticAuthoringTurnEngine {
             emitPreIntentToolPlanSkipped(eventSink, "request-unavailable", "");
             return PreIntentToolPlanExecution.empty();
         }
-        if (hasPlatformGuidanceOpportunity(request)) {
-            emitPreIntentToolPlanSkipped(eventSink, "governed-platform-guidance-opportunity", "");
-            return PreIntentToolPlanExecution.empty();
-        }
         if (hasResourceDiscoveryContext(request)) {
             emitPreIntentToolPlanSkipped(eventSink, "resource-discovery-context-present", "");
             return PreIntentToolPlanExecution.empty();
@@ -2082,12 +2085,29 @@ public class AgenticAuthoringTurnEngine {
                     planningResult == null ? "" : planningResult.errorCode());
             return new PreIntentToolPlanExecution(
                     null,
+                    null,
                     planningResult == null ? List.of() : planningResult.providerInvocations());
         }
         AgenticAuthoringPreIntentToolPlan plan = planningResult.plan();
-        if (plan == null || plan.toolCalls().isEmpty()) {
+        if (plan == null) {
+            emitPreIntentToolPlanSkipped(eventSink, "planner-plan-empty", "");
+            return new PreIntentToolPlanExecution(null, null, planningResult.providerInvocations());
+        }
+        if (plan.resolvesPlatformGuidance()) {
+            eventSink.append("thought.step", thoughtStepPayload(
+                    "intent.orientation",
+                    "Entendi a pergunta como orientação sobre o que o Praxis pode fazer neste contexto.",
+                    "Resolved the first semantic orientation from platform, domain, surface and component context.",
+                    Map.of(
+                            "semanticIntentClass", plan.semanticIntentClass(),
+                            "groundedByPlatform", true,
+                            "groundedByDomain", true,
+                            "groundedByComponentCapabilities", request.componentCapabilities() != null)));
+            return new PreIntentToolPlanExecution(null, plan, planningResult.providerInvocations());
+        }
+        if (plan.toolCalls().isEmpty()) {
             emitPreIntentToolPlanSkipped(eventSink, "planner-tool-calls-empty", "");
-            return new PreIntentToolPlanExecution(null, planningResult.providerInvocations());
+            return new PreIntentToolPlanExecution(null, null, planningResult.providerInvocations());
         }
         eventSink.append("thought.step", safeToolProjection(
                 "tool.plan",
@@ -2125,7 +2145,7 @@ public class AgenticAuthoringTurnEngine {
                 break;
             }
         }
-        return new PreIntentToolPlanExecution(resourceDiscovery, planningResult.providerInvocations());
+        return new PreIntentToolPlanExecution(resourceDiscovery, null, planningResult.providerInvocations());
     }
 
     private ArtifactReconciliationOutcome reconcilePlannedArtifact(
@@ -5179,6 +5199,7 @@ public class AgenticAuthoringTurnEngine {
 
     private record PreIntentToolPlanExecution(
             AgenticAuthoringResourceCandidatesResult resourceDiscovery,
+            AgenticAuthoringPreIntentToolPlan semanticOrientation,
             List<AiProviderInvocationTelemetry> providerInvocations) {
 
         private PreIntentToolPlanExecution {
@@ -5186,7 +5207,7 @@ public class AgenticAuthoringTurnEngine {
         }
 
         private static PreIntentToolPlanExecution empty() {
-            return new PreIntentToolPlanExecution(null, List.of());
+            return new PreIntentToolPlanExecution(null, null, List.of());
         }
     }
 

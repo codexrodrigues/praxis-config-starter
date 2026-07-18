@@ -300,7 +300,7 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void usesCompactOrchestrationForStructuredPlatformGuidanceOpportunity() throws Exception {
+    void resolvesBasicPlatformGuidanceWithoutUiRecommendedIntent() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringPreIntentToolPlanningService planningService =
@@ -321,40 +321,41 @@ class AgenticAuthoringTurnEngineTest {
                 "Posso ajudar a criar formulários, tabelas, gráficos, filtros e páginas governadas.",
                 List.of(),
                 List.of(),
-                List.of("llm-compact-platform-guidance-confirmation-used"),
+                List.of("llm-semantic-orientation-used"),
                 List.of(),
                 objectMapper.createObjectNode());
-        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "A pergunta solicita orientação geral sobre as capacidades do Praxis.",
+                List.of(),
+                "platform_guidance",
+                "Posso ajudar a criar formulários, tabelas, gráficos, filtros e páginas governadas.");
+        when(planningService.plan(any(), eq(principalContext)))
+                .thenReturn(AgenticAuthoringPreIntentToolPlanningResult.planned(orientation));
+        when(intentResolverService.resolve(
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"),
+                eq(orientation)))
                 .thenReturn(platformGuidanceIntent);
-        ObjectNode contextHints = objectMapper.createObjectNode();
-        ObjectNode recommendedIntent = contextHints.putObject("recommendedIntent");
-        recommendedIntent.put("source", "page-builder-assistant-empty-state");
-        recommendedIntent.put("opportunityId", "page-builder.platform-capabilities.explore");
-        recommendedIntent.put("semanticScope", "platform-capabilities");
 
         AgenticAuthoringTurnOutcome outcome = engine(null, null, null, planningService).execute(
-                requestWithContextHintsOnEmptyPage("O que posso fazer aqui?", contextHints),
+                requestWithContextHintsOnEmptyPage(
+                        "O que posso fazer aqui?",
+                        objectMapper.createObjectNode().put("source", "page-builder")),
                 principalContext,
                 sink);
 
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
-        verify(planningService, never()).plan(any(), any());
-        verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
+        verify(planningService).plan(any(), eq(principalContext));
+        verify(intentResolverService).resolve(
+                any(), eq("tenant"), eq("user"), eq("local"), eq(orientation));
         verify(previewService, never()).preview(any(), any(), any(), any());
         org.assertj.core.api.Assertions.assertThat(phases(sink))
-                .containsExactly("tool.plan.skipped")
-                .doesNotContain(
-                        "context.bundle",
-                        "intent.resolve",
-                        "component.capabilities",
-                        "intent.resolve.llm",
-                        "consultative.intent",
-                        "consultative.answer");
-        assertPhaseBeforeEventType(sink, "tool.plan.skipped", "intent.resolved");
-        JsonNode planSkipped = objectMapper.valueToTree(
-                sink.payloads.get(phaseIndex(sink, "tool.plan.skipped")));
-        org.assertj.core.api.Assertions.assertThat(planSkipped.path("diagnostics").path("skipReason").asText())
-                .isEqualTo("governed-platform-guidance-opportunity");
+                .containsSubsequence("component.capabilities", "intent.orientation", "intent.resolve.llm")
+                .doesNotContain("tool.plan", "tool.start", "tool.result", "preview.plan");
+        assertPhaseBeforeEventType(sink, "intent.orientation", "intent.resolved");
         org.assertj.core.api.Assertions.assertThat(sink.types)
                 .containsSubsequence("intent.resolved", "result");
         JsonNode result = firstPayloadOfType(sink, "result");
@@ -9875,7 +9876,7 @@ class AgenticAuthoringTurnEngineTest {
 
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
         org.assertj.core.api.Assertions.assertThat(phases(sink))
-                .containsSubsequence("tool.plan", "tool.start", "tool.result", "component.capabilities", "intent.resolve.evidence");
+                .containsSubsequence("component.capabilities", "tool.plan", "tool.start", "tool.result", "intent.resolve.evidence");
         assertPhaseBeforeEventType(sink, "tool.plan", "intent.resolved");
         assertThoughtStepHasUserFacingMessage(sink, "context.bundle");
         assertThoughtStepHasUserFacingMessage(sink, "intent.resolve");

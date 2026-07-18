@@ -48,7 +48,9 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                  "semanticIntentClass": "authoring_or_other",
+                  "assistantMessage": "",
                   "shouldRetrieveGovernedResources": true,
                   "artifactKind": "page",
                   "retrievalQuery": "funcionarios colaboradores recursos humanos pessoas da empresa",
@@ -68,6 +70,8 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
             assertThat(invocation.status()).isEqualTo("success");
         });
         assertThat(result.plan().reason()).contains("fonte governada");
+        assertThat(result.plan().semanticIntentClass()).isEqualTo("authoring_or_other");
+        assertThat(result.plan().resolvesPlatformGuidance()).isFalse();
         assertThat(result.plan().toolCalls()).hasSize(1);
         AgenticAuthoringToolCall call = result.plan().toolCalls().get(0);
         assertThat(call.name()).isEqualTo("searchApiResources");
@@ -94,6 +98,8 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("human-resources.funcionarios");
         assertThat(promptCaptor.getValue()).doesNotContain("\n  \"");
         assertThat(schemaCaptor.getValue().jsonSchema())
+                .contains("semanticIntentClass")
+                .contains("assistantMessage")
                 .contains("shouldRetrieveGovernedResources")
                 .contains("retrievalQuery")
                 .contains("Canonical business subject explicitly requested by the user")
@@ -150,7 +156,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
 
         assertThat(result.planned()).isTrue();
         assertThat(promptCaptor.getValue())
-                .contains("praxis-agentic-authoring-pre-intent-planning-context.v1")
+                .contains("praxis-agentic-authoring-semantic-orientation-context.v1")
                 .contains("DOMAIN_CATALOG_CONTEXT")
                 .contains("serviceKey: praxis-service");
         assertThat(contextHintsCaptor.getValue().path("source").asText()).isEqualTo("page-builder");
@@ -202,7 +208,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
     }
 
     @Test
-    void returnsEmptyWhenLlmDoesNotRequestGovernedResourceRetrieval() throws Exception {
+    void preservesSemanticOrientationWhenLlmDoesNotRequestGovernedResourceRetrieval() throws Exception {
         when(providerManagementService.generateJson(
                 any(),
                 any(),
@@ -225,8 +231,87 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 request("deixe o card mais compacto"),
                 new AiPrincipalContext("tenant", "user", "local", true));
 
-        assertThat(result.planned()).isFalse();
-        assertThat(result.skipReason()).isEqualTo("llm-no-tool-requested");
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().toolCalls()).isEmpty();
+        assertThat(result.plan().semanticIntentClass()).isEqualTo("authoring_or_other");
+        assertThat(result.plan().assistantMessage()).isEmpty();
+    }
+
+    @Test
+    void resolvesPlatformGuidanceWithoutRecommendedIntentFromPraxisDomainSurfaceAndComponents() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(domainCatalogPromptContextService.buildPromptContext(
+                eq("O que posso fazer aqui?"),
+                any(),
+                eq("tenant"),
+                eq("local")))
+                .thenReturn("DOMAIN_CATALOG_CONTEXT\nresources: funcionarios, departamentos");
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                  "semanticIntentClass": "platform_guidance",
+                  "assistantMessage": "Aqui no Praxis posso ajudar a criar formulários, tabelas e gráficos usando os recursos governados do seu domínio.",
+                  "shouldRetrieveGovernedResources": false,
+                  "artifactKind": "unknown",
+                  "retrievalQuery": null,
+                  "resourceSearchFocus": {
+                    "primaryBusinessEntity": null,
+                    "supportingConcepts": [],
+                    "desiredSurface": null,
+                    "uncertainty": null,
+                    "rationale": null
+                  },
+                  "reason": "A pergunta solicita orientação geral sobre as capacidades disponíveis."
+                }
+                """));
+        AgenticAuthoringComponentCapabilitiesResult capabilities =
+                new AgenticAuthoringComponentCapabilitiesResult(
+                        "test",
+                        List.of(
+                                new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog(
+                                        "praxis-dynamic-form", "test", List.of()),
+                                new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog(
+                                        "praxis-table", "test", List.of()),
+                                new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog(
+                                        "praxis-chart", "test", List.of())));
+        AgenticAuthoringTurnStreamRequest base = request(
+                "O que posso fazer aqui?",
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode().put("source", "page-builder"));
+        AgenticAuthoringTurnStreamRequest requestWithoutRecommendation = new AgenticAuthoringTurnStreamRequest(
+                base.userPrompt(), base.targetApp(), base.targetComponentId(), base.currentRoute(),
+                base.currentPage(), base.selectedWidgetKey(), base.provider(), base.model(), base.apiKey(),
+                base.sessionId(), base.clientTurnId(), base.conversationMessages(), base.pendingClarification(),
+                base.attachmentSummaries(), base.contextHints(), capabilities);
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        domainCatalogPromptContextService);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                requestWithoutRecommendation,
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().resolvesPlatformGuidance()).isTrue();
+        assertThat(result.plan().toolCalls()).isEmpty();
+        assertThat(result.providerInvocations()).hasSize(1);
+        assertThat(promptCaptor.getValue())
+                .contains("Praxis is a governed AI authoring platform")
+                .contains("DOMAIN_CATALOG_CONTEXT")
+                .contains("funcionarios, departamentos")
+                .contains("praxis-dynamic-form")
+                .contains("praxis-table")
+                .contains("praxis-chart")
+                .contains("recommendedIntent is optional evidence");
+        assertThat(promptCaptor.getValue()).doesNotContain("\"recommendedIntent\"");
     }
 
     @Test
@@ -512,7 +597,8 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("middle omitted for planner performance")
                 .contains("userPromptOriginalLength")
                 .contains("head_tail_compacted");
-        assertThat(promptCaptor.getValue().length()).isLessThan(prompt.length() + 3000);
+        assertThat(promptCaptor.getValue().length()).isLessThan(12_000);
+        assertThat(promptCaptor.getValue()).doesNotContain(longMiddle);
     }
 
     @Test

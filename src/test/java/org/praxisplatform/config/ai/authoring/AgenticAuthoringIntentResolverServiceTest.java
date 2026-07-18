@@ -4631,7 +4631,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         ObjectNode diagnosticSnapshot = objectMapper.createObjectNode();
         diagnosticSnapshot.put("promptTemplateId", "ai-authoring/page-builder-system-prompt.v1.md");
-        diagnosticSnapshot.put("prompt", "contextBundle: {}");
+        diagnosticSnapshot.put("captureKind", "non_retrieving_projection");
+        diagnosticSnapshot.put("exactProviderPromptIncluded", false);
         diagnosticSnapshot.putObject("contextBundle")
                 .put("schemaVersion", "praxis-agentic-authoring-context-bundle.v1");
         Mockito.when(llmIntentResolver.resolve(
@@ -4676,15 +4677,13 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 120,
                                 "chatcmpl-safe-123",
                                 "stop")))));
-        Mockito.when(llmIntentResolver.diagnosticSnapshot(
+        Mockito.when(llmIntentResolver.diagnosticProjection(
                 Mockito.any(),
                 Mockito.anyString(),
                 Mockito.any(),
                 Mockito.any(),
                 Mockito.anyList(),
-                Mockito.any(),
-                Mockito.eq("tenant"),
-                Mockito.eq("local")))
+                Mockito.any()))
                 .thenReturn(diagnosticSnapshot);
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
@@ -4721,6 +4720,17 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isEqualTo("ai-authoring/page-builder-system-prompt.v1.md");
         assertThat(result.llmDiagnostics().path("request").path("contextBundle").path("schemaVersion").asText())
                 .isEqualTo("praxis-agentic-authoring-context-bundle.v1");
+        assertThat(result.llmDiagnostics().path("request").path("captureKind").asText())
+                .isEqualTo("non_retrieving_projection");
+        Mockito.verify(llmIntentResolver, Mockito.never()).diagnosticSnapshot(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
         JsonNode providerInvocation = result.llmDiagnostics()
                 .path("resolutionTelemetry")
                 .path("providerInvocations")
