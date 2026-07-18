@@ -109,3 +109,22 @@ Corrigir primeiro a shell visual compartilhada, sem criar contrato novo:
 
 A variancia de Project Knowledge deve virar caso focal repetivel. O gate nao
 deve esconder a primeira falha apenas porque a retentativa passou.
+
+## Atualizacao de 2026-07-17 — orientacao consultiva responsiva
+
+O fluxo production-like `O que eu posso fazer aqui?` passou com OpenAI,
+Quickstart, Config Starter, Angular e SSE reais em `1,2 min`. Alem de validar a
+resposta amigavel e as quick replies governadas sem patch aplicavel, o mesmo
+caso agora certifica:
+
+- shell totalmente contida em viewport `390x844`;
+- ausencia de overflow horizontal no documento;
+- quick replies visiveis e alcancaveis apenas com `Tab`;
+- nome acessivel nao vazio no alvo de teclado.
+
+A suite focal da shell compartilhada passou `59/59`, incluindo clamp de
+viewport, wrapping do contexto governado e resize handles fora da arvore de
+acoes acessiveis. A classificacao de overflow/wrapping e narrow viewport muda
+de pendencia funcional para `ja-suportado-so-ux` certificado no fluxo
+consultivo. A auditoria AXE continua pendente porque o workspace ainda nao
+possui essa dependencia; este corte nao altera configuracao de pacotes.
