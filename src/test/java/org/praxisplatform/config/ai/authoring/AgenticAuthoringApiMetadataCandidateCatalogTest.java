@@ -814,6 +814,46 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
     }
 
     @Test
+    void canonicalizesComparisonOperationAsCapabilityOfItsBaseResource() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        Mockito.when(retrievalService.searchApiMetadata(
+                        Mockito.anyString(),
+                        Mockito.nullable(String.class),
+                        Mockito.isNull(),
+                        Mockito.anyInt(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull()))
+                .thenReturn(List.of(searchResult(
+                        "/api/human-resources/funcionarios/stats/comparison",
+                        "POST",
+                        "Comparacao analitica governada de funcionarios.",
+                        0.94d)));
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: Funcionarios. "
+                        + "supporting concepts: pagamentos, setores. "
+                        + "desired surface: dashboard analitico. "
+                        + "semantic query: comparar pagamentos de funcionarios por setor",
+                "dashboard");
+
+        assertThat(candidates).singleElement().satisfies(candidate -> {
+            assertThat(candidate.resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+            assertThat(candidate.submitUrl())
+                    .isEqualTo("/api/human-resources/funcionarios/stats/comparison");
+            assertThat(candidate.schemaUrl())
+                    .contains("path=/api/human-resources/funcionarios/stats/comparison")
+                    .contains("schemaType=response");
+            assertThat(candidate.evidence()).contains("semantic-role:analytics-projection");
+        });
+        Mockito.verifyNoInteractions(repository);
+    }
+
+    @Test
     void llmDesiredProfileSurfacePromotesProfileProjection() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);

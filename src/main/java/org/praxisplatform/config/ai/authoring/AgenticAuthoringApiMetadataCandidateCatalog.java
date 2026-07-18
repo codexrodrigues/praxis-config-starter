@@ -1640,6 +1640,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 "/stats/group-by",
                 "/stats/timeseries",
                 "/stats/distribution",
+                "/stats/comparison",
                 "/filter/cursor",
                 "/filter",
                 "/all")) {
@@ -1655,7 +1656,8 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 || path.endsWith("/filter/cursor")
                 || path.endsWith("/stats/group-by")
                 || path.endsWith("/stats/timeseries")
-                || path.endsWith("/stats/distribution");
+                || path.endsWith("/stats/distribution")
+                || path.endsWith("/stats/comparison");
     }
 
     private String canonicalSubmitMethod(String submitUrl, String operation) {
@@ -1671,6 +1673,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 && (normalized.endsWith("/stats/group-by")
                 || normalized.endsWith("/stats/timeseries")
                 || normalized.endsWith("/stats/distribution")
+                || normalized.endsWith("/stats/comparison")
                 || normalized.endsWith("/filter")
                 || normalized.endsWith("/filter/cursor"));
     }
