@@ -128,3 +128,19 @@ acoes acessiveis. A classificacao de overflow/wrapping e narrow viewport muda
 de pendencia funcional para `ja-suportado-so-ux` certificado no fluxo
 consultivo. A auditoria AXE continua pendente porque o workspace ainda nao
 possui essa dependencia; este corte nao altera configuracao de pacotes.
+
+## Atualizacao de 2026-07-18 — tema e i18n do Project Knowledge
+
+O cockpit de Project Knowledge deixou de depender de fallbacks ingleses e de
+cores claras literais. O chrome interno agora possui cobertura simetrica
+pt-BR/en-US para titulo, descricao, acoes, fatos, validacao e mensagens de
+lifecycle, enquanto identificadores e estados recebidos do backend continuam
+preservados como evidencia governada.
+
+A superficie visual passou a consumir os tokens Material ativos para surface,
+on-surface, primary, tertiary, outline e error. A prova browser com backend
+real passou `1/1` em `26,1 s`, validando texto pt-BR, heranca dos tokens de
+tema e o lifecycle canonico do change-set. Os gates focais registraram `4/4`
+na paridade i18n e `126/127` no componente; a unica falha restante e o caso
+independente de descarte de preview invalido, que nao toca cockpit, tema ou
+i18n e permanece como regressao separada a corrigir.
