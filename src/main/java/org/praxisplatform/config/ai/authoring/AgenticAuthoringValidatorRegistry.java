@@ -2,7 +2,9 @@ package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
+import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -163,6 +165,9 @@ public final class AgenticAuthoringValidatorRegistry {
             "field-metadata-shape-canonical",
             "field-path-supported-by-editor",
             "metadata-round-trip",
+            "date-range-shortcuts-static-canonical",
+            "date-range-shortcuts-no-executable-metadata",
+            "date-range-shortcuts-unique-ids",
             "control-type-exists-in-discovery",
             "editor-coverage-exists",
             "option-source-shape-canonical",
@@ -308,6 +313,8 @@ public final class AgenticAuthoringValidatorRegistry {
             "remote-resource-in-api-metadata",
             "bound-fields-exist",
             "stats-operation-supported",
+            "comparison-period-complete",
+            "comparison-metrics-supported",
             "query-context-structured",
             "query-context-filter-expression-stats-unsupported",
             "query-context-fields-exist",
@@ -640,6 +647,12 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "metadata-round-trip", "runtime-editor-round-trip" -> {
                     // Round-trip is enforced by compiling fieldMetadata and normalizedSeed together.
                 }
+                case "date-range-shortcuts-static-canonical" ->
+                        validateMetadataDateRangeShortcutsCanonical(operationId, planOperation, failures);
+                case "date-range-shortcuts-no-executable-metadata" ->
+                        validateMetadataDateRangeShortcutsNonExecutable(operationId, planOperation, failures);
+                case "date-range-shortcuts-unique-ids" ->
+                        validateMetadataDateRangeShortcutIds(operationId, planOperation, failures);
                 case "manual-field-id-unique" -> validateManualFieldIdUnique(operationId, planOperation, config, failures);
                 case "manual-field-exists", "host-template-field-exists" -> validateManualFieldExists(operationId, planOperation, config, failures);
                 case "control-type-discovered" -> validateManualControlTypeDiscovered(operationId, planOperation, config, failures);
@@ -764,6 +777,8 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "cartesian-dimension-required" -> validateChartCartesianDimensionRequired(operationId, planOperation, config, failures);
                 case "remote-resource-in-api-metadata" -> validateChartRemoteResource(operationId, planOperation, config, failures);
                 case "stats-operation-supported" -> validateChartStatsOperation(operationId, planOperation, config, failures);
+                case "comparison-period-complete" -> validateChartComparisonPeriod(operationId, planOperation, failures);
+                case "comparison-metrics-supported" -> validateChartComparisonMetrics(operationId, planOperation, failures);
                 case "query-context-filter-expression-stats-unsupported" ->
                         validateChartStatsFilterExpressionUnsupported(operationId, planOperation, config, failures);
                 case "query-context-structured", "query-context-safe-values",
@@ -3209,6 +3224,171 @@ public final class AgenticAuthoringValidatorRegistry {
                 || text(period, "mode").isBlank()) {
             failures.add("validator stats-operation-supported failed for " + operationId
                     + ": comparison requires governed comparisonPeriod field, timezone, preset and mode");
+        }
+    }
+
+    private void validateChartComparisonPeriod(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (!"comparison".equals(text(input, "operation"))) {
+            return;
+        }
+        JsonNode period = input.path("comparisonPeriod");
+        if (!period.isObject()
+                || text(period, "field").isBlank()
+                || text(period, "timezone").isBlank()
+                || text(period, "preset").isBlank()
+                || text(period, "mode").isBlank()) {
+            failures.add("validator comparison-period-complete failed for " + operationId
+                    + ": comparison requires governed comparisonPeriod field, timezone, preset and mode");
+        }
+    }
+
+    private void validateChartComparisonMetrics(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (!"comparison".equals(text(input, "operation"))) {
+            return;
+        }
+        if (input.path("metric").isObject()) {
+            failures.add("validator comparison-metrics-supported failed for " + operationId
+                    + ": comparison must use metrics[] and must not declare singular metric");
+        }
+        JsonNode metrics = input.path("metrics");
+        if (!metrics.isArray() || metrics.isEmpty()) {
+            failures.add("validator comparison-metrics-supported failed for " + operationId
+                    + ": comparison requires non-empty metrics[]");
+            return;
+        }
+        Set<String> aliases = new HashSet<>();
+        for (JsonNode metric : metrics) {
+            String field = text(metric, "field");
+            String aggregation = text(metric, "aggregation");
+            String alias = text(metric, "alias");
+            if (field.isBlank()
+                    || !Set.of("count", "distinct-count", "sum").contains(aggregation)
+                    || alias.isBlank()
+                    || !aliases.add(alias)) {
+                failures.add("validator comparison-metrics-supported failed for " + operationId
+                        + ": comparison metrics require unique aliases, canonical fields and count, distinct-count or sum aggregation");
+                return;
+            }
+        }
+    }
+
+    private void validateMetadataDateRangeShortcutsCanonical(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode shortcuts = planOperation.path("input").path("shortcuts");
+        if (!shortcuts.isArray()) {
+            failures.add("validator date-range-shortcuts-static-canonical failed for " + operationId
+                    + ": shortcuts must be an array");
+            return;
+        }
+        Set<String> builtInIds = Set.of(
+                "today", "yesterday", "thisWeek", "lastWeek", "thisMonth", "lastMonth", "thisYear", "lastYear");
+        Set<String> tones = Set.of("neutral", "info", "success", "warning");
+        for (JsonNode shortcut : shortcuts) {
+            if (shortcut.isTextual() && builtInIds.contains(shortcut.asText())) {
+                continue;
+            }
+            if (!shortcut.isObject()
+                    || text(shortcut, "id").isBlank()
+                    || text(shortcut, "label").isBlank()
+                    || !isIsoDate(text(shortcut, "startDate"))
+                    || !isIsoDate(text(shortcut, "endDate"))) {
+                failures.add("validator date-range-shortcuts-static-canonical failed for " + operationId
+                        + ": shortcuts must be built-in ids or static ranges with id, label, startDate and endDate");
+                return;
+            }
+            if (shortcut.has("tone") && !tones.contains(text(shortcut, "tone"))) {
+                failures.add("validator date-range-shortcuts-static-canonical failed for " + operationId
+                        + ": unsupported shortcut tone " + text(shortcut, "tone"));
+                return;
+            }
+            LocalDate start = LocalDate.parse(text(shortcut, "startDate"));
+            LocalDate end = LocalDate.parse(text(shortcut, "endDate"));
+            if (end.isBefore(start)) {
+                failures.add("validator date-range-shortcuts-static-canonical failed for " + operationId
+                        + ": shortcut endDate must not be before startDate");
+                return;
+            }
+        }
+    }
+
+    private void validateMetadataDateRangeShortcutsNonExecutable(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        if (containsExecutableShortcutMetadata(planOperation.path("input").path("shortcuts"))) {
+            failures.add("validator date-range-shortcuts-no-executable-metadata failed for " + operationId
+                    + ": shortcut metadata must not contain executable expressions or frontend calendar rules");
+        }
+    }
+
+    private void validateMetadataDateRangeShortcutIds(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode shortcuts = planOperation.path("input").path("shortcuts");
+        if (!shortcuts.isArray()) {
+            return;
+        }
+        Set<String> ids = new HashSet<>();
+        for (JsonNode shortcut : shortcuts) {
+            String id = shortcut.isTextual() ? shortcut.asText() : text(shortcut, "id");
+            if (!id.isBlank() && !ids.add(id)) {
+                failures.add("validator date-range-shortcuts-unique-ids failed for " + operationId
+                        + ": duplicate shortcut id " + id);
+                return;
+            }
+        }
+    }
+
+    private boolean containsExecutableShortcutMetadata(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return false;
+        }
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                String normalized = field.getKey().replaceAll("[^A-Za-z]", "").toLowerCase();
+                if (normalized.contains("calculaterange")
+                        || normalized.contains("expression")
+                        || normalized.contains("executable")
+                        || normalized.contains("businessday")
+                        || normalized.contains("calendarrule")) {
+                    return true;
+                }
+                if (containsExecutableShortcutMetadata(field.getValue())) {
+                    return true;
+                }
+            }
+        } else if (node.isArray()) {
+            for (JsonNode item : node) {
+                if (containsExecutableShortcutMetadata(item)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean isIsoDate(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        try {
+            LocalDate.parse(value);
+            return true;
+        } catch (DateTimeParseException ex) {
+            return false;
         }
     }
 

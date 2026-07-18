@@ -20,13 +20,13 @@ import org.springframework.core.io.ClassPathResource;
 class AiRegistrySnapshotContractTest {
 
     private static final String EXPECTED_SNAPSHOT_HASH =
-            "f6a6f1d0a4d54e622e779c19057071c7af348189b39ed01a89549aaee965ec20";
+            "bc111488cb7d4f0cfa27af1a2b9b5111ddd406bd3a8662ad586a0a001437422c";
     private static final String EXPECTED_VERSION = "1.0.0";
-    private static final String EXPECTED_GENERATED_AT = "2026-07-11T14:21:15.146Z";
+    private static final String EXPECTED_GENERATED_AT = "2026-07-18T00:28:12.020Z";
     private static final int EXPECTED_COMPONENT_COUNT = 105;
     private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 95;
     private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 105;
-    private static final int EXPECTED_CHUNK_COUNT = 476;
+    private static final int EXPECTED_CHUNK_COUNT = 1493;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -101,6 +101,26 @@ class AiRegistrySnapshotContractTest {
         }
 
         assertThat(unsupportedValidators).isEmpty();
+    }
+
+    @Test
+    void classpathSnapshotRespectsCanonicalUtf8ChunkLimit() throws IOException {
+        JsonNode components = readSnapshot().path("components");
+        List<String> oversized = new ArrayList<>();
+        var componentFields = components.fields();
+        while (componentFields.hasNext()) {
+            var component = componentFields.next();
+            for (JsonNode chunk : component.getValue().path("chunks")) {
+                int utf8Bytes = chunk.path("content").asText("")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+                if (utf8Bytes > org.praxisplatform.config.service.RegistryIngestionService.MAX_CHUNK_UTF8_BYTES) {
+                    oversized.add(component.getKey() + "/" + chunk.path("chunkIndex").asInt()
+                            + "=" + utf8Bytes);
+                }
+            }
+        }
+
+        assertThat(oversized).isEmpty();
     }
 
     private JsonNode readSnapshot() throws IOException {

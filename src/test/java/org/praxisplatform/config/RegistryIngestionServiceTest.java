@@ -23,11 +23,14 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.io.ClassPathResource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 @Tag("unit")
@@ -64,11 +67,11 @@ class RegistryIngestionServiceTest {
     }
 
     private void setupMocks() {
-        when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
-        when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+        lenient().when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
+        lenient().when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
                 anyString(), anyString(), anyString(), any(), anyString()))
                 .thenReturn(java.util.Optional.empty());
-        when(repository.save(any(AiRegistry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(repository.save(any(AiRegistry.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
@@ -122,6 +125,207 @@ class RegistryIngestionServiceTest {
 
         assertThat(authoringManifest(tableDefinition).path("operations").size()).isGreaterThan(0);
         assertThat(authoringManifest(formDefinition).path("operations").size()).isGreaterThan(0);
+    }
+
+    @Test
+    void acceptsChunkExactlyAtUtf8ByteLimit() {
+        RegistryIngestionRequest request = requestWithChunks(Map.of(
+                "at-limit", chunk(0, "docs", "a".repeat(RegistryIngestionService.MAX_CHUNK_UTF8_BYTES))));
+
+        registryIngestionService.ingestRegistry(request, null, null);
+
+        verify(repository).save(any(AiRegistry.class));
+        verify(embeddingService).embed(anyString());
+        verify(ragVectorStoreService).upsertDocuments(any());
+    }
+
+    @Test
+    void rejectsOversizedChunkBeforeAnyPersistenceVectorOrEmbeddingEffect() {
+        String secretPayload = "sensitive-" + "a".repeat(RegistryIngestionService.MAX_CHUNK_UTF8_BYTES);
+        RegistryIngestionRequest request = requestWithChunks(Map.of(
+                "oversized-component", chunk(7, "authoring_manifest", secretPayload)));
+
+        assertThatThrownBy(() -> registryIngestionService.ingestRegistry(request, null, null))
+                .hasMessageContaining("componentId=oversized-component")
+                .hasMessageContaining("chunkIndex=7")
+                .hasMessageContaining("chunkKind=authoring_manifest")
+                .hasMessageContaining("observedBytes=8010")
+                .hasMessageContaining("maxBytes=8000")
+                .hasMessageNotContaining("sensitive-");
+
+        verifyNoIngestionEffects();
+    }
+
+    @Test
+    void rejectsNullChunkContentBeforeAnyEffect() {
+        RegistryIngestionRequest request = requestWithChunks(Map.of(
+                "null-content", chunk(4, "documentation", null)));
+
+        assertThatThrownBy(() -> registryIngestionService.ingestRegistry(request, null, null))
+                .hasMessageContaining("componentId=null-content")
+                .hasMessageContaining("chunkIndex=4")
+                .hasMessageContaining("chunkKind=documentation")
+                .hasMessageContaining("reason=chunk content is null");
+
+        verifyNoIngestionEffects();
+    }
+
+    @Test
+    void rejectsNullChunkEntryBeforeAnyEffect() {
+        List<RegistryIngestionRequest.ChunkEntry> chunks = new java.util.ArrayList<>();
+        chunks.add(null);
+        RegistryIngestionRequest request = RegistryIngestionRequest.builder()
+                .components(Map.of(
+                        "null-chunk",
+                        RegistryIngestionRequest.ComponentEntry.builder()
+                                .description("Null chunk entry")
+                                .chunks(chunks)
+                                .build()))
+                .build();
+
+        assertThatThrownBy(() -> registryIngestionService.ingestRegistry(request, null, null))
+                .hasMessageContaining("componentId=null-chunk")
+                .hasMessageContaining("chunkIndex=0")
+                .hasMessageContaining("chunkKind=unknown")
+                .hasMessageContaining("reason=chunk entry is null");
+
+        verifyNoIngestionEffects();
+    }
+
+    @Test
+    void rejectsEmptyChunkContentBeforeAnyEffect() {
+        RegistryIngestionRequest request = requestWithChunks(Map.of(
+                "empty-content", chunk(5, "runtime_contract", "")));
+
+        assertThatThrownBy(() -> registryIngestionService.ingestRegistry(request, null, null))
+                .hasMessageContaining("componentId=empty-content")
+                .hasMessageContaining("chunkIndex=5")
+                .hasMessageContaining("chunkKind=runtime_contract")
+                .hasMessageContaining("reason=chunk content is blank");
+
+        verifyNoIngestionEffects();
+    }
+
+    @Test
+    void rejectsWhitespaceOnlyChunkContentBeforeAnyEffectWithoutLeakingIt() {
+        String invalidContent = " \t\n ";
+        RegistryIngestionRequest request = requestWithChunks(Map.of(
+                "blank-content", chunk(6, "authoring_manifest", invalidContent)));
+
+        assertThatThrownBy(() -> registryIngestionService.ingestRegistry(request, null, null))
+                .hasMessageContaining("componentId=blank-content")
+                .hasMessageContaining("chunkIndex=6")
+                .hasMessageContaining("chunkKind=authoring_manifest")
+                .hasMessageContaining("reason=chunk content is blank")
+                .hasMessageNotContaining(invalidContent);
+
+        verifyNoIngestionEffects();
+    }
+
+    @Test
+    void rejectsWholeBatchWhenLaterComponentHasBlankContent() {
+        Map<String, RegistryIngestionRequest.ComponentEntry> components = new java.util.LinkedHashMap<>();
+        components.put("valid-first", component(chunk(0, "summary", "valid")));
+        components.put("invalid-second", component(chunk(1, "documentation", "   ")));
+
+        assertThatThrownBy(() -> registryIngestionService.ingestRegistry(
+                RegistryIngestionRequest.builder().components(components).build(), null, null))
+                .hasMessageContaining("componentId=invalid-second")
+                .hasMessageContaining("reason=chunk content is blank");
+
+        verifyNoIngestionEffects();
+    }
+
+    @Test
+    void measuresMultibyteUnicodeAsUtf8Bytes() {
+        String unicodeContent = "á".repeat(4_001);
+        RegistryIngestionRequest request = requestWithChunks(Map.of(
+                "unicode-component", chunk(3, "documentation", unicodeContent)));
+
+        assertThat(unicodeContent).hasSize(4_001);
+        assertThatThrownBy(() -> registryIngestionService.ingestRegistry(request, null, null))
+                .hasMessageContaining("observedBytes=8002")
+                .hasMessageContaining("maxBytes=8000");
+
+        verify(repository, never()).save(any());
+        verify(embeddingService, never()).embed(anyString());
+        verify(ragVectorStoreService, never()).upsertDocuments(any());
+    }
+
+    @Test
+    void rejectsWholeBatchWhenLaterComponentIsOversized() {
+        Map<String, RegistryIngestionRequest.ComponentEntry> components = new java.util.LinkedHashMap<>();
+        components.put("valid-first", component(chunk(0, "summary", "valid")));
+        components.put("invalid-second", component(chunk(
+                1,
+                "runtime_contract",
+                "b".repeat(RegistryIngestionService.MAX_CHUNK_UTF8_BYTES + 1))));
+
+        assertThatThrownBy(() -> registryIngestionService.ingestRegistry(
+                RegistryIngestionRequest.builder().components(components).build(), null, null))
+                .hasMessageContaining("componentId=invalid-second");
+
+        verify(repository, never()).save(any());
+        verify(embeddingService, never()).embed(anyString());
+        verify(ragVectorStoreService, never()).deleteDocumentsByScope(any(), any(), any(), any(), any());
+        verify(ragVectorStoreService, never()).upsertDocuments(any());
+    }
+
+    @Test
+    void rejectsOversizedChunkAtEveryBatchPositionBeforeEffects() {
+        for (int invalidPosition : List.of(0, 1, 2)) {
+            List<RegistryIngestionRequest.ChunkEntry> chunks = new java.util.ArrayList<>();
+            for (int index = 0; index < 3; index++) {
+                chunks.add(chunk(
+                        index,
+                        "recipe",
+                        index == invalidPosition
+                                ? "x".repeat(RegistryIngestionService.MAX_CHUNK_UTF8_BYTES + 1)
+                                : "valid"));
+            }
+            RegistryIngestionRequest request = RegistryIngestionRequest.builder()
+                    .components(Map.of(
+                            "position-" + invalidPosition,
+                            RegistryIngestionRequest.ComponentEntry.builder()
+                                    .description("Position test")
+                                    .chunks(chunks)
+                                    .build()))
+                    .build();
+
+            assertThatThrownBy(() -> registryIngestionService.ingestRegistry(request, null, null))
+                    .hasMessageContaining("chunkIndex=" + invalidPosition);
+        }
+
+        verify(repository, never()).save(any());
+        verify(embeddingService, never()).embed(anyString());
+        verify(ragVectorStoreService, never()).deleteDocumentsByScope(any(), any(), any(), any(), any());
+        verify(ragVectorStoreService, never()).upsertDocuments(any());
+    }
+
+    private RegistryIngestionRequest requestWithChunks(
+            Map<String, RegistryIngestionRequest.ChunkEntry> chunksByComponent) {
+        Map<String, RegistryIngestionRequest.ComponentEntry> components = new java.util.LinkedHashMap<>();
+        chunksByComponent.forEach((componentId, chunk) -> components.put(componentId, component(chunk)));
+        return RegistryIngestionRequest.builder().components(components).build();
+    }
+
+    private RegistryIngestionRequest.ComponentEntry component(RegistryIngestionRequest.ChunkEntry chunk) {
+        return RegistryIngestionRequest.ComponentEntry.builder()
+                .description("Test component")
+                .chunks(List.of(chunk))
+                .build();
+    }
+
+    private RegistryIngestionRequest.ChunkEntry chunk(int index, String kind, String content) {
+        return RegistryIngestionRequest.ChunkEntry.builder()
+                .chunkIndex(index)
+                .chunkKind(kind)
+                .content(content)
+                .build();
+    }
+
+    private void verifyNoIngestionEffects() {
+        verifyNoInteractions(repository, embeddingService, ragVectorStoreService, eventPublisher);
     }
 
     private JsonNode authoringManifest(AiRegistry definition) throws Exception {

@@ -41,6 +41,17 @@ validate the Angular corpus first, copy that artifact into the starter, and let
 `AiRegistrySnapshotContractTest` lock the resulting hash, release identity, manifest coverage, and
 chunk counts.
 
+Registry publication is fail-closed. `RegistryIngestionService` preflights the complete request
+before the first repository write, vector-store purge/upsert, or embedding call. Every explicit
+`components[].chunks[].content` is measured as UTF-8 and must respect the provider-neutral
+8,000-byte boundary published by the Angular
+`tools/ai-registry/registry-ingestion-contract.json`. An oversized chunk rejects the whole batch
+with a sanitized diagnostic containing only `componentId`, `chunkIndex`, `chunkKind`, observed
+bytes, and the maximum. Content is never truncated, logged in the diagnostic, skipped, or accepted
+as a partial-ready release. The classpath bootstrap runs the same preflight before readiness checks
+or snapshot metadata publication, so an invalid snapshot leaves `succeeded=false` and preserves the
+previous canonical release unchanged.
+
 Assisted repository exploration is available through [CodeWiki](https://codewiki.google/github.com/codexrodrigues/praxis-config-starter/).
 CodeWiki is complementary navigation for code reading; the repository docs and source remain normative.
 

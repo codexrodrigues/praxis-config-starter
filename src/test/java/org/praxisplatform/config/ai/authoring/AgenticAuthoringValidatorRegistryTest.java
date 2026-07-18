@@ -762,6 +762,70 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldExecuteDedicatedComparisonValidators() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", false,
+                        "comparison-period-complete,comparison-metrics-supported"),
+                plan("{}", """
+                        {
+                          "sourceKind": "praxis.stats",
+                          "operation": "comparison",
+                          "metric": { "field": "amount", "aggregation": "sum" },
+                          "metrics": [
+                            { "field": "amount", "aggregation": "avg", "alias": "total" },
+                            { "field": "orders", "aggregation": "count", "alias": "total" }
+                          ],
+                          "comparisonPeriod": { "field": "createdAt" }
+                        }
+                        """),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).contains(
+                "validator comparison-period-complete failed for data.resource.bind: comparison requires governed comparisonPeriod field, timezone, preset and mode",
+                "validator comparison-metrics-supported failed for data.resource.bind: comparison must use metrics[] and must not declare singular metric",
+                "validator comparison-metrics-supported failed for data.resource.bind: comparison metrics require unique aliases, canonical fields and count, distinct-count or sum aggregation");
+    }
+
+    @Test
+    void shouldValidateStaticNonExecutableUniqueDateRangeShortcuts() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-metadata-editor",
+                operation("dateRangeShortcuts.configure", "dateRangeShortcuts",
+                        "metadata-editor-date-range-shortcut-catalog", false,
+                        "date-range-shortcuts-static-canonical,date-range-shortcuts-no-executable-metadata,date-range-shortcuts-unique-ids"),
+                plan("{}", """
+                        {
+                          "shortcuts": [
+                            "today",
+                            "today",
+                            {
+                              "id": "payroll-close",
+                              "label": "Payroll close",
+                              "startDate": "2026-07-31",
+                              "endDate": "2026-07-01",
+                              "calculateRange": "frontendFunction"
+                            }
+                          ]
+                        }
+                        """),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).contains(
+                "validator date-range-shortcuts-static-canonical failed for dateRangeShortcuts.configure: shortcut endDate must not be before startDate",
+                "validator date-range-shortcuts-no-executable-metadata failed for dateRangeShortcuts.configure: shortcut metadata must not contain executable expressions or frontend calendar rules",
+                "validator date-range-shortcuts-unique-ids failed for dateRangeShortcuts.configure: duplicate shortcut id today");
+    }
+
+    @Test
     void shouldFailClosedWhenChartGroundingCatalogsAreMissingOrUnsupported() throws Exception {
         List<String> failures = new ArrayList<>();
         JsonNode chartOnlyConfig = objectMapper.readTree("""
