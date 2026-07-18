@@ -71,7 +71,16 @@ class AgenticAuthoringProviderPricingSnapshotTest {
         for (JsonNode entry : snapshot().path("entries")) {
             models.add(entry.path("model").asText());
         }
-        assertThat(models).contains("gpt-4.1-mini");
+        assertThat(models).contains("gpt-5.4-mini");
+    }
+
+    @Test
+    void snapshotCoversTheOpenAi56EvaluationFamily() throws Exception {
+        Set<String> models = new HashSet<>();
+        for (JsonNode entry : snapshot().path("entries")) {
+            models.add(entry.path("model").asText());
+        }
+        assertThat(models).contains("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna");
     }
 
     private JsonNode snapshot() throws Exception {

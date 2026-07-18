@@ -82,7 +82,7 @@
     "journeyTurn": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "userPrompt", "currentPageSource", "expected", "pageAssertions"],
+      "required": ["id", "userPrompt", "currentPageSource", "expected"],
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
         "userPrompt": { "type": "string", "minLength": 1 },
@@ -172,7 +172,9 @@
         "canApply": { "type": "boolean" },
         "preview": { "enum": ["required", "forbidden", "optional"] },
         "minimumQuickReplies": { "type": "integer", "minimum": 0 },
-        "forbiddenPhases": { "$ref": "#/$defs/strings" }
+        "forbiddenPhases": { "$ref": "#/$defs/strings" },
+        "minimumSemanticAxisCount": { "type": "integer", "minimum": 1 },
+        "requireAllSemanticAxesVerified": { "type": "boolean" }
       }
     },
     "persistence": {

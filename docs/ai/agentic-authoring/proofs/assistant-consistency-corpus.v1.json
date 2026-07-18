@@ -49,6 +49,13 @@
           "source": "page-builder-assistant-empty-state",
           "opportunityId": "page-builder.platform-capabilities.explore",
           "semanticScope": "platform-capabilities"
+        },
+        "agenticApplyTarget": {
+          "schemaVersion": "praxis-agentic-authoring-apply-target.v1",
+          "componentType": "praxis-dynamic-page",
+          "componentId": "page-builder-ia",
+          "scope": "user",
+          "mode": "create"
         }
       }
     },
@@ -401,6 +408,91 @@
     }
   ],
   "journeys": [
+    {
+      "id": "platform-guidance-to-employee-dashboard-pt",
+      "family": "refinement",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page-employee-domain-platform-opportunity",
+      "turns": [
+        {
+          "id": "discover-capabilities",
+          "userPrompt": "O que posso fazer aqui?",
+          "currentPageSource": "context",
+          "expected": {
+            "intent": {
+              "operationKinds": ["explain"],
+              "artifactKinds": ["component"],
+              "changeKinds": ["answer_component_catalog_question", "answer_component_capability_question"],
+              "resourcePaths": [null]
+            },
+            "terminal": {
+              "eventTypes": ["result"],
+              "canApply": false,
+              "preview": "forbidden",
+              "minimumQuickReplies": 3,
+              "forbiddenPhases": ["preview.plan", "preview.compile"]
+            },
+            "assistantMessage": {
+              "minimumCharacters": 80,
+              "requiredConceptGroups": [
+                ["formulário", "formulario", "form"],
+                ["tabela", "table"],
+                ["gráfico", "grafico", "painel", "dashboard", "chart"],
+                ["filtro", "filter"]
+              ],
+              "forbiddenTerms": ["json", "schema", "changeKind", "operationKind", "artifactKind", "tool loop"]
+            },
+            "safety": {
+              "allowedResourcePathPrefixes": [],
+              "forbidUnlistedResourcePaths": true,
+              "mutationRequiresPreview": true
+            }
+          }
+        },
+        {
+          "id": "materialize-employee-dashboard",
+          "userPrompt": "Ótimo. A partir dessa recomendação, crie um dashboard para acompanhar os funcionários por departamento.",
+          "currentPageSource": "context",
+          "expected": {
+            "intent": {
+              "operationKinds": ["create"],
+              "artifactKinds": ["dashboard", "page"],
+              "changeKinds": ["create_artifact"],
+              "resourcePaths": ["/api/human-resources/funcionarios"]
+            },
+            "terminal": {
+              "eventTypes": ["result"],
+              "canApply": true,
+              "preview": "required",
+              "minimumQuickReplies": 0,
+              "forbiddenPhases": [],
+              "minimumSemanticAxisCount": 1,
+              "requireAllSemanticAxesVerified": true
+            },
+            "assistantMessage": {
+              "minimumCharacters": 60,
+              "requiredConceptGroups": [
+                ["dashboard", "painel", "gráfico", "grafico"],
+                ["funcionário", "funcionario", "employee"],
+                ["prévia", "previa", "preview", "revisar", "visualização", "visualizacao"]
+              ],
+              "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+            },
+            "safety": {
+              "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
+              "forbidUnlistedResourcePaths": true,
+              "mutationRequiresPreview": true
+            }
+          },
+          "lineage": {
+            "sameThread": true,
+            "distinctTurn": true,
+            "activeDecisionFromPreviousTurn": true
+          }
+        }
+      ]
+    },
     {
       "id": "employee-table-progressive-columns-pt",
       "family": "refinement",

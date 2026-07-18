@@ -1,11 +1,38 @@
 {
   "version": "1.0.0",
   "kind": "praxis.ai-provider-pricing-snapshot",
-  "capturedAt": "2026-07-16",
+  "capturedAt": "2026-07-18",
   "currency": "USD",
   "unit": "per-million-tokens",
   "sourceUrl": "https://developers.openai.com/api/docs/pricing",
   "entries": [
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "modelPrefixes": ["gpt-5.6-sol-"],
+      "serviceTier": "standard",
+      "inputUsdPerMillion": 5.0,
+      "cachedInputUsdPerMillion": 0.5,
+      "outputUsdPerMillion": 30.0
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "modelPrefixes": ["gpt-5.6-terra-"],
+      "serviceTier": "standard",
+      "inputUsdPerMillion": 2.5,
+      "cachedInputUsdPerMillion": 0.25,
+      "outputUsdPerMillion": 15.0
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "modelPrefixes": ["gpt-5.6-luna-"],
+      "serviceTier": "standard",
+      "inputUsdPerMillion": 1.0,
+      "cachedInputUsdPerMillion": 0.1,
+      "outputUsdPerMillion": 6.0
+    },
     {
       "provider": "openai",
       "model": "gpt-5.4-mini",

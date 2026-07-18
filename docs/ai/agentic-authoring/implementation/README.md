@@ -115,9 +115,10 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 40. [36-openai-extended-consistency-and-dashboard-variance-evidence.md](./36-openai-extended-consistency-and-dashboard-variance-evidence.md)
 41. [37-assistant-consistency-provider-variance-closure-evidence.md](./37-assistant-consistency-provider-variance-closure-evidence.md)
 42. [38-page-builder-browser-gate-baseline-evidence.md](./38-page-builder-browser-gate-baseline-evidence.md)
-43. [01-current-state-and-target.md](./01-current-state-and-target.md)
-44. [02-implementation-backlog.md](./02-implementation-backlog.md)
-45. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+43. [39-openai-56-model-cost-quality-evidence.md](./39-openai-56-model-cost-quality-evidence.md)
+44. [01-current-state-and-target.md](./01-current-state-and-target.md)
+45. [02-implementation-backlog.md](./02-implementation-backlog.md)
+46. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
@@ -225,6 +226,10 @@ revalidacao integrada com provider real. O baseline bloqueante posterior esta
 registrado em `35-openai-responses-consistency-baseline-evidence.md`: seis
 jornadas, tres repeticoes, `18/18`, transacoes `3/3` e limites de latencia,
 tokens e custo verdes no workflow oficial.
+`39-openai-56-model-cost-quality-evidence.md` adiciona a jornada continuada
+"o que posso fazer aqui?" ate dashboard aplicavel, atualiza o snapshot de
+pricing GPT-5.6 e registra a politica em duas camadas: `gpt-5.4-mini` para o
+loop economico e `gpt-5.6-terra` para gates explicitos de assertividade e demo.
 
 ## Checkpoint 2026-06-18 - pre-intent resource discovery e UX de revisao
 

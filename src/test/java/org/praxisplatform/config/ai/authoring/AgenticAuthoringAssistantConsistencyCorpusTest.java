@@ -63,7 +63,7 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
                     assertThat(turn.path("currentPageSource").asText()).isEqualTo("context");
                     assertThat(turn.has("lineage")).isFalse();
                 } else {
-                    assertThat(turn.path("currentPageSource").asText()).isEqualTo("previous-preview");
+                    assertThat(turn.path("currentPageSource").asText()).isIn("context", "previous-preview");
                     assertThat(turn.path("lineage").path("sameThread").asBoolean()).isTrue();
                     assertThat(turn.path("lineage").path("distinctTurn").asBoolean()).isTrue();
                     assertThat(turn.path("lineage").path("activeDecisionFromPreviousTurn").asBoolean()).isTrue();
@@ -145,6 +145,24 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
                         .at("/requiredConfigValues/~1behavior~1filtering~1advancedFilters~1enabled")
                         .asBoolean())
                 .isTrue();
+    }
+
+    @Test
+    void platformGuidanceJourneyContinuesToGovernedDashboardMaterialization() throws Exception {
+        JsonNode journey = findById(corpus().path("journeys"), "platform-guidance-to-employee-dashboard-pt");
+
+        assertThat(journey).isNotNull();
+        assertThat(journey.path("status").asText()).isEqualTo("must-pass");
+        assertThat(journey.path("turns")).hasSize(2);
+        JsonNode guidance = journey.path("turns").get(0);
+        JsonNode materialization = journey.path("turns").get(1);
+        assertThat(guidance.at("/expected/terminal/canApply").asBoolean()).isFalse();
+        assertThat(guidance.at("/expected/terminal/preview").asText()).isEqualTo("forbidden");
+        assertThat(materialization.path("currentPageSource").asText()).isEqualTo("context");
+        assertThat(materialization.at("/expected/terminal/canApply").asBoolean()).isTrue();
+        assertThat(materialization.at("/expected/terminal/minimumSemanticAxisCount").asInt()).isPositive();
+        assertThat(materialization.at("/expected/terminal/requireAllSemanticAxesVerified").asBoolean()).isTrue();
+        assertThat(materialization.at("/lineage/sameThread").asBoolean()).isTrue();
     }
 
     @Test

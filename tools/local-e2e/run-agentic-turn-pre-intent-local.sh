@@ -13,7 +13,7 @@ if [[ -z "${MODEL:-}" ]]; then
   if [[ "$PROVIDER" == "gemini" ]]; then
     MODEL="${PRAXIS_AI_GEMINI_MODEL:-gemini-2.5-flash}"
   else
-    MODEL="${PRAXIS_AI_OPENAI_MODEL:-gpt-4.1-mini}"
+    MODEL="${PRAXIS_AI_OPENAI_MODEL:-gpt-5.4-mini}"
   fi
 fi
 USER_PROMPT="${USER_PROMPT:-quero criar algo que mostre informacoes dos empregados}"
@@ -28,6 +28,7 @@ ATTACHMENT_SUMMARIES_JSON="${ATTACHMENT_SUMMARIES_JSON:-[]}"
 CONTEXT_HINTS_JSON="${CONTEXT_HINTS_JSON:-}"
 SESSION_ID="${SESSION_ID:-local-pre-intent-session}"
 STREAM_TIMEOUT_SECONDS="${STREAM_TIMEOUT_SECONDS:-180}"
+REQUIRE_TOOL_PLAN="${REQUIRE_TOOL_PLAN:-true}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-$STARTER_ROOT/artifacts/local-e2e/agentic-turn-pre-intent-$(date +%Y%m%d-%H%M%S)}"
 
 if [[ -z "$CURRENT_PAGE_JSON" ]]; then
@@ -187,7 +188,7 @@ if [[ "$event_count" -le 0 ]]; then
 fi
 
 echo "[5/5] assert pre-intent planning observability"
-python3 - "$ARTIFACTS_DIR/turn.events.jsonl" "$ARTIFACTS_DIR/summary.json" <<'PY'
+python3 - "$ARTIFACTS_DIR/turn.events.jsonl" "$ARTIFACTS_DIR/summary.json" "$REQUIRE_TOOL_PLAN" <<'PY'
 import json
 import re
 import sys
@@ -195,6 +196,7 @@ from datetime import datetime, timezone
 
 events_path = sys.argv[1]
 summary_path = sys.argv[2]
+require_tool_plan = sys.argv[3].lower() == "true"
 
 events = []
 with open(events_path, "r", encoding="utf-8") as handle:
@@ -362,7 +364,7 @@ summary = {
     "sequence": sequence,
 }
 
-if plan_index < 0:
+if require_tool_plan and plan_index < 0:
     print("Expected tool.plan or tool.plan.skipped before intent.resolved, but neither was emitted.", file=sys.stderr)
     print(json.dumps(sequence, ensure_ascii=False, indent=2), file=sys.stderr)
     sys.exit(1)
@@ -370,7 +372,7 @@ if resolved_index < 0:
     print("Expected intent.resolved event, but it was not emitted.", file=sys.stderr)
     print(json.dumps(sequence, ensure_ascii=False, indent=2), file=sys.stderr)
     sys.exit(1)
-if plan_index >= resolved_index:
+if plan_index >= 0 and plan_index >= resolved_index:
     print("Expected tool.plan/tool.plan.skipped before intent.resolved.", file=sys.stderr)
     print(json.dumps(sequence, ensure_ascii=False, indent=2), file=sys.stderr)
     sys.exit(1)

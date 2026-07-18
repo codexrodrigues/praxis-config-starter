@@ -19,7 +19,7 @@ if [[ -z "${MODEL:-}" ]]; then
   if [[ "$PROVIDER" == "gemini" ]]; then
     MODEL="${PRAXIS_AI_GEMINI_MODEL:-gemini-2.5-flash}"
   else
-    MODEL="${PRAXIS_AI_OPENAI_MODEL:-gpt-4.1-mini}"
+    MODEL="${PRAXIS_AI_OPENAI_MODEL:-gpt-5.4-mini}"
   fi
 fi
 STREAM_TIMEOUT_SECONDS="${STREAM_TIMEOUT_SECONDS:-180}"
@@ -142,8 +142,9 @@ for repetition in range(1, repetitions + 1):
                     "userPrompt": turn["userPrompt"],
                     "expected": turn["expected"],
                     "currentPageSource": turn["currentPageSource"],
-                    "pageAssertions": turn["pageAssertions"],
                 }
+                if "pageAssertions" in turn:
+                    case["pageAssertions"] = turn["pageAssertions"]
                 if "lineage" in turn:
                     case["lineage"] = turn["lineage"]
             else:
@@ -213,15 +214,30 @@ if [[ "$REUSE_EXISTING_ARTIFACTS" != "true" ]]; then
         continue
       fi
       session_id="$(jq -r '.threadId // empty' "$previous_dir/turn.start.response.json")"
-      current_page_json="$(jq -s -c '
+      current_page_source="$(jq -r '.currentPageSource' "$case_dir/case.json")"
+      previous_preview_json="$(jq -s -c '
         [.[] | select(.type == "result")][-1].payload.preview
         | if (.uiCompositionPlan.widgets? | type) == "array" then .uiCompositionPlan
           elif (.compiledFormPatch.patch.page.widgets? | type) == "array" then .compiledFormPatch.patch.page
           else empty
           end
       ' "$previous_dir/turn.events.jsonl")"
-      if [[ -z "$session_id" || -z "$current_page_json" ]]; then
-        echo "Previous journey turn did not expose a thread and materialized preview." | tee "$case_dir/journey-precondition-error.txt" >&2
+      if [[ -z "$session_id" ]]; then
+        echo "Previous journey turn did not expose a canonical thread." | tee "$case_dir/journey-precondition-error.txt" >&2
+        printf '%s\n' '1' > "$case_dir/runner-exit-code.txt"
+        continue
+      fi
+      if [[ "$current_page_source" == "previous-preview" ]]; then
+        current_page_json="$previous_preview_json"
+        if [[ -z "$current_page_json" ]]; then
+          echo "Journey turn requires the previous materialized preview, but none was emitted." | tee "$case_dir/journey-precondition-error.txt" >&2
+          printf '%s\n' '1' > "$case_dir/runner-exit-code.txt"
+          continue
+        fi
+      elif [[ "$current_page_source" == "context" ]]; then
+        current_page_json="$(jq -c '.currentPage' "$case_dir/context.json")"
+      else
+        echo "Unsupported journey currentPageSource '$current_page_source'." | tee "$case_dir/journey-precondition-error.txt" >&2
         printf '%s\n' '1' > "$case_dir/runner-exit-code.txt"
         continue
       fi
@@ -264,6 +280,7 @@ if [[ "$REUSE_EXISTING_ARTIFACTS" != "true" ]]; then
       ENVIRONMENT="$ENVIRONMENT" \
       PROVIDER="$PROVIDER" \
       MODEL="$MODEL" \
+      REQUIRE_TOOL_PLAN="$(jq -r 'if .expected.terminal.preview == "forbidden" then "false" else "true" end' "$case_dir/case.json")" \
       STREAM_TIMEOUT_SECONDS="$STREAM_TIMEOUT_SECONDS" \
       "$SCRIPT_DIR/run-agentic-turn-pre-intent-local.sh" 2>&1 | tee "$case_dir/runner.log"
     runner_exit="${PIPESTATUS[0]}"
@@ -583,6 +600,24 @@ for run in plan["runs"]:
     if preview_expectation == "forbidden" and has_preview:
         failures.append("preview forbidden but present")
 
+    decision_diagnostics = terminal_payload.get("decisionDiagnostics")
+    decision_diagnostics = decision_diagnostics if isinstance(decision_diagnostics, dict) else {}
+    minimum_semantic_axis_count = terminal_expected.get("minimumSemanticAxisCount")
+    semantic_axis_count = decision_diagnostics.get("semanticAxisCount")
+    semantic_axis_verified_count = decision_diagnostics.get("semanticAxisVerifiedCount")
+    if isinstance(minimum_semantic_axis_count, int):
+        if not isinstance(semantic_axis_count, int) or semantic_axis_count < minimum_semantic_axis_count:
+            failures.append(
+                f"semanticAxisCount {semantic_axis_count!r} below minimum {minimum_semantic_axis_count}"
+            )
+    if terminal_expected.get("requireAllSemanticAxesVerified") is True:
+        if not isinstance(semantic_axis_count, int) or semantic_axis_count <= 0:
+            failures.append("semantic axes must exist before verification can pass")
+        elif semantic_axis_verified_count != semantic_axis_count:
+            failures.append(
+                f"semanticAxisVerifiedCount {semantic_axis_verified_count!r} expected {semantic_axis_count!r}"
+            )
+
     column_fields = []
     selected_config = {}
     if has_preview:
@@ -771,7 +806,11 @@ for run in plan["runs"]:
     ), None)
     first_feedback_seconds = elapsed(events[0], first_feedback) if first_feedback else None
     duration_seconds = elapsed(events[0], terminal)
-    duration_limit = max_guidance if case["family"] == "platform-discovery" else max_authoring
+    duration_limit = (
+        max_guidance
+        if terminal_expected["canApply"] is False and preview_expectation == "forbidden"
+        else max_authoring
+    )
     if enforce_latency:
         if first_feedback_seconds is None or first_feedback_seconds > max_first_feedback:
             failures.append(
