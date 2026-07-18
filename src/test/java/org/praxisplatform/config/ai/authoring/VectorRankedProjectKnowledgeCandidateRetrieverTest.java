@@ -83,8 +83,29 @@ class VectorRankedProjectKnowledgeCandidateRetrieverTest {
     }
 
     @Test
-    void ignoresVectorHitsWithoutCanonicalConceptRows() {
+    void fallsBackToCanonicalRepositoryWhenVectorSearchIsEmpty() {
         AgenticAuthoringProjectKnowledgeQuery query = query(5);
+        DomainKnowledgeConcept concept = concept("knowledge:fallback-empty-search");
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.search(any(), any(Integer.class), any())).thenReturn(List.of());
+        when(conceptRepository.findGovernedProjectKnowledgeCandidates(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("human-resources"),
+                eq("human-resources.funcionarios"),
+                eq("concept"),
+                any(Pageable.class)))
+                .thenReturn(List.of(concept));
+
+        List<DomainKnowledgeConcept> result = retriever.retrieve(query);
+
+        assertThat(result).containsExactly(concept);
+    }
+
+    @Test
+    void fallsBackToCanonicalRepositoryWhenVectorHitsHaveNoCanonicalRows() {
+        AgenticAuthoringProjectKnowledgeQuery query = query(5);
+        DomainKnowledgeConcept concept = concept("knowledge:fallback-stale-index");
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
         when(ragVectorStoreService.search(any(), any(Integer.class), any()))
                 .thenReturn(List.of(document("knowledge:missing")));
@@ -93,10 +114,18 @@ class VectorRankedProjectKnowledgeCandidateRetrieverTest {
                 eq("dev"),
                 eq(List.of("knowledge:missing"))))
                 .thenReturn(List.of());
+        when(conceptRepository.findGovernedProjectKnowledgeCandidates(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("human-resources"),
+                eq("human-resources.funcionarios"),
+                eq("concept"),
+                any(Pageable.class)))
+                .thenReturn(List.of(concept));
 
         List<DomainKnowledgeConcept> result = retriever.retrieve(query);
 
-        assertThat(result).isEmpty();
+        assertThat(result).containsExactly(concept);
     }
 
     private AgenticAuthoringProjectKnowledgeQuery query(int limit) {

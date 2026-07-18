@@ -3,6 +3,7 @@ package org.praxisplatform.config.dto;
 import com.fasterxml.jackson.annotation.JsonAnyGetter;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
 import lombok.Data;
@@ -109,8 +110,12 @@ public class RegistryIngestionRequest {
      */
     public static class IoEntry {
         private String name;
+        private String label;
+        private String description;
         private String type;
         private boolean required;
+        @JsonProperty("default")
+        private JsonNode defaultValue;
     }
 
     @Data

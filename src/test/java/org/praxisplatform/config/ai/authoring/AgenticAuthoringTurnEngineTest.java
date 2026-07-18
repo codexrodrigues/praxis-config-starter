@@ -8942,7 +8942,7 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void skipsOptionalPreviewKnowledgeAndAuthoringEvidenceWhenPreIntentGovernedEvidenceIsSufficient()
+    void retrievesScopedProjectKnowledgeAfterPreIntentGovernedEvidenceResolvesTheResource()
             throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
@@ -8951,6 +8951,7 @@ class AgenticAuthoringTurnEngineTest {
 
         when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(preIntentGovernedEvidenceIntent());
+        when(projectKnowledgeService.retrieve(any())).thenReturn(List.of());
         when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(new AgenticAuthoringPreviewResult(
                         true,
@@ -8966,15 +8967,22 @@ class AgenticAuthoringTurnEngineTest {
                 .execute(request(), principalContext, sink);
 
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
-        verify(projectKnowledgeService, never()).retrieve(any());
+        ArgumentCaptor<AgenticAuthoringProjectKnowledgeQuery> knowledgeQuery =
+                ArgumentCaptor.forClass(AgenticAuthoringProjectKnowledgeQuery.class);
+        verify(projectKnowledgeService).retrieve(knowledgeQuery.capture());
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().contextKey())
+                .isEqualTo("human-resources");
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().resourceKey())
+                .isEqualTo("human-resources.funcionarios");
         verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
         org.assertj.core.api.Assertions.assertThat(phases(sink))
-                .doesNotContain("intent.resolve.grounding", "projectKnowledge.retrieve", "projectKnowledge.result");
+                .doesNotContain("intent.resolve.grounding")
+                .contains("projectKnowledge.result");
         org.assertj.core.api.Assertions.assertThat(sink.payloads)
                 .noneSatisfy(payload -> {
                     JsonNode node = objectMapper.valueToTree(payload);
                     org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
-                            .isIn("projectKnowledge.retrieve", "projectKnowledge.result", "authoringEvidence.skipped");
+                            .isEqualTo("authoringEvidence.skipped");
                 });
     }
 
@@ -9931,6 +9939,66 @@ class AgenticAuthoringTurnEngineTest {
         inOrder.verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
         verify(componentCapabilitiesService).listCapabilities();
         verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
+    }
+
+    @Test
+    void composesChartProjectionIntoPlannedDashboardWithoutASecondIntentCall() throws Exception {
+        AiPrincipalContext principal = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringIntentResolutionResult chartProjection = funcionarioIntent(
+                "chart",
+                "create_chart",
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "employee_payroll_evolution",
+                        "chart_with_detail",
+                        "praxis-chart",
+                        List.of(),
+                        true,
+                        true,
+                        List.of(),
+                        true,
+                        true,
+                        "llm"));
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(chartProjection);
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine(
+                funcionarioRepository(),
+                null,
+                null,
+                coordinatedDashboardPlanner()).execute(
+                        requestWithContextHintsOnEmptyPage(
+                                "Monte uma experiência analítica coordenada de funcionários por cargo e departamento.",
+                                domainDiscoveryContext()),
+                        principal,
+                        sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .containsSubsequence("intent.resolve.composed", "preview.plan")
+                .doesNotContain("intent.resolve.reconcile", "intent.resolve.reconciliation_required");
+        verify(intentResolverService)
+                .resolve(any(), eq("tenant"), eq("user"), eq("local"));
+        ArgumentCaptor<AgenticAuthoringPlanRequest> previewRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
+        verify(previewService).preview(previewRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        org.assertj.core.api.Assertions.assertThat(previewRequest.getValue().intentResolution().artifactKind())
+                .isEqualTo("dashboard");
+        org.assertj.core.api.Assertions.assertThat(previewRequest.getValue().intentResolution().changeKind())
+                .isEqualTo("create_dashboard");
+        org.assertj.core.api.Assertions.assertThat(previewRequest.getValue().intentResolution().warnings())
+                .contains("llm-chart-projection-composed-into-pre-intent-dashboard-plan");
     }
 
     @Test

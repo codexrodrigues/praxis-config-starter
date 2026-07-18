@@ -438,13 +438,11 @@ public class AgenticAuthoringTurnEngine {
             if (route.allowsPreview() && intentResolution.valid()) {
                 AgenticAuthoringTurnStreamRequest contextualPreviewRequest =
                         withImplicitChartDetailModalActionContext(request, intentResolution);
-                AgenticAuthoringTurnStreamRequest previewRequest = resolvedByPreIntentGovernedEvidence(intentResolution)
-                        ? contextualPreviewRequest
-                        : withProjectKnowledgeContext(
-                                contextualPreviewRequest,
-                                principalContext,
-                                eventSink,
-                                intentResolution);
+                AgenticAuthoringTurnStreamRequest previewRequest = withProjectKnowledgeContext(
+                        contextualPreviewRequest,
+                        principalContext,
+                        eventSink,
+                        intentResolution);
                 if (!compactGovernedFastPath) {
                     emitStatus(
                             eventSink,
@@ -2137,6 +2135,18 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringResourceCandidatesResult plannedResourceDiscovery,
             AgenticAuthoringIntentResolutionResult intentResolution,
             boolean reconciliationAlreadyAttempted) {
+        AgenticAuthoringIntentResolutionResult composedResolution =
+                composePlannedDashboardWithChartDecision(plannedResourceDiscovery, intentResolution);
+        if (composedResolution != intentResolution) {
+            eventSink.append("thought.step", thoughtStepPayload(
+                    "intent.resolve.composed",
+                    "O planejamento confirmou um dashboard e a decisão visual confirmou seu gráfico principal; vou compor as duas evidências.",
+                    "Composed the governed dashboard plan with its chart projection.",
+                    Map.of(
+                            "plannedArtifactKind", "dashboard",
+                            "resolvedProjectionKind", "chart")));
+            return new ArtifactReconciliationOutcome(composedResolution, reconciliationAlreadyAttempted);
+        }
         if (isCompatibleWithPlannedArtifact(plannedResourceDiscovery, intentResolution)) {
             return new ArtifactReconciliationOutcome(intentResolution, reconciliationAlreadyAttempted);
         }
@@ -2189,6 +2199,50 @@ public class AgenticAuthoringTurnEngine {
                         "plannedArtifactKind", safeText(plannedResourceDiscovery.artifactKind()),
                         "resolvedArtifactKind", safeText(reconciled == null ? null : reconciled.artifactKind()))));
         return new ArtifactReconciliationOutcome(blockPersistentArtifactConflict(reconciled), true);
+    }
+
+    private AgenticAuthoringIntentResolutionResult composePlannedDashboardWithChartDecision(
+            AgenticAuthoringResourceCandidatesResult plannedResourceDiscovery,
+            AgenticAuthoringIntentResolutionResult resolution) {
+        if (plannedResourceDiscovery == null
+                || !plannedResourceDiscovery.valid()
+                || !"dashboard".equals(safeText(plannedResourceDiscovery.artifactKind()).toLowerCase(Locale.ROOT))
+                || resolution == null
+                || !resolution.valid()
+                || !"chart".equals(safeText(resolution.artifactKind()).toLowerCase(Locale.ROOT))
+                || !Set.of("create", "explore").contains(
+                        safeText(resolution.operationKind()).toLowerCase(Locale.ROOT))
+                || resolution.visualizationDecision() == null) {
+            return resolution;
+        }
+        LinkedHashSet<String> warnings = new LinkedHashSet<>(
+                resolution.warnings() == null ? List.of() : resolution.warnings());
+        warnings.add("llm-chart-projection-composed-into-pre-intent-dashboard-plan");
+        return new AgenticAuthoringIntentResolutionResult(
+                resolution.valid(),
+                resolution.operationKind(),
+                "dashboard",
+                "create_dashboard",
+                resolution.authoringProfile(),
+                resolution.targetApp(),
+                resolution.targetComponentId(),
+                resolution.target(),
+                resolution.selectedCandidate(),
+                resolution.candidates(),
+                resolution.gate(),
+                resolution.effectivePrompt(),
+                resolution.assistantMessage(),
+                resolution.assistantContent(),
+                resolution.apiCatalogAnswer(),
+                resolution.quickReplies(),
+                resolution.pendingClarification(),
+                resolution.clarificationQuestions(),
+                List.copyOf(warnings),
+                resolution.failureCodes(),
+                resolution.currentPageSummary(),
+                resolution.llmDiagnostics(),
+                resolution.visualizationDecision(),
+                null);
     }
 
     private boolean isCompatibleWithPlannedArtifact(

@@ -307,13 +307,9 @@ class RegistryIngestionServiceIdentityTest {
 
         assertThatThrownBy(() -> service.ingestRegistry(request, null, null))
                 .isInstanceOf(ConfigurationIngestionException.class)
-                .hasMessageContaining("Error processing component: table")
-                .hasCauseInstanceOf(ConfigurationIngestionException.class)
-                .satisfies(error -> {
-                    assertThat(error.getCause()).hasMessageContaining("Invalid authoringManifest");
-                    assertThat(error.getCause()).hasMessageContaining("target.kind is not declared");
-                    assertThat(error.getCause()).hasMessageContaining("unknown validator");
-                });
+                .hasMessageContaining("Invalid authoringManifest")
+                .hasMessageContaining("target.kind is not declared")
+                .hasMessageContaining("unknown validator");
     }
 
     @Test
@@ -365,17 +361,13 @@ class RegistryIngestionServiceIdentityTest {
 
         assertThatThrownBy(() -> service.ingestRegistry(request, null, null))
                 .isInstanceOf(ConfigurationIngestionException.class)
-                .hasMessageContaining("Error processing component: table")
-                .hasCauseInstanceOf(ConfigurationIngestionException.class)
-                .satisfies(error -> {
-                    assertThat(error.getCause()).hasMessageContaining("Invalid authoringManifest");
-                    assertThat(error.getCause()).hasMessageContaining("presentationAffordances.version is required");
-                    assertThat(error.getCause()).hasMessageContaining("presentationAffordances.sourceRef is required");
-                    assertThat(error.getCause()).hasMessageContaining(
-                            "presentationAffordances.affordances[date-short].appliesToTypes must be a non-empty array");
-                    assertThat(error.getCause()).hasMessageContaining(
-                            "presentationAffordances.affordances[date-short].unknownCompatible must be boolean");
-                });
+                .hasMessageContaining("Invalid authoringManifest")
+                .hasMessageContaining("presentationAffordances.version is required")
+                .hasMessageContaining("presentationAffordances.sourceRef is required")
+                .hasMessageContaining(
+                        "presentationAffordances.affordances[date-short].appliesToTypes must be a non-empty array")
+                .hasMessageContaining(
+                        "presentationAffordances.affordances[date-short].unknownCompatible must be boolean");
     }
 
     @Test

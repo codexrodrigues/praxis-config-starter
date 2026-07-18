@@ -202,9 +202,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
     $domainRuleArgs.AuthorPassword = $governanceAuthorPassword
     $domainRuleArgs.ReviewerUsername = $governanceReviewerUsername
     $domainRuleArgs.ReviewerPassword = $governanceReviewerPassword
-    if ($DomainRuleLifecycleOnly) {
-        $domainRuleArgs.ExpectAuthorApprovalIamRejection = $true
-    }
+    $domainRuleArgs.ExpectAuthorApprovalIamRejection = $true
     $domainRuleLifecycle = & (Join-Path $PSScriptRoot "Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1") @domainRuleArgs | ConvertFrom-Json
     if ($DomainRuleLifecycleOnly) {
         [pscustomobject]@{

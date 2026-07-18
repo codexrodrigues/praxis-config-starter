@@ -50,17 +50,18 @@ public class VectorRankedProjectKnowledgeCandidateRetriever
                 Math.max(query.limit(), 1) * VECTOR_OVERSAMPLE_FACTOR,
                 filter(query));
         if (documents.isEmpty()) {
-            return List.of();
+            return repositoryFallback(query);
         }
         List<String> conceptKeys = conceptKeys(documents);
         if (conceptKeys.isEmpty()) {
-            return List.of();
+            return repositoryFallback(query);
         }
         List<DomainKnowledgeConcept> concepts = conceptRepository.findWithSourceReleaseByTenantIdAndEnvironmentAndConceptKeyIn(
                 query.tenantId(),
                 query.environment(),
                 conceptKeys);
-        return rankedConcepts(conceptKeys, concepts, query.limit());
+        List<DomainKnowledgeConcept> ranked = rankedConcepts(conceptKeys, concepts, query.limit());
+        return ranked.isEmpty() ? repositoryFallback(query) : ranked;
     }
 
     private List<DomainKnowledgeConcept> repositoryFallback(AgenticAuthoringProjectKnowledgeQuery query) {

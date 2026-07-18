@@ -2338,6 +2338,56 @@ class AgenticAuthoringEffectCompilerRegistryTest {
     }
 
     @Test
+    void shouldPersistComparisonPeriodInsideCanonicalChartSourceOptions() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "bar",
+                    "source": { "kind": "derived" },
+                    "dimensions": [],
+                    "metrics": []
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operationWithHandler("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", false,
+                        "compile-domain-patch", "chart-data-resource-bind",
+                        "chartDocument.source", "chartDocument.source.options.comparisonPeriod",
+                        "chartDocument.dimensions[]", "chartDocument.metrics[]"),
+                plan("{}", """
+                        {
+                          "sourceKind": "praxis.stats",
+                          "resource": "/api/payroll/stats",
+                          "operation": "comparison",
+                          "comparisonPeriod": {
+                            "field": "competencia",
+                            "timezone": "America/Sao_Paulo",
+                            "preset": "LAST_30_DAYS",
+                            "mode": "PREVIOUS_ALIGNED"
+                          },
+                          "metrics": [{ "field": "amount", "aggregation": "sum", "alias": "amount" }]
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        assertThat(patchOperations.get(0).path("writeDeltas"))
+                .extracting(node -> node.path("path").asText())
+                .contains("chartDocument.source.options.comparisonPeriod");
+        assertThat(proposedConfig.path("chartDocument").path("source").path("options")
+                .path("comparisonPeriod").path("field").asText()).isEqualTo("competencia");
+    }
+
+    @Test
     void shouldRejectChartDomainCompilerWritesOutsideAffectedPaths() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {
@@ -2578,6 +2628,24 @@ class AgenticAuthoringEffectCompilerRegistryTest {
                 new ArrayList<>());
         registry.appendCompiledEffects(
                 "praxis-metadata-editor",
+                operationWithHandler("dateRangeShortcuts.configure", "dateRangeShortcuts",
+                        "metadata-editor-date-range-shortcut-catalog", false,
+                        "compile-domain-patch", "metadata-date-range-shortcuts-configure",
+                        "fieldMetadata.shortcuts", "fieldMetadata.inlineQuickPresets",
+                        "fieldMetadata.inlineOverlay.applyMode"),
+                plan("{}", """
+                        {
+                          "shortcuts": ["today", { "id": "payroll", "label": "Payroll", "startDate": "2026-07-01", "endDate": "2026-07-31" }],
+                          "inlineQuickPresets": { "enabled": true, "maxVisible": 2 },
+                          "applyMode": "explicit"
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-metadata-editor",
                 operationWithHandler("normalization.apply", "normalization", "metadata-editor-schema-normalizer", false,
                         "compile-domain-patch", "metadata-normalization-apply", "normalizedSeed"),
                 plan("{}", "{ \"mode\": \"preserve-advanced-properties\", \"preserveUnknownCanonicalFields\": true }"),
@@ -2587,15 +2655,19 @@ class AgenticAuthoringEffectCompilerRegistryTest {
                 new ArrayList<>());
 
         assertThat(failures).isEmpty();
-        assertThat(patchOperations).hasSize(8);
+        assertThat(patchOperations).hasSize(9);
         assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("set-metadata-field-property");
-        assertThat(patchOperations.get(7).path("op").asText()).isEqualTo("apply-metadata-normalization");
+        assertThat(patchOperations.get(7).path("op").asText()).isEqualTo("configure-metadata-date-range-shortcuts");
+        assertThat(patchOperations.get(8).path("op").asText()).isEqualTo("apply-metadata-normalization");
         assertThat(proposedConfig.path("fieldMetadata").path("label").asText()).isEqualTo("Situação");
         assertThat(proposedConfig.path("fieldMetadata").path("controlType").asText()).isEqualTo("pdx-combo");
         assertThat(proposedConfig.path("fieldMetadata").path("optionSource").path("resource").asText()).isEqualTo("/api/status");
         assertThat(proposedConfig.path("fieldMetadata").path("dependencyFields").get(0).asText()).isEqualTo("country");
         assertThat(proposedConfig.path("properties").get(0).path("editorType").asText()).isEqualTo("textarea");
         assertThat(proposedConfig.path("fieldMetadata").path("validators")).hasSize(1);
+        assertThat(proposedConfig.path("fieldMetadata").path("shortcuts")).hasSize(2);
+        assertThat(proposedConfig.path("fieldMetadata").path("inlineOverlay").path("applyMode").asText())
+                .isEqualTo("explicit");
         assertThat(proposedConfig.path("normalizedSeed").path("normalized").asBoolean()).isTrue();
         assertThat(proposedConfig.path("form").path("fieldMetadata").path("helpText").asText()).isEqualTo("Choose status");
     }

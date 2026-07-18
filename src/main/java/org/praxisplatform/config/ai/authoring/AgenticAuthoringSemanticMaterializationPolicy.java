@@ -252,7 +252,7 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
             String primaryComponent,
             JsonNode materialization) {
         if (isPageBuilderComponent(primaryComponent)) {
-            return isUiCompositionPlan(materialization);
+            return isPageBuilderMaterialization(materialization);
         }
         if (!"praxis-crud".equals(safe(primaryComponent))) {
             return false;
@@ -266,11 +266,19 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         return "praxis-page-builder".equals(value) || "praxis-dynamic-page-builder".equals(value);
     }
 
-    private static boolean isUiCompositionPlan(JsonNode materialization) {
-        return materialization != null
-                && !materialization.isMissingNode()
-                && !materialization.isNull()
-                && "praxis.ui-composition-plan".equals(safe(materialization.path("kind").asText("")));
+    private static boolean isPageBuilderMaterialization(JsonNode materialization) {
+        if (materialization == null || materialization.isMissingNode() || materialization.isNull()) {
+            return false;
+        }
+        if ("praxis.ui-composition-plan".equals(safe(materialization.path("kind").asText("")))) {
+            return true;
+        }
+        JsonNode page = materialization.path("patch").path("page");
+        // The compiled authoring envelope preserves governance diagnostics while its canonical
+        // page projection intentionally no longer carries the authoring-plan discriminator.
+        return page.path("widgets").isArray()
+                && page.path("canvas").isObject()
+                && !safe(page.path("layoutPreset").asText("")).isBlank();
     }
 
     private static String safe(String value) {

@@ -351,6 +351,42 @@ public class AgenticAuthoringLlmIntentResolverService {
                     componentCapabilities)) {
                 return resolution.map(this::withFastIntentWarning);
             }
+            if (resolution.isPresent() && shouldRepairFastVisualization(request, resolution.get())) {
+                JsonNode repairedResult = invokeJson(
+                        "intent_fast_visualization_repair",
+                        fastVisualizationRepairPrompt(
+                                request,
+                                effectivePrompt,
+                                currentPageSummary,
+                                target,
+                                fastCandidates,
+                                componentCapabilities),
+                        AiJsonSchema.ofSchema(schema()),
+                        AiCallConfig.builder()
+                                .provider(request.provider())
+                                .model(request.model())
+                                .apiKey(request.apiKey())
+                                .temperature(0.0d)
+                                .maxTokens(MAX_FAST_INTENT_RESOLUTION_TOKENS)
+                                .timeoutSeconds(fastIntentTimeoutSeconds)
+                                .build(),
+                        tenantId,
+                        userId,
+                        environment,
+                        providerInvocations);
+                Optional<AgenticAuthoringLlmIntentResolution> repaired = toResolution(repairedResult)
+                        .map(value -> withFastCandidateResourceWhenUnambiguous(value, fastCandidates));
+                if (repaired.isPresent() && fastIntentResolutionComplete(
+                        repaired.get(),
+                        target,
+                        componentCapabilities)) {
+                    return repaired
+                            .map(this::withFastIntentWarning)
+                            .map(value -> withWarning(
+                                    value,
+                                    "llm-fast-visualization-repair-used"));
+                }
+            }
             resolution.ifPresent(value -> log.debug(
                     "[AgenticAuthoringLlmIntentResolver] Fast intent pass fell back; reason={} resolved={} operation={} artifact={} selectedResourcePresent={} visualizationPresent={} axes={}",
                     fastIntentRejectionReason(value),
@@ -368,6 +404,58 @@ public class AgenticAuthoringLlmIntentResolverService {
                     safeProviderFailureSummary(rootCause(ex)));
         }
         return Optional.empty();
+    }
+
+    private boolean shouldRepairFastVisualization(
+            AgenticAuthoringIntentResolutionRequest request,
+            AgenticAuthoringLlmIntentResolution resolution) {
+        if (request == null
+                || request.contextHints() == null
+                || resolution == null
+                || !resolution.resolved()
+                || !"create".equals(valueOrDefault(resolution.operationKind(), ""))
+                || !List.of("chart", "dashboard").contains(valueOrDefault(resolution.artifactKind(), ""))) {
+            return false;
+        }
+        String plannedArtifact = request.contextHints()
+                .path("resourceDiscovery")
+                .path("artifactKind")
+                .asText("");
+        if (!List.of("chart", "dashboard").contains(plannedArtifact)) {
+            return false;
+        }
+        AgenticAuthoringVisualizationDecision decision = resolution.visualizationDecision();
+        return decision == null
+                || !StringUtils.hasText(decision.primaryComponent())
+                || decision.axes() == null
+                || decision.axes().isEmpty();
+    }
+
+    private String fastVisualizationRepairPrompt(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            JsonNode currentPageSummary,
+            AgenticAuthoringTarget target,
+            List<AgenticAuthoringCandidate> candidateOptions,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        return fastIntentPrompt(
+                        request,
+                        effectivePrompt,
+                        currentPageSummary,
+                        target,
+                        candidateOptions,
+                        componentCapabilities)
+                + """
+
+                The previous compact resolution selected an analytical artifact but omitted a complete
+                visualizationDecision. Repair that semantic decision now using the same governed evidence.
+                Return a complete intent object, not a patch. Preserve the AI-authored artifact in
+                semanticRetrievalIntent unless the user's meaning clearly requires the other analytical
+                artifact. For chart or dashboard, visualizationDecision must be non-null, primaryComponent
+                must come from authorableComponents, and axes must contain at least one grounded grouping or
+                time dimension with its metric semantics. If the evidence cannot support that decision, set
+                resolved=false instead of inventing fields or components.
+                """;
     }
 
     private Optional<AgenticAuthoringLlmIntentResolution> compactPlatformGuidanceConfirmation(
@@ -1086,6 +1174,32 @@ public class AgenticAuthoringLlmIntentResolverService {
                 resolution.warnings() == null ? List.of() : resolution.warnings());
         if (!warnings.contains("llm-fast-intent-resolution-used")) {
             warnings.add("llm-fast-intent-resolution-used");
+        }
+        return new AgenticAuthoringLlmIntentResolution(
+                resolution.resolved(),
+                resolution.operationKind(),
+                resolution.artifactKind(),
+                resolution.changeKind(),
+                resolution.selectedResourcePath(),
+                resolution.resourceSearchQuery(),
+                resolution.followUpKind(),
+                resolution.assistantMessage(),
+                resolution.quickReplies(),
+                resolution.clarificationQuestions(),
+                List.copyOf(warnings),
+                resolution.consultativeRetrievalPlan(),
+                resolution.visualizationDecision(),
+                resolution.requiresGovernedAuthoring(),
+                resolution.semanticIntentClass());
+    }
+
+    private AgenticAuthoringLlmIntentResolution withWarning(
+            AgenticAuthoringLlmIntentResolution resolution,
+            String warning) {
+        List<String> warnings = new ArrayList<>(
+                resolution.warnings() == null ? List.of() : resolution.warnings());
+        if (StringUtils.hasText(warning) && !warnings.contains(warning)) {
+            warnings.add(warning);
         }
         return new AgenticAuthoringLlmIntentResolution(
                 resolution.resolved(),
