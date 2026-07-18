@@ -2827,6 +2827,14 @@ public class AgenticAuthoringPreviewService {
         if (exactSemantic.isPresent()) {
             return exactSemantic;
         }
+        String originallyRequested = normalize(semanticAxis.path("requestedField").asText(""));
+        Optional<StatsCapabilityFieldDescriptor> exactOriginallyRequested = fields.stream()
+                .filter(field -> eligibleStatsDimension(field, operation))
+                .filter(field -> normalize(field.field()).equals(originallyRequested))
+                .findFirst();
+        if (exactOriginallyRequested.isPresent()) {
+            return exactOriginallyRequested;
+        }
         List<StatsCapabilityFieldDescriptor> eligible = fields.stream()
                 .filter(field -> eligibleStatsDimension(field, operation))
                 .toList();
@@ -2894,18 +2902,7 @@ public class AgenticAuthoringPreviewService {
         }
         String operation = normalize(statsMetric.path("operation").asText(""));
         if ("count".equals(operation)) {
-            statsMetric.remove("field");
-            statsMetric.put("alias", "total");
-            JsonNode metrics = query.path("metrics");
-            if (metrics.isArray()) {
-                for (JsonNode metric : metrics) {
-                    if (metric instanceof ObjectNode metricObject
-                            && "count".equals(normalize(metricObject.path("aggregation").asText("")))) {
-                        metricObject.remove("field");
-                        metricObject.put("alias", "total");
-                    }
-                }
-            }
+            alignStatsCountMetric(query, statsMetric);
             return true;
         }
         String requestedField = statsMetric.path("field").asText("");
@@ -2915,7 +2912,11 @@ public class AgenticAuthoringPreviewService {
                 .filter(field -> field.metrics().contains(operation))
                 .findFirst();
         if (metricCapability.isEmpty()) {
-            return false;
+            // A model-authored metric field that cannot be confirmed must not be replaced with a
+            // different arbitrary schema field. COUNT is the canonical field-free aggregate and
+            // preserves an executable chart without inventing financial or business semantics.
+            alignStatsCountMetric(query, statsMetric);
+            return true;
         }
         String canonicalField = metricCapability.get().field();
         statsMetric.put("field", canonicalField);
@@ -2929,6 +2930,22 @@ public class AgenticAuthoringPreviewService {
             }
         }
         return true;
+    }
+
+    private void alignStatsCountMetric(ObjectNode query, ObjectNode statsMetric) {
+        statsMetric.put("operation", "COUNT");
+        statsMetric.remove("field");
+        statsMetric.put("alias", "total");
+        JsonNode metrics = query.path("metrics");
+        if (metrics.isArray()) {
+            for (JsonNode metric : metrics) {
+                if (metric instanceof ObjectNode metricObject) {
+                    metricObject.put("aggregation", "count");
+                    metricObject.remove("field");
+                    metricObject.put("alias", "total");
+                }
+            }
+        }
     }
 
     private boolean alignComparisonPeriodCapability(

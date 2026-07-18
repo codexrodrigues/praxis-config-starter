@@ -120,6 +120,20 @@ class AgenticAuthoringApplyServiceTest {
     }
 
     @Test
+    void semanticPolicyAcceptsCanonicalCompiledPageForPageBuilderDecision() throws Exception {
+        ObjectNode compiledPatch = (ObjectNode) compiledPatch();
+        ObjectNode page = (ObjectNode) compiledPatch.path("patch").path("page");
+        page.put("layoutPreset", "resource-dashboard");
+        page.putObject("canvas").put("mode", "grid");
+
+        AgenticAuthoringSemanticMaterializationPolicy.ValidationResult result =
+                AgenticAuthoringSemanticMaterializationPolicy.validate(pageBuilderSemanticDecision(), compiledPatch);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+    }
+
+    @Test
     void applyRejectsMissingTerminalResultReference() throws Exception {
         AgenticAuthoringApplyRequest request = new AgenticAuthoringApplyRequest(
                 compiledPatch(),
@@ -609,6 +623,30 @@ class AgenticAuthoringApplyServiceTest {
                 "create_artifact",
                 null,
                 null,
+                null,
+                false,
+                "",
+                "",
+                "");
+    }
+
+    private AgenticAuthoringSemanticDecision pageBuilderSemanticDecision() {
+        return new AgenticAuthoringSemanticDecision(
+                "praxis-agentic-authoring-semantic-decision.v1",
+                "decision-page-builder",
+                "create",
+                "dashboard",
+                "create_artifact",
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "resource-dashboard",
+                        "dashboard",
+                        "praxis-page-builder",
+                        List.of(),
+                        true,
+                        true,
+                        "test"),
                 null,
                 false,
                 "",
