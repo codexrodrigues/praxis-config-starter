@@ -22,11 +22,142 @@ import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
+import org.praxisplatform.config.service.ResourceCapabilitiesFetchResult;
+import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
 
 @Tag("unit")
 class AgenticAuthoringResourceDiscoveryServiceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void dashboardSearchOffersOnlyResourcesWithVerifiedStatsCapabilities() {
+        AgenticAuthoringApiMetadataCandidateCatalog catalog = Mockito.mock(
+                AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate analytics = new AgenticAuthoringCandidate(
+                "/api/risk-intelligence/vw-indicadores-incidentes",
+                "post",
+                "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by&operation=post&schemaType=response",
+                "/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by",
+                "post",
+                0.91,
+                "analytics projection",
+                List.of("api-metadata", "domain-catalog-grounding", "capabilities-probe-pending"));
+        AgenticAuthoringCandidate numericCollection = new AgenticAuthoringCandidate(
+                "/api/human-resources/eventos-folha",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/eventos-folha/filter&operation=post&schemaType=response",
+                "/api/human-resources/eventos-folha/filter",
+                "post",
+                0.89,
+                "numeric collection",
+                List.of("api-metadata", "domain-catalog-grounding", "capabilities-probe-pending"));
+        when(catalog.discover(
+                Mockito.anyString(),
+                Mockito.eq("dashboard"),
+                Mockito.eq("tenant"),
+                Mockito.eq("local"),
+                Mockito.isNull())).thenReturn(List.of(numericCollection, analytics));
+
+        ResourceCapabilitiesRetrievalService capabilities = Mockito.mock(
+                ResourceCapabilitiesRetrievalService.class);
+        ObjectNode analyticsCapabilities = objectMapper.createObjectNode();
+        analyticsCapabilities.putObject("stats").putArray("fields").addObject()
+                .put("field", "severidade")
+                .put("groupByEligible", true);
+        ObjectNode collectionCapabilities = objectMapper.createObjectNode();
+        collectionCapabilities.putObject("stats").putArray("fields");
+        when(capabilities.fetchCapabilitiesResult(
+                Mockito.eq(analytics.resourcePath()),
+                Mockito.isNull(),
+                Mockito.eq("tenant"),
+                Mockito.eq("user"),
+                Mockito.eq("local"))).thenReturn(ResourceCapabilitiesFetchResult.success(
+                        analyticsCapabilities,
+                        "http://localhost" + analytics.resourcePath() + "/capabilities"));
+        when(capabilities.fetchCapabilitiesResult(
+                Mockito.eq(numericCollection.resourcePath()),
+                Mockito.isNull(),
+                Mockito.eq("tenant"),
+                Mockito.eq("user"),
+                Mockito.eq("local"))).thenReturn(ResourceCapabilitiesFetchResult.success(
+                        collectionCapabilities,
+                        "http://localhost" + numericCollection.resourcePath() + "/capabilities"));
+
+        AgenticAuthoringResourceDiscoveryService service = new AgenticAuthoringResourceDiscoveryService(
+                catalog,
+                objectMapper,
+                "praxis-service",
+                null,
+                null,
+                capabilities);
+
+        AgenticAuthoringResourceCandidatesResult result = service.search(
+                new AgenticAuthoringResourceCandidatesRequest(
+                        "Quais fontes analiticas podem alimentar este painel?",
+                        null,
+                        "dashboard",
+                        6),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .containsExactly(analytics.resourcePath());
+        assertThat(result.candidates().get(0).evidence())
+                .contains("stats-capabilities-verified")
+                .doesNotContain("capabilities-probe-pending");
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::id)
+                .containsExactly("resource-api-risk-intelligence-vw-indicadores-incidentes");
+        assertThat(result.warnings()).contains("analytics-candidates-without-verified-stats-excluded");
+        assertThat(result.diagnostics())
+                .containsEntry("analyticsCapabilityGroundingRequired", true)
+                .containsEntry("analyticsCapabilityVerifiedCandidateCount", 1)
+                .containsEntry("analyticsCapabilityExcludedCandidateCount", 1)
+                .containsEntry("analyticsCapabilityFetchCount", 2);
+    }
+
+    @Test
+    void tableSearchDoesNotRequireStatsCapabilities() {
+        AgenticAuthoringApiMetadataCandidateCatalog catalog = Mockito.mock(
+                AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate collection = new AgenticAuthoringCandidate(
+                "/api/human-resources/eventos-folha",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/eventos-folha/filter&operation=post&schemaType=response",
+                "/api/human-resources/eventos-folha/filter",
+                "post",
+                0.89,
+                "collection",
+                List.of("api-metadata", "domain-catalog-grounding"));
+        when(catalog.discover(
+                Mockito.anyString(),
+                Mockito.eq("table"),
+                Mockito.eq("tenant"),
+                Mockito.eq("local"),
+                Mockito.isNull())).thenReturn(List.of(collection));
+        ResourceCapabilitiesRetrievalService capabilities = Mockito.mock(
+                ResourceCapabilitiesRetrievalService.class);
+        AgenticAuthoringResourceDiscoveryService service = new AgenticAuthoringResourceDiscoveryService(
+                catalog,
+                objectMapper,
+                "praxis-service",
+                null,
+                null,
+                capabilities);
+
+        AgenticAuthoringResourceCandidatesResult result = service.search(
+                new AgenticAuthoringResourceCandidatesRequest(
+                        "Quero listar eventos da folha",
+                        null,
+                        "table",
+                        6),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.candidates()).containsExactly(collection);
+        assertThat(result.diagnostics()).containsEntry("analyticsCapabilityGroundingRequired", false);
+        verifyNoInteractions(capabilities);
+    }
 
     @Test
     void searchReturnsCandidatesFromApiMetadataCatalog() {

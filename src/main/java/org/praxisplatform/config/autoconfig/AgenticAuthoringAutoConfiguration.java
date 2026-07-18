@@ -268,6 +268,7 @@ public class AgenticAuthoringAutoConfiguration {
             AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog,
             ObjectProvider<AgenticAuthoringDomainCatalogCandidateEnhancer> domainCatalogCandidateEnhancer,
             ObjectProvider<AgenticAuthoringConsultativeApiCatalogProjectionService> consultativeApiCatalogProjectionService,
+            ObjectProvider<ResourceCapabilitiesRetrievalService> resourceCapabilitiesRetrievalService,
             ObjectMapper objectMapper,
             @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey) {
         return new AgenticAuthoringResourceDiscoveryService(
@@ -275,7 +276,8 @@ public class AgenticAuthoringAutoConfiguration {
                 objectMapper,
                 domainCatalogServiceKey,
                 domainCatalogCandidateEnhancer.getIfAvailable(),
-                consultativeApiCatalogProjectionService.getIfAvailable());
+                consultativeApiCatalogProjectionService.getIfAvailable(),
+                resourceCapabilitiesRetrievalService.getIfAvailable());
     }
 
     @Bean

@@ -1,15 +1,20 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 import org.praxisplatform.config.service.AiPrincipalContext;
+import org.praxisplatform.config.service.ResourceCapabilitiesFetchResult;
+import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
 
 public class AgenticAuthoringResourceDiscoveryService {
 
@@ -22,6 +27,7 @@ public class AgenticAuthoringResourceDiscoveryService {
     private final String domainCatalogServiceKey;
     private final AgenticAuthoringDomainCatalogCandidateEnhancer domainCatalogCandidateEnhancer;
     private final AgenticAuthoringConsultativeApiCatalogProjectionService consultativeApiCatalogProjectionService;
+    private final ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService;
 
     public AgenticAuthoringResourceDiscoveryService(
             AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog,
@@ -46,6 +52,7 @@ public class AgenticAuthoringResourceDiscoveryService {
                 objectMapper,
                 domainCatalogServiceKey,
                 domainCatalogCandidateEnhancer,
+                null,
                 null);
     }
 
@@ -55,11 +62,28 @@ public class AgenticAuthoringResourceDiscoveryService {
             String domainCatalogServiceKey,
             AgenticAuthoringDomainCatalogCandidateEnhancer domainCatalogCandidateEnhancer,
             AgenticAuthoringConsultativeApiCatalogProjectionService consultativeApiCatalogProjectionService) {
+        this(
+                candidateCatalog,
+                objectMapper,
+                domainCatalogServiceKey,
+                domainCatalogCandidateEnhancer,
+                consultativeApiCatalogProjectionService,
+                null);
+    }
+
+    public AgenticAuthoringResourceDiscoveryService(
+            AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog,
+            ObjectMapper objectMapper,
+            String domainCatalogServiceKey,
+            AgenticAuthoringDomainCatalogCandidateEnhancer domainCatalogCandidateEnhancer,
+            AgenticAuthoringConsultativeApiCatalogProjectionService consultativeApiCatalogProjectionService,
+            ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService) {
         this.candidateCatalog = candidateCatalog;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
         this.domainCatalogServiceKey = domainCatalogServiceKey;
         this.domainCatalogCandidateEnhancer = domainCatalogCandidateEnhancer;
         this.consultativeApiCatalogProjectionService = consultativeApiCatalogProjectionService;
+        this.resourceCapabilitiesRetrievalService = resourceCapabilitiesRetrievalService;
     }
 
     public AgenticAuthoringResourceCandidatesResult search(
@@ -111,6 +135,20 @@ public class AgenticAuthoringResourceDiscoveryService {
         diagnostics.put("groundingElapsedMs", elapsedMs(groundingStartedAtNanos));
         diagnostics.put("groundedCandidateCount", candidates.size());
         diagnostics.put("domainCatalogGroundedCandidateCount", domainCatalogGroundedCandidateCount(candidates));
+        long capabilityGroundingStartedAtNanos = System.nanoTime();
+        AnalyticsCapabilityGrounding analyticsCapabilityGrounding = groundAnalyticsCapabilities(
+                artifactKind,
+                candidates,
+                principalContext,
+                diagnostics);
+        candidates = analyticsCapabilityGrounding.candidates();
+        diagnostics.put("analyticsCapabilityGroundingElapsedMs", elapsedMs(capabilityGroundingStartedAtNanos));
+        if (analyticsCapabilityGrounding.excludedCount() > 0) {
+            warnings.add("analytics-candidates-without-verified-stats-excluded");
+        }
+        if (analyticsCapabilityGrounding.unavailable()) {
+            warnings.add("analytics-capability-grounding-unavailable");
+        }
         long consultativeProjectionStartedAtNanos = System.nanoTime();
         AgenticAuthoringConsultativeApiCatalogProjection consultativeProjection = consultativeProjection(
                 retrievalQuery,
@@ -248,7 +286,141 @@ public class AgenticAuthoringResourceDiscoveryService {
     }
 
     private boolean isWeakLexicalCandidate(AgenticAuthoringCandidate candidate) {
-        return hasEvidence(candidate, "lexical-fallback") || hasEvidence(candidate, "weak-evidence");
+        return !hasEvidence(candidate, "stats-capabilities-verified")
+                && (hasEvidence(candidate, "lexical-fallback") || hasEvidence(candidate, "weak-evidence"));
+    }
+
+    private AnalyticsCapabilityGrounding groundAnalyticsCapabilities(
+            String artifactKind,
+            List<AgenticAuthoringCandidate> candidates,
+            AiPrincipalContext principalContext,
+            Map<String, Object> diagnostics) {
+        int inputCount = candidates == null ? 0 : candidates.size();
+        diagnostics.put("analyticsCapabilityGroundingRequired", requiresVerifiedStats(artifactKind));
+        diagnostics.put("analyticsCapabilityInputCandidateCount", inputCount);
+        if (!requiresVerifiedStats(artifactKind) || inputCount == 0) {
+            diagnostics.put("analyticsCapabilityGroundingAvailable", resourceCapabilitiesRetrievalService != null);
+            diagnostics.put("analyticsCapabilityVerifiedCandidateCount", inputCount);
+            diagnostics.put("analyticsCapabilityExcludedCandidateCount", 0);
+            diagnostics.put("analyticsCapabilityFetchCount", 0);
+            return new AnalyticsCapabilityGrounding(candidates == null ? List.of() : candidates, 0, false);
+        }
+        if (resourceCapabilitiesRetrievalService == null) {
+            diagnostics.put("analyticsCapabilityGroundingAvailable", false);
+            diagnostics.put("analyticsCapabilityVerifiedCandidateCount", 0);
+            diagnostics.put("analyticsCapabilityExcludedCandidateCount", 0);
+            diagnostics.put("analyticsCapabilityFetchCount", 0);
+            return new AnalyticsCapabilityGrounding(candidates, 0, false);
+        }
+
+        diagnostics.put("analyticsCapabilityGroundingAvailable", true);
+        Map<String, ResourceCapabilitiesFetchResult> fetches = new HashMap<>();
+        List<AgenticAuthoringCandidate> verified = new ArrayList<>();
+        int excludedCount = 0;
+        for (AgenticAuthoringCandidate candidate : candidates) {
+            if (candidate == null || candidate.resourcePath() == null || candidate.resourcePath().isBlank()) {
+                excludedCount++;
+                continue;
+            }
+            ResourceCapabilitiesFetchResult result = fetches.computeIfAbsent(
+                    candidate.resourcePath(),
+                    resourcePath -> resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                            resourcePath,
+                            null,
+                            principalContext == null ? null : principalContext.tenantId(),
+                            principalContext == null ? null : principalContext.userId(),
+                            principalContext == null ? null : principalContext.environment()));
+            if (!hasVerifiedStatsFields(result)) {
+                excludedCount++;
+                continue;
+            }
+            verified.add(withVerifiedStatsEvidence(candidate, principalContext));
+        }
+        diagnostics.put("analyticsCapabilityVerifiedCandidateCount", verified.size());
+        diagnostics.put("analyticsCapabilityExcludedCandidateCount", excludedCount);
+        diagnostics.put("analyticsCapabilityFetchCount", fetches.size());
+        boolean unavailable = !fetches.isEmpty()
+                && fetches.values().stream().noneMatch(ResourceCapabilitiesFetchResult::isSuccess);
+        return new AnalyticsCapabilityGrounding(List.copyOf(verified), excludedCount, unavailable);
+    }
+
+    private boolean requiresVerifiedStats(String artifactKind) {
+        return "dashboard".equals(artifactKind) || "chart".equals(artifactKind);
+    }
+
+    private boolean hasVerifiedStatsFields(ResourceCapabilitiesFetchResult result) {
+        if (result == null || !result.isSuccess()) {
+            return false;
+        }
+        JsonNode root = result.getCapabilities();
+        if (root != null && root.path("data").path("stats").isObject()) {
+            root = root.path("data");
+        }
+        JsonNode fields = root == null ? null : root.path("stats").path("fields");
+        if (fields == null || !fields.isArray()) {
+            return false;
+        }
+        for (JsonNode field : fields) {
+            if (field.path("field").asText("").isBlank()) {
+                continue;
+            }
+            if (field.path("groupByEligible").asBoolean(false)
+                    || field.path("timeSeriesEligible").asBoolean(false)
+                    || field.path("distributionTermsEligible").asBoolean(false)
+                    || field.path("distributionHistogramEligible").asBoolean(false)
+                    || field.path("metricFieldEligible").asBoolean(false)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private AgenticAuthoringCandidate withVerifiedStatsEvidence(
+            AgenticAuthoringCandidate candidate,
+            AiPrincipalContext principalContext) {
+        LinkedHashSet<String> evidence = new LinkedHashSet<>(candidate.evidence() == null
+                ? List.of()
+                : candidate.evidence());
+        evidence.remove("capabilities-probe-pending");
+        evidence.add("stats-capabilities-verified");
+
+        AgenticAuthoringEvidenceBundle bundle = candidate.evidenceBundle();
+        List<AgenticAuthoringEvidenceBundle.Evidence> items = new ArrayList<>();
+        if (bundle != null && bundle.evidence() != null) {
+            bundle.evidence().stream()
+                    .filter(item -> !("capabilities".equals(item.source())
+                            && "capabilities_probe_pending".equals(item.kind())))
+                    .forEach(items::add);
+        }
+        items.add(new AgenticAuthoringEvidenceBundle.Evidence(
+                "capabilities",
+                "stats_capabilities_verified",
+                candidate.resourcePath() + "/capabilities",
+                "The canonical resource capability snapshot publishes eligible statistical fields.",
+                1d,
+                List.of("stats", "fields"),
+                principalContext == null ? "" : principalContext.tenantId(),
+                principalContext == null ? "" : principalContext.environment(),
+                ""));
+        AgenticAuthoringEvidenceBundle groundedBundle = AgenticAuthoringEvidenceBundle.of(
+                bundle == null ? "capabilities" : bundle.retrievalSource(),
+                items);
+        return new AgenticAuthoringCandidate(
+                candidate.resourcePath(),
+                candidate.operation(),
+                candidate.schemaUrl(),
+                candidate.submitUrl(),
+                candidate.submitMethod(),
+                candidate.score(),
+                candidate.reason(),
+                List.copyOf(evidence),
+                groundedBundle);
+    }
+
+    private record AnalyticsCapabilityGrounding(
+            List<AgenticAuthoringCandidate> candidates,
+            int excludedCount,
+            boolean unavailable) {
     }
 
     private boolean hasEvidence(AgenticAuthoringCandidate candidate, String evidence) {
