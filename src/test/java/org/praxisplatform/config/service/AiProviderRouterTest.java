@@ -132,6 +132,30 @@ class AiProviderRouterTest {
     }
 
     @Test
+    void generateTextDoesNotRenewTheOperationTimeoutForFallbackProvider() throws Exception {
+        when(openaiProvider.getIfAvailable(any())).thenReturn(openai);
+        AiProviderRouter router = new AiProviderRouter(geminiProvider, openaiProvider, xaiProvider, mockProvider);
+        ReflectionTestUtils.setField(router, "provider", "openai");
+        ReflectionTestUtils.setField(router, "providerFallbackEnabled", true);
+        ReflectionTestUtils.setField(router, "providerFallbackCandidates", "gemini");
+
+        when(openai.generateText(eq("prompt"), any())).thenAnswer(invocation -> {
+            Thread.sleep(1100L);
+            throw AiProviderCallException.timeout(
+                    "openai",
+                    new java.util.concurrent.TimeoutException("operation timed out"));
+        });
+
+        AiProviderCallException result = assertThrows(
+                AiProviderCallException.class,
+                () -> router.generateText("prompt", AiCallConfig.builder().timeoutSeconds(1).build()));
+
+        assertEquals(AiProviderCallException.Kind.TIMEOUT, result.getKind());
+        verify(openai).generateText(eq("prompt"), any());
+        verifyNoInteractions(gemini, xai, mock);
+    }
+
+    @Test
     void generateTextDoesNotFallbackForQuotaFailures() {
         when(openaiProvider.getIfAvailable(any())).thenReturn(openai);
         AiProviderRouter router = new AiProviderRouter(geminiProvider, openaiProvider, xaiProvider, mockProvider);

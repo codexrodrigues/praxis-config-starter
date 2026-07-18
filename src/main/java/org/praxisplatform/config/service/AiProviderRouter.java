@@ -182,6 +182,7 @@ public class AiProviderRouter implements AiProvider {
             Supplier<Boolean> fallbackAllowed,
             ProviderOperation<T> operation) {
         List<ProviderCandidate> candidates = resolveProviderCandidates(config);
+        long deadlineNanos = operationDeadlineNanos(config);
         RuntimeException firstRecoverableFailure = null;
         RuntimeException lastRecoverableFailure = null;
         for (int i = 0; i < candidates.size(); i++) {
@@ -190,7 +191,20 @@ public class AiProviderRouter implements AiProvider {
             if (selectedProvider == null) {
                 continue;
             }
-            AiCallConfig selectedConfig = configForCandidate(config, candidate, i == 0);
+            Integer remainingTimeoutSeconds = remainingTimeoutSeconds(config, deadlineNanos);
+            if (deadlineNanos > 0 && remainingTimeoutSeconds == null) {
+                log.warn(
+                        "[AiProviderRouter] Provider fallback budget exhausted; operation={} candidate={}/{}.",
+                        operationName,
+                        i + 1,
+                        candidates.size());
+                break;
+            }
+            AiCallConfig selectedConfig = configForCandidate(
+                    config,
+                    candidate,
+                    i == 0,
+                    remainingTimeoutSeconds);
             try {
                 return operation.execute(selectedProvider, selectedConfig);
             } catch (RuntimeException ex) {
@@ -235,6 +249,30 @@ public class AiProviderRouter implements AiProvider {
             throw lastRecoverableFailure;
         }
         throw new IllegalStateException("No AI provider candidate is active.");
+    }
+
+    private long operationDeadlineNanos(AiCallConfig config) {
+        if (config == null || config.getTimeoutSeconds() == null || config.getTimeoutSeconds() <= 0) {
+            return 0L;
+        }
+        long timeoutNanos = java.util.concurrent.TimeUnit.SECONDS.toNanos(config.getTimeoutSeconds());
+        long now = System.nanoTime();
+        return Long.MAX_VALUE - now < timeoutNanos ? Long.MAX_VALUE : now + timeoutNanos;
+    }
+
+    private Integer remainingTimeoutSeconds(AiCallConfig config, long deadlineNanos) {
+        if (deadlineNanos <= 0) {
+            return config == null ? null : config.getTimeoutSeconds();
+        }
+        long remainingNanos = deadlineNanos - System.nanoTime();
+        if (remainingNanos <= 0) {
+            return null;
+        }
+        long remainingSeconds = java.util.concurrent.TimeUnit.NANOSECONDS.toSeconds(remainingNanos);
+        if (java.util.concurrent.TimeUnit.SECONDS.toNanos(remainingSeconds) < remainingNanos) {
+            remainingSeconds++;
+        }
+        return (int) Math.max(1L, Math.min(Integer.MAX_VALUE, remainingSeconds));
     }
 
     private List<ProviderCandidate> resolveProviderCandidates(AiCallConfig config) {
@@ -294,11 +332,16 @@ public class AiProviderRouter implements AiProvider {
         }
     }
 
-    private AiCallConfig configForCandidate(AiCallConfig config, ProviderCandidate candidate, boolean primary) {
+    private AiCallConfig configForCandidate(
+            AiCallConfig config,
+            ProviderCandidate candidate,
+            boolean primary,
+            Integer remainingTimeoutSeconds) {
         AiCallConfig base = config != null ? config : AiCallConfig.builder().build();
         AiCallConfig.AiCallConfigBuilder builder = base.toBuilder()
                 .provider(candidate.provider())
-                .model(candidate.model());
+                .model(candidate.model())
+                .timeoutSeconds(remainingTimeoutSeconds);
         String primaryProvider = normalizeProvider(base.getProvider());
         if (primaryProvider == null) {
             primaryProvider = normalizeProvider(provider);

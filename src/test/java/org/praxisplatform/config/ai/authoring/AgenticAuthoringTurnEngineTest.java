@@ -10442,6 +10442,50 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void completesProviderFailureClarificationWithoutStartingASecondInference() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                null,
+                null,
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                consultativeAnswerService);
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(providerFailureClarificationIntent());
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(
+                request("quero criar algo que mostre informacoes dos empregados"),
+                principalContext,
+                sink);
+
+        assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        assertThat(phases(sink)).contains("consultative.provider-failure-clarification");
+        verify(consultativeAnswerService, never()).answer(
+                any(AgenticAuthoringTurnStreamRequest.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        verify(previewService, never()).preview(any(), any(), any(), any());
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        assertThat(result.path("assistantMessage").asText())
+                .isEqualTo("Ainda não consegui confirmar a intenção com segurança.");
+        assertThat(result.path("canApply").asBoolean()).isFalse();
+        assertThat(result.path("decisionDiagnostics").path("providerFailureClarification").asBoolean())
+                .isTrue();
+        assertThat(result.path("decisionDiagnostics").path("secondInferenceSkipped").asBoolean())
+                .isTrue();
+    }
+
+    @Test
     void emitsPreIntentToolPlanSkippedWhenPlannerBeanIsUnavailable() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();

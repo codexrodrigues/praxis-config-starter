@@ -800,6 +800,16 @@ public class AgenticAuthoringTurnEngine {
         if (groundedClarificationOutcome != null) {
             return groundedClarificationOutcome;
         }
+        groundedClarificationOutcome = maybeCompleteProviderFailureClarification(
+                request,
+                eventSink,
+                state,
+                intentResolution,
+                route,
+                providerInvocations);
+        if (groundedClarificationOutcome != null) {
+            return groundedClarificationOutcome;
+        }
         AgenticAuthoringTurnOutcome resolvedPlatformGuidance = maybeCompleteResolvedPlatformGuidance(
                 eventSink,
                 state,
@@ -883,6 +893,59 @@ public class AgenticAuthoringTurnEngine {
         resultPayload.put("decisionDiagnostics", decisionDiagnostics);
         resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
                 "result:consultative_post_intent:" + safeText(answer.category()),
+                false));
+        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        return terminalResult.appendedType("result")
+                ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
+                : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private AgenticAuthoringTurnOutcome maybeCompleteProviderFailureClarification(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringTurnState state,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringTurnRoute route,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+        if (eventSink == null
+                || eventSink.terminalReached()
+                || intentResolution == null
+                || route == null
+                || !"needs_clarification".equals(route.routeClass())
+                || !contains(intentResolution.warnings(), "llm-intent-resolution-failed")
+                || !contains(intentResolution.warnings(), "llm-provider-error")) {
+            return null;
+        }
+        eventSink.append("thought.step", streamEventPayload(
+                "consultative.provider-failure-clarification",
+                "Completed the turn from the structured semantic provider failure without starting another inference.",
+                Map.of(
+                        "routeClass", safeText(route.routeClass()),
+                        "providerFailure", true,
+                        "secondInferenceSkipped", true),
+                "consultative.provider-failure-clarification:semantic_resolution"));
+        Map<String, Object> decisionDiagnostics = decisionDiagnostics(
+                intentResolution,
+                null,
+                null,
+                request,
+                providerInvocations);
+        decisionDiagnostics.put("routeClass", safeText(route.routeClass()));
+        decisionDiagnostics.put("consultativePostIntent", false);
+        decisionDiagnostics.put("providerFailureClarification", true);
+        decisionDiagnostics.put("secondInferenceSkipped", true);
+        Map<String, Object> resultPayload = new LinkedHashMap<>();
+        resultPayload.put("intentResolution", intentResolution);
+        resultPayload.put("preview", objectMapper.createObjectNode());
+        resultPayload.put("assistantMessage", publicAssistantMessage(intentResolution.assistantMessage()));
+        resultPayload.put("assistantContent", intentResolution.assistantContent());
+        resultPayload.put("quickReplies", intentResolution.quickReplies() == null
+                ? List.of()
+                : intentResolution.quickReplies());
+        resultPayload.put("canApply", false);
+        resultPayload.put("decisionDiagnostics", decisionDiagnostics);
+        resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
+                "result:provider_failure_clarification",
                 false));
         AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
         return terminalResult.appendedType("result")
