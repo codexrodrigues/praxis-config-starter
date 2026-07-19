@@ -38,3 +38,20 @@ Provas focais posteriores:
 ## Próximo gate
 
 Não executar novo `extended x3` até corrigir locale, grounding de stats e timestamps. Depois, repetir o mesmo corpus com meta de 100% must-pass, pelo menos 95% extended, zero duração negativa e limites de custo/tokens explicitamente aprovados.
+
+## Fechamento focal posterior
+
+As três lacunas foram tratadas sem criar uma semântica paralela:
+
+- o Page Builder projeta `pageIdentity.locale` como `contextHints.responseLocale`, e os dois caminhos compactos de orientação governam explicitamente o idioma da resposta;
+- a apresentação final preserva respostas não portuguesas, evitando traduzir termos ingleses pela normalização editorial de PT-BR;
+- o Preview passou a consumir os aliases já publicados em `resource.capabilities.stats.fields` depois que intenção, recurso e eixo já foram semanticamente resolvidos;
+- o verificador de fases não calcula duração quando os eventos não formam um intervalo cronológico válido.
+
+Provas reais focais com o Quickstart empacotado explicitamente contra `praxis-config-starter 0.1.0-rc.85`:
+
+- `platform-guidance-to-employee-dashboard-pt`: 2/2 turnos aprovados; o turno de materialização terminou com `canApply=true`, `statsExecutionField=departamento`, `statsVerified=true` e `resourceStatsGrounding.verified=true`;
+- `platform-what-can-i-do-en`: 1/1 aprovado com `gpt-5.6-terra`, 7.431 tokens, custo estimado de USD 0,005921 e resposta em inglês;
+- nenhuma métrica negativa foi publicada na jornada focal; intervalos sem ordenação válida passaram a ser representados como indisponíveis.
+
+O `extended x3` completo continua sendo gate de fechamento de corte, não uma chamada a repetir durante cada ajuste local. O próximo passo recomendado é executá-lo uma única vez depois do merge destas correções e, em seguida, fechar o browser production-like do Page Builder.

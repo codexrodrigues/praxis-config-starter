@@ -239,6 +239,14 @@ public final class AgenticAuthoringPresentationText {
         return restoreCanonicalConfigPaths(cleaned);
     }
 
+    public static String assistantReply(String value, String responseLocale) {
+        String locale = safe(responseLocale);
+        if (!locale.isBlank() && !locale.toLowerCase(Locale.ROOT).startsWith("pt")) {
+            return display(value);
+        }
+        return assistantReply(value);
+    }
+
     public static String titleCase(String value) {
         String text = display(value);
         if (text.isBlank()) {

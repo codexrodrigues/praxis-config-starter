@@ -125,6 +125,7 @@ runs = []
 for repetition in range(1, repetitions + 1):
     for kind, unit in selected:
         context = deepcopy(contexts[unit["contextRef"]])
+        context.setdefault("contextHints", {})["responseLocale"] = unit["locale"]
         apply_target = (context.get("contextHints") or {}).get("agenticApplyTarget")
         if apply_target is not None:
             apply_target["componentId"] = f"assistant-consistency-{repetition}-{unit['id']}"

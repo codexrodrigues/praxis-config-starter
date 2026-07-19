@@ -283,7 +283,9 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         AgenticAuthoringTurnStreamRequest base = request(
                 "O que posso fazer aqui?",
                 objectMapper.createObjectNode(),
-                objectMapper.createObjectNode().put("source", "page-builder"));
+                objectMapper.createObjectNode()
+                        .put("source", "page-builder")
+                        .put("responseLocale", "en-US"));
         AgenticAuthoringTurnStreamRequest requestWithoutRecommendation = new AgenticAuthoringTurnStreamRequest(
                 base.userPrompt(), base.targetApp(), base.targetComponentId(), base.currentRoute(),
                 base.currentPage(), base.selectedWidgetKey(), base.provider(), base.model(), base.apiKey(),
@@ -310,6 +312,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("praxis-dynamic-form")
                 .contains("praxis-table")
                 .contains("praxis-chart")
+                .contains("Canonical response locale: en-US")
                 .contains("recommendedIntent is optional evidence");
         assertThat(promptCaptor.getValue()).doesNotContain("\"recommendedIntent\"");
     }

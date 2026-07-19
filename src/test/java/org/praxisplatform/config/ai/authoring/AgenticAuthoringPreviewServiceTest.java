@@ -4461,12 +4461,12 @@ class AgenticAuthoringPreviewServiceTest {
     private ObjectNode employeeStatsCapabilities() {
         ObjectNode capabilities = objectMapper.createObjectNode();
         ArrayNode fields = capabilities.putObject("stats").putArray("fields");
-        fields.addObject()
+        ObjectNode department = fields.addObject()
                 .put("field", "departamento")
-                .put("label", "Departamento")
                 .put("keyAndLabelDistinct", true)
-                .put("groupByEligible", true)
-                .putArray("metrics").add("COUNT");
+                .put("groupByEligible", true);
+        department.putArray("aliases").add("departamento").add("departamentos").add("centro de custo");
+        department.putArray("metrics").add("COUNT");
         fields.addObject()
                 .put("field", "cargoNome")
                 .put("label", "Cargo Nome")

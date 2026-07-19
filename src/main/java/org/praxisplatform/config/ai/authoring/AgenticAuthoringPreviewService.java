@@ -2781,6 +2781,7 @@ public class AgenticAuthoringPreviewService {
             result.add(new StatsCapabilityFieldDescriptor(
                     fieldName,
                     field.path("label").asText("").trim(),
+                    textValues(field.path("aliases")),
                     normalizedTextValues(field.path("metrics")),
                     normalizedTextValues(field.path("modes")),
                     field.path("groupByEligible").asBoolean(false),
@@ -2800,6 +2801,19 @@ public class AgenticAuthoringPreviewService {
                 String normalized = normalize(value.asText("")).replace('_', '-');
                 if (!normalized.isBlank()) {
                     result.add(normalized);
+                }
+            }
+        }
+        return Set.copyOf(result);
+    }
+
+    private Set<String> textValues(JsonNode values) {
+        Set<String> result = new LinkedHashSet<>();
+        if (values != null && values.isArray()) {
+            for (JsonNode value : values) {
+                String text = value.asText("").trim();
+                if (!text.isBlank()) {
+                    result.add(text);
                 }
             }
         }
@@ -2860,9 +2874,19 @@ public class AgenticAuthoringPreviewService {
         String axisLabel = normalize(semanticAxis.path("label").asText(""));
         String capabilityLabel = normalize(capability.label());
         int score = !axisLabel.isBlank() && axisLabel.equals(capabilityLabel) ? 12 : 0;
+        Set<String> normalizedAliases = capability.aliases().stream()
+                .map(this::normalize)
+                .filter(alias -> !alias.isBlank())
+                .collect(java.util.stream.Collectors.toSet());
+        if (normalizedAliases.contains(normalize(semanticAxis.path("concept").asText("")))
+                || normalizedAliases.contains(normalize(semanticAxis.path("field").asText("")))
+                || normalizedAliases.contains(axisLabel)) {
+            score = Math.max(score, 12);
+        }
         Set<String> axisTokens = semanticAxisTokens(semanticAxis);
         Set<String> capabilityTokens = new LinkedHashSet<>(tokens(capability.field()));
         capabilityTokens.addAll(tokens(capability.label()));
+        capability.aliases().forEach(alias -> capabilityTokens.addAll(tokens(alias)));
         for (String token : axisTokens) {
             if (capabilityTokens.contains(token)) {
                 score += 2;
@@ -6150,6 +6174,7 @@ public class AgenticAuthoringPreviewService {
     private record StatsCapabilityFieldDescriptor(
             String field,
             String label,
+            Set<String> aliases,
             Set<String> metrics,
             Set<String> modes,
             boolean groupByEligible,

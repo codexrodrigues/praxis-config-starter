@@ -240,11 +240,14 @@ def elapsed_between_event_indices(start_index, end_index):
         return None
     if start_index < 0 or end_index < 0 or start_index >= len(events) or end_index >= len(events):
         return None
+    if end_index <= start_index:
+        return None
     start = event_timestamp(events[start_index])
     end = event_timestamp(events[end_index])
     if start is None or end is None:
         return None
-    return round((end - start).total_seconds(), 3)
+    elapsed = (end - start).total_seconds()
+    return round(elapsed, 3) if elapsed >= 0 else None
 
 def first_phase_index(phase_name, event_type_name=None):
     return first_index(

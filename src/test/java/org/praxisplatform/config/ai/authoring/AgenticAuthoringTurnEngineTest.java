@@ -243,8 +243,8 @@ class AgenticAuthoringTurnEngineTest {
                 null,
                 List.of(),
                 new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
-                "O que posso fazer aqui?",
-                "Posso explicar os componentes governados disponíveis.",
+                "What can I do here?",
+                "Create dashboards with detail tables, filters, and forms.",
                 null,
                 null,
                 List.of(createForm),
@@ -274,8 +274,10 @@ class AgenticAuthoringTurnEngineTest {
 
         AgenticAuthoringTurnOutcome outcome = engine.execute(
                 requestWithContextHints(
-                        "O que posso fazer aqui?",
-                        objectMapper.createObjectNode().put("includeLlmDiagnostics", true)),
+                        "What can I do here?",
+                        objectMapper.createObjectNode()
+                                .put("includeLlmDiagnostics", true)
+                                .put("responseLocale", "en-US")),
                 principalContext,
                 sink);
 
@@ -285,6 +287,8 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(result.path("quickReplies").path(0).path("id").asText())
                 .isEqualTo("platform-create-form");
         org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
+                .isEqualTo("Create dashboards with detail tables, filters, and forms.");
         org.assertj.core.api.Assertions.assertThat(
                 result.path("decisionDiagnostics").path("resolvedIntentAnswerUsed").asBoolean()).isTrue();
         org.assertj.core.api.Assertions.assertThat(

@@ -9,6 +9,14 @@ import org.junit.jupiter.api.Test;
 class AgenticAuthoringPresentationTextTest {
 
     @Test
+    void assistantReplyPreservesEnglishLanguageWhenResponseLocaleIsEnglish() {
+        String message = "Create dashboards with detail tables, filters, and forms.";
+
+        assertThat(AgenticAuthoringPresentationText.assistantReply(message, "en-US"))
+                .isEqualTo(message);
+    }
+
+    @Test
     void displayNormalizesCommonPortugueseBusinessTermsWithoutChangingTechnicalKeys() {
         assertThat(AgenticAuthoringPresentationText.display(
                 "analytics folha pagamento: boa para analises, indicadores e graficos"))

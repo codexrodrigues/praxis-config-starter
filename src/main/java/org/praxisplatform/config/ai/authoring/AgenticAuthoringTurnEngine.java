@@ -937,7 +937,7 @@ public class AgenticAuthoringTurnEngine {
         Map<String, Object> resultPayload = new LinkedHashMap<>();
         resultPayload.put("intentResolution", intentResolution);
         resultPayload.put("preview", objectMapper.createObjectNode());
-        resultPayload.put("assistantMessage", publicAssistantMessage(intentResolution.assistantMessage()));
+        resultPayload.put("assistantMessage", publicAssistantMessage(intentResolution.assistantMessage(), request));
         resultPayload.put("assistantContent", intentResolution.assistantContent());
         resultPayload.put("quickReplies", intentResolution.quickReplies() == null
                 ? List.of()
@@ -999,7 +999,7 @@ public class AgenticAuthoringTurnEngine {
         Map<String, Object> resultPayload = new LinkedHashMap<>();
         resultPayload.put("intentResolution", intentResolution);
         resultPayload.put("preview", objectMapper.createObjectNode());
-        resultPayload.put("assistantMessage", publicAssistantMessage(intentResolution.assistantMessage()));
+        resultPayload.put("assistantMessage", publicAssistantMessage(intentResolution.assistantMessage(), request));
         resultPayload.put("assistantContent", intentResolution.assistantContent());
         resultPayload.put("quickReplies", intentResolution.quickReplies() == null
                 ? List.of()
@@ -5207,6 +5207,13 @@ public class AgenticAuthoringTurnEngine {
 
     private String publicAssistantMessage(String value) {
         return AgenticAuthoringPresentationText.assistantReply(safeText(value));
+    }
+
+    private String publicAssistantMessage(String value, AgenticAuthoringTurnStreamRequest request) {
+        String responseLocale = request == null || request.contextHints() == null
+                ? ""
+                : request.contextHints().path("responseLocale").asText("");
+        return AgenticAuthoringPresentationText.assistantReply(safeText(value), responseLocale);
     }
 
     private String presentationText(String value) {

@@ -377,7 +377,7 @@
         },
         "assistantMessage": {
           "minimumCharacters": 80,
-          "requiredConceptGroups": [["form"], ["table"], ["chart", "dashboard"], ["filter"]],
+          "requiredConceptGroups": [["form", "forms"], ["table", "tables"], ["chart", "charts", "dashboard", "dashboards"], ["filter", "filters"]],
           "forbiddenTerms": ["json", "schema", "changeKind", "operationKind", "artifactKind", "tool loop"]
         },
         "safety": {

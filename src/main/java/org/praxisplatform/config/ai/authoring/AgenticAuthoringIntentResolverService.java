@@ -1168,7 +1168,9 @@ public class AgenticAuthoringIntentResolverService {
         if (shouldHideTechnicalAddresses(request, operationKind, artifactKind, llmRequiresGovernedAuthoring)) {
             assistantMessage = sanitizePresentationText(assistantMessage, selectedCandidate, candidates);
         }
-        assistantMessage = AgenticAuthoringPresentationText.assistantReply(assistantMessage);
+        assistantMessage = AgenticAuthoringPresentationText.assistantReply(
+                assistantMessage,
+                request.contextHints() == null ? "" : jsonText(request.contextHints(), "responseLocale"));
         assistantMessage = conciseAssistantMessage(assistantMessage);
         boolean promotedAssistantChoiceToClarification = shouldPromoteAssistantChoiceToClarification(
                 llmIntent,

@@ -400,6 +400,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             AiPrincipalContext principalContext) {
         String governedDomainContext = governedDomainContext(request, principalContext);
         ObjectNode context = planningContext(request, governedDomainContext);
+        String responseLocale = request.contextHints() == null
+                ? ""
+                : text(request.contextHints(), "responseLocale");
         return """
                 Praxis first semantic orientation and pre-intent tool planner. Decide semantically and without keyword routing
                 whether this turn is platform guidance or should continue to governed authoring.
@@ -410,7 +413,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Set semanticIntentClass=platform_guidance when the user asks what can be done here, how Praxis or
                 this assistant can help, what a useful next step is, or asks for general improvement guidance without
                 requesting a concrete change. In that case, set shouldRetrieveGovernedResources=false and answer in
-                assistantMessage naturally in the user's language. Ground the answer in platformGuide,
+                assistantMessage in responseLocale when it is present; otherwise use the user's language. Do not infer
+                a different response language from domain labels. Ground the answer in platformGuide,
                 authorableComponents, governedDomainContext, runtimeContext and the components already on the page.
                 Be friendly and concrete. Do not claim a change was made and do not ask for technical endpoints.
 
@@ -439,8 +443,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Use artifactKind dashboard when the requested outcome depends on multiple coordinated analytical
                 regions such as filters, KPIs, multiple charts and a detail/list/table surface. Use artifactKind page
                 for general layout or content composition where analytics are not the dominant requested outcome.
+                Canonical response locale: %s
                 Context JSON: %s
-                """.formatted(context.toString());
+                """.formatted(responseLocale, context.toString());
     }
 
     private ObjectNode planningContext(

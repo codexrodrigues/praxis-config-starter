@@ -847,7 +847,8 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                     "source": "page-builder-assistant-empty-state",
                     "opportunityId": "page-builder.platform-capabilities.explore",
                     "semanticScope": "platform-capabilities"
-                  }
+                  },
+                  "responseLocale": "en-US"
                 }
                 """);
         AgenticAuthoringLlmIntentResolverService service =
@@ -886,6 +887,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("Do not ask a follow-up question or")
                 .contains("page-builder.platform-capabilities.explore")
                 .contains("platform-capabilities")
+                .contains("Canonical response locale: en-US")
                 .contains("praxis-chart")
                 .doesNotContain("praxis-agentic-authoring-fast-intent-context.v1");
         assertThat(schemaCaptor.getValue().jsonSchema())

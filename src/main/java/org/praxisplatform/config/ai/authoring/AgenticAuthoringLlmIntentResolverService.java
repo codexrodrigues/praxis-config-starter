@@ -548,6 +548,9 @@ public class AgenticAuthoringLlmIntentResolverService {
             AgenticAuthoringTarget target,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
             String governedDomainContext) {
+        String responseLocale = request.contextHints() == null
+                ? ""
+                : nullableText(request.contextHints(), "responseLocale");
         ObjectNode context = objectMapper.createObjectNode();
         context.put("schemaVersion", "praxis-platform-guidance-confirmation-context.v1");
         context.put("userPrompt", valueOrDefault(effectivePrompt, request.userPrompt()));
@@ -603,16 +606,19 @@ public class AgenticAuthoringLlmIntentResolverService {
                 source, set matchesSemanticScope=false and semanticIntentClass="other" so the complete governed
                 resolver can decide the request.
 
-                When the scope matches, answer naturally in the user's language using only the governed component
-                capabilities supplied here. Be friendly, concise and concrete. Mention useful examples such as
+                When the scope matches, answer in the canonical response locale below when it is present; otherwise
+                use the user's language. Do not infer a different response language from domain labels. Use only the
+                governed component capabilities supplied here. Be friendly, concise and concrete. Mention useful examples such as
                 forms, tables, charts, filters or page composition only when supported by the supplied catalog,
                 and finish with one helpful next action stated declaratively. Do not ask a follow-up question or
                 request confirmation in this advisory answer. Do not claim that anything was already created or applied.
                 When the scope does not match, use an empty assistantMessage.
 
+                Canonical response locale: %s
+
                 Compact governed context:
                 %s
-                """.formatted(context.toPrettyString());
+                """.formatted(responseLocale, context.toPrettyString());
     }
 
     private String compactPlatformGuidanceSchema() {
