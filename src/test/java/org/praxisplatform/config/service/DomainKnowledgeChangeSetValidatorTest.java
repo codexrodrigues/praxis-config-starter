@@ -29,7 +29,8 @@ class DomainKnowledgeChangeSetValidatorTest {
         assertThat(report.warningCount()).isZero();
         assertThat(report.issues()).isEmpty();
         assertThat(report.proposedOperationTypes()).containsExactly("add_evidence");
-        assertThat(report.executableOperationTypes()).containsExactly("add_evidence", "revert_evidence");
+        assertThat(report.executableOperationTypes()).containsExactly(
+                "add_alias", "add_binding", "add_evidence", "add_relationship", "create_concept", "revert_evidence");
         assertThat(report.executablePatchOperationTypes()).containsExactly("add_evidence");
         assertThat(report.nonExecutableOperationTypes()).isEmpty();
     }
@@ -58,15 +59,15 @@ class DomainKnowledgeChangeSetValidatorTest {
     }
 
     @Test
-    void rejectsProposedOperationWithoutCanonicalApplier() {
+    void rejectsRemainingProposedOperationWithoutCanonicalApplier() {
         var request = new DomainKnowledgeChangeSetCreateRequest(
-                "project-knowledge:employees:create-concept:v1",
+                "project-knowledge:employees:update-summary:v1",
                 "proposed",
                 "llm",
                 "openai:gpt-5.4",
-                "Create concept",
-                "Concept writes must wait for an executable applier.",
-                List.of(operation("op-create-concept", "create_concept", target(), payload())));
+                "Update concept summary",
+                "Summary updates must wait for an executable applier.",
+                List.of(operation("op-update-summary", "update_concept_summary", target(), payload())));
 
         var report = validator.validateCreateRequest(TENANT, ENVIRONMENT, request);
 
@@ -74,9 +75,87 @@ class DomainKnowledgeChangeSetValidatorTest {
         assertThat(report.issues())
                 .extracting(DomainKnowledgeChangeSetValidationIssue::code)
                 .contains("non_executable_operation_type");
-        assertThat(report.proposedOperationTypes()).containsExactly("create_concept");
+        assertThat(report.proposedOperationTypes()).containsExactly("update_concept_summary");
         assertThat(report.executablePatchOperationTypes()).isEmpty();
-        assertThat(report.nonExecutableOperationTypes()).containsExactly("create_concept");
+        assertThat(report.nonExecutableOperationTypes()).containsExactly("update_concept_summary");
+    }
+
+    @Test
+    void acceptsInferredConceptWithClaimLevelProvenance() {
+        var request = new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:hr:workforce-management:v1",
+                "proposed",
+                "llm",
+                "openai:gpt-5.6-mini",
+                "Propose workforce management capability",
+                "The reviewed HR pilot needs a semantic capability above API resources.",
+                List.of(operation(
+                        "op-create-workforce-capability",
+                        "create_concept",
+                        conceptTarget("human-resources.capability.workforce-management"),
+                        semanticConceptPayload())));
+
+        var report = validator.validateCreateRequest(TENANT, ENVIRONMENT, request);
+
+        assertThat(report.valid()).isTrue();
+        assertThat(report.executablePatchOperationTypes()).containsExactly("create_concept");
+        assertThat(report.nonExecutableOperationTypes()).isEmpty();
+    }
+
+    @Test
+    void rejectsLlmSemanticClaimWithoutInferenceProvenance() {
+        JsonNode payload = semanticConceptPayload();
+        ((com.fasterxml.jackson.databind.node.ObjectNode) payload.path("provenance"))
+                .put("sourceClass", "authored")
+                .remove("model");
+        var request = new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:hr:invalid-provenance:v1",
+                "proposed",
+                "llm",
+                "openai:gpt-5.6-mini",
+                "Invalid authored claim",
+                "An LLM cannot self-declare an authored claim.",
+                List.of(operation(
+                        "op-invalid-provenance",
+                        "create_concept",
+                        conceptTarget("human-resources.capability.invalid"),
+                        payload)));
+
+        var report = validator.validateCreateRequest(TENANT, ENVIRONMENT, request);
+
+        assertThat(report.valid()).isFalse();
+        assertThat(report.issues())
+                .extracting(DomainKnowledgeChangeSetValidationIssue::code)
+                .contains("llm_claim_must_be_inferred");
+    }
+
+    @Test
+    void rejectsDuplicateClaimIdentityBeforeApply() {
+        var request = new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:hr:duplicate-claim:v1",
+                "proposed",
+                "llm",
+                "openai:gpt-5.6-mini",
+                "Duplicate claim",
+                "A claim identity cannot authorize two semantic subjects.",
+                List.of(
+                        operation(
+                                "op-first-claim",
+                                "create_concept",
+                                conceptTarget("human-resources.capability.first"),
+                                semanticConceptPayload()),
+                        operation(
+                                "op-second-claim",
+                                "create_concept",
+                                conceptTarget("human-resources.capability.second"),
+                                semanticConceptPayload())));
+
+        var report = validator.validateCreateRequest(TENANT, ENVIRONMENT, request);
+
+        assertThat(report.valid()).isFalse();
+        assertThat(report.issues())
+                .extracting(DomainKnowledgeChangeSetValidationIssue::code)
+                .contains("claim_id_duplicate");
     }
 
     @Test
@@ -305,6 +384,35 @@ class DomainKnowledgeChangeSetValidatorTest {
                 .put("environment", ENVIRONMENT)
                 .put("subjectType", "concept")
                 .put("conceptKey", "human-resources.funcionarios.field.cpf");
+    }
+
+    private JsonNode conceptTarget(String conceptKey) {
+        return objectMapper.createObjectNode()
+                .put("tenantId", TENANT)
+                .put("environment", ENVIRONMENT)
+                .put("conceptKey", conceptKey);
+    }
+
+    private JsonNode semanticConceptPayload() {
+        var provenance = objectMapper.createObjectNode()
+                .put("claimId", "claim:hr:workforce-management:v1")
+                .put("sourceClass", "inferred")
+                .put("derivationActivity", "semantic-pilot-synthesis")
+                .put("model", "gpt-5.6-mini")
+                .put("templateHash", "sha256:semantic-pilot-v1");
+        provenance.set("sourceRefs", objectMapper.createArrayNode()
+                .add("domain-catalog:praxis-service:human-resources:025f0d304a66669b"));
+        provenance.set("agent", objectMapper.createObjectNode()
+                .put("type", "model")
+                .put("id", "openai:gpt-5.6-mini"));
+        return objectMapper.createObjectNode()
+                .put("contextKey", "human-resources")
+                .put("nodeType", "business_capability")
+                .put("label", "Workforce Management")
+                .put("description", "Manage the employee lifecycle and workforce structure.")
+                .put("semanticOwner", "people-operations")
+                .put("aiVisibility", "allow")
+                .set("provenance", provenance);
     }
 
     private JsonNode payload() {

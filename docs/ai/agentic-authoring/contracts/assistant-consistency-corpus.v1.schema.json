@@ -87,9 +87,19 @@
         "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
         "userPrompt": { "type": "string", "minLength": 1 },
         "currentPageSource": { "enum": ["context", "previous-preview"] },
+        "quickReplySelection": { "$ref": "#/$defs/quickReplySelection" },
         "expected": { "$ref": "#/$defs/expected" },
         "lineage": { "$ref": "#/$defs/lineage" },
         "pageAssertions": { "$ref": "#/$defs/pageAssertions" }
+      }
+    },
+    "quickReplySelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["replyId", "requireSemanticDecision"],
+      "properties": {
+        "replyId": { "type": "string", "minLength": 1 },
+        "requireSemanticDecision": { "const": true }
       }
     },
     "lineage": {
@@ -99,7 +109,10 @@
       "properties": {
         "sameThread": { "const": true },
         "distinctTurn": { "const": true },
-        "activeDecisionFromPreviousTurn": { "const": true }
+        "activeDecisionFromPreviousTurn": { "const": true },
+        "activeDecisionSource": {
+          "enum": ["previous-terminal", "selected-quick-reply"]
+        }
       }
     },
     "pageAssertions": {

@@ -41,12 +41,30 @@ public interface DomainKnowledgeConceptRepository extends JpaRepository<DomainKn
           and c.lifecycle = 'active'
           and c.curationStatus = 'approved'
           and c.aiVisibility in ('allow', 'mask', 'summarize_only')
+        order by c.conceptKey asc
+    """)
+    List<DomainKnowledgeConcept> findGovernedProjectKnowledgeForDerivedIndex(
+            @Param("tenantId") String tenantId,
+            @Param("environment") String environment);
+
+    @Query("""
+        select c from DomainKnowledgeConcept c
+        left join fetch c.sourceRelease
+        where c.tenantId = :tenantId
+          and c.environment = :environment
+          and c.lifecycle = 'active'
+          and c.curationStatus = 'approved'
+          and c.aiVisibility in ('allow', 'mask', 'summarize_only')
           and (:contextKey is null or :contextKey = ''
             or c.contextKey is null or c.contextKey = '' or c.contextKey = :contextKey)
           and (:resourceKey is null or :resourceKey = ''
             or c.resourceKey is null or c.resourceKey = '' or c.resourceKey = :resourceKey)
           and (:nodeType is null or :nodeType = '' or c.nodeType = :nodeType)
-        order by c.contextKey asc nulls first, c.resourceKey asc nulls first, c.conceptKey asc
+        order by
+          case when c.resourceKey is null or c.resourceKey = '' then 0 else 1 end asc,
+          c.contextKey asc nulls first,
+          c.resourceKey asc nulls first,
+          c.conceptKey asc
     """)
     List<DomainKnowledgeConcept> findGovernedProjectKnowledgeCandidates(
             @Param("tenantId") String tenantId,

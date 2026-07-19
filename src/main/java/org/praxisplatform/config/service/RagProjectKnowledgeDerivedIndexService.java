@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.domain.DomainKnowledgeConcept;
@@ -13,6 +14,8 @@ import org.praxisplatform.config.rag.RagDocumentIdentity;
 import org.praxisplatform.config.rag.RagProjectKnowledgeMetadata;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
+import org.praxisplatform.config.repository.DomainKnowledgeConceptRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository;
 import org.springframework.ai.document.Document;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -33,6 +36,8 @@ public class RagProjectKnowledgeDerivedIndexService implements ProjectKnowledgeD
     private final RagVectorStoreService ragVectorStoreService;
     private final ObjectMapper objectMapper;
     private final AiSensitiveDataRedactor redactor;
+    private final DomainKnowledgeConceptRepository conceptRepository;
+    private final DomainKnowledgeEvidenceRepository evidenceRepository;
 
     @Override
     public void evidenceActivated(DomainKnowledgeConcept concept, DomainKnowledgeEvidence evidence) {
@@ -59,6 +64,52 @@ public class RagProjectKnowledgeDerivedIndexService implements ProjectKnowledgeD
                 evidence.getEvidenceKey());
     }
 
+    @Override
+    public ReconciliationResult reconcileRelease(String tenantId, String environment, String releaseId) {
+        String resolvedTenant = RagDocumentIdentity.normalize(tenantId);
+        String resolvedEnvironment = RagDocumentIdentity.normalize(environment);
+        String resolvedRelease = RagDocumentIdentity.resolveReleaseId(releaseId, null, null);
+        if (!ragVectorStoreService.isAvailable()) {
+            return new ReconciliationResult(
+                    resolvedTenant, resolvedEnvironment, resolvedRelease, 0, 0, false);
+        }
+
+        List<DomainKnowledgeConcept> concepts = conceptRepository
+                .findGovernedProjectKnowledgeForDerivedIndex(resolvedTenant, resolvedEnvironment);
+        Map<UUID, DomainKnowledgeConcept> conceptsById = concepts.stream()
+                .filter(concept -> concept.getId() != null)
+                .collect(java.util.stream.Collectors.toMap(
+                        DomainKnowledgeConcept::getId,
+                        concept -> concept,
+                        (left, right) -> left,
+                        java.util.LinkedHashMap::new));
+        List<DomainKnowledgeEvidence> evidence = conceptsById.isEmpty()
+                ? List.of()
+                : evidenceRepository.findActiveProjectKnowledgeEvidenceForDerivedIndex(
+                        resolvedTenant,
+                        resolvedEnvironment,
+                        List.copyOf(conceptsById.keySet()));
+        List<Document> documents = evidence.stream()
+                .filter(item -> conceptsById.containsKey(item.getSubjectId()))
+                .filter(item -> resolvedRelease.equals(releaseId(conceptsById.get(item.getSubjectId()), item)))
+                .map(item -> toDocument(conceptsById.get(item.getSubjectId()), item))
+                .toList();
+
+        ragVectorStoreService.deleteDocumentsByRelease(
+                resolvedTenant,
+                resolvedEnvironment,
+                resolvedRelease,
+                RagResourceTypes.PROJECT_KNOWLEDGE);
+        ragVectorStoreService.upsertDocuments(documents);
+        return new ReconciliationResult(
+                resolvedTenant,
+                resolvedEnvironment,
+                resolvedRelease,
+                documents.size(),
+                documents.size(),
+                true);
+    }
+
     private boolean canPublish(DomainKnowledgeConcept concept, DomainKnowledgeEvidence evidence) {
         return concept != null
                 && evidence != null
@@ -82,7 +133,7 @@ public class RagProjectKnowledgeDerivedIndexService implements ProjectKnowledgeD
 
     private Document toDocument(DomainKnowledgeConcept concept, DomainKnowledgeEvidence evidence) {
         String content = content(concept, evidence);
-        String contentHash = contentHash(concept, evidence);
+        String contentHash = RagDocumentIdentity.sha256(content);
         Map<String, Object> metadata = RagProjectKnowledgeMetadata.from(
                 concept,
                 evidence,
@@ -186,11 +237,16 @@ public class RagProjectKnowledgeDerivedIndexService implements ProjectKnowledgeD
                 concept.getConceptKey(),
                 releaseId(concept, evidence),
                 RagResourceTypes.PROJECT_KNOWLEDGE,
-                contentHash(concept, evidence),
+                identityHash(concept, evidence),
                 0);
     }
 
-    private String contentHash(DomainKnowledgeConcept concept, DomainKnowledgeEvidence evidence) {
+    /**
+     * Keeps the derived document address stable across safe content revisions. The independently
+     * stored content hash tracks the indexed projection itself; using that hash in the address
+     * would leave the previous document orphaned whenever the canonical concept changed.
+     */
+    private String identityHash(DomainKnowledgeConcept concept, DomainKnowledgeEvidence evidence) {
         return RagDocumentIdentity.sha256(concept.getConceptKey() + "|" + evidence.getEvidenceKey());
     }
 

@@ -45,6 +45,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private final int planningBudgetSeconds;
     private final int providerAttempts;
     private final long providerRetryDelayMs;
+    private final String openAiPlanningModel;
 
     public AgenticAuthoringLlmPreIntentToolPlanningService(
             AiProviderManagementService providerManagementService,
@@ -62,7 +63,23 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 domainCatalogPromptContextService,
                 DEFAULT_PLANNING_BUDGET_SECONDS,
                 DEFAULT_PROVIDER_ATTEMPTS,
-                DEFAULT_PROVIDER_RETRY_DELAY_MS);
+                DEFAULT_PROVIDER_RETRY_DELAY_MS,
+                "");
+    }
+
+    public AgenticAuthoringLlmPreIntentToolPlanningService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            DomainCatalogPromptContextService domainCatalogPromptContextService,
+            String openAiPlanningModel) {
+        this(
+                providerManagementService,
+                objectMapper,
+                domainCatalogPromptContextService,
+                DEFAULT_PLANNING_BUDGET_SECONDS,
+                DEFAULT_PROVIDER_ATTEMPTS,
+                DEFAULT_PROVIDER_RETRY_DELAY_MS,
+                openAiPlanningModel);
     }
 
     AgenticAuthoringLlmPreIntentToolPlanningService(
@@ -75,7 +92,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 null,
                 planningBudgetSeconds,
                 DEFAULT_PROVIDER_ATTEMPTS,
-                DEFAULT_PROVIDER_RETRY_DELAY_MS);
+                DEFAULT_PROVIDER_RETRY_DELAY_MS,
+                "");
     }
 
     AgenticAuthoringLlmPreIntentToolPlanningService(
@@ -90,7 +108,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 null,
                 planningBudgetSeconds,
                 providerAttempts,
-                providerRetryDelayMs);
+                providerRetryDelayMs,
+                "");
     }
 
     AgenticAuthoringLlmPreIntentToolPlanningService(
@@ -100,6 +119,24 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             int planningBudgetSeconds,
             int providerAttempts,
             long providerRetryDelayMs) {
+        this(
+                providerManagementService,
+                objectMapper,
+                domainCatalogPromptContextService,
+                planningBudgetSeconds,
+                providerAttempts,
+                providerRetryDelayMs,
+                "");
+    }
+
+    AgenticAuthoringLlmPreIntentToolPlanningService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            DomainCatalogPromptContextService domainCatalogPromptContextService,
+            int planningBudgetSeconds,
+            int providerAttempts,
+            long providerRetryDelayMs,
+            String openAiPlanningModel) {
         this.providerManagementService = Objects.requireNonNull(
                 providerManagementService,
                 "providerManagementService must not be null");
@@ -110,6 +147,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 : DEFAULT_PLANNING_BUDGET_SECONDS;
         this.providerAttempts = Math.max(1, providerAttempts);
         this.providerRetryDelayMs = Math.max(0L, providerRetryDelayMs);
+        this.openAiPlanningModel = normalizeModel(openAiPlanningModel);
     }
 
     @Override
@@ -145,7 +183,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 break;
             }
             AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
-                    "pre_intent_tool_plan", attempt, request.provider(), request.model());
+                    "pre_intent_tool_plan", attempt, request.provider(), planningModel(request));
             AiCallConfig callConfig = callConfig(request, attemptTimeoutSeconds)
                     .toBuilder()
                     .invocationTrace(trace)
@@ -242,12 +280,26 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             int attemptTimeoutSeconds) {
         return AiCallConfig.builder()
                 .provider(request.provider())
-                .model(request.model())
+                .model(planningModel(request))
                 .apiKey(request.apiKey())
                 .temperature(0.0d)
                 .maxTokens(MAX_PLANNING_TOKENS)
                 .timeoutSeconds(attemptTimeoutSeconds)
                 .build();
+    }
+
+    private String planningModel(AgenticAuthoringTurnStreamRequest request) {
+        String provider = request == null || request.provider() == null
+                ? ""
+                : request.provider().trim().toLowerCase(java.util.Locale.ROOT);
+        if ("openai".equals(provider) && StringUtils.hasText(openAiPlanningModel)) {
+            return openAiPlanningModel;
+        }
+        return request == null ? null : request.model();
+    }
+
+    private static String normalizeModel(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private int remainingTimeoutSeconds(long deadlineNanos) {
@@ -281,7 +333,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             AgenticAuthoringTurnStreamRequest request,
             JsonNode result) {
         String semanticIntentClass = text(result, "semanticIntentClass");
-        if (!List.of("platform_guidance", "authoring_or_other").contains(semanticIntentClass)) {
+        if (!List.of("platform_guidance", "governed_domain_discovery", "authoring_or_other")
+                .contains(semanticIntentClass)) {
             semanticIntentClass = "authoring_or_other";
         }
         String assistantMessage = "platform_guidance".equals(semanticIntentClass)
@@ -307,8 +360,13 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     semanticIntentClass,
                     ""));
         }
+        String groundingProfile = text(result, "groundingProfile");
+        if (!List.of("domain_context", "domain_capability", "domain_concept", "domain_binding", "operation_verification", "api_resource")
+                .contains(groundingProfile)) {
+            groundingProfile = "api_resource";
+        }
         String retrievalQuery = text(result, "retrievalQuery");
-        if (!StringUtils.hasText(retrievalQuery)) {
+        if ("api_resource".equals(groundingProfile) && !StringUtils.hasText(retrievalQuery)) {
             return AgenticAuthoringPreIntentToolPlanningResult.skipped("llm-retrieval-query-empty");
         }
         AgenticAuthoringResourceSearchFocus resourceSearchFocus =
@@ -319,21 +377,50 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         if (!List.of("page", "dashboard", "chart", "table", "form", "api_catalog").contains(artifactKind)) {
             artifactKind = "page";
         }
-        AgenticAuthoringToolCall toolCall = new AgenticAuthoringToolCall(
-                AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
-                "pre_intent_resource_discovery",
-                new AgenticAuthoringResourceCandidatesRequest(
-                        retrievalQuery,
-                        request.userPrompt(),
-                        artifactKind,
-                        6,
-                        resourceSearchFocus));
+        AgenticAuthoringToolCall toolCall = progressiveToolCall(
+                request, groundingProfile, retrievalQuery, artifactKind, resourceSearchFocus);
         return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
                 textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v2"),
                 text(result, "reason"),
                 List.of(toolCall),
                 semanticIntentClass,
                 ""));
+    }
+
+    private AgenticAuthoringToolCall progressiveToolCall(
+            AgenticAuthoringTurnStreamRequest request,
+            String groundingProfile,
+            String retrievalQuery,
+            String artifactKind,
+            AgenticAuthoringResourceSearchFocus resourceSearchFocus) {
+        if ("api_resource".equals(groundingProfile)) {
+            return new AgenticAuthoringToolCall(
+                    AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                    "pre_intent_resource_discovery",
+                    new AgenticAuthoringResourceCandidatesRequest(
+                            retrievalQuery,
+                            request.userPrompt(),
+                            artifactKind,
+                            6,
+                            resourceSearchFocus));
+        }
+        String toolName = switch (groundingProfile) {
+            case "domain_context" -> AgenticAuthoringToolRegistry.DISCOVER_DOMAIN_CONTEXTS;
+            case "domain_capability" -> AgenticAuthoringToolRegistry.DISCOVER_DOMAIN_CAPABILITIES;
+            case "domain_binding" -> AgenticAuthoringToolRegistry.INSPECT_DOMAIN_BINDINGS;
+            case "operation_verification" -> AgenticAuthoringToolRegistry.VERIFY_DOMAIN_OPERATION;
+            default -> AgenticAuthoringToolRegistry.DISCOVER_DOMAIN_CONCEPTS;
+        };
+        String contextKey = request.contextHints() == null ? "" : text(request.contextHints(), "contextKey");
+        String resourceKey = resourceSearchFocus == null ? "" : resourceSearchFocus.primaryBusinessEntity();
+        Object payload = switch (groundingProfile) {
+            case "domain_binding" -> new DomainBindingToolRequest(resourceKey, 6);
+            case "operation_verification" -> new DomainOperationVerificationToolRequest(
+                    resourceKey,
+                    request.contextHints() == null ? "" : text(request.contextHints(), "requestBaseUrl"));
+            default -> new DomainKnowledgeToolRequest(contextKey, resourceKey, 0);
+        };
+        return new AgenticAuthoringToolCall(toolName, "advisory_authoring", payload);
     }
 
     private boolean isRetryableProviderFailure(RuntimeException error) {
@@ -417,11 +504,31 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 a different response language from domain labels. Ground the answer in platformGuide,
                 authorableComponents, governedDomainContext, runtimeContext and the components already on the page.
                 Be friendly and concrete. Do not claim a change was made and do not ask for technical endpoints.
+                Keep this class for generic platform guidance.
+
+                Set semanticIntentClass=governed_domain_discovery when the user asks which actual business domains,
+                themes, administrative subjects or governed business capabilities are available in the current host,
+                including when the user mentions a future form, table, dashboard or page only as the reason for asking.
+                This class always sets shouldRetrieveGovernedResources=true, assistantMessage empty and starts with
+                groundingProfile=domain_context. It is governed domain enumeration, not generic platform guidance and
+                not yet concrete artifact authoring. Semantically equivalent examples include asking which administrative
+                themes are available for an interactive dashboard, what business areas the host knows, or which governed
+                domains can be used before choosing what to build. A question such as "sobre quais assuntos posso criar
+                tabelas ou dashboards para obter informações visuais?" is domain discovery: the user is asking for the
+                available business subjects, not yet commanding creation of either artifact. The same remains true with
+                grammar errors, omitted words, or without the literal word "available". This discovery must happen before capability, concept,
+                binding or API-resource discovery.
 
                 Set semanticIntentClass=authoring_or_other when the user requests creation, editing, removal,
                 inspection, a concrete domain artifact, or another intent that needs the complete governed resolver.
                 For that class, leave assistantMessage empty and decide whether to run searchApiResources before
-                authoring. Use the tool when governed resources, fields, datasets or
+                authoring. Select groundingProfile progressively: domain_context for macro business orientation,
+                domain_capability when a governed context is known but the business capability is not, domain_concept
+                for concepts inside an already scoped context/resource, domain_binding after a canonical resourceKey
+                has been resolved but its operational binding is not yet grounded, operation_verification after a binding
+                exists but its exact schema and current capability have not been checked, and api_resource only when an operational
+                resource, field, dataset, binding or endpoint is actually needed. Use API resource retrieval when
+                governed resources, fields, datasets or
                 API-backed sources are needed for a page, view, table, dashboard, form, overview, analysis,
                 monitoring surface, or data-source change. User wording may be vague, misspelled, colloquial, multilingual
                 or loosely related to domainDiscovery. If domainDiscovery exists and resourceDiscovery
@@ -511,7 +618,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 || request == null
                 || principalContext == null
                 || !StringUtils.hasText(principalContext.tenantId())
-                || !StringUtils.hasText(principalContext.environment())) {
+                || !StringUtils.hasText(principalContext.environment())
+                || !hasExplicitDomainCatalogScope(request.contextHints())) {
             return "";
         }
         try {
@@ -531,14 +639,16 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     }
 
     private JsonNode preIntentDomainCatalogContextHints(JsonNode contextHints) {
-        ObjectNode governedHints = contextHints != null && contextHints.isObject()
+        return contextHints != null && contextHints.isObject()
                 ? ((ObjectNode) contextHints).deepCopy()
                 : objectMapper.createObjectNode();
-        if (!governedHints.path("domainCatalog").isObject()
-                && !hasText(governedHints, "domainCatalogServiceKey")) {
-            governedHints.putObject("domainCatalog").put("enabled", true);
-        }
-        return governedHints;
+    }
+
+    private boolean hasExplicitDomainCatalogScope(JsonNode contextHints) {
+        return contextHints != null
+                && contextHints.isObject()
+                && (contextHints.path("domainCatalog").isObject()
+                || hasText(contextHints, "domainCatalogServiceKey"));
     }
 
     private String compactUserPrompt(String value) {
@@ -645,6 +755,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         copyCompactArray(compact, "domainDiscovery", contextHints.path("domainDiscovery"));
         copyCompactObject(compact, "domainCatalog", contextHints.path("domainCatalog"));
         copyCompactObject(compact, "projectKnowledge", contextHints.path("projectKnowledge"));
+        copyCompactObject(compact, "domainBindings", contextHints.path("domainBindings"));
+        copyCompactObject(compact, "verifiedDomainOperations", contextHints.path("verifiedDomainOperations"));
         copyCompactObject(compact, "groundedRuntimeComponentContext", contextHints.path("groundedRuntimeComponentContext"));
         return compact;
     }
@@ -766,9 +878,23 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         semanticIntentClass.put("type", "string");
         semanticIntentClass.putArray("enum")
                 .add("platform_guidance")
+                .add("governed_domain_discovery")
                 .add("authoring_or_other");
+        semanticIntentClass.put(
+                "description",
+                "Semantic routing decision authored by the model. Use governed_domain_discovery for questions asking which business subjects, themes, or domains can be used for possible tables, dashboards, forms, or pages; mentioning those future artifacts does not make the request concrete authoring.");
         properties.putObject("assistantMessage").put("type", "string");
         properties.putObject("shouldRetrieveGovernedResources").put("type", "boolean");
+        ObjectNode groundingProfile = properties.putObject("groundingProfile");
+        groundingProfile.put("type", "string");
+        groundingProfile.putArray("enum")
+                .add("none")
+                .add("domain_context")
+                .add("domain_capability")
+                .add("domain_concept")
+                .add("domain_binding")
+                .add("operation_verification")
+                .add("api_resource");
         ObjectNode artifactKind = properties.putObject("artifactKind");
         artifactKind.put("type", "string");
         ArrayNode artifactEnum = artifactKind.putArray("enum");
@@ -805,6 +931,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 .add("semanticIntentClass")
                 .add("assistantMessage")
                 .add("shouldRetrieveGovernedResources")
+                .add("groundingProfile")
                 .add("artifactKind")
                 .add("retrievalQuery")
                 .add("resourceSearchFocus")

@@ -25,6 +25,136 @@ class AgenticAuthoringIntentResolverServiceTest {
     private final AgenticAuthoringIntentResolverService service =
             new AgenticAuthoringIntentResolverService(objectMapper, quickstartCandidateCatalog());
 
+    @Test
+    void reusesGovernedDomainDiscoveryOrientationWhenKnowledgeWasAlreadyRetrieved() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringIntentResolverService semanticService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode knowledge = contextHints.putObject("projectKnowledge");
+        knowledge.put("source", "domain_knowledge_concept");
+        knowledge.putArray("entries").addObject()
+                .put("conceptKey", "human-resources.context")
+                .put("summary", "Pessoas, departamentos e folha de pagamento.");
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "Sobre quais assuntos posso criar tabelas ou dashboards?",
+                "page-builder",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                "session-domain-discovery",
+                "turn-domain-discovery",
+                List.of(),
+                null,
+                List.of(),
+                contextHints);
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                "Discover governed business contexts.",
+                List.of(),
+                "governed_domain_discovery",
+                "");
+
+        AgenticAuthoringIntentResolutionResult result = semanticService.resolve(
+                request,
+                "tenant",
+                "user",
+                "local",
+                orientation);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.warnings())
+                .contains("llm-governed-domain-discovery-grounded-by-project-knowledge");
+        Mockito.verifyNoInteractions(llmIntentResolver);
+    }
+
+    @Test
+    void resolvesServerIssuedQuickReplyWithoutReclassifyingItWithTheLlm() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringIntentResolverService semanticService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+        ObjectNode issuedConstraints = objectMapper.createObjectNode();
+        issuedConstraints.put("source", "server-issued-quick-reply");
+        issuedConstraints.put("quickReplyId", "governed-domain:explore-data");
+        issuedConstraints.put("continuationOf", "governed_domain_discovery");
+        issuedConstraints.putArray("conceptKeys").add("human-resources");
+        AgenticAuthoringSemanticDecision issuedDecision = AgenticAuthoringSemanticDecision.from(
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question",
+                        null,
+                        List.of(),
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        "session-domain-continuation",
+                        "turn-domain-choice",
+                        "Ver dados disponíveis",
+                        "Ver dados disponíveis",
+                        "Server-issued governed continuation.")
+                .withConstraints(issuedConstraints);
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("continuationOf", "governed_domain_discovery");
+        contextHints.putArray("conceptKeys").add("human-resources");
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "Para esses temas governados, explique quais recursos e campos confirmados estão disponíveis.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                "session-domain-continuation",
+                "turn-domain-continuation",
+                List.of(),
+                null,
+                List.of(),
+                contextHints,
+                issuedDecision);
+
+        AgenticAuthoringIntentResolutionResult result = semanticService.resolve(
+                request,
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.warnings())
+                .contains("server-issued-quick-reply-continuation-applied")
+                .doesNotContain("keyword-fallback-applied", "keyword-fallback-fail-safe-applied");
+        assertThat(result.semanticDecision().previousDecisionId()).isEqualTo(issuedDecision.decisionId());
+        assertThat(result.semanticDecision().constraints().path("source").asText())
+                .isEqualTo("resolved-quick-reply-continuation");
+        assertThat(result.semanticDecision().constraints().path("quickReplyId").asText())
+                .isEqualTo("governed-domain:explore-data");
+        assertThat(result.candidates())
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .allMatch(path -> path.contains("human-resources"));
+        Mockito.verifyNoInteractions(llmIntentResolver);
+    }
+
     private AgenticAuthoringApiMetadataCandidateCatalog quickstartCandidateCatalog() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAll()).thenReturn(List.of(

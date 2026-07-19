@@ -32,4 +32,8 @@ public record AgenticAuthoringPreIntentToolPlan(
     public boolean resolvesPlatformGuidance() {
         return "platform_guidance".equals(semanticIntentClass) && !assistantMessage.isBlank();
     }
+
+    public boolean resolvesGovernedDomainDiscovery() {
+        return "governed_domain_discovery".equals(semanticIntentClass);
+    }
 }

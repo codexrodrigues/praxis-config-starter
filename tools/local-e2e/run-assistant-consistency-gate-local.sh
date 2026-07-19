@@ -152,6 +152,8 @@ for repetition in range(1, repetitions + 1):
                     case["pageAssertions"] = turn["pageAssertions"]
                 if "lineage" in turn:
                     case["lineage"] = turn["lineage"]
+                if "quickReplySelection" in turn:
+                    case["quickReplySelection"] = turn["quickReplySelection"]
             else:
                 relative = pathlib.Path(f"run-{repetition:02d}") / unit["id"]
                 case = unit
@@ -210,6 +212,9 @@ if [[ "$REUSE_EXISTING_ARTIFACTS" != "true" ]]; then
     previous_relative="$(jq -r --arg directory "$relative_dir" '.runs[] | select(.directory == $directory) | .previousDirectory // empty' "$ARTIFACTS_DIR/execution-plan.json")"
     current_page_json="$(jq -c '.currentPage' "$case_dir/context.json")"
     conversation_messages_json='[]'
+    active_semantic_decision_json='null'
+    selected_user_prompt="$(jq -r '.userPrompt' "$case_dir/case.json")"
+    selected_context_hints_json="$(jq -c '.contextHints + {includeLlmDiagnostics:true}' "$case_dir/context.json")"
     session_id="assistant-consistency-$repetition-$case_id"
     if [[ "$run_kind" == "journey" && -n "$previous_relative" ]]; then
       previous_dir="$ARTIFACTS_DIR/$previous_relative"
@@ -252,6 +257,43 @@ if [[ "$REUSE_EXISTING_ARTIFACTS" != "true" ]]; then
       fi
       previous_prompt="$(jq -r '.userPrompt' "$previous_dir/case.json")"
       previous_assistant_message="$(jq -s -r '[.[] | select(.type == "result")][-1].payload.assistantMessage // empty' "$previous_dir/turn.events.jsonl")"
+      quick_reply_id="$(jq -r '.quickReplySelection.replyId // empty' "$case_dir/case.json")"
+      if [[ -n "$quick_reply_id" ]]; then
+        selected_quick_reply_json="$(jq -s -c --arg replyId "$quick_reply_id" '
+          [.[] | select(.type == "result")][-1].payload.quickReplies
+          | [.[] | select(.id == $replyId)]
+          | if length == 1 then .[0] else empty end
+        ' "$previous_dir/turn.events.jsonl")"
+        if [[ -z "$selected_quick_reply_json" ]]; then
+          echo "Previous turn did not emit exactly one quick reply '$quick_reply_id'." | tee "$case_dir/journey-precondition-error.txt" >&2
+          printf '%s\n' '1' > "$case_dir/runner-exit-code.txt"
+          continue
+        fi
+        require_semantic_decision="$(jq -r '.quickReplySelection.requireSemanticDecision // false' "$case_dir/case.json")"
+        active_semantic_decision_json="$(jq -c '.semanticDecision // null' <<<"$selected_quick_reply_json")"
+        if [[ "$require_semantic_decision" == "true" ]] && ! jq -e '
+          type == "object" and ((.decisionId // "") | length > 0)
+        ' >/dev/null <<<"$active_semantic_decision_json"; then
+          echo "Selected quick reply '$quick_reply_id' did not carry a semantic decision." | tee "$case_dir/journey-precondition-error.txt" >&2
+          printf '%s\n' '1' > "$case_dir/runner-exit-code.txt"
+          continue
+        fi
+        selected_user_prompt="$(jq -r '
+          if (.value | type) == "string" and (.value | length) > 0 then .value else .prompt end
+        ' <<<"$selected_quick_reply_json")"
+        selected_context_hints_json="$(jq -cn \
+          --argjson base "$selected_context_hints_json" \
+          --argjson reply "$selected_quick_reply_json" '
+          $base
+          + ($reply.contextHints // {})
+          + (if ($reply.semanticDecision | type) == "object"
+              then {semanticDecision: $reply.semanticDecision}
+              else {}
+            end)
+          + {includeLlmDiagnostics:true}
+        ')"
+        printf '%s\n' "$selected_quick_reply_json" | jq '.' > "$case_dir/input-selected-quick-reply.json"
+      fi
       timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       conversation_messages_json="$(jq -cn \
         --argjson previous "$previous_conversation" \
@@ -268,13 +310,14 @@ if [[ "$REUSE_EXISTING_ARTIFACTS" != "true" ]]; then
     echo
     echo "=== repetition $repetition | $case_id ==="
     set +e
-    USER_PROMPT="$(jq -r '.userPrompt' "$case_dir/case.json")" \
+    USER_PROMPT="$selected_user_prompt" \
       TARGET_APP="$(jq -r '.targetApp' "$case_dir/context.json")" \
       TARGET_COMPONENT_ID="$(jq -r '.targetComponentId' "$case_dir/context.json")" \
       CURRENT_ROUTE="$(jq -r '.currentRoute' "$case_dir/context.json")" \
       CURRENT_PAGE_JSON="$current_page_json" \
       SELECTED_WIDGET_KEY_JSON="$(jq -c '.selectedWidgetKey' "$case_dir/context.json")" \
-      CONTEXT_HINTS_JSON="$(jq -c '.contextHints + {includeLlmDiagnostics:true}' "$case_dir/context.json")" \
+      CONTEXT_HINTS_JSON="$selected_context_hints_json" \
+      ACTIVE_SEMANTIC_DECISION_JSON="$active_semantic_decision_json" \
       CONVERSATION_MESSAGES_JSON="$conversation_messages_json" \
       SESSION_ID="$session_id" \
       ARTIFACTS_DIR="$case_dir" \
@@ -723,9 +766,24 @@ for run in plan["runs"]:
                 (event for event in previous_events if event.get("type") in {"result", "error", "cancelled"}),
                 {},
             )
-            previous_decision_id = event_payload(previous_terminal).get("decisionDiagnostics", {}).get(
-                "semanticDecisionId"
-            )
+            quick_reply_selection = case.get("quickReplySelection")
+            if isinstance(quick_reply_selection, dict):
+                selected_reply_id = quick_reply_selection.get("replyId")
+                selected_replies = [
+                    reply
+                    for reply in event_payload(previous_terminal).get("quickReplies") or []
+                    if isinstance(reply, dict) and reply.get("id") == selected_reply_id
+                ]
+                previous_decision_id = (
+                    selected_replies[0].get("semanticDecision", {}).get("decisionId")
+                    if len(selected_replies) == 1
+                    and isinstance(selected_replies[0].get("semanticDecision"), dict)
+                    else None
+                )
+            else:
+                previous_decision_id = event_payload(previous_terminal).get("decisionDiagnostics", {}).get(
+                    "semanticDecisionId"
+                )
             if lineage.get("sameThread") is True and thread_id != previous_start.get("threadId"):
                 failures.append(
                     f"thread lineage changed {previous_start.get('threadId')!r}->{thread_id!r}"

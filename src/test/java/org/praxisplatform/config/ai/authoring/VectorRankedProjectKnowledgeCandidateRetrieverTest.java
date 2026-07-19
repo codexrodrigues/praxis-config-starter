@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -80,6 +81,33 @@ class VectorRankedProjectKnowledgeCandidateRetrieverTest {
         List<DomainKnowledgeConcept> result = retriever.retrieve(query);
 
         assertThat(result).containsExactly(concept);
+    }
+
+    @Test
+    void enumeratesUnscopedGovernedNodesFromCanonicalRepositoryWithoutVectorRanking() {
+        AgenticAuthoringProjectKnowledgeQuery query = new AgenticAuthoringProjectKnowledgeQuery(
+                "tenant-a",
+                "dev",
+                null,
+                null,
+                List.of("context"),
+                "context",
+                4);
+        DomainKnowledgeConcept context = concept("human-resources.context");
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(conceptRepository.findGovernedProjectKnowledgeCandidates(
+                eq("tenant-a"),
+                eq("dev"),
+                eq(null),
+                eq(null),
+                eq("context"),
+                any(Pageable.class)))
+                .thenReturn(List.of(context));
+
+        List<DomainKnowledgeConcept> result = retriever.retrieve(query);
+
+        assertThat(result).containsExactly(context);
+        verify(ragVectorStoreService, never()).search(any(), any(Integer.class), any());
     }
 
     @Test

@@ -4,6 +4,13 @@ Status: Draft
 Date: 2026-04-21  
 Owner: Praxis Platform
 
+Amended by the machine-first Semantic IR direction in
+[`2026-07-machine-first-semantic-ir-rfc.md`](2026-07-machine-first-semantic-ir-rfc.md).
+This RFC remains the foundation for source/federated/authoring layers, immutable releases and
+technical bindings. The later RFC narrows the universal-node principle, adds claim provenance,
+multi-resolution compiled projections, progressive LLM tools and the end-to-end generative UI
+grounding protocol.
+
 ## 1. Problem
 
 Praxis already has strong metadata for API contracts, UI schemas, component capabilities, AI registry assets and agentic authoring manifests. This is enough for an LLM to understand many technical surfaces:

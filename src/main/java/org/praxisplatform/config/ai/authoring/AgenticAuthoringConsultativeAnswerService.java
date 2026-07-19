@@ -119,6 +119,11 @@ public class AgenticAuthoringConsultativeAnswerService {
         if (request == null || !StringUtils.hasText(request.userPrompt())) {
             return Optional.empty();
         }
+        Optional<AgenticAuthoringConsultativeAnswer> governedDomainDiscovery =
+                governedDomainDiscoveryAnswer(request, tenantId, userId, environment);
+        if (governedDomainDiscovery.isPresent()) {
+            return governedDomainDiscovery;
+        }
         boolean resolvedApiCatalogQuestion = isResolvedApiCatalogQuestion(request);
         boolean hasResolvedIntentContext = hasResolvedIntentContext(request);
         boolean domainAvailabilityQuestion = resolvedApiCatalogQuestion
@@ -144,8 +149,9 @@ public class AgenticAuthoringConsultativeAnswerService {
             }
             if (domainAvailabilityQuestion) {
                 projection = apiCatalogProjection(
-                        request.userPrompt(),
+                        request,
                         tenantId,
+                        userId,
                         environment);
                 if (pendingRuntimeDisambiguationContext) {
                     Optional<AgenticAuthoringConsultativeAnswer> runtimeContextAnswer =
@@ -154,9 +160,11 @@ public class AgenticAuthoringConsultativeAnswerService {
                         return runtimeContextAnswer;
                     }
                 }
-                String unsupportedDomainMessage = AgenticAuthoringConsultativeGroundingAlignment.unsupportedDomainMessage(
-                        request.userPrompt(),
-                        projection == null ? List.of() : projection.resources());
+                String unsupportedDomainMessage = isServerIssuedQuickReplyContinuation(request)
+                        ? ""
+                        : AgenticAuthoringConsultativeGroundingAlignment.unsupportedDomainMessage(
+                                request.userPrompt(),
+                                projection == null ? List.of() : projection.resources());
                 if (StringUtils.hasText(unsupportedDomainMessage)) {
                     return Optional.of(new AgenticAuthoringConsultativeAnswer(
                             "domain_api",
@@ -165,7 +173,8 @@ public class AgenticAuthoringConsultativeAnswerService {
                             null,
                             warnings("domain_api", null)));
                 }
-                if (shouldUseGroundedProjectionAnswer(projection)) {
+                if (shouldUseGroundedProjectionAnswer(projection)
+                        || isServerIssuedQuickReplyContinuation(request)) {
                     return Optional.of(new AgenticAuthoringConsultativeAnswer(
                             "domain_api",
                             changeKind("domain_api"),
@@ -233,7 +242,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                 String category = category(parsed.category());
                 if ("domain_api".equals(category)) {
                     projection = apiCatalogProjection(
-                            request.userPrompt(),
+                            consultativeApiCatalogQuery(request),
                             tenantId,
                             environment);
                     Optional<AgenticAuthoringConsultativeAnswer> runtimeContextAnswer =
@@ -295,7 +304,7 @@ public class AgenticAuthoringConsultativeAnswerService {
             String category = category(parsed.category());
             if ("domain_api".equals(category)) {
                 projection = apiCatalogProjection(
-                        request.userPrompt(),
+                        consultativeApiCatalogQuery(request),
                         tenantId,
                         environment);
                 Optional<AgenticAuthoringConsultativeAnswer> runtimeContextAnswer =
@@ -376,6 +385,194 @@ public class AgenticAuthoringConsultativeAnswerService {
                     ex.getClass().getSimpleName());
             return Optional.empty();
         }
+    }
+
+    private Optional<AgenticAuthoringConsultativeAnswer> governedDomainDiscoveryAnswer(
+            AgenticAuthoringTurnStreamRequest request,
+            String tenantId,
+            String userId,
+            String environment) {
+        JsonNode hints = request.contextHints();
+        if (hints == null
+                || !"governed_domain_discovery".equals(hints.path("preIntentSemanticOrientation")
+                        .path("semanticIntentClass").asText(""))) {
+            return Optional.empty();
+        }
+        JsonNode projectKnowledge = hints.path("projectKnowledge");
+        JsonNode entries = projectKnowledge.path("entries");
+        if (!entries.isArray() || entries.isEmpty()) {
+            return Optional.empty();
+        }
+        ObjectNode evidence = objectMapper.createObjectNode();
+        evidence.put("schemaVersion", "praxis-agentic-authoring-domain-discovery-evidence.v1");
+        evidence.put("source", projectKnowledge.path("source").asText("domain_knowledge_concept"));
+        evidence.set("entries", entries.deepCopy());
+        String generated;
+        try {
+            generated = providerManagementService.generateText(
+                    """
+                    Answer the user as a friendly Praxis assistant using only the governed business-domain entries below.
+                    Explain which business themes are actually available, what each one covers, and offer a concrete next
+                    step for the requested UI. Do not replace domain knowledge with endpoint, API, component, or generic
+                    administrative examples. Do not claim unavailable domains. Answer in the user's language with concise,
+                    readable Markdown.
+                    User request: %s
+                    Governed domain entries: %s
+                    """.formatted(request.userPrompt(), entries.toString()),
+                    AiCallConfig.builder()
+                            .provider(request.provider())
+                            .model(request.model())
+                            .apiKey(request.apiKey())
+                            .temperature(0.2d)
+                            .maxTokens(900)
+                            .build(),
+                    tenantId,
+                    userId,
+                    environment);
+        } catch (RuntimeException ex) {
+            log.warn(
+                    "[AgenticAuthoring] Governed domain answer generation failed; using retrieved evidence. reason={}",
+                    ex.getClass().getSimpleName());
+            generated = governedDomainDiscoveryFallback(entries);
+        }
+        String message = sanitizeUserFacingAnswer(generated);
+        if (!StringUtils.hasText(message)) {
+            return Optional.empty();
+        }
+        return Optional.of(new AgenticAuthoringConsultativeAnswer(
+                "domain_knowledge",
+                "answer_governed_domain_discovery",
+                message,
+                null,
+                List.of(),
+                evidence,
+                governedDomainDiscoveryQuickReplies(request, entries)));
+    }
+
+    private List<AgenticAuthoringQuickReply> governedDomainDiscoveryQuickReplies(
+            AgenticAuthoringTurnStreamRequest request,
+            JsonNode entries) {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("source", "domain_knowledge_concept");
+        contextHints.put("continuationOf", "governed_domain_discovery");
+        ArrayNode conceptKeys = contextHints.putArray("conceptKeys");
+        for (JsonNode entry : entries) {
+            String conceptKey = entry.path("conceptKey").asText("").trim();
+            if (!conceptKey.isBlank()) {
+                conceptKeys.add(conceptKey);
+            }
+        }
+        return List.of(
+                new AgenticAuthoringQuickReply(
+                        "governed-domain:create-table",
+                        "suggestion",
+                        "Criar uma tabela",
+                        "Com base nesses temas governados, proponha uma tabela útil usando apenas dados confirmados.",
+                        "Transforma o contexto de negócio apresentado em uma tabela governada para revisão.",
+                        "table_chart",
+                        "primary",
+                        contextHints.deepCopy(),
+                        governedDomainContinuationDecision(
+                                request,
+                                contextHints,
+                                "governed-domain:create-table",
+                                "create",
+                                "table",
+                                "create_artifact",
+                                "Com base nesses temas governados, proponha uma tabela útil usando apenas dados confirmados."),
+                        objectMapper.getNodeFactory().textNode(
+                                "Com base nesses temas governados, proponha uma tabela útil usando apenas dados confirmados.")),
+                new AgenticAuthoringQuickReply(
+                        "governed-domain:create-dashboard",
+                        "suggestion",
+                        "Montar um dashboard",
+                        "Com base nesses temas governados, proponha um dashboard interativo usando apenas dados confirmados.",
+                        "Transforma o contexto de negócio apresentado em indicadores e visualizações governadas.",
+                        "query_stats",
+                        "default",
+                        contextHints.deepCopy(),
+                        governedDomainContinuationDecision(
+                                request,
+                                contextHints,
+                                "governed-domain:create-dashboard",
+                                "create",
+                                "dashboard",
+                                "create_dashboard",
+                                "Com base nesses temas governados, proponha um dashboard interativo usando apenas dados confirmados."),
+                        objectMapper.getNodeFactory().textNode(
+                                "Com base nesses temas governados, proponha um dashboard interativo usando apenas dados confirmados.")),
+                new AgenticAuthoringQuickReply(
+                        "governed-domain:explore-data",
+                        "suggestion",
+                        "Ver dados disponíveis",
+                        "Para esses temas governados, explique quais recursos e campos confirmados estão disponíveis.",
+                        "Aprofunda o tema antes de materializar uma tela.",
+                        "dataset",
+                        "default",
+                        contextHints.deepCopy(),
+                        governedDomainContinuationDecision(
+                                request,
+                                contextHints,
+                                "governed-domain:explore-data",
+                                "explore",
+                                "api_catalog",
+                                "answer_api_catalog_question",
+                                "Para esses temas governados, explique quais recursos e campos confirmados estão disponíveis."),
+                        objectMapper.getNodeFactory().textNode(
+                                "Para esses temas governados, explique quais recursos e campos confirmados estão disponíveis.")));
+    }
+
+    private JsonNode governedDomainContinuationDecision(
+            AgenticAuthoringTurnStreamRequest request,
+            ObjectNode contextHints,
+            String quickReplyId,
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            String prompt) {
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("source", "server-issued-quick-reply");
+        constraints.put("quickReplyId", quickReplyId);
+        constraints.put("continuationOf", "governed_domain_discovery");
+        constraints.set("conceptKeys", contextHints.path("conceptKeys").deepCopy());
+        AgenticAuthoringSemanticDecision decision = AgenticAuthoringSemanticDecision.from(
+                        operationKind,
+                        artifactKind,
+                        changeKind,
+                        null,
+                        List.of(),
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        request.activeSemanticDecision(),
+                        request.sessionId(),
+                        request.clientTurnId() + ":" + quickReplyId,
+                        prompt,
+                        prompt,
+                        "The user may select this governed continuation after domain discovery.")
+                .withConstraints(constraints);
+        return objectMapper.valueToTree(decision);
+    }
+
+    private String governedDomainDiscoveryFallback(JsonNode entries) {
+        StringBuilder answer = new StringBuilder("## Temas disponíveis\n\n");
+        for (JsonNode entry : entries) {
+            String conceptKey = entry.path("conceptKey").asText("").trim();
+            String summary = entry.path("summary").asText("").trim();
+            if (conceptKey.isBlank() && summary.isBlank()) {
+                continue;
+            }
+            answer.append("- **")
+                    .append(conceptKey.isBlank() ? "Tema governado" : conceptKey)
+                    .append("**");
+            if (!summary.isBlank()) {
+                answer.append(" — ").append(summary);
+            }
+            answer.append('\n');
+        }
+        answer.append("\n## Próximo passo\n\nEscolha um desses temas e eu proponho uma tabela ou um dashboard usando apenas os dados governados disponíveis.");
+        return answer.toString();
     }
 
     public Optional<AgenticAuthoringConsultativeAnswer> answer(
@@ -531,6 +728,138 @@ public class AgenticAuthoringConsultativeAnswerService {
                         value(userPrompt),
                         conversationTranscript(request),
                         evidence == null ? "{}" : evidence.toPrettyString());
+    }
+
+    private String consultativeApiCatalogQuery(AgenticAuthoringTurnStreamRequest request) {
+        if (request == null) {
+            return "";
+        }
+        LinkedHashSet<String> conceptKeys = new LinkedHashSet<>();
+        JsonNode contextHints = request.contextHints();
+        if (contextHints != null
+                && "governed_domain_discovery".equals(contextHints.path("continuationOf").asText(""))) {
+            addTextValues(conceptKeys, contextHints.path("conceptKeys"));
+        }
+        AgenticAuthoringSemanticDecision activeDecision = request.activeSemanticDecision();
+        if (activeDecision != null && activeDecision.constraints() != null) {
+            JsonNode constraints = activeDecision.constraints();
+            if ("governed_domain_discovery".equals(constraints.path("continuationOf").asText(""))) {
+                addTextValues(conceptKeys, constraints.path("conceptKeys"));
+            }
+        }
+        return conceptKeys.isEmpty()
+                ? request.userPrompt()
+                : request.userPrompt() + " " + String.join(" ", conceptKeys);
+    }
+
+    private void addTextValues(Set<String> values, JsonNode node) {
+        if (values == null || node == null || !node.isArray()) {
+            return;
+        }
+        for (JsonNode item : node) {
+            String value = item.asText("").trim();
+            if (!value.isBlank()) {
+                values.add(value);
+            }
+        }
+    }
+
+    private AgenticAuthoringConsultativeApiCatalogProjection apiCatalogProjection(
+            AgenticAuthoringTurnStreamRequest request,
+            String tenantId,
+            String userId,
+            String environment) {
+        if (apiCatalogProjectionService == null) {
+            return null;
+        }
+        String query = consultativeApiCatalogQuery(request);
+        List<AgenticAuthoringCandidate> resolvedCandidates = resolvedApiCatalogCandidates(request);
+        AgenticAuthoringConsultativeApiCatalogProjection projection;
+        if (!resolvedCandidates.isEmpty()) {
+            projection = apiCatalogProjectionService.projectResolvedCandidates(
+                    query,
+                    resolvedCandidates,
+                    tenantId,
+                    userId,
+                    environment,
+                    request.contextHints().path("requestBaseUrl").asText(""));
+        } else if (isServerIssuedQuickReplyContinuation(request)) {
+            projection = null;
+        } else {
+            projection = apiCatalogProjectionService.projectCompact(query, tenantId, environment);
+        }
+        return projection != null && projection.hasResources() ? projection : null;
+    }
+
+    private List<String> governedContinuationConceptKeys(AgenticAuthoringTurnStreamRequest request) {
+        if (request == null
+                || request.activeSemanticDecision() == null
+                || request.activeSemanticDecision().constraints() == null) {
+            return List.of();
+        }
+        JsonNode conceptKeys = request.activeSemanticDecision().constraints().path("conceptKeys");
+        if (!conceptKeys.isArray()) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        conceptKeys.forEach(node -> {
+            String value = node.asText("").trim();
+            if (!value.isBlank()) {
+                values.add(value);
+            }
+        });
+        return values.stream().distinct().toList();
+    }
+
+    private List<AgenticAuthoringCandidate> resolvedApiCatalogCandidates(
+            AgenticAuthoringTurnStreamRequest request) {
+        if (!isServerIssuedQuickReplyContinuation(request)
+                || request.contextHints() == null) {
+            return List.of();
+        }
+        JsonNode candidates = request.contextHints().path("resolvedIntent").path("candidateApis");
+        if (!candidates.isArray()) {
+            return List.of();
+        }
+        List<AgenticAuthoringCandidate> resolved = new ArrayList<>();
+        for (JsonNode candidate : candidates) {
+            try {
+                resolved.add(objectMapper.convertValue(candidate, AgenticAuthoringCandidate.class));
+            } catch (IllegalArgumentException ignored) {
+                // Ignore malformed derived evidence and preserve the governed empty-result behavior.
+            }
+        }
+        List<String> conceptKeys = governedContinuationConceptKeys(request);
+        if (conceptKeys.isEmpty()) {
+            return resolved;
+        }
+        return resolved.stream()
+                .filter(candidate -> matchesGovernedConcept(candidate, conceptKeys))
+                .toList();
+    }
+
+    private boolean matchesGovernedConcept(
+            AgenticAuthoringCandidate candidate,
+            List<String> conceptKeys) {
+        if (candidate == null || !StringUtils.hasText(candidate.resourcePath())) {
+            return false;
+        }
+        String resourcePath = candidate.resourcePath().toLowerCase(Locale.ROOT);
+        return conceptKeys.stream()
+                .filter(StringUtils::hasText)
+                .map(value -> value.trim().toLowerCase(Locale.ROOT).replace('.', '/'))
+                .anyMatch(concept -> resourcePath.equals("/api/" + concept)
+                        || resourcePath.startsWith("/api/" + concept + "/"));
+    }
+
+    private boolean isServerIssuedQuickReplyContinuation(AgenticAuthoringTurnStreamRequest request) {
+        AgenticAuthoringSemanticDecision activeDecision = request == null
+                ? null
+                : request.activeSemanticDecision();
+        return activeDecision != null
+                && activeDecision.constraints() != null
+                && "server-issued-quick-reply".equals(
+                        activeDecision.constraints().path("source").asText(""));
     }
 
     private AgenticAuthoringConsultativeApiCatalogProjection apiCatalogProjection(
@@ -6360,7 +6689,12 @@ public class AgenticAuthoringConsultativeAnswerService {
                 .replaceAll("(?i)\\busou uma informa[cç][oõ]es resumidas\\b", "trouxe informações resumidas")
                 .replaceAll("(?i)\\bdomain-api-[a-z0-9-]+\\b", "")
                 .replaceAll("(?i)\\bconsultative-[a-z0-9-]+\\b", "")
-                .replaceAll("\\s{2,}", " ")
+                .replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .replaceAll("[ \\t]{2,}", " ")
+                .replaceAll("[ \\t]+(?=\\n)", "")
+                .replaceAll("(?<!\\n)(#{1,6}[ \\t]+)", "\n\n$1")
+                .replaceAll("\\n{3,}", "\n\n")
                 .trim();
         if (sanitized.endsWith("?")) {
             int lastBreak = Math.max(sanitized.lastIndexOf(". "), Math.max(sanitized.lastIndexOf("\\n"), sanitized.lastIndexOf(" - ")));

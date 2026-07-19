@@ -1014,6 +1014,175 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     }
 
     @Test
+    void governedConceptProjectionUsesHierarchicalCatalogWithoutLoadingAllApiMetadata() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
+        when(domainCatalog.contextLatest(
+                Mockito.eq("praxis-service"),
+                Mockito.isNull(),
+                Mockito.eq("tenant-a"),
+                Mockito.eq("dev"),
+                Mockito.eq("node"),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.eq("human-resources"),
+                Mockito.eq(8))).thenReturn(discoveryContext(List.of("human-resources.funcionarios")));
+        when(domainCatalog.contextLatest(
+                Mockito.eq("praxis-service"),
+                Mockito.eq("human-resources.funcionarios"),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.nullable(String.class),
+                Mockito.eq(80))).thenReturn(domainContext(
+                "human-resources.funcionarios",
+                "Funcionários",
+                "Cadastro governado das pessoas da organização",
+                List.of("Nome", "Cargo", "Departamento", "Status")));
+        AgenticAuthoringConsultativeApiCatalogProjectionService projectionService =
+                new AgenticAuthoringConsultativeApiCatalogProjectionService(
+                        () -> domainCatalog,
+                        repository,
+                        "praxis-service");
+
+        AgenticAuthoringConsultativeApiCatalogProjection projection =
+                projectionService.projectGovernedConcepts(
+                        "Explique os dados confirmados desse tema.",
+                        List.of("human-resources"),
+                        "tenant-a",
+                        "dev");
+
+        assertThat(projection).isNotNull();
+        assertThat(projection.resources())
+                .extracting(AgenticAuthoringConsultativeApiCatalogProjection.Resource::resourceKey)
+                .containsExactly("human-resources.funcionarios");
+        assertThat(projection.resources().get(0).fields())
+                .extracting(AgenticAuthoringConsultativeApiCatalogProjection.Field::label)
+                .containsExactly("Nome", "Cargo", "Departamento", "Status");
+        assertThat(projection.warnings()).contains("governed-domain-hierarchical-projection-used");
+        verify(repository, never()).findAll();
+    }
+
+    @Test
+    void resolvedCandidateProjectionLoadsOnlyMetadataForThePersistedResource() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ApiMetadata metadata = new ApiMetadata(
+                "/api/human-resources/funcionarios/filter/cursor",
+                "POST",
+                "human-resources,funcionarios",
+                "Consultar funcionários",
+                "Consulta governada do cadastro de funcionários",
+                "filterFuncionariosCursor",
+                "{}",
+                "{\"type\":\"object\",\"properties\":{\"nome\":{\"type\":\"string\",\"description\":\"Nome da pessoa\"},\"cargo\":{\"type\":\"string\",\"description\":\"Cargo atual\"},\"departamento\":{\"type\":\"string\",\"description\":\"Departamento atual\"}}}",
+                "[]",
+                "{}",
+                null);
+        when(repository.findAllByTenantAndEnvironmentAndResourcePath(
+                "tenant-a",
+                "dev",
+                "/api/human-resources/funcionarios")).thenReturn(List.of(metadata));
+        AgenticAuthoringConsultativeApiCatalogProjectionService projectionService =
+                new AgenticAuthoringConsultativeApiCatalogProjectionService(
+                        () -> null,
+                        repository,
+                        "praxis-service");
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter/cursor",
+                "post",
+                0.82,
+                "persisted governed candidate",
+                List.of("domain-catalog-grounding"));
+
+        AgenticAuthoringConsultativeApiCatalogProjection projection =
+                projectionService.projectResolvedCandidates(
+                        "Explique os dados confirmados desse tema.",
+                        List.of(candidate),
+                        "tenant-a",
+                        "user-a",
+                        "dev",
+                        "http://localhost:8088");
+
+        assertThat(projection).isNotNull();
+        assertThat(projection.resources()).hasSize(1);
+        assertThat(projection.resources().get(0).fields())
+                .extracting(AgenticAuthoringConsultativeApiCatalogProjection.Field::name)
+                .containsExactly("nome", "cargo", "departamento");
+        assertThat(projection.assistantMessage())
+                .contains("Funcionários")
+                .contains("Campos confirmados")
+                .doesNotContain("Não encontrei dados governados");
+        verify(repository).findAllByTenantAndEnvironmentAndResourcePath(
+                "tenant-a",
+                "dev",
+                "/api/human-resources/funcionarios");
+        verify(repository, never()).findAll();
+    }
+
+    @Test
+    void resolvedCandidateProjectionUsesCanonicalFilteredSchemaWhenPersistedMetadataHasNoFields() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAllByTenantAndEnvironmentAndResourcePath(
+                "tenant-a",
+                "dev",
+                "/api/human-resources/funcionarios")).thenReturn(List.of());
+        org.praxisplatform.config.service.SchemaRetrievalService schemaRetrievalService =
+                Mockito.mock(org.praxisplatform.config.service.SchemaRetrievalService.class);
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.putArray("fields")
+                .addObject().put("name", "nome").put("label", "Nome").put("description", "Nome da pessoa");
+        schema.withArray("fields")
+                .addObject().put("name", "cargo").put("label", "Cargo").put("description", "Cargo atual");
+        when(schemaRetrievalService.fetchSchemaResult(
+                Mockito.any(),
+                Mockito.eq("http://localhost:8088"),
+                Mockito.eq("tenant-a"),
+                Mockito.eq("user-a"),
+                Mockito.eq("dev"))).thenReturn(
+                        org.praxisplatform.config.service.SchemaFetchResult.success(
+                                schema,
+                                "http://localhost:8088/schemas/filtered"));
+        AgenticAuthoringConsultativeApiCatalogProjectionService projectionService =
+                new AgenticAuthoringConsultativeApiCatalogProjectionService(
+                        () -> null,
+                        repository,
+                        "praxis-service",
+                        60_000L,
+                        256,
+                        60_000L,
+                        schemaRetrievalService);
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter/cursor",
+                "post",
+                0.90,
+                "persisted governed candidate",
+                List.of("domain-catalog-grounding"));
+
+        AgenticAuthoringConsultativeApiCatalogProjection projection =
+                projectionService.projectResolvedCandidates(
+                        "Explique os campos confirmados.",
+                        List.of(candidate),
+                        "tenant-a",
+                        "user-a",
+                        "dev",
+                        "http://localhost:8088");
+
+        assertThat(projection).isNotNull();
+        assertThat(projection.resources().get(0).fields())
+                .extracting(AgenticAuthoringConsultativeApiCatalogProjection.Field::name)
+                .containsExactly("nome", "cargo");
+        assertThat(projection.resources().get(0).evidence()).contains("schemas_filtered");
+    }
+
+    @Test
     void compactConsultativeProjectionReusesRecentProjectionAndApiMetadata() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         when(repository.findAll()).thenReturn(List.of(new ApiMetadata(

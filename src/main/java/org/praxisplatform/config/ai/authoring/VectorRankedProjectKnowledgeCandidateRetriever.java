@@ -38,7 +38,7 @@ public class VectorRankedProjectKnowledgeCandidateRetriever
 
     @Override
     public List<DomainKnowledgeConcept> retrieve(AgenticAuthoringProjectKnowledgeQuery query) {
-        if (query == null || !ragVectorStoreService.isAvailable()) {
+        if (query == null || isUnscopedEnumeration(query) || !ragVectorStoreService.isAvailable()) {
             return repositoryFallback(query);
         }
         String searchText = searchText(query);
@@ -62,6 +62,18 @@ public class VectorRankedProjectKnowledgeCandidateRetriever
                 conceptKeys);
         List<DomainKnowledgeConcept> ranked = rankedConcepts(conceptKeys, concepts, query.limit());
         return ranked.isEmpty() ? repositoryFallback(query) : ranked;
+    }
+
+    /**
+     * A node-type-only request is a governed enumeration, not a semantic search. Sending values
+     * such as "context context" to the vector store produces arbitrary ranking and can hide the
+     * canonical macro contexts behind resource-derived entries. The LLM has already selected the
+     * semantic tool at this point, so deterministic repository enumeration is the correct
+     * grounding operation.
+     */
+    private boolean isUnscopedEnumeration(AgenticAuthoringProjectKnowledgeQuery query) {
+        return !StringUtils.hasText(query.contextKey())
+                && !StringUtils.hasText(query.resourceKey());
     }
 
     private List<DomainKnowledgeConcept> repositoryFallback(AgenticAuthoringProjectKnowledgeQuery query) {

@@ -549,6 +549,28 @@ compacto usa `praxis.ai.authoring.intent-resolution.fast-timeout-seconds`
 o passe completo usa
 `praxis.ai.authoring.intent-resolution.full-timeout-seconds`
 (`PRAXIS_AI_AUTHORING_INTENT_RESOLUTION_FULL_TIMEOUT_SECONDS`, default `30s`).
+
+Separadamente, o planejador pre-intent OpenAI usa
+`praxis.ai.authoring.pre-intent.openai-model` (default `gpt-5.6-luna`) para manter
+classificacao e planejamento estruturado em uma classe de custo/latencia separada do modelo geral
+de autoria. A configuracao nao altera o modelo de providers nao OpenAI nem o modelo usado nas fases
+posteriores do turno.
+
+O passe pre-intent nao cria implicitamente uma consulta sem escopo ao Domain Catalog. Contexto de
+dominio e incorporado diretamente nessa fase apenas quando o host envia um escopo `domainCatalog`
+explicito. Sem esse escopo, a orientacao semantica decide primeiro o nivel necessario e solicita
+progressivamente `discoverDomainContexts`, `discoverDomainCapabilities`, `discoverDomainConcepts`,
+`inspectDomainBindings`, `verifyDomainOperation` ou `searchApiResources`. Isso evita varrer o
+catalogo inteiro antes de saber se a pergunta exige dominio, binding ou endpoint.
+
+Perguntas que enumeram os dominios, temas ou assuntos de negocio efetivamente disponiveis usam a
+classe semantica interna `governed_domain_discovery`. Ela nao e orientacao generica nem autoria de
+um artefato ainda: seleciona primeiro `discoverDomainContexts`. Enumeracoes sem `contextKey` ou
+`resourceKey` consultam deterministicamente o repositorio canonico e priorizam conhecimento macro
+sem `resourceKey`; ranking vetorial fica reservado a consultas semanticamente delimitadas. A
+telemetria `pre_intent_tool_plan.model` registra o modelo efetivamente selecionado para essa fase,
+inclusive quando ele difere do modelo geral solicitado pelo turno.
+
 Esses limites governam apenas a chamada do provider para decidir intencao; eles
 nao encerram o stream por si so. Quando o provider falha ou estoura timeout, o
 backend deve materializar uma resolucao nao aplicada, com warnings como

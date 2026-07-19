@@ -9,6 +9,7 @@
     "schemaVersion": { "const": "praxis.domain-catalog/v0.2" },
     "service": { "$ref": "#/$defs/service" },
     "release": { "$ref": "#/$defs/release" },
+    "resourceKey": { "type": ["string", "null"], "minLength": 1, "maxLength": 255 },
     "contexts": { "type": "array", "items": { "$ref": "#/$defs/context" } },
     "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
     "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
@@ -64,7 +65,7 @@
         "nodeKey": { "$ref": "#/$defs/key" },
         "contextKey": { "$ref": "#/$defs/key" },
         "nodeType": {
-          "enum": ["concept", "resource", "entity", "field", "state", "operation", "action", "surface", "relationship", "policy_hint", "llm_visibility"]
+          "enum": ["concept", "resource", "entity", "field", "state", "operation", "action", "surface", "stats", "relationship", "policy_hint", "llm_visibility"]
         },
         "label": { "$ref": "#/$defs/nonEmptyString" },
         "description": { "type": ["string", "null"] },
@@ -90,7 +91,7 @@
         "sourceNodeKey": { "$ref": "#/$defs/key" },
         "targetNodeKey": { "$ref": "#/$defs/key" },
         "edgeType": {
-          "enum": ["has_field", "has_state", "has_action", "has_surface", "allowed_in_state", "selectable_when", "blocked_when", "uses_concept", "same_as", "depends_on", "references", "owned_by", "governed_by", "materializes"]
+          "enum": ["has_field", "has_state", "has_action", "has_surface", "has_stats", "allowed_in_state", "selectable_when", "blocked_when", "uses_concept", "same_as", "depends_on", "references", "owned_by", "governed_by", "materializes"]
         },
         "label": { "type": ["string", "null"] },
         "confidence": { "$ref": "#/$defs/confidence" },
@@ -105,7 +106,7 @@
         "bindingKey": { "$ref": "#/$defs/key" },
         "nodeKey": { "$ref": "#/$defs/key" },
         "bindingType": {
-          "enum": ["api_resource", "api_operation", "dto_schema", "dto_field", "workflow_action", "approval_policy", "ui_surface", "option_source", "form_config", "rule_definition", "external_reference"]
+          "enum": ["api_resource", "api_operation", "dto_schema", "dto_field", "workflow_action", "approval_policy", "ui_surface", "option_source", "stats_endpoint", "form_config", "rule_definition", "external_reference"]
         },
         "target": { "$ref": "#/$defs/freeObject" },
         "schemaLinks": { "type": "array", "items": { "$ref": "#/$defs/schemaLink" } },
@@ -141,7 +142,7 @@
       "additionalProperties": false,
       "properties": {
         "evidenceKey": { "$ref": "#/$defs/key" },
-        "evidenceType": { "enum": ["annotation", "openapi", "dto_schema", "option_source", "manual", "inference", "external"] },
+        "evidenceType": { "enum": ["annotation", "openapi", "openapi_stats", "dto_schema", "option_source", "manual", "inference", "external"] },
         "sourceRef": { "$ref": "#/$defs/freeObject" },
         "summary": { "type": ["string", "null"] },
         "confidence": { "$ref": "#/$defs/confidence" }

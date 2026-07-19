@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
+import java.text.Normalizer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -18,8 +19,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import org.praxisplatform.config.domain.DomainKnowledgeChangeSet;
+import org.praxisplatform.config.domain.DomainKnowledgeAlias;
+import org.praxisplatform.config.domain.DomainKnowledgeBinding;
 import org.praxisplatform.config.domain.DomainKnowledgeConcept;
 import org.praxisplatform.config.domain.DomainKnowledgeEvidence;
+import org.praxisplatform.config.domain.DomainKnowledgeRelationship;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetCreateRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationSummary;
@@ -31,11 +35,16 @@ import org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationIssue;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationResponse;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeAliasRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeBindingRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeConceptRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeRelationshipRepository;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -46,6 +55,9 @@ import org.springframework.util.StringUtils;
 @ConditionalOnBean({
         DomainKnowledgeChangeSetRepository.class,
         DomainKnowledgeConceptRepository.class,
+        DomainKnowledgeAliasRepository.class,
+        DomainKnowledgeBindingRepository.class,
+        DomainKnowledgeRelationshipRepository.class,
         DomainKnowledgeEvidenceRepository.class
 })
 @ConditionalOnProperty(prefix = "praxis.domain-knowledge.change-sets", name = "enabled", havingValue = "true", matchIfMissing = true)
@@ -60,6 +72,9 @@ public class DomainKnowledgeChangeSetService {
 
     private final DomainKnowledgeChangeSetRepository repository;
     private final DomainKnowledgeConceptRepository conceptRepository;
+    private final DomainKnowledgeAliasRepository aliasRepository;
+    private final DomainKnowledgeBindingRepository bindingRepository;
+    private final DomainKnowledgeRelationshipRepository relationshipRepository;
     private final DomainKnowledgeEvidenceRepository evidenceRepository;
     private final DomainKnowledgeChangeSetValidator validator;
     private final ObjectMapper objectMapper;
@@ -69,6 +84,9 @@ public class DomainKnowledgeChangeSetService {
     public DomainKnowledgeChangeSetService(
             DomainKnowledgeChangeSetRepository repository,
             DomainKnowledgeConceptRepository conceptRepository,
+            DomainKnowledgeAliasRepository aliasRepository,
+            DomainKnowledgeBindingRepository bindingRepository,
+            DomainKnowledgeRelationshipRepository relationshipRepository,
             DomainKnowledgeEvidenceRepository evidenceRepository,
             DomainKnowledgeChangeSetValidator validator,
             ObjectMapper objectMapper,
@@ -76,6 +94,9 @@ public class DomainKnowledgeChangeSetService {
         this(
                 repository,
                 conceptRepository,
+                aliasRepository,
+                bindingRepository,
+                relationshipRepository,
                 evidenceRepository,
                 validator,
                 objectMapper,
@@ -85,12 +106,18 @@ public class DomainKnowledgeChangeSetService {
     DomainKnowledgeChangeSetService(
             DomainKnowledgeChangeSetRepository repository,
             DomainKnowledgeConceptRepository conceptRepository,
+            DomainKnowledgeAliasRepository aliasRepository,
+            DomainKnowledgeBindingRepository bindingRepository,
+            DomainKnowledgeRelationshipRepository relationshipRepository,
             DomainKnowledgeEvidenceRepository evidenceRepository,
             DomainKnowledgeChangeSetValidator validator,
             ObjectMapper objectMapper,
             ProjectKnowledgeDerivedIndexService projectKnowledgeDerivedIndexService) {
         this.repository = repository;
         this.conceptRepository = conceptRepository;
+        this.aliasRepository = aliasRepository;
+        this.bindingRepository = bindingRepository;
+        this.relationshipRepository = relationshipRepository;
         this.evidenceRepository = evidenceRepository;
         this.validator = validator;
         this.objectMapper = objectMapper;
@@ -172,11 +199,10 @@ public class DomainKnowledgeChangeSetService {
         String normalizedTenant = normalize(tenantId);
         String normalizedEnvironment = normalize(environment);
         DomainKnowledgeChangeSet changeSet = repository.findById(id)
-                .orElseThrow(() -> new ConfigurationIngestionException(
-                        "Domain knowledge change set not found: " + id));
+                .orElseThrow(() -> changeSetNotFound(id));
         if (!sameScope(normalizedTenant, changeSet.getTenantId())
                 || !sameScope(normalizedEnvironment, changeSet.getEnvironment())) {
-            throw new ConfigurationIngestionException("Domain knowledge change set not found in request scope: " + id);
+            throw changeSetNotFound(id);
         }
         return toResponse(changeSet);
     }
@@ -458,6 +484,22 @@ public class DomainKnowledgeChangeSetService {
             DomainKnowledgeChangeSet changeSet,
             DomainKnowledgeChangeSetOperationRequest operation) {
         String operationType = normalize(operation.operationType());
+        if ("create_concept".equals(operationType)) {
+            applyCreateConceptOperation(changeSet, operation);
+            return;
+        }
+        if ("add_alias".equals(operationType)) {
+            applyAliasOperation(changeSet, operation);
+            return;
+        }
+        if ("add_binding".equals(operationType)) {
+            applyBindingOperation(changeSet, operation);
+            return;
+        }
+        if ("add_relationship".equals(operationType)) {
+            applyRelationshipOperation(changeSet, operation);
+            return;
+        }
         if ("add_evidence".equals(operationType)) {
             applyEvidenceOperation(changeSet, operation);
             return;
@@ -467,7 +509,250 @@ public class DomainKnowledgeChangeSetService {
             return;
         }
         throw new ConfigurationIngestionException(
-                "Only add_evidence and revert_evidence operations can be applied in this cut: " + operationType);
+                "Domain knowledge operation has no canonical applier: " + operationType);
+    }
+
+    private void applyCreateConceptOperation(
+            DomainKnowledgeChangeSet changeSet,
+            DomainKnowledgeChangeSetOperationRequest operation) {
+        String conceptKey = requireText(text(operation.target(), "conceptKey"), "target.conceptKey");
+        if (conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(
+                changeSet.getTenantId(), changeSet.getEnvironment(), conceptKey).isPresent()) {
+            throw new ConfigurationIngestionException(
+                    "Domain knowledge concept already exists in request scope: " + conceptKey);
+        }
+        JsonNode payload = operation.payload();
+        DomainKnowledgeConcept concept = new DomainKnowledgeConcept();
+        concept.setTenantId(changeSet.getTenantId());
+        concept.setEnvironment(changeSet.getEnvironment());
+        concept.setConceptKey(conceptKey);
+        concept.setContextKey(requireText(text(payload, "contextKey"), "payload.contextKey"));
+        concept.setResourceKey(text(payload, "resourceKey"));
+        concept.setNodeType(requireText(text(payload, "nodeType"), "payload.nodeType"));
+        concept.setLabel(requireText(text(payload, "label"), "payload.label"));
+        concept.setDescription(requireText(text(payload, "description"), "payload.description"));
+        concept.setLocale(text(payload, "locale"));
+        concept.setSemanticOwner(requireText(text(payload, "semanticOwner"), "payload.semanticOwner"));
+        concept.setSteward(text(payload, "steward"));
+        concept.setLifecycle("active");
+        concept.setCurationStatus("approved");
+        concept.setAiVisibility(normalizeOrDefault(text(payload, "aiVisibility"), "allow"));
+        concept.setDataCategory(text(payload, "dataCategory"));
+        concept.setClassification(text(payload, "classification"));
+        JsonNode complianceTags = payload == null ? null : payload.path("complianceTags");
+        concept.setComplianceTags(complianceTags != null && complianceTags.isArray()
+                ? write(complianceTags)
+                : "[]");
+        concept.setPayload(write(payload));
+        DomainKnowledgeConcept savedConcept = conceptRepository.save(concept);
+        persistClaimEvidence(
+                changeSet, "concept", savedConcept.getId(), savedConcept, payload, operation.confidence());
+    }
+
+    private void applyAliasOperation(
+            DomainKnowledgeChangeSet changeSet,
+            DomainKnowledgeChangeSetOperationRequest operation) {
+        DomainKnowledgeConcept concept = requireConcept(changeSet, text(operation.target(), "conceptKey"));
+        JsonNode payload = operation.payload();
+        String aliasValue = requireText(text(payload, "alias"), "payload.alias");
+        String normalizedAlias = normalizedAlias(aliasValue);
+        DomainKnowledgeAlias existing = aliasRepository.findByConcept_Id(concept.getId()).stream()
+                .filter(alias -> normalizedAlias.equals(alias.getNormalizedAlias()))
+                .findFirst()
+                .orElse(null);
+        if (existing != null) {
+            if (normalize(existing.getAliasType()).equals(normalize(text(payload, "aliasType")))) {
+                persistClaimEvidence(
+                        changeSet, "alias", existing.getId(), null, payload, operation.confidence());
+                return;
+            }
+            throw new ConfigurationIngestionException(
+                    "Domain knowledge alias already exists with different semantics: " + aliasValue);
+        }
+        DomainKnowledgeAlias alias = new DomainKnowledgeAlias();
+        alias.setTenantId(changeSet.getTenantId());
+        alias.setEnvironment(changeSet.getEnvironment());
+        alias.setConcept(concept);
+        alias.setAlias(aliasValue);
+        alias.setNormalizedAlias(normalizedAlias);
+        alias.setLocale(text(payload, "locale"));
+        alias.setRegion(text(payload, "region"));
+        alias.setBusinessUnit(text(payload, "businessUnit"));
+        alias.setAliasType(requireText(text(payload, "aliasType"), "payload.aliasType"));
+        alias.setWeight(operation.confidence());
+        alias.setSource(aliasSource(payload));
+        alias.setCurationStatus("approved");
+        DomainKnowledgeAlias savedAlias = aliasRepository.save(alias);
+        persistClaimEvidence(
+                changeSet, "alias", savedAlias.getId(), null, payload, operation.confidence());
+    }
+
+    private void applyBindingOperation(
+            DomainKnowledgeChangeSet changeSet,
+            DomainKnowledgeChangeSetOperationRequest operation) {
+        DomainKnowledgeConcept concept = requireConcept(changeSet, text(operation.target(), "conceptKey"));
+        JsonNode payload = operation.payload();
+        String bindingType = requireText(text(payload, "bindingType"), "payload.bindingType");
+        String bindingKey = requireText(text(payload, "bindingKey"), "payload.bindingKey");
+        DomainKnowledgeBinding existingBinding = bindingRepository
+                .findByTenantIdAndEnvironmentAndBindingTypeAndBindingKey(
+                        changeSet.getTenantId(), changeSet.getEnvironment(), bindingType, bindingKey)
+                .stream()
+                .filter(binding -> binding.getConcept() != null
+                        && java.util.Objects.equals(binding.getConcept().getId(), concept.getId()))
+                .findFirst()
+                .orElse(null);
+        if (existingBinding != null) {
+            persistClaimEvidence(
+                    changeSet, "binding", existingBinding.getId(), null, payload, operation.confidence());
+            return;
+        }
+        DomainKnowledgeBinding binding = new DomainKnowledgeBinding();
+        binding.setTenantId(changeSet.getTenantId());
+        binding.setEnvironment(changeSet.getEnvironment());
+        binding.setConcept(concept);
+        binding.setBindingType(bindingType);
+        binding.setBindingKey(bindingKey);
+        binding.setResourceKey(text(payload, "resourceKey"));
+        binding.setApiPath(text(payload, "apiPath"));
+        binding.setApiMethod(text(payload, "apiMethod"));
+        binding.setSchemaPointer(text(payload, "schemaPointer"));
+        binding.setConfidence(operation.confidence());
+        binding.setCurationStatus("approved");
+        binding.setPayload(write(payload));
+        DomainKnowledgeBinding savedBinding = bindingRepository.save(binding);
+        persistClaimEvidence(
+                changeSet, "binding", savedBinding.getId(), null, payload, operation.confidence());
+    }
+
+    private void applyRelationshipOperation(
+            DomainKnowledgeChangeSet changeSet,
+            DomainKnowledgeChangeSetOperationRequest operation) {
+        DomainKnowledgeConcept source = requireConcept(
+                changeSet, text(operation.target(), "sourceConceptKey"));
+        DomainKnowledgeConcept target = requireConcept(
+                changeSet, text(operation.target(), "targetConceptKey"));
+        JsonNode payload = operation.payload();
+        String relationshipType = requireText(
+                text(payload, "relationshipType"), "payload.relationshipType");
+        DomainKnowledgeRelationship existingRelationship = relationshipRepository
+                .findByTenantIdAndEnvironmentAndSourceConcept_Id(
+                        changeSet.getTenantId(), changeSet.getEnvironment(), source.getId())
+                .stream()
+                .filter(relationship -> relationship.getTargetConcept() != null
+                        && java.util.Objects.equals(relationship.getTargetConcept().getId(), target.getId())
+                        && normalize(relationship.getRelationshipType()).equals(normalize(relationshipType)))
+                .findFirst()
+                .orElse(null);
+        if (existingRelationship != null) {
+            persistClaimEvidence(
+                    changeSet,
+                    "relationship",
+                    existingRelationship.getId(),
+                    null,
+                    payload,
+                    operation.confidence());
+            return;
+        }
+        DomainKnowledgeRelationship relationship = new DomainKnowledgeRelationship();
+        relationship.setTenantId(changeSet.getTenantId());
+        relationship.setEnvironment(changeSet.getEnvironment());
+        relationship.setSourceConcept(source);
+        relationship.setTargetConcept(target);
+        relationship.setRelationshipType(relationshipType);
+        relationship.setCrossContext(!java.util.Objects.equals(source.getContextKey(), target.getContextKey()));
+        relationship.setSourceContextKey(source.getContextKey());
+        relationship.setTargetContextKey(target.getContextKey());
+        relationship.setContractKey(text(payload, "contractKey"));
+        relationship.setConfidence(operation.confidence());
+        relationship.setCurationStatus("approved");
+        relationship.setPayload(write(payload));
+        DomainKnowledgeRelationship savedRelationship = relationshipRepository.save(relationship);
+        persistClaimEvidence(
+                changeSet, "relationship", savedRelationship.getId(), null, payload, operation.confidence());
+    }
+
+    private void persistClaimEvidence(
+            DomainKnowledgeChangeSet changeSet,
+            String subjectType,
+            UUID subjectId,
+            DomainKnowledgeConcept concept,
+            JsonNode claimPayload,
+            Double confidence) {
+        JsonNode provenance = claimPayload == null ? null : claimPayload.path("provenance");
+        String claimId = requireText(text(provenance, "claimId"), "payload.provenance.claimId");
+        List<DomainKnowledgeEvidence> existingEvidence =
+                evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKey(
+                        changeSet.getTenantId(), changeSet.getEnvironment(), claimId);
+        if (!existingEvidence.isEmpty()) {
+            DomainKnowledgeEvidence existing = existingEvidence.get(0);
+            if (subjectType.equals(existing.getSubjectType())
+                    && java.util.Objects.equals(subjectId, existing.getSubjectId())) {
+                return;
+            }
+            throw new ConfigurationIngestionException(
+                    "Claim id already exists for a different semantic subject: " + claimId);
+        }
+        DomainKnowledgeEvidence evidence = new DomainKnowledgeEvidence();
+        evidence.setTenantId(changeSet.getTenantId());
+        evidence.setEnvironment(changeSet.getEnvironment());
+        evidence.setEvidenceKey(claimId);
+        evidence.setSubjectType(subjectType);
+        evidence.setSubjectId(subjectId);
+        evidence.setEvidenceType(claimEvidenceType(text(provenance, "sourceClass")));
+        evidence.setSourceUri(firstTextValue(provenance == null ? null : provenance.path("sourceRefs")));
+        evidence.setSourcePointer(text(provenance, "derivationActivity"));
+        evidence.setConfidence(confidence);
+        evidence.setPayload(write(provenance));
+        DomainKnowledgeEvidence savedEvidence = evidenceRepository.save(evidence);
+        if (concept != null) {
+            projectKnowledgeDerivedIndexService.evidenceActivated(concept, savedEvidence);
+        }
+    }
+
+    private String claimEvidenceType(String sourceClass) {
+        return switch (normalizeOrDefault(sourceClass, "inferred")) {
+            case "authored" -> "manual_review";
+            case "extracted" -> "import";
+            default -> "llm_proposal";
+        };
+    }
+
+    private String firstTextValue(JsonNode values) {
+        if (values == null || !values.isArray()) {
+            return null;
+        }
+        for (JsonNode value : values) {
+            if (value.isTextual() && StringUtils.hasText(value.asText())) {
+                return value.asText().trim();
+            }
+        }
+        return null;
+    }
+
+    private DomainKnowledgeConcept requireConcept(
+            DomainKnowledgeChangeSet changeSet,
+            String conceptKey) {
+        String requiredConceptKey = requireText(conceptKey, "target concept key");
+        return conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(
+                        changeSet.getTenantId(), changeSet.getEnvironment(), requiredConceptKey)
+                .orElseThrow(() -> new ConfigurationIngestionException(
+                        "Domain knowledge concept not found in request scope: " + requiredConceptKey));
+    }
+
+    private String aliasSource(JsonNode payload) {
+        String sourceClass = text(payload == null ? null : payload.path("provenance"), "sourceClass");
+        return switch (normalizeOrDefault(sourceClass, "inferred")) {
+            case "authored" -> "manual";
+            case "extracted" -> "generated";
+            default -> "llm_proposed";
+        };
+    }
+
+    private String normalizedAlias(String value) {
+        String normalized = Normalizer.normalize(value.trim(), Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "");
+        return normalized.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
     }
 
     private void applyEvidenceOperation(
@@ -630,13 +915,18 @@ public class DomainKnowledgeChangeSetService {
         String normalizedTenant = normalize(tenantId);
         String normalizedEnvironment = normalize(environment);
         DomainKnowledgeChangeSet changeSet = repository.findById(id)
-                .orElseThrow(() -> new ConfigurationIngestionException(
-                        "Domain knowledge change set not found: " + id));
+                .orElseThrow(() -> changeSetNotFound(id));
         if (!sameScope(normalizedTenant, changeSet.getTenantId())
                 || !sameScope(normalizedEnvironment, changeSet.getEnvironment())) {
-            throw new ConfigurationIngestionException("Domain knowledge change set not found in request scope: " + id);
+            throw changeSetNotFound(id);
         }
         return changeSet;
+    }
+
+    private ResponseStatusException changeSetNotFound(UUID id) {
+        return new ResponseStatusException(
+                HttpStatus.NOT_FOUND,
+                "Domain knowledge change set not found in request scope: " + id);
     }
 
     private DomainKnowledgeChangeSetResponse reuseExistingOrReject(
@@ -696,6 +986,14 @@ public class DomainKnowledgeChangeSetService {
         }
         if (target.hasNonNull("conceptKey")) {
             return List.of(target.path("conceptKey").asText());
+        }
+        if (target.hasNonNull("sourceConceptKey") || target.hasNonNull("targetConceptKey")) {
+            return java.util.stream.Stream.of(
+                            target.path("sourceConceptKey").asText(null),
+                            target.path("targetConceptKey").asText(null))
+                    .filter(StringUtils::hasText)
+                    .distinct()
+                    .toList();
         }
         if (target.has("conceptKeys") && target.path("conceptKeys").isArray()) {
             return readableValues(target.path("conceptKeys"));

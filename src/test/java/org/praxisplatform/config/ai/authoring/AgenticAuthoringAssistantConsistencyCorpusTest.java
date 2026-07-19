@@ -62,11 +62,19 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
                 if (index == 0) {
                     assertThat(turn.path("currentPageSource").asText()).isEqualTo("context");
                     assertThat(turn.has("lineage")).isFalse();
+                    assertThat(turn.has("quickReplySelection")).isFalse();
                 } else {
                     assertThat(turn.path("currentPageSource").asText()).isIn("context", "previous-preview");
                     assertThat(turn.path("lineage").path("sameThread").asBoolean()).isTrue();
                     assertThat(turn.path("lineage").path("distinctTurn").asBoolean()).isTrue();
                     assertThat(turn.path("lineage").path("activeDecisionFromPreviousTurn").asBoolean()).isTrue();
+                    if (turn.has("quickReplySelection")) {
+                        assertThat(turn.path("quickReplySelection").path("replyId").asText()).isNotBlank();
+                        assertThat(turn.path("quickReplySelection").path("requireSemanticDecision").asBoolean())
+                                .isTrue();
+                        assertThat(turn.path("lineage").path("activeDecisionSource").asText())
+                                .isEqualTo("selected-quick-reply");
+                    }
                 }
                 index++;
             }
@@ -163,6 +171,27 @@ class AgenticAuthoringAssistantConsistencyCorpusTest {
         assertThat(materialization.at("/expected/terminal/minimumSemanticAxisCount").asInt()).isPositive();
         assertThat(materialization.at("/expected/terminal/requireAllSemanticAxesVerified").asBoolean()).isTrue();
         assertThat(materialization.at("/lineage/sameThread").asBoolean()).isTrue();
+    }
+
+    @Test
+    void governedDomainJourneySelectsTheQuickReplyActuallyEmittedByThePreviousTurn() throws Exception {
+        JsonNode journey = findById(corpus().path("journeys"), "governed-domain-to-available-data-pt");
+
+        assertThat(journey).isNotNull();
+        assertThat(journey.path("status").asText()).isEqualTo("must-pass");
+        assertThat(journey.path("turns")).hasSize(3);
+        JsonNode selection = journey.path("turns").get(1).path("quickReplySelection");
+        assertThat(selection.path("replyId").asText()).isEqualTo("governed-domain:explore-data");
+        assertThat(selection.path("requireSemanticDecision").asBoolean()).isTrue();
+        assertThat(journey.path("turns").get(1).path("lineage").path("activeDecisionSource").asText())
+                .isEqualTo("selected-quick-reply");
+        JsonNode materialization = journey.path("turns").get(2);
+        assertThat(materialization.path("quickReplySelection").path("requireSemanticDecision").asBoolean())
+                .isTrue();
+        assertThat(materialization.at("/expected/terminal/canApply").asBoolean()).isTrue();
+        assertThat(materialization.at("/expected/terminal/preview").asText()).isEqualTo("required");
+        assertThat(materialization.at("/lineage/activeDecisionSource").asText())
+                .isEqualTo("selected-quick-reply");
     }
 
     @Test

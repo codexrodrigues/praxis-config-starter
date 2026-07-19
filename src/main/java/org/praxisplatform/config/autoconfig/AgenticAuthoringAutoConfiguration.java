@@ -137,6 +137,7 @@ public class AgenticAuthoringAutoConfiguration {
     public AgenticAuthoringConsultativeApiCatalogProjectionService agenticAuthoringConsultativeApiCatalogProjectionService(
             ObjectProvider<DomainCatalogIngestionService> domainCatalogIngestionService,
             ObjectProvider<ApiMetadataRepository> apiMetadataRepository,
+            ObjectProvider<SchemaRetrievalService> schemaRetrievalService,
             @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey,
             @Value("${praxis.ai.authoring.consultative.api-catalog.compact-cache-ttl-ms:60000}") long compactProjectionCacheTtlMs,
             @Value("${praxis.ai.authoring.consultative.api-catalog.compact-cache-max-entries:256}") int compactProjectionCacheMaxEntries,
@@ -147,7 +148,8 @@ public class AgenticAuthoringAutoConfiguration {
                 domainCatalogServiceKey,
                 compactProjectionCacheTtlMs,
                 compactProjectionCacheMaxEntries,
-                apiMetadataCacheTtlMs);
+                apiMetadataCacheTtlMs,
+                schemaRetrievalService.getIfAvailable());
     }
 
     @Bean
@@ -332,12 +334,34 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainBindingService
+            agenticAuthoringDomainBindingService(
+                    ObjectProvider<org.praxisplatform.config.repository.DomainKnowledgeBindingRepository>
+                            bindingRepositoryProvider,
+                    ObjectProvider<org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository>
+                            evidenceRepositoryProvider) {
+        var bindingRepository = bindingRepositoryProvider.getIfAvailable();
+        var evidenceRepository = evidenceRepositoryProvider.getIfAvailable();
+        if (bindingRepository == null || evidenceRepository == null) {
+            return null;
+        }
+        return new org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainBindingService(
+                bindingRepository, evidenceRepository);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public AgenticAuthoringToolRegistry agenticAuthoringToolRegistry(
             AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
             ObjectProvider<ContextRetrievalService> contextRetrievalService,
             ObjectProvider<AgenticAuthoringManifestService> manifestService,
             ObjectProvider<SchemaRetrievalService> schemaRetrievalService,
             ObjectProvider<AgenticAuthoringPresentationAffordanceDiscoveryService> presentationAffordanceDiscoveryService,
+            ObjectProvider<org.praxisplatform.config.ai.authoring.AgenticAuthoringProjectKnowledgeService> projectKnowledgeService,
+            ObjectProvider<org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainBindingService> domainBindingService,
+            ObjectProvider<org.praxisplatform.config.ai.authoring.AgenticAuthoringOperationalBindingVerificationService> operationalVerificationService,
+            ObjectProvider<DomainCatalogIngestionService> domainCatalogIngestionService,
+            @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey,
             ObjectMapper objectMapper) {
         return new AgenticAuthoringToolRegistry(
                 resourceDiscoveryService,
@@ -345,7 +369,12 @@ public class AgenticAuthoringAutoConfiguration {
                 manifestService.getIfAvailable(),
                 schemaRetrievalService.getIfAvailable(),
                 objectMapper,
-                presentationAffordanceDiscoveryService.getIfAvailable());
+                presentationAffordanceDiscoveryService.getIfAvailable(),
+                projectKnowledgeService.getIfAvailable(),
+                domainBindingService.getIfAvailable(),
+                operationalVerificationService.getIfAvailable(),
+                domainCatalogIngestionService.getIfAvailable(),
+                domainCatalogServiceKey);
     }
 
     @Bean
@@ -410,11 +439,14 @@ public class AgenticAuthoringAutoConfiguration {
     public AgenticAuthoringPreIntentToolPlanningService agenticAuthoringPreIntentToolPlanningService(
             AiProviderManagementService providerManagementService,
             ObjectMapper objectMapper,
-            ObjectProvider<DomainCatalogPromptContextService> domainCatalogPromptContextService) {
+            ObjectProvider<DomainCatalogPromptContextService> domainCatalogPromptContextService,
+            @Value("${praxis.ai.authoring.pre-intent.openai-model:gpt-5.6-luna}")
+            String openAiPlanningModel) {
         return new AgenticAuthoringLlmPreIntentToolPlanningService(
                 providerManagementService,
                 objectMapper,
-                domainCatalogPromptContextService.getIfAvailable());
+                domainCatalogPromptContextService.getIfAvailable(),
+                openAiPlanningModel);
     }
 
     @Bean
@@ -430,6 +462,24 @@ public class AgenticAuthoringAutoConfiguration {
                 capabilitiesTimeoutMs,
                 authorizationProviders.getIfAvailable(
                         GovernedPlatformRequestAuthorizationProvider::none));
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnBean({
+            org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainBindingService.class,
+            SchemaRetrievalService.class,
+            ResourceCapabilitiesRetrievalService.class
+    })
+    public org.praxisplatform.config.ai.authoring.AgenticAuthoringOperationalBindingVerificationService
+            agenticAuthoringOperationalBindingVerificationService(
+                    org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainBindingService bindingService,
+                    SchemaRetrievalService schemaRetrievalService,
+                    ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService) {
+        return new org.praxisplatform.config.ai.authoring.AgenticAuthoringOperationalBindingVerificationService(
+                bindingService,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService);
     }
 
     @Bean

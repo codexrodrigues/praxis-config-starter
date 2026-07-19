@@ -8,6 +8,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.praxisplatform.config.dto.ApiSearchResult;
@@ -117,6 +118,51 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         List<AgenticAuthoringCandidate> mergedCandidates =
                 mergeCandidates(supplementaryCandidates, semanticCandidates, artifactKind, normalizedPrompt);
         return mergedCandidates;
+    }
+
+    List<AgenticAuthoringCandidate> discoverResolvedConcepts(
+            List<String> conceptKeys,
+            String artifactKind,
+            String tenantId,
+            String environment) {
+        String conceptQuery = conceptKeys == null
+                ? ""
+                : conceptKeys.stream()
+                        .filter(Objects::nonNull)
+                        .map(String::trim)
+                        .filter(value -> !value.isBlank())
+                        .distinct()
+                        .collect(java.util.stream.Collectors.joining(" "));
+        if (conceptQuery.isBlank() || repository == null) {
+            return List.of();
+        }
+        RetrievalContext context = new RetrievalContext(
+                conceptQuery,
+                artifactKind,
+                expectedMethod(artifactKind),
+                tenantId,
+                environment,
+                null);
+        List<AgenticAuthoringCandidate> ranked = new LexicalFallbackCandidateRetriever()
+                .retrieve(context.withTokens(meaningfulTokens(conceptQuery)));
+        return mergeCandidates(ranked, List.of(), artifactKind, conceptQuery).stream()
+                .map(candidate -> {
+                    List<String> evidence = new ArrayList<>(candidate.evidence() == null
+                            ? List.of()
+                            : candidate.evidence());
+                    evidence.add("governed-concept-catalog-ranking");
+                    return new AgenticAuthoringCandidate(
+                            candidate.resourcePath(),
+                            candidate.operation(),
+                            candidate.schemaUrl(),
+                            candidate.submitUrl(),
+                            candidate.submitMethod(),
+                            candidate.score(),
+                            "resource ranked from resolved governed domain concepts",
+                            evidence.stream().distinct().toList(),
+                            candidate.evidenceBundle());
+                })
+                .toList();
     }
 
     private boolean hasScope(String tenantId, String environment) {

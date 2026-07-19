@@ -16,9 +16,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import org.praxisplatform.config.dto.AiSchemaContext;
+import org.praxisplatform.config.dto.DomainCatalogContextResponse;
+import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.ContextRetrievalService;
+import org.praxisplatform.config.service.DomainCatalogIngestionService;
 import org.praxisplatform.config.service.SchemaRetrievalService;
+import org.springframework.util.StringUtils;
 
 public class AgenticAuthoringToolRegistry {
 
@@ -31,6 +35,11 @@ public class AgenticAuthoringToolRegistry {
     static final String SEARCH_SCHEMA_FIELDS = "searchSchemaFields";
     static final String DISCOVER_PRESENTATION_AFFORDANCES = "presentationAffordanceDiscovery";
     static final String RESOLVE_RUNTIME_RELATED_SURFACE = "resolveRuntimeRelatedSurface";
+    static final String DISCOVER_DOMAIN_CONTEXTS = "discoverDomainContexts";
+    static final String DISCOVER_DOMAIN_CAPABILITIES = "discoverDomainCapabilities";
+    static final String DISCOVER_DOMAIN_CONCEPTS = "discoverDomainConcepts";
+    static final String INSPECT_DOMAIN_BINDINGS = "inspectDomainBindings";
+    static final String VERIFY_DOMAIN_OPERATION = "verifyDomainOperation";
 
     private final Map<String, AgenticAuthoringToolExecutor> executors;
 
@@ -50,7 +59,10 @@ public class AgenticAuthoringToolRegistry {
                 manifestService,
                 schemaRetrievalService,
                 objectMapper,
-                AgenticAuthoringPresentationAffordanceDiscoveryService.defaultService(objectMapper));
+                AgenticAuthoringPresentationAffordanceDiscoveryService.defaultService(objectMapper),
+                null,
+                null,
+                null);
     }
 
     public AgenticAuthoringToolRegistry(
@@ -60,8 +72,98 @@ public class AgenticAuthoringToolRegistry {
             SchemaRetrievalService schemaRetrievalService,
             ObjectMapper objectMapper,
             AgenticAuthoringPresentationAffordanceDiscoveryService presentationAffordanceDiscoveryService) {
+        this(
+                resourceDiscoveryService,
+                contextRetrievalService,
+                manifestService,
+                schemaRetrievalService,
+                objectMapper,
+                presentationAffordanceDiscoveryService,
+                null,
+                null,
+                null);
+    }
+
+    public AgenticAuthoringToolRegistry(
+            AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
+            ContextRetrievalService contextRetrievalService,
+            AgenticAuthoringManifestService manifestService,
+            SchemaRetrievalService schemaRetrievalService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringPresentationAffordanceDiscoveryService presentationAffordanceDiscoveryService,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService) {
+        this(
+                resourceDiscoveryService,
+                contextRetrievalService,
+                manifestService,
+                schemaRetrievalService,
+                objectMapper,
+                presentationAffordanceDiscoveryService,
+                projectKnowledgeService,
+                null,
+                null);
+    }
+
+    public AgenticAuthoringToolRegistry(
+            AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
+            ContextRetrievalService contextRetrievalService,
+            AgenticAuthoringManifestService manifestService,
+            SchemaRetrievalService schemaRetrievalService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringPresentationAffordanceDiscoveryService presentationAffordanceDiscoveryService,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            AgenticAuthoringDomainBindingService domainBindingService) {
+        this(
+                resourceDiscoveryService,
+                contextRetrievalService,
+                manifestService,
+                schemaRetrievalService,
+                objectMapper,
+                presentationAffordanceDiscoveryService,
+                projectKnowledgeService,
+                domainBindingService,
+                null);
+    }
+
+    public AgenticAuthoringToolRegistry(
+            AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
+            ContextRetrievalService contextRetrievalService,
+            AgenticAuthoringManifestService manifestService,
+            SchemaRetrievalService schemaRetrievalService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringPresentationAffordanceDiscoveryService presentationAffordanceDiscoveryService,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            AgenticAuthoringDomainBindingService domainBindingService,
+            AgenticAuthoringOperationalBindingVerificationService operationalVerificationService) {
+        this(
+                resourceDiscoveryService,
+                contextRetrievalService,
+                manifestService,
+                schemaRetrievalService,
+                objectMapper,
+                presentationAffordanceDiscoveryService,
+                projectKnowledgeService,
+                domainBindingService,
+                operationalVerificationService,
+                null,
+                "praxis-service");
+    }
+
+    public AgenticAuthoringToolRegistry(
+            AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
+            ContextRetrievalService contextRetrievalService,
+            AgenticAuthoringManifestService manifestService,
+            SchemaRetrievalService schemaRetrievalService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringPresentationAffordanceDiscoveryService presentationAffordanceDiscoveryService,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            AgenticAuthoringDomainBindingService domainBindingService,
+            AgenticAuthoringOperationalBindingVerificationService operationalVerificationService,
+            DomainCatalogIngestionService domainCatalogIngestionService,
+            String domainCatalogServiceKey) {
         Map<String, AgenticAuthoringToolExecutor> registered = new LinkedHashMap<>();
-        register(registered, new SearchApiResourcesToolExecutor(resourceDiscoveryService));
+        register(registered, new SearchApiResourcesToolExecutor(
+                resourceDiscoveryService, domainBindingService, operationalVerificationService));
         register(registered, new SearchComponentCorpusToolExecutor(contextRetrievalService));
         register(registered, new GetComponentAuthoringContextToolExecutor(contextRetrievalService));
         register(registered, new GetManifestSliceToolExecutor(manifestService, objectMapper));
@@ -73,7 +175,313 @@ public class AgenticAuthoringToolRegistry {
                         ? presentationAffordanceDiscoveryService
                         : AgenticAuthoringPresentationAffordanceDiscoveryService.defaultService(objectMapper)));
         register(registered, new RuntimeRelatedSurfaceReadToolExecutor(objectMapper));
+        register(registered, new DomainKnowledgeDiscoveryToolExecutor(
+                DISCOVER_DOMAIN_CONTEXTS,
+                "context",
+                4,
+                projectKnowledgeService,
+                domainCatalogIngestionService,
+                domainCatalogServiceKey));
+        register(registered, new DomainKnowledgeDiscoveryToolExecutor(
+                DISCOVER_DOMAIN_CAPABILITIES,
+                "business_capability",
+                8,
+                projectKnowledgeService,
+                null,
+                domainCatalogServiceKey));
+        register(registered, new DomainKnowledgeDiscoveryToolExecutor(
+                DISCOVER_DOMAIN_CONCEPTS,
+                "concept",
+                8,
+                projectKnowledgeService,
+                null,
+                domainCatalogServiceKey));
+        register(registered, new DomainBindingInspectionToolExecutor(domainBindingService));
+        register(registered, new DomainOperationVerificationToolExecutor(operationalVerificationService));
         this.executors = Map.copyOf(registered);
+    }
+
+    private static final class DomainOperationVerificationToolExecutor implements AgenticAuthoringToolExecutor {
+
+        private static final AgenticAuthoringToolDefinition DEFINITION = new AgenticAuthoringToolDefinition(
+                VERIFY_DOMAIN_OPERATION,
+                Set.of("component_authoring", "shared_rule_authoring", "mixed", "needs_clarification", "advisory_authoring"),
+                Set.of("retrieveEvidence"),
+                "praxis-metadata-starter:schemas-filtered+capabilities",
+                "read_only",
+                "governed_operational_verification",
+                "safe_event_projection_only");
+
+        private final AgenticAuthoringOperationalBindingVerificationService verificationService;
+
+        private DomainOperationVerificationToolExecutor(
+                AgenticAuthoringOperationalBindingVerificationService verificationService) {
+            this.verificationService = verificationService;
+        }
+
+        @Override public AgenticAuthoringToolDefinition definition() { return DEFINITION; }
+        @Override public AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call) { return execute(call, null); }
+
+        @Override
+        public AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call, AiPrincipalContext principalContext) {
+            if (verificationService == null) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(), "tool-service-unavailable", "Operational metadata verification is unavailable.");
+            }
+            if (!(call.payload() instanceof DomainOperationVerificationToolRequest request)) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(), "tool-payload-invalid", "verifyDomainOperation requires its canonical request.");
+            }
+            AgenticAuthoringOperationalBindingVerificationService.VerificationResult result =
+                    verificationService.verify(request.resourceKey(), request.requestBaseUrl(), principalContext);
+            return result.verified()
+                    ? AgenticAuthoringToolResult.success(
+                            call.name(),
+                            result.operations(),
+                            Map.of(
+                                    "resourceKey", safeText(result.resourceKey()),
+                                    "operationCount", result.operations().size(),
+                                    "verification", "schemas_filtered+capabilities"))
+                    : AgenticAuthoringToolResult.failure(
+                            call.name(),
+                            result.failureCodes().isEmpty()
+                                    ? "operational-grounding-unverified"
+                                    : result.failureCodes().get(0),
+                            "The governed binding did not pass exact schema and capability verification.");
+        }
+    }
+
+    private static final class DomainBindingInspectionToolExecutor implements AgenticAuthoringToolExecutor {
+
+        private static final AgenticAuthoringToolDefinition DEFINITION = new AgenticAuthoringToolDefinition(
+                INSPECT_DOMAIN_BINDINGS,
+                Set.of("component_authoring", "shared_rule_authoring", "mixed", "needs_clarification", "advisory_authoring"),
+                Set.of("retrieveEvidence"),
+                "praxis-config-starter:domain-knowledge/bindings",
+                "read_only",
+                "governed_operational_grounding",
+                "safe_event_projection_only");
+
+        private final AgenticAuthoringDomainBindingService domainBindingService;
+
+        private DomainBindingInspectionToolExecutor(AgenticAuthoringDomainBindingService domainBindingService) {
+            this.domainBindingService = domainBindingService;
+        }
+
+        @Override
+        public AgenticAuthoringToolDefinition definition() {
+            return DEFINITION;
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call) {
+            return execute(call, null);
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call, AiPrincipalContext principalContext) {
+            if (domainBindingService == null) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(), "tool-service-unavailable", "Governed Domain Knowledge bindings are unavailable.");
+            }
+            if (principalContext == null
+                    || principalContext.tenantId() == null
+                    || principalContext.environment() == null) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(), "tool-principal-scope-required", "Binding inspection requires authenticated scope.");
+            }
+            if (!(call.payload() instanceof DomainBindingToolRequest request)
+                    || request.resourceKey() == null
+                    || request.resourceKey().isBlank()) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(), "tool-resource-scope-required", "Binding inspection requires a canonical resourceKey.");
+            }
+            List<AgenticAuthoringDomainBindingService.BindingProjection> bindings = domainBindingService.resolve(
+                    principalContext.tenantId(),
+                    principalContext.environment(),
+                    request.resourceKey(),
+                    request.limit() > 0 ? request.limit() : 6);
+            return AgenticAuthoringToolResult.success(
+                    call.name(),
+                    bindings,
+                    Map.of(
+                            "bindingCount", bindings.size(),
+                            "resourceKey", request.resourceKey(),
+                            "operationalGrounding", bindings.isEmpty() ? "unresolved" : "governed_binding"));
+        }
+    }
+
+    private static final class DomainKnowledgeDiscoveryToolExecutor implements AgenticAuthoringToolExecutor {
+
+        private static final Set<String> ROUTES = Set.of(
+                "component_authoring",
+                "shared_rule_authoring",
+                "mixed",
+                "needs_clarification",
+                "advisory_authoring");
+
+        private final AgenticAuthoringToolDefinition definition;
+        private final String nodeType;
+        private final int defaultLimit;
+        private final AgenticAuthoringProjectKnowledgeService projectKnowledgeService;
+        private final DomainCatalogIngestionService domainCatalogIngestionService;
+        private final String domainCatalogServiceKey;
+
+        private DomainKnowledgeDiscoveryToolExecutor(
+                String name,
+                String nodeType,
+                int defaultLimit,
+                AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+                DomainCatalogIngestionService domainCatalogIngestionService,
+                String domainCatalogServiceKey) {
+            this.definition = new AgenticAuthoringToolDefinition(
+                    name,
+                    ROUTES,
+                    Set.of("retrieveEvidence"),
+                    "context".equals(nodeType)
+                            ? "praxis-config-starter:domain-catalog+domain-knowledge"
+                            : "praxis-config-starter:domain-knowledge",
+                    "read_only",
+                    "governed_semantic_grounding",
+                    "safe_event_projection_only");
+            this.nodeType = nodeType;
+            this.defaultLimit = defaultLimit;
+            this.projectKnowledgeService = projectKnowledgeService;
+            this.domainCatalogIngestionService = domainCatalogIngestionService;
+            this.domainCatalogServiceKey = firstNonBlank(domainCatalogServiceKey, "praxis-service");
+        }
+
+        @Override
+        public AgenticAuthoringToolDefinition definition() {
+            return definition;
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call) {
+            return execute(call, null);
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(
+                AgenticAuthoringToolCall call,
+                AiPrincipalContext principalContext) {
+            if (projectKnowledgeService == null && domainCatalogIngestionService == null) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(),
+                        "tool-service-unavailable",
+                        call.name() + " requires a governed domain catalog or Project Knowledge.");
+            }
+            if (principalContext == null
+                    || principalContext.tenantId() == null
+                    || principalContext.environment() == null) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(),
+                        "tool-principal-scope-required",
+                        "Domain Knowledge discovery requires authenticated tenant and environment scope.");
+            }
+            if (!(call.payload() instanceof DomainKnowledgeToolRequest request)) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(),
+                        "tool-payload-invalid",
+                        call.name() + " requires DomainKnowledgeToolRequest payload.");
+            }
+            int limit = request.limit() > 0 ? Math.min(request.limit(), 12) : defaultLimit;
+            Map<String, AgenticAuthoringProjectKnowledgeProjection> projectionsByConcept = new LinkedHashMap<>();
+            if ("context".equals(nodeType) && domainCatalogIngestionService != null) {
+                DomainCatalogContextResponse context = domainCatalogIngestionService.contextLatest(
+                        domainCatalogServiceKey,
+                        principalContext.tenantId(),
+                        principalContext.environment(),
+                        "context",
+                        request.contextKey(),
+                        null,
+                        null,
+                        limit);
+                for (AgenticAuthoringProjectKnowledgeProjection projection :
+                        domainCatalogContextProjections(context, principalContext)) {
+                    projectionsByConcept.putIfAbsent(projection.conceptKey(), projection);
+                }
+            }
+            if (projectKnowledgeService != null && projectionsByConcept.size() < limit) {
+                List<AgenticAuthoringProjectKnowledgeProjection> curated = projectKnowledgeService.retrieve(
+                        new AgenticAuthoringProjectKnowledgeQuery(
+                                principalContext.tenantId(),
+                                principalContext.environment(),
+                                request.contextKey(),
+                                request.resourceKey(),
+                                List.of(nodeType),
+                                nodeType,
+                                limit - projectionsByConcept.size()));
+                for (AgenticAuthoringProjectKnowledgeProjection projection : curated) {
+                    projectionsByConcept.putIfAbsent(projection.conceptKey(), projection);
+                }
+            }
+            List<AgenticAuthoringProjectKnowledgeProjection> projections = projectionsByConcept.values().stream()
+                    .limit(limit)
+                    .toList();
+            return AgenticAuthoringToolResult.success(
+                    call.name(),
+                    projections,
+                    Map.of(
+                            "candidateCount", projections.size(),
+                            "nodeType", nodeType,
+                            "contextKey", safeText(request.contextKey()),
+                            "resourceKey", safeText(request.resourceKey()),
+                            "source", "context".equals(nodeType)
+                                    ? "domain_catalog+domain_knowledge"
+                                    : "domain_knowledge"));
+        }
+
+        private List<AgenticAuthoringProjectKnowledgeProjection> domainCatalogContextProjections(
+                DomainCatalogContextResponse context,
+                AiPrincipalContext principalContext) {
+            if (context == null || context.items() == null || context.items().isEmpty()) {
+                return List.of();
+            }
+            Map<String, AgenticAuthoringProjectKnowledgeProjection> projections = new LinkedHashMap<>();
+            for (DomainCatalogItemResponse item : context.items()) {
+                if (item == null || !"context".equals(item.itemType()) || !StringUtils.hasText(item.itemKey())) {
+                    continue;
+                }
+                JsonNode payload = item.payload();
+                String conceptKey = item.itemKey().trim();
+                String contextKey = firstNonBlank(item.contextKey(), text(payload, "contextKey"), conceptKey);
+                String visibility = firstNonBlank(text(payload == null ? null : payload.path("aiUsage"), "visibility"), "allow");
+                String summary = firstNonBlank(
+                        text(payload, "safeSummary"),
+                        text(payload, "summary"),
+                        text(payload, "description"),
+                        text(payload, "label"),
+                        conceptKey);
+                String sourceSummary = firstNonBlank(text(payload, "source"), item.releaseKey(), "domain_catalog");
+                List<String> evidence = StringUtils.hasText(item.releaseKey())
+                        ? List.of(
+                                "domain-catalog:context:" + conceptKey,
+                                "source-release:" + item.releaseKey(),
+                                "ai-visibility:" + visibility)
+                        : List.of(
+                                "domain-catalog:context:" + conceptKey,
+                                "ai-visibility:" + visibility);
+                projections.putIfAbsent(conceptKey, new AgenticAuthoringProjectKnowledgeProjection(
+                        item.id() == null ? null : item.id().toString(),
+                        conceptKey,
+                        "context",
+                        new AgenticAuthoringProjectKnowledgeProjection.Scope(
+                                principalContext.tenantId(),
+                                principalContext.environment(),
+                                contextKey,
+                                null),
+                        new AgenticAuthoringProjectKnowledgeProjection.Status(
+                                firstNonBlank(text(payload, "lifecycle"), text(payload, "status"), "active"),
+                                "generated"),
+                        visibility,
+                        sourceSummary,
+                        "governed_domain_context",
+                        summary,
+                        evidence));
+            }
+            return List.copyOf(projections.values());
+        }
     }
 
     List<AgenticAuthoringToolDefinition> definitions() {
@@ -164,11 +572,18 @@ public class AgenticAuthoringToolRegistry {
                 "safe_event_projection_only");
 
         private final AgenticAuthoringResourceDiscoveryService resourceDiscoveryService;
+        private final AgenticAuthoringDomainBindingService domainBindingService;
+        private final AgenticAuthoringOperationalBindingVerificationService operationalVerificationService;
 
-        private SearchApiResourcesToolExecutor(AgenticAuthoringResourceDiscoveryService resourceDiscoveryService) {
+        private SearchApiResourcesToolExecutor(
+                AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
+                AgenticAuthoringDomainBindingService domainBindingService,
+                AgenticAuthoringOperationalBindingVerificationService operationalVerificationService) {
             this.resourceDiscoveryService = Objects.requireNonNull(
                     resourceDiscoveryService,
                     "resourceDiscoveryService must not be null");
+            this.domainBindingService = domainBindingService;
+            this.operationalVerificationService = operationalVerificationService;
         }
 
         @Override
@@ -190,6 +605,40 @@ public class AgenticAuthoringToolRegistry {
                         call.name(),
                         "tool-payload-invalid",
                         "searchApiResources requires AgenticAuthoringResourceCandidatesRequest payload.");
+            }
+            if ("pre_intent_resource_discovery".equals(call.routeClass()) && domainBindingService != null) {
+                String resourceKey = request.resourceSearchFocus() == null
+                        ? null
+                        : request.resourceSearchFocus().primaryBusinessEntity();
+                if (resourceKey == null || resourceKey.isBlank()) {
+                    return AgenticAuthoringToolResult.failure(
+                            call.name(),
+                            "operational-grounding-resource-required",
+                            "API discovery requires a semantically resolved canonical resourceKey.");
+                }
+                List<AgenticAuthoringDomainBindingService.BindingProjection> bindings = domainBindingService.resolve(
+                        principalContext == null ? null : principalContext.tenantId(),
+                        principalContext == null ? null : principalContext.environment(),
+                        resourceKey,
+                        6);
+                if (bindings.isEmpty()) {
+                    return AgenticAuthoringToolResult.failure(
+                            call.name(),
+                            "operational-grounding-binding-required",
+                            "API discovery requires an approved active-evidence Domain Knowledge binding.");
+                }
+                if (operationalVerificationService != null) {
+                    AgenticAuthoringOperationalBindingVerificationService.VerificationResult verification =
+                            operationalVerificationService.verify(resourceKey, null, principalContext);
+                    if (!verification.verified()) {
+                        return AgenticAuthoringToolResult.failure(
+                                call.name(),
+                                verification.failureCodes().isEmpty()
+                                        ? "operational-grounding-unverified"
+                                        : verification.failureCodes().get(0),
+                                "API discovery requires exact schema and capability verification.");
+                    }
+                }
             }
             AgenticAuthoringResourceCandidatesResult result = resourceDiscoveryService.search(request, principalContext);
             Map<String, Object> diagnostics = new LinkedHashMap<>();

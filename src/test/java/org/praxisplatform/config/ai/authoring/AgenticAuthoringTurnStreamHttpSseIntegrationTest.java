@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -26,6 +28,13 @@ import org.praxisplatform.config.TestApplication;
 import org.praxisplatform.config.dto.AgenticAuthoringTurnStreamStartResponse;
 import org.praxisplatform.config.dto.AiPatchStreamCancelResponse;
 import org.praxisplatform.config.dto.AiTurnEventEnvelope;
+import org.praxisplatform.config.domain.DomainCatalogRelease;
+import org.praxisplatform.config.domain.DomainKnowledgeBinding;
+import org.praxisplatform.config.domain.DomainKnowledgeConcept;
+import org.praxisplatform.config.domain.DomainKnowledgeEvidence;
+import org.praxisplatform.config.repository.DomainKnowledgeBindingRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository;
+import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiTurnEventService;
 import org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration;
@@ -112,11 +121,21 @@ class AgenticAuthoringTurnStreamHttpSseIntegrationTest {
     @Autowired
     private AiTurnEventService turnEventService;
 
+    @Autowired
+    private AgenticAuthoringToolRegistry toolRegistry;
+
     @MockBean
     private AgenticAuthoringTurnEngine turnEngine;
 
+    @MockBean
+    private DomainKnowledgeBindingRepository bindingRepository;
+
+    @MockBean
+    private DomainKnowledgeEvidenceRepository evidenceRepository;
+
     @BeforeEach
     void resetTables() throws Exception {
+        reset(bindingRepository, evidenceRepository);
         jdbcTemplate.execute("set referential_integrity false");
         jdbcTemplate.execute("delete from ai_turn_event");
         jdbcTemplate.execute("delete from ai_turn");
@@ -124,6 +143,80 @@ class AgenticAuthoringTurnStreamHttpSseIntegrationTest {
         jdbcTemplate.execute("set referential_integrity true");
         ReflectionTestUtils.setField(unwrapProxy(turnEventService), "streamExpirySeconds", 900L);
         stubSuccessfulTurn("ok");
+    }
+
+    @Test
+    void shouldRejectStaleDomainBindingBeforeItReachesHttpStreamGrounding() throws Exception {
+        DomainCatalogRelease currentRelease = DomainCatalogRelease.builder().id(UUID.randomUUID()).build();
+        DomainCatalogRelease staleRelease = DomainCatalogRelease.builder().id(UUID.randomUUID()).build();
+        DomainKnowledgeConcept concept = DomainKnowledgeConcept.builder()
+                .id(UUID.randomUUID())
+                .conceptKey("hr:employee-management")
+                .tenantId(TENANT)
+                .environment(ENV)
+                .sourceRelease(currentRelease)
+                .build();
+        DomainKnowledgeBinding staleBinding = DomainKnowledgeBinding.builder()
+                .id(UUID.randomUUID())
+                .tenantId(TENANT)
+                .environment(ENV)
+                .concept(concept)
+                .bindingType("api_resource")
+                .bindingKey("human-resources.funcionarios")
+                .resourceKey("human-resources.funcionarios")
+                .apiPath("/api/human-resources/funcionarios")
+                .apiMethod("GET")
+                .curationStatus("approved")
+                .sourceRelease(staleRelease)
+                .build();
+        when(bindingRepository.findGovernedOperationalBindings(
+                TENANT, ENV, "human-resources.funcionarios")).thenReturn(List.of(staleBinding));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectIdAndStatus(
+                TENANT, ENV, "concept", concept.getId(), "active"))
+                .thenReturn(List.of(DomainKnowledgeEvidence.builder().id(UUID.randomUUID()).build()));
+
+        doAnswer(invocation -> {
+                    AiPrincipalContext principal = invocation.getArgument(1);
+                    AgenticAuthoringTurnEventSink sink = invocation.getArgument(2);
+                    AgenticAuthoringToolResult result = toolRegistry.execute(
+                            new AgenticAuthoringToolCall(
+                                    AgenticAuthoringToolRegistry.INSPECT_DOMAIN_BINDINGS,
+                                    "component_authoring",
+                                    new DomainBindingToolRequest("human-resources.funcionarios", 6)),
+                            principal,
+                            "retrieveEvidence");
+                    int bindingCount = result.payload() instanceof List<?> bindings
+                            ? bindings.size()
+                            : -1;
+                    sink.append("thought.step", java.util.Map.of(
+                            "phase", "domain.binding.result",
+                            "bindingCount", bindingCount,
+                            "toolValid", result.valid(),
+                            "errorCode", result.errorCode() == null ? "" : result.errorCode()));
+                    sink.append("result", java.util.Map.of(
+                            "message", "stale binding rejected",
+                            "routeClass", "component_authoring",
+                            "bindingCount", bindingCount,
+                            "toolValid", result.valid()));
+                    return AgenticAuthoringTurnEngine.AgenticAuthoringTurnOutcome.completed(
+                            new AgenticAuthoringTurnEngine.AgenticAuthoringTurnState(
+                                    "component_authoring", null, null));
+                })
+                .when(turnEngine)
+                .execute(any(), any(), any(), anyString());
+
+        AgenticAuthoringTurnStreamStartResponse start = startStream("stale-binding-http-proof");
+        List<AiTurnEventEnvelope> events = readSseEvents(start.getStreamId(), null);
+
+        assertThat(events).filteredOn(event -> "thought.step".equals(event.getType()))
+                .anySatisfy(event -> {
+                    assertThat(event.getPayload().path("phase").asText()).isEqualTo("domain.binding.result");
+                    assertThat(event.getPayload().path("toolValid").asBoolean()).isTrue();
+                    assertThat(event.getPayload().path("bindingCount").asInt()).isZero();
+                });
+        assertThat(events).filteredOn(event -> "result".equals(event.getType()))
+                .singleElement()
+                .satisfies(event -> assertThat(event.getPayload().path("bindingCount").asInt()).isZero());
     }
 
     private <T> T unwrapProxy(T bean) {

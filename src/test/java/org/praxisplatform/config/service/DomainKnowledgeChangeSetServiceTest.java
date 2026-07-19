@@ -19,15 +19,22 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.DomainKnowledgeChangeSet;
+import org.praxisplatform.config.domain.DomainKnowledgeAlias;
+import org.praxisplatform.config.domain.DomainKnowledgeBinding;
 import org.praxisplatform.config.domain.DomainKnowledgeConcept;
 import org.praxisplatform.config.domain.DomainKnowledgeEvidence;
+import org.praxisplatform.config.domain.DomainKnowledgeRelationship;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetCreateRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetOperationRequest;
 import org.praxisplatform.config.dto.DomainKnowledgeChangeSetStatusRequest;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
+import org.springframework.web.server.ResponseStatusException;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeAliasRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeBindingRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeConceptRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeRelationshipRepository;
 
 @Tag("unit")
 class DomainKnowledgeChangeSetServiceTest {
@@ -65,7 +72,7 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThat(readableValues(response.validationResult().path("proposedOperationTypes")))
                 .containsExactly("add_evidence");
         assertThat(readableValues(response.validationResult().path("executableOperationTypes")))
-                .containsExactly("add_evidence", "revert_evidence");
+                .containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "create_concept", "revert_evidence");
         assertThat(readableValues(response.validationResult().path("executablePatchOperationTypes")))
                 .containsExactly("add_evidence");
         assertThat(readableValues(response.validationResult().path("nonExecutableOperationTypes")))
@@ -178,19 +185,19 @@ class DomainKnowledgeChangeSetServiceTest {
     }
 
     @Test
-    void rejectsCreateRequestWithProposedButNonExecutableOperationBeforePersisting() {
+    void rejectsCreateRequestWithRemainingNonExecutableOperationBeforePersisting() {
         DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
         DomainKnowledgeChangeSetService service = service(repository);
         DomainKnowledgeChangeSetCreateRequest invalid = new DomainKnowledgeChangeSetCreateRequest(
-                "project-knowledge:employees:create-concept:v1",
+                "project-knowledge:employees:update-summary:v1",
                 "proposed",
                 "llm",
                 "openai:gpt-5.4",
-                "Create concept",
-                "Concept writes need a canonical applier before approval.",
+                "Update summary",
+                "Summary updates need a canonical applier before approval.",
                 List.of(operation(
-                        "op-create-concept",
-                        "create_concept",
+                        "op-update-summary",
+                        "update_concept_summary",
                         target(),
                         payload("llm-proposal:create-concept:v1"))));
 
@@ -224,7 +231,7 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThat(service.get(existing.getId(), TENANT, ENVIRONMENT).changeSetKey()).isEqualTo(CHANGE_SET_KEY);
 
         assertThatThrownBy(() -> service.get(existing.getId(), "tenant-b", ENVIRONMENT))
-                .isInstanceOf(ConfigurationIngestionException.class)
+                .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("not found in request scope");
     }
 
@@ -262,10 +269,10 @@ class DomainKnowledgeChangeSetServiceTest {
         DomainKnowledgeChangeSetService service = service(repository);
         DomainKnowledgeChangeSet existing = persisted(validRequest());
         existing.setPatch(write(objectMapper.valueToTree(List.of(new DomainKnowledgeChangeSetOperationRequest(
-                "op-create-concept",
-                "create_concept",
+                "op-update-summary",
+                "update_concept_summary",
                 target(),
-                "Concept writes need a canonical applier before approval.",
+                "Summary updates need a canonical applier before approval.",
                 List.of("domain-catalog:human-resources:v2026-04-30"),
                 0.8,
                 payload("llm-proposal:create-concept:v1"))))));
@@ -278,21 +285,21 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThat(validation.issues())
                 .extracting(org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationIssue::code)
                 .contains("non_executable_operation_type");
-        assertThat(validation.proposedOperationTypes()).containsExactly("create_concept");
-        assertThat(validation.executableOperationTypes()).containsExactly("add_evidence", "revert_evidence");
+        assertThat(validation.proposedOperationTypes()).containsExactly("update_concept_summary");
+        assertThat(validation.executableOperationTypes()).containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "create_concept", "revert_evidence");
         assertThat(validation.executablePatchOperationTypes()).isEmpty();
-        assertThat(validation.nonExecutableOperationTypes()).containsExactly("create_concept");
+        assertThat(validation.nonExecutableOperationTypes()).containsExactly("update_concept_summary");
         ArgumentCaptor<DomainKnowledgeChangeSet> captor = ArgumentCaptor.forClass(DomainKnowledgeChangeSet.class);
         verify(repository).save(captor.capture());
         JsonNode validationResult = read(captor.getValue().getValidationResult());
         assertThat(readableValues(validationResult.path("proposedOperationTypes")))
-                .containsExactly("create_concept");
+                .containsExactly("update_concept_summary");
         assertThat(readableValues(validationResult.path("executableOperationTypes")))
-                .containsExactly("add_evidence", "revert_evidence");
+                .containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "create_concept", "revert_evidence");
         assertThat(readableValues(validationResult.path("executablePatchOperationTypes")))
                 .isEmpty();
         assertThat(readableValues(validationResult.path("nonExecutableOperationTypes")))
-                .containsExactly("create_concept");
+                .containsExactly("update_concept_summary");
     }
 
     @Test
@@ -303,7 +310,7 @@ class DomainKnowledgeChangeSetServiceTest {
         when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
 
         assertThatThrownBy(() -> service.validate(existing.getId(), "tenant-b", ENVIRONMENT))
-                .isInstanceOf(ConfigurationIngestionException.class)
+                .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("not found in request scope");
     }
 
@@ -362,10 +369,10 @@ class DomainKnowledgeChangeSetServiceTest {
         DomainKnowledgeChangeSetService service = service(repository);
         DomainKnowledgeChangeSet existing = persisted(validRequest());
         existing.setPatch(write(objectMapper.valueToTree(List.of(new DomainKnowledgeChangeSetOperationRequest(
-                "op-create-concept",
-                "create_concept",
+                "op-update-summary",
+                "update_concept_summary",
                 target(),
-                "Legacy valid validation must not approve a non-executable operation.",
+                "Legacy valid validation must not approve an operation without an applier.",
                 List.of("domain-catalog:human-resources:v2026-04-30"),
                 0.8,
                 payload("llm-proposal:create-concept:v1"))))));
@@ -378,7 +385,7 @@ class DomainKnowledgeChangeSetServiceTest {
                 ENVIRONMENT))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("without canonical appliers")
-                .hasMessageContaining("create_concept");
+                .hasMessageContaining("update_concept_summary");
     }
 
     @Test
@@ -771,6 +778,9 @@ class DomainKnowledgeChangeSetServiceTest {
         return new DomainKnowledgeChangeSetService(
                 repository,
                 conceptRepository,
+                mock(DomainKnowledgeAliasRepository.class),
+                mock(DomainKnowledgeBindingRepository.class),
+                mock(DomainKnowledgeRelationshipRepository.class),
                 evidenceRepository,
                 validator,
                 objectMapper,

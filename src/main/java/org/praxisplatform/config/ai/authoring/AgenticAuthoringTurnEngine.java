@@ -44,6 +44,8 @@ public class AgenticAuthoringTurnEngine {
     private final AgenticAuthoringOrchestrator orchestrator;
     private final SchemaRetrievalService schemaRetrievalService;
     private final AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService;
+    private final AgenticAuthoringComponentDiscoveryService componentDiscoveryService =
+            new AgenticAuthoringComponentDiscoveryService();
     private final AgenticAuthoringConsultativeAnswerService consultativeAnswerService;
     private final AgenticAuthoringPreIntentToolPlanningService preIntentToolPlanningService;
     private final long componentCapabilitiesPreloadTimeoutMs;
@@ -254,8 +256,10 @@ public class AgenticAuthoringTurnEngine {
         List<AiProviderInvocationTelemetry> turnProviderInvocations = new ArrayList<>();
         request = withActiveDecisionContext(request, state.activeSemanticDecision());
         boolean compactPlatformGuidanceOpportunity = hasPlatformGuidanceOpportunity(request);
-        PreloadedComponentCapabilities componentCapabilitiesFuture =
-                preloadServerComponentCapabilities(request);
+        boolean serverIssuedQuickReplyContinuation = isServerIssuedQuickReplyContinuation(request);
+        PreloadedComponentCapabilities componentCapabilitiesFuture = serverIssuedQuickReplyContinuation
+                ? null
+                : preloadServerComponentCapabilities(request);
         try {
             if (!compactPlatformGuidanceOpportunity) {
                 eventSink.append("thought.step", thoughtStepPayload(
@@ -275,17 +279,32 @@ public class AgenticAuthoringTurnEngine {
                         "Estou identificando a intencao principal do pedido antes de escolher recursos ou componentes.",
                         "Preparing semantic intent resolution."));
             }
-            request = withProjectKnowledgeContext(request, principalContext, eventSink, null);
-            request = withServerComponentCapabilities(
-                    request,
-                    eventSink,
-                    componentCapabilitiesFuture,
-                    !compactPlatformGuidanceOpportunity);
+            if (!serverIssuedQuickReplyContinuation) {
+                request = withProjectKnowledgeContext(request, principalContext, eventSink, null);
+                request = withServerComponentCapabilities(
+                        request,
+                        eventSink,
+                        componentCapabilitiesFuture,
+                        !compactPlatformGuidanceOpportunity);
+            }
             PreIntentToolPlanExecution preIntentExecution =
                     maybeRunPreIntentToolPlan(request, principalContext, eventSink);
+            if (preIntentExecution.semanticOrientation() != null) {
+                request = withPreIntentSemanticOrientationContext(
+                        request, preIntentExecution.semanticOrientation());
+            }
             AgenticAuthoringResourceCandidatesResult plannedResourceDiscovery =
                     preIntentExecution.resourceDiscovery();
             turnProviderInvocations.addAll(preIntentExecution.providerInvocations());
+            if (!preIntentExecution.domainKnowledge().isEmpty()) {
+                request = withProgressiveDomainKnowledgeContext(request, preIntentExecution.domainKnowledge());
+            }
+            if (!preIntentExecution.domainBindings().isEmpty()) {
+                request = withProgressiveDomainBindingContext(request, preIntentExecution.domainBindings());
+            }
+            if (!preIntentExecution.verifiedOperations().isEmpty()) {
+                request = withVerifiedOperationContext(request, preIntentExecution.verifiedOperations());
+            }
             if (plannedResourceDiscovery != null
                     && plannedResourceDiscovery.candidates() != null
                     && !plannedResourceDiscovery.candidates().isEmpty()) {
@@ -295,19 +314,21 @@ public class AgenticAuthoringTurnEngine {
             boolean compactIntentProgress = compactPlatformGuidanceOpportunity
                     && !resourceDiscoveryContextPresent;
             if (!compactIntentProgress) {
-                if (!resourceDiscoveryContextPresent) {
+                if (!resourceDiscoveryContextPresent && !serverIssuedQuickReplyContinuation) {
                     emitStatus(
                             eventSink,
                             "intent.resolve.llm",
                             "A LLM esta confirmando a intencao com a evidencia governada antes de materializar a tela.");
                 }
-                String intentResolutionPhase = resourceDiscoveryContextPresent
+                String intentResolutionPhase = resourceDiscoveryContextPresent || serverIssuedQuickReplyContinuation
                         ? "intent.resolve.evidence"
                         : "intent.resolve.llm";
                 eventSink.append("thought.step", thoughtStepPayload(
                         intentResolutionPhase,
                         resourceDiscoveryContextPresent
                                 ? "Estou avaliando os candidatos governados recuperados antes de materializar."
+                                : serverIssuedQuickReplyContinuation
+                                        ? "Estou aplicando a escolha governada deste histórico e consultando apenas os dados do domínio selecionado."
                                 : "A LLM esta confirmando a intencao com o contexto governado.",
                         "Resolving the user request against governed context.",
                         Map.of(
@@ -440,6 +461,7 @@ public class AgenticAuthoringTurnEngine {
                     eventSink,
                     intentResolution,
                     route);
+            request = withComponentSelectionContext(request, intentResolution, route, eventSink);
             AgenticAuthoringPreviewResult preview = null;
             AgenticAuthoringToolLoopResult toolLoopResult = null;
             if (route.allowsPreview() && intentResolution.valid()) {
@@ -543,6 +565,7 @@ public class AgenticAuthoringTurnEngine {
                     && terminalPreviewApplyBlockReason.isBlank()
                     && !requiresDecisionReview(decisionDiagnostics)
                     && (toolLoopResult == null || toolLoopResult.completed());
+            assistantMessage = ensureReviewablePreviewMessage(assistantMessage, request, canApply);
             Map<String, Object> resultPayload = new LinkedHashMap<>();
             resultPayload.put("intentResolution", terminalIntentResolution);
             resultPayload.put("preview", preview != null ? preview : objectMapper.createObjectNode());
@@ -859,6 +882,8 @@ public class AgenticAuthoringTurnEngine {
         if (answer == null || eventSink.terminalReached()) {
             return null;
         }
+        AgenticAuthoringIntentResolutionResult consultativeIntentResolution =
+                reconcileGovernedDomainConsultativeDecision(request, intentResolution, answer);
         emitRuntimeRelatedSurfaceEvidenceSteps(answer, eventSink);
         eventSink.append("thought.step", streamEventPayload(
                 "consultative.answer",
@@ -872,7 +897,7 @@ public class AgenticAuthoringTurnEngine {
                                 && answer.evidenceBundle().path("runtimeConsultableContext").isObject()),
                 "consultative.answer:" + safeText(answer.category())));
         Map<String, Object> decisionDiagnostics = decisionDiagnostics(
-                intentResolution,
+                consultativeIntentResolution,
                 null,
                 null,
                 request,
@@ -880,7 +905,7 @@ public class AgenticAuthoringTurnEngine {
         decisionDiagnostics.put("routeClass", safeText(route.routeClass()));
         decisionDiagnostics.put("consultativePostIntent", true);
         Map<String, Object> resultPayload = new LinkedHashMap<>();
-        resultPayload.put("intentResolution", intentResolution);
+        resultPayload.put("intentResolution", consultativeIntentResolution);
         resultPayload.put("preview", objectMapper.createObjectNode());
         resultPayload.put("assistantMessage", publicAssistantMessage(answer.assistantMessage()));
         resultPayload.put("assistantContent",
@@ -888,7 +913,7 @@ public class AgenticAuthoringTurnEngine {
         if (answer.evidenceBundle() != null && !answer.evidenceBundle().isNull()) {
             resultPayload.put("evidenceBundle", answer.evidenceBundle());
         }
-        resultPayload.put("quickReplies", consultativeQuickReplies(answer, intentResolution));
+        resultPayload.put("quickReplies", consultativeQuickReplies(request, answer, consultativeIntentResolution));
         resultPayload.put("canApply", false);
         resultPayload.put("decisionDiagnostics", decisionDiagnostics);
         resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
@@ -898,6 +923,77 @@ public class AgenticAuthoringTurnEngine {
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private AgenticAuthoringIntentResolutionResult reconcileGovernedDomainConsultativeDecision(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringConsultativeAnswer answer) {
+        if (answer == null
+                || !"domain_knowledge".equals(answer.category())
+                || intentResolution == null) {
+            return intentResolution;
+        }
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("source", "governed-domain-discovery");
+        JsonNode entries = answer.evidenceBundle() == null
+                ? null
+                : answer.evidenceBundle().path("entries");
+        ArrayNode conceptKeys = constraints.putArray("conceptKeys");
+        if (entries != null && entries.isArray()) {
+            for (JsonNode entry : entries) {
+                String conceptKey = entry.path("conceptKey").asText("").trim();
+                if (!conceptKey.isBlank()) {
+                    conceptKeys.add(conceptKey);
+                }
+            }
+        }
+        List<String> warnings = new ArrayList<>(intentResolution.warnings() == null
+                ? List.of()
+                : intentResolution.warnings());
+        warnings.add("governed-domain-discovery-cleared-ungrounded-resource-selection");
+        AgenticAuthoringSemanticDecision semanticDecision = AgenticAuthoringSemanticDecision.from(
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question",
+                        null,
+                        List.of(),
+                        null,
+                        warnings,
+                        intentResolution.llmDiagnostics(),
+                        null,
+                        request.activeSemanticDecision(),
+                        request.sessionId(),
+                        request.clientTurnId(),
+                        request.userPrompt(),
+                        request.userPrompt(),
+                        "Governed domain discovery is grounded by the canonical domain catalog, not by an unrelated resource candidate.")
+                .withConstraints(constraints);
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "explore",
+                "api_catalog",
+                "answer_api_catalog_question",
+                "api-catalog-qa",
+                intentResolution.targetApp(),
+                intentResolution.targetComponentId(),
+                intentResolution.target(),
+                null,
+                List.of(),
+                intentResolution.gate(),
+                intentResolution.effectivePrompt(),
+                intentResolution.assistantMessage(),
+                intentResolution.assistantContent(),
+                intentResolution.apiCatalogAnswer(),
+                intentResolution.quickReplies(),
+                intentResolution.pendingClarification(),
+                intentResolution.clarificationQuestions(),
+                warnings.stream().distinct().toList(),
+                intentResolution.failureCodes(),
+                intentResolution.currentPageSummary(),
+                intentResolution.llmDiagnostics(),
+                null,
+                semanticDecision);
     }
 
     private AgenticAuthoringTurnOutcome maybeCompleteProviderFailureClarification(
@@ -1195,7 +1291,7 @@ public class AgenticAuthoringTurnEngine {
         List<AgenticAuthoringQuickReply> quickReplies = onlyWeakCandidates
                 ? List.of()
                 : projection != null && projection.hasResources()
-                ? consultativeQuickReplies(new AgenticAuthoringConsultativeAnswer(
+                ? consultativeQuickReplies(request, new AgenticAuthoringConsultativeAnswer(
                         "resource_discovery",
                         "clarify_resource_selection",
                         "",
@@ -1451,6 +1547,7 @@ public class AgenticAuthoringTurnEngine {
         ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
                 ? request.contextHints().deepCopy()
                 : objectMapper.createObjectNode();
+        JsonNode persistedCandidateApis = contextHints.path("resolvedIntent").path("candidateApis").deepCopy();
         ObjectNode resolvedIntent = contextHints.putObject("resolvedIntent");
         resolvedIntent.put("schemaVersion", "praxis-agentic-authoring-resolved-intent-context.v1");
         resolvedIntent.put("source", "intent.resolved");
@@ -1459,6 +1556,17 @@ public class AgenticAuthoringTurnEngine {
         resolvedIntent.put("artifactKind", safeText(intentResolution.artifactKind()));
         resolvedIntent.put("changeKind", safeText(intentResolution.changeKind()));
         resolvedIntent.put("valid", intentResolution.valid());
+        if (intentResolution.apiCatalogAnswer() != null
+                && intentResolution.apiCatalogAnswer().path("candidateApis").isArray()) {
+            resolvedIntent.set(
+                    "candidateApis",
+                    intentResolution.apiCatalogAnswer().path("candidateApis").deepCopy());
+        } else if (request.activeSemanticDecision() != null
+                && isServerIssuedQuickReplyContinuation(request)
+                && persistedCandidateApis.isArray()
+                && !persistedCandidateApis.isEmpty()) {
+            resolvedIntent.set("candidateApis", persistedCandidateApis);
+        }
         if (intentResolution.selectedCandidate() != null) {
             putText(resolvedIntent, "selectedResourcePath", intentResolution.selectedCandidate().resourcePath());
         }
@@ -1475,6 +1583,7 @@ public class AgenticAuthoringTurnEngine {
     }
 
     private List<AgenticAuthoringQuickReply> consultativeQuickReplies(
+            AgenticAuthoringTurnStreamRequest request,
             AgenticAuthoringConsultativeAnswer answer,
             AgenticAuthoringIntentResolutionResult intentResolution) {
         if (answer == null) {
@@ -1493,24 +1602,32 @@ public class AgenticAuthoringTurnEngine {
         AgenticAuthoringConsultativeApiCatalogProjection.Resource primary = firstResource(projection.resources());
         if (primary != null) {
             replies.add(consultativeResourceQuickReply(
+                    request,
                     "consultative-show-fields:" + safeResourceId(primary),
                     "Ver campos",
                     "Quais campos confirmados existem em " + resourceLabel(primary) + "?",
                     "Mostra os campos confirmados antes de escolher tabela, formulário ou gráfico.",
                     "view_list",
                     "resource",
+                    "explore",
+                    "api_catalog",
+                    "answer_api_catalog_question",
                     primary,
                     quickReplyPresentation(
                             "Boa para entender se essa fonte cobre os dados que você precisa.",
                             "Retorna campos confirmados e pistas de uso para colunas, filtros, formulários ou gráficos.",
                             "Clique para explorar os campos dessa fonte.")));
             replies.add(consultativeResourceQuickReply(
+                    request,
                     "consultative-create-table:" + safeResourceId(primary),
                     "Criar tabela",
                     "Crie uma tabela filtrável usando " + resourceLabel(primary) + ".",
                     "Transforma a fonte confirmada em uma primeira tabela governada para revisão.",
                     "table_chart",
                     "primary",
+                    "create",
+                    "table",
+                    "create_artifact",
                     primary,
                     quickReplyPresentation(
                             "Boa para listas operacionais, auditoria e navegação por registros.",
@@ -1520,12 +1637,16 @@ public class AgenticAuthoringTurnEngine {
         AgenticAuthoringConsultativeApiCatalogProjection.Resource analytical = firstAnalyticalResource(projection.resources());
         if (analytical != null) {
             replies.add(consultativeResourceQuickReply(
+                    request,
                     "consultative-create-chart:" + safeResourceId(analytical),
                     "Criar gráfico",
                     "Crie uma visão com gráficos usando " + resourceLabel(analytical) + ".",
                     "Usa uma fonte analítica confirmada para propor indicadores e visualizações.",
                     "query_stats",
                     "analytics",
+                    "create",
+                    "chart",
+                    "create_artifact",
                     analytical,
                     quickReplyPresentation(
                             "Boa para indicadores, tendências, comparação e visão executiva.",
@@ -1535,12 +1656,16 @@ public class AgenticAuthoringTurnEngine {
         AgenticAuthoringConsultativeApiCatalogProjection.Resource writable = firstWritableResource(projection.resources());
         if (writable != null) {
             replies.add(consultativeResourceQuickReply(
+                    request,
                     "consultative-create-form:" + safeResourceId(writable),
                     "Criar formulário",
                     "Crie um formulário governado usando " + resourceLabel(writable) + ".",
                     "Usa uma operação confirmada de escrita para capturar ou atualizar dados com governança.",
                     "dynamic_form",
                     "resource",
+                    "create",
+                    "form",
+                    "create_artifact",
                     writable,
                     quickReplyPresentation(
                             "Boa quando a fonte confirma uma ação de cadastro ou atualização.",
@@ -1554,12 +1679,16 @@ public class AgenticAuthoringTurnEngine {
     }
 
     private AgenticAuthoringQuickReply consultativeResourceQuickReply(
+            AgenticAuthoringTurnStreamRequest request,
             String id,
             String label,
             String prompt,
             String description,
             String icon,
             String tone,
+            String operationKind,
+            String artifactKind,
+            String changeKind,
             AgenticAuthoringConsultativeApiCatalogProjection.Resource resource,
             ObjectNode presentation) {
         ObjectNode contextHints = objectMapper.createObjectNode();
@@ -1569,6 +1698,9 @@ public class AgenticAuthoringTurnEngine {
         putText(contextHints, "resourcePath", resource.resourcePath());
         putText(contextHints, "resourceLabel", resourceLabel(resource));
         putText(contextHints, "resourceRole", resource.role());
+        putText(contextHints, "operationKind", operationKind);
+        putText(contextHints, "artifactKind", artifactKind);
+        putText(contextHints, "changeKind", changeKind);
         if (presentation != null) {
             contextHints.set("presentation", presentation);
         }
@@ -1581,23 +1713,50 @@ public class AgenticAuthoringTurnEngine {
                 icon,
                 tone,
                 contextHints,
-                consultativeResourceSemanticDecision(id, resource),
+                consultativeResourceSemanticDecision(
+                        request,
+                        id,
+                        operationKind,
+                        artifactKind,
+                        changeKind,
+                        prompt,
+                        resource),
                 consultativeResourceChoiceValue(resource));
     }
 
-    private ObjectNode consultativeResourceSemanticDecision(
+    private JsonNode consultativeResourceSemanticDecision(
+            AgenticAuthoringTurnStreamRequest request,
             String id,
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            String prompt,
             AgenticAuthoringConsultativeApiCatalogProjection.Resource resource) {
-        ObjectNode decision = objectMapper.createObjectNode();
-        decision.put("schemaVersion", "praxis-agentic-authoring-semantic-decision.v1");
-        decision.put("decisionId", id);
-        decision.put("artifactKind", "api_catalog");
-        decision.put("changeKind", "answer_api_catalog_question");
-        decision.put("source", "consultative-api-catalog-projection");
-        putText(decision, "selectedResourcePath", resource.resourcePath());
-        putText(decision, "selectedResourceKey", resource.resourceKey());
-        putText(decision, "selectedResourceLabel", resourceLabel(resource));
-        return decision;
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("source", "server-issued-quick-reply");
+        constraints.put("quickReplyId", id);
+        constraints.put("continuationOf", "api_catalog_projection");
+        putText(constraints, "resourcePath", resource.resourcePath());
+        putText(constraints, "resourceKey", resource.resourceKey());
+        constraints.putArray("conceptKeys");
+        AgenticAuthoringSemanticDecision decision = AgenticAuthoringSemanticDecision.from(
+                        operationKind,
+                        artifactKind,
+                        changeKind,
+                        null,
+                        List.of(),
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        request == null ? null : request.activeSemanticDecision(),
+                        request == null ? "" : request.sessionId(),
+                        (request == null ? "" : request.clientTurnId()) + ":" + id,
+                        prompt,
+                        prompt,
+                        "The user may select this governed resource action after catalog discovery.")
+                .withConstraints(constraints);
+        return objectMapper.valueToTree(decision);
     }
 
     private ObjectNode consultativeResourceChoiceValue(
@@ -1857,6 +2016,17 @@ public class AgenticAuthoringTurnEngine {
         JsonNode recommendedIntent = request.contextHints().path("recommendedIntent");
         return recommendedIntent.isObject()
                 && "platform-capabilities".equals(recommendedIntent.path("semanticScope").asText(""));
+    }
+
+    private boolean isServerIssuedQuickReplyContinuation(AgenticAuthoringTurnStreamRequest request) {
+        AgenticAuthoringSemanticDecision decision = request == null
+                ? null
+                : request.activeSemanticDecision();
+        return decision != null
+                && decision.constraints() != null
+                && "server-issued-quick-reply".equals(
+                        decision.constraints().path("source").asText(""))
+                && !decision.constraints().path("quickReplyId").asText("").isBlank();
     }
 
     private AgenticAuthoringTurnStreamRequest withServerComponentCapabilities(
@@ -2149,12 +2319,15 @@ public class AgenticAuthoringTurnEngine {
             return new PreIntentToolPlanExecution(
                     null,
                     null,
+                    List.of(),
+                    List.of(),
+                    List.of(),
                     planningResult == null ? List.of() : planningResult.providerInvocations());
         }
         AgenticAuthoringPreIntentToolPlan plan = planningResult.plan();
         if (plan == null) {
             emitPreIntentToolPlanSkipped(eventSink, "planner-plan-empty", "");
-            return new PreIntentToolPlanExecution(null, null, planningResult.providerInvocations());
+            return new PreIntentToolPlanExecution(null, null, List.of(), List.of(), List.of(), planningResult.providerInvocations());
         }
         if (plan.resolvesPlatformGuidance()) {
             eventSink.append("thought.step", thoughtStepPayload(
@@ -2166,11 +2339,11 @@ public class AgenticAuthoringTurnEngine {
                             "groundedByPlatform", true,
                             "groundedByDomain", true,
                             "groundedByComponentCapabilities", request.componentCapabilities() != null)));
-            return new PreIntentToolPlanExecution(null, plan, planningResult.providerInvocations());
+            return new PreIntentToolPlanExecution(null, plan, List.of(), List.of(), List.of(), planningResult.providerInvocations());
         }
         if (plan.toolCalls().isEmpty()) {
             emitPreIntentToolPlanSkipped(eventSink, "planner-tool-calls-empty", "");
-            return new PreIntentToolPlanExecution(null, null, planningResult.providerInvocations());
+            return new PreIntentToolPlanExecution(null, null, List.of(), List.of(), List.of(), planningResult.providerInvocations());
         }
         eventSink.append("thought.step", safeToolProjection(
                 "tool.plan",
@@ -2180,6 +2353,9 @@ public class AgenticAuthoringTurnEngine {
                         "toolCallCount", Math.min(plan.toolCalls().size(), MAX_TOOL_CALLS_PER_TURN),
                         "reason", safeText(plan.reason()))));
         AgenticAuthoringResourceCandidatesResult resourceDiscovery = null;
+        List<AgenticAuthoringProjectKnowledgeProjection> domainKnowledge = new ArrayList<>();
+        List<AgenticAuthoringDomainBindingService.BindingProjection> domainBindings = new ArrayList<>();
+        List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection> verifiedOperations = new ArrayList<>();
         int executed = 0;
         for (AgenticAuthoringToolCall toolCall : plan.toolCalls()) {
             if (toolCall == null || executed >= MAX_TOOL_CALLS_PER_TURN || eventSink.terminalReached()) {
@@ -2204,11 +2380,94 @@ public class AgenticAuthoringTurnEngine {
             if (payload != null) {
                 resourceDiscovery = payload;
             }
+            if (result.payload() instanceof List<?> items) {
+                items.stream()
+                        .filter(AgenticAuthoringProjectKnowledgeProjection.class::isInstance)
+                        .map(AgenticAuthoringProjectKnowledgeProjection.class::cast)
+                        .forEach(domainKnowledge::add);
+                items.stream()
+                        .filter(AgenticAuthoringDomainBindingService.BindingProjection.class::isInstance)
+                        .map(AgenticAuthoringDomainBindingService.BindingProjection.class::cast)
+                        .forEach(domainBindings::add);
+                items.stream()
+                        .filter(AgenticAuthoringOperationalBindingVerificationService.OperationProjection.class::isInstance)
+                        .map(AgenticAuthoringOperationalBindingVerificationService.OperationProjection.class::cast)
+                        .forEach(verifiedOperations::add);
+            }
             if (!result.valid()) {
                 break;
             }
         }
-        return new PreIntentToolPlanExecution(resourceDiscovery, null, planningResult.providerInvocations());
+        return new PreIntentToolPlanExecution(
+                resourceDiscovery,
+                "governed_domain_discovery".equals(plan.semanticIntentClass()) ? plan : null,
+                List.copyOf(domainKnowledge),
+                List.copyOf(domainBindings),
+                List.copyOf(verifiedOperations),
+                planningResult.providerInvocations());
+    }
+
+    private AgenticAuthoringTurnStreamRequest withProgressiveDomainKnowledgeContext(
+            AgenticAuthoringTurnStreamRequest request,
+            List<AgenticAuthoringProjectKnowledgeProjection> projections) {
+        if (request == null || projections == null || projections.isEmpty()) {
+            return request;
+        }
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        contextHints.set("projectKnowledge", projectKnowledgeContext(projections));
+        return copyWithContextHints(request, contextHints);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withPreIntentSemanticOrientationContext(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringPreIntentToolPlan orientation) {
+        if (request == null || orientation == null) {
+            return request;
+        }
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        ObjectNode context = contextHints.putObject("preIntentSemanticOrientation");
+        context.put("schemaVersion", "praxis-agentic-authoring-pre-intent-orientation-context.v1");
+        context.put("semanticIntentClass", safeText(orientation.semanticIntentClass()));
+        context.put("source", "llm_pre_intent_tool_plan");
+        return copyWithContextHints(request, contextHints);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withProgressiveDomainBindingContext(
+            AgenticAuthoringTurnStreamRequest request,
+            List<AgenticAuthoringDomainBindingService.BindingProjection> bindings) {
+        if (request == null || bindings == null || bindings.isEmpty()) {
+            return request;
+        }
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        ObjectNode envelope = contextHints.putObject("domainBindings");
+        envelope.put("schemaVersion", "praxis-agentic-authoring-domain-bindings.v1");
+        envelope.put("source", "domain_knowledge_binding");
+        envelope.put("bindingCount", bindings.size());
+        envelope.set("entries", objectMapper.valueToTree(bindings));
+        return copyWithContextHints(request, contextHints);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withVerifiedOperationContext(
+            AgenticAuthoringTurnStreamRequest request,
+            List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection> operations) {
+        if (request == null || operations == null || operations.isEmpty()) {
+            return request;
+        }
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        ObjectNode envelope = contextHints.putObject("verifiedDomainOperations");
+        envelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v1");
+        envelope.put("source", "schemas.filtered+resource.capabilities");
+        envelope.put("operationCount", operations.size());
+        envelope.set("entries", objectMapper.valueToTree(operations));
+        return copyWithContextHints(request, contextHints);
     }
 
     private ArtifactReconciliationOutcome reconcilePlannedArtifact(
@@ -2708,6 +2967,49 @@ public class AgenticAuthoringTurnEngine {
                 componentId,
                 evidence));
         return copyWithContextHints(request, contextHints);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withComponentSelectionContext(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringTurnRoute route,
+            AgenticAuthoringTurnEventSink eventSink) {
+        if (request == null
+                || intentResolution == null
+                || intentResolution.semanticDecision() == null
+                || route == null
+                || !route.allowsPreview()
+                || request.contextHints() != null
+                && request.contextHints().path("componentSelection").isObject()) {
+            return request;
+        }
+        AgenticAuthoringComponentDiscoveryService.ComponentDiscoveryResult selection =
+                componentDiscoveryService.discover(
+                        intentResolution.semanticDecision(),
+                        componentCapabilities(request));
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        contextHints.set("componentSelection", objectMapper.valueToTree(selection));
+        if (eventSink != null && !eventSink.terminalReached()) {
+            eventSink.append("thought.step", safeToolProjection(
+                    "component.discovery",
+                    selection.acceptedCandidates().isEmpty()
+                            ? "Nao encontrei um componente governado compativel com a decisao semantica."
+                            : "Selecionei candidatos de componentes pelo catalogo governado de capacidades.",
+                    Map.of(
+                            "source", selection.source(),
+                            "acceptedCandidateCount", selection.acceptedCandidates().size(),
+                            "rejectedCandidateCount", selection.rejectedCandidates().size(),
+                            "outcome", selection.outcome())));
+        }
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(), request.targetApp(), request.targetComponentId(), request.currentRoute(),
+                request.currentPage(), request.selectedWidgetKey(), request.provider(), request.model(),
+                request.apiKey(), request.sessionId(), request.clientTurnId(), request.conversationMessages(),
+                request.pendingClarification(), request.attachmentSummaries(), contextHints,
+                request.componentCapabilities(), request.activeSemanticDecision(), request.diagnostics(),
+                request.runtimeComponentObservations(), request.runtimeComponentObservationTrustBoundary());
     }
 
     private boolean hasAuthoringEvidenceContext(AgenticAuthoringTurnStreamRequest request) {
@@ -3347,10 +3649,18 @@ public class AgenticAuthoringTurnEngine {
         if (projectKnowledgeService == null || eventSink.terminalReached()) {
             return request;
         }
-        if (request.contextHints() != null && request.contextHints().path("projectKnowledge").isObject()) {
+        boolean hasExistingProjectKnowledge = request.contextHints() != null
+                && request.contextHints().path("projectKnowledge").isObject();
+        if (intentResolution == null && hasExistingProjectKnowledge) {
             return request;
         }
         AgenticAuthoringProjectKnowledgeQuery query = projectKnowledgeQuery(request, principalContext, intentResolution);
+        if (hasExistingProjectKnowledge
+                && !StringUtils.hasText(query.contextKey())
+                && !StringUtils.hasText(query.resourceKey())
+                && "context".equals(query.nodeType())) {
+            return request;
+        }
         if (!hasProjectKnowledgeScope(query)) {
             return request;
         }
@@ -3366,6 +3676,16 @@ public class AgenticAuthoringTurnEngine {
                     "projectKnowledge.result",
                     "Nao encontrei conhecimento governado adicional do projeto para este planejamento.",
                     diagnostics));
+            if (!hasExistingProjectKnowledge
+                    && !StringUtils.hasText(query.contextKey())
+                    && !StringUtils.hasText(query.resourceKey())
+                    && "context".equals(query.nodeType())) {
+                ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                        ? request.contextHints().deepCopy()
+                        : objectMapper.createObjectNode();
+                contextHints.set("projectKnowledge", projectKnowledgeContext(List.of()));
+                return copyWithContextHints(request, contextHints);
+            }
             return request;
         }
         eventSink.append("thought.step", safeToolProjection(
@@ -3536,25 +3856,42 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnStreamRequest request,
             AiPrincipalContext principalContext,
             AgenticAuthoringIntentResolutionResult intentResolution) {
+        String contextKey = firstText(
+                domainCatalogHint(request, "contextKey"), contextKeyFromCandidate(intentResolution));
+        String resourceKey = firstText(
+                domainCatalogHint(request, "resourceKey"), resourceKeyFromCandidate(intentResolution));
+        boolean macroPack = !StringUtils.hasText(contextKey) && !StringUtils.hasText(resourceKey);
         return new AgenticAuthoringProjectKnowledgeQuery(
                 principalContext.tenantId(),
                 principalContext.environment(),
-                firstText(domainCatalogHint(request, "contextKey"), contextKeyFromCandidate(intentResolution)),
-                firstText(domainCatalogHint(request, "resourceKey"), resourceKeyFromCandidate(intentResolution)),
-                List.of(
-                        "project_preference",
-                        "domain_decision_hint",
-                        "component_authoring_pattern",
-                        "resource_selection_rationale",
-                        "governance_constraint",
-                        "integration_note"),
-                null,
-                6);
+                contextKey,
+                resourceKey,
+                macroPack
+                        ? List.of("context")
+                        : List.of(
+                                "context",
+                                "business_capability",
+                                "process",
+                                "business_event",
+                                "policy",
+                                "metric",
+                                "actor",
+                                "concept",
+                                "project_preference",
+                                "domain_decision_hint",
+                                "component_authoring_pattern",
+                                "resource_selection_rationale",
+                                "governance_constraint",
+                                "integration_note"),
+                macroPack ? "context" : null,
+                macroPack ? 4 : 8);
     }
 
     private boolean hasProjectKnowledgeScope(AgenticAuthoringProjectKnowledgeQuery query) {
         return query != null
-                && (StringUtils.hasText(query.contextKey()) || StringUtils.hasText(query.resourceKey()));
+                && (StringUtils.hasText(query.contextKey())
+                        || StringUtils.hasText(query.resourceKey())
+                        || "context".equals(query.nodeType()));
     }
 
     private ObjectNode projectKnowledgeContext(List<AgenticAuthoringProjectKnowledgeProjection> projections) {
@@ -5220,6 +5557,36 @@ public class AgenticAuthoringTurnEngine {
         return AgenticAuthoringPresentationText.assistantReply(safeText(value), responseLocale);
     }
 
+    static String ensureReviewablePreviewMessage(
+            String value,
+            AgenticAuthoringTurnStreamRequest request,
+            boolean canApply) {
+        String message = value == null ? "" : value.trim();
+        if (!canApply) {
+            return message;
+        }
+        String normalized = java.text.Normalizer.normalize(message, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim();
+        boolean reviewMeaningPresent = normalized.contains("previa")
+                || normalized.contains("pre visualizacao")
+                || normalized.contains("preview")
+                || normalized.contains("revis");
+        if (reviewMeaningPresent) {
+            return message;
+        }
+        String responseLocale = request == null || request.contextHints() == null
+                ? ""
+                : request.contextHints().path("responseLocale").asText("");
+        String guarantee = !responseLocale.isBlank()
+                        && !responseLocale.toLowerCase(java.util.Locale.ROOT).startsWith("pt")
+                ? "The preview is ready for review before saving."
+                : "A prévia está pronta para revisão antes de salvar.";
+        return message.isBlank() ? guarantee : message + "\n\n" + guarantee;
+    }
+
     private String presentationText(String value) {
         return AgenticAuthoringPresentationText.display(safeText(value));
     }
@@ -5274,14 +5641,20 @@ public class AgenticAuthoringTurnEngine {
     private record PreIntentToolPlanExecution(
             AgenticAuthoringResourceCandidatesResult resourceDiscovery,
             AgenticAuthoringPreIntentToolPlan semanticOrientation,
+            List<AgenticAuthoringProjectKnowledgeProjection> domainKnowledge,
+            List<AgenticAuthoringDomainBindingService.BindingProjection> domainBindings,
+            List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection> verifiedOperations,
             List<AiProviderInvocationTelemetry> providerInvocations) {
 
         private PreIntentToolPlanExecution {
+            domainKnowledge = domainKnowledge == null ? List.of() : List.copyOf(domainKnowledge);
+            domainBindings = domainBindings == null ? List.of() : List.copyOf(domainBindings);
+            verifiedOperations = verifiedOperations == null ? List.of() : List.copyOf(verifiedOperations);
             providerInvocations = providerInvocations == null ? List.of() : List.copyOf(providerInvocations);
         }
 
         private static PreIntentToolPlanExecution empty() {
-            return new PreIntentToolPlanExecution(null, null, List.of());
+            return new PreIntentToolPlanExecution(null, null, List.of(), List.of(), List.of(), List.of());
         }
     }
 

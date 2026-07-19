@@ -1,0 +1,387 @@
+{
+  "version": "0.1.0",
+  "kind": "praxis.semantic-grounding.generative-ui-corpus",
+  "description": "Initial acceptance corpus for progressive machine-first domain grounding and evidence-backed generative UI.",
+  "contexts": {
+    "blank-page": {
+      "tenantId": "GLOBAL",
+      "environment": "default",
+      "targetApp": "praxis-ui-angular",
+      "targetComponentId": "praxis-dynamic-page-builder",
+      "currentRoute": "/funcionarios",
+      "currentPage": { "widgets": [] },
+      "runtimeEvidence": "none",
+      "selectedResourceKey": null,
+      "selectedComponentId": null,
+      "faults": []
+    },
+    "employee-form": {
+      "tenantId": "GLOBAL",
+      "environment": "default",
+      "targetApp": "praxis-ui-angular",
+      "targetComponentId": "praxis-dynamic-page-builder",
+      "currentRoute": "/funcionarios",
+      "currentPage": {
+        "widgets": [
+          {
+            "key": "employee-form",
+            "definition": {
+              "id": "praxis-dynamic-form",
+              "inputs": { "resourceKey": "human-resources.funcionarios" }
+            }
+          }
+        ]
+      },
+      "runtimeEvidence": "untrusted_frontend_observation",
+      "selectedResourceKey": "human-resources.funcionarios",
+      "selectedComponentId": "praxis-dynamic-form",
+      "faults": []
+    },
+    "blank-page-vector-unavailable": {
+      "tenantId": "GLOBAL",
+      "environment": "default",
+      "targetApp": "praxis-ui-angular",
+      "targetComponentId": "praxis-dynamic-page-builder",
+      "currentRoute": "/funcionarios",
+      "currentPage": { "widgets": [] },
+      "runtimeEvidence": "none",
+      "selectedResourceKey": null,
+      "selectedComponentId": null,
+      "faults": ["vector-store-unavailable"]
+    },
+    "blank-page-stale-release": {
+      "tenantId": "GLOBAL",
+      "environment": "default",
+      "targetApp": "praxis-ui-angular",
+      "targetComponentId": "praxis-dynamic-page-builder",
+      "currentRoute": "/funcionarios",
+      "currentPage": { "widgets": [] },
+      "runtimeEvidence": "none",
+      "selectedResourceKey": null,
+      "selectedComponentId": null,
+      "faults": ["semantic-release-superseded"]
+    },
+    "blank-page-cross-scope": {
+      "tenantId": "tenant-a",
+      "environment": "production",
+      "targetApp": "praxis-ui-angular",
+      "targetComponentId": "praxis-dynamic-page-builder",
+      "currentRoute": "/funcionarios",
+      "currentPage": { "widgets": [] },
+      "runtimeEvidence": "none",
+      "selectedResourceKey": null,
+      "selectedComponentId": null,
+      "faults": ["only-tenant-b-evidence-available"]
+    }
+  },
+  "cases": [
+    {
+      "id": "platform-what-can-i-do-pt",
+      "family": "platform-capability",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page",
+      "userPrompt": "O que posso fazer aqui?",
+      "expected": {
+        "abstractionLevel": "platform",
+        "taskMode": "explain",
+        "retrievalProfile": "platform",
+        "terminalAuthority": "answer",
+        "canApply": false,
+        "requiredSemanticRefs": ["praxis.platform.capabilities"],
+        "allowedResourceKeys": [],
+        "allowedComponentIds": [],
+        "allowedTools": ["describe_platform_capabilities"],
+        "technicalReadBudget": { "maxResources": 0, "maxOpenApiDocuments": 0, "maxSchemas": 0, "maxComponentManifests": 0 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    },
+    {
+      "id": "enterprise-discover-domains-pt",
+      "family": "global-domain",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page",
+      "userPrompt": "Quais domínios de negócio existem aqui?",
+      "expected": {
+        "abstractionLevel": "enterprise",
+        "taskMode": "discover",
+        "retrievalProfile": "global-domain",
+        "terminalAuthority": "answer",
+        "canApply": false,
+        "requiredSemanticRefs": ["enterprise.domain-map"],
+        "allowedResourceKeys": [],
+        "allowedComponentIds": [],
+        "allowedTools": ["discover_domain_map"],
+        "technicalReadBudget": { "maxResources": 0, "maxOpenApiDocuments": 0, "maxSchemas": 0, "maxComponentManifests": 0 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    },
+    {
+      "id": "domain-hr-overview-pt",
+      "family": "global-domain",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page",
+      "userPrompt": "O que o Praxis sabe sobre Recursos Humanos?",
+      "expected": {
+        "abstractionLevel": "domain",
+        "taskMode": "explain",
+        "retrievalProfile": "global-domain",
+        "terminalAuthority": "answer",
+        "canApply": false,
+        "requiredSemanticRefs": ["human-resources"],
+        "allowedResourceKeys": [],
+        "allowedComponentIds": [],
+        "allowedTools": ["describe_domain_context", "discover_business_capabilities"],
+        "technicalReadBudget": { "maxResources": 0, "maxOpenApiDocuments": 0, "maxSchemas": 0, "maxComponentManifests": 0 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    },
+    {
+      "id": "surface-explain-employee-form-pt",
+      "family": "current-surface",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "employee-form",
+      "userPrompt": "Sobre o que é este formulário e para que ele serve?",
+      "expected": {
+        "abstractionLevel": "concept",
+        "taskMode": "explain",
+        "retrievalProfile": "context",
+        "terminalAuthority": "answer",
+        "canApply": false,
+        "requiredSemanticRefs": ["human-resources", "human-resources.employee"],
+        "allowedResourceKeys": ["human-resources.funcionarios"],
+        "allowedComponentIds": ["praxis-dynamic-form"],
+        "allowedTools": ["search_business_concepts", "resolve_domain_bindings"],
+        "technicalReadBudget": { "maxResources": 1, "maxOpenApiDocuments": 0, "maxSchemas": 0, "maxComponentManifests": 0 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    },
+    {
+      "id": "concept-employee-meaning-pt",
+      "family": "business-concept",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page",
+      "userPrompt": "Qual é a diferença entre funcionário e vínculo empregatício?",
+      "expected": {
+        "abstractionLevel": "concept",
+        "taskMode": "explain",
+        "retrievalProfile": "context",
+        "terminalAuthority": "answer",
+        "canApply": false,
+        "requiredSemanticRefs": ["human-resources.employee", "human-resources.employment-relationship"],
+        "allowedResourceKeys": [],
+        "allowedComponentIds": [],
+        "allowedTools": ["search_business_concepts", "expand_semantic_neighborhood"],
+        "technicalReadBudget": { "maxResources": 0, "maxOpenApiDocuments": 0, "maxSchemas": 0, "maxComponentManifests": 0 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    },
+    {
+      "id": "concept-cpf-governance-pt",
+      "family": "business-concept",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "employee-form",
+      "userPrompt": "O que significa o campo CPF e quais cuidados devemos ter com ele?",
+      "expected": {
+        "abstractionLevel": "concept",
+        "taskMode": "explain",
+        "retrievalProfile": "context",
+        "terminalAuthority": "answer",
+        "canApply": false,
+        "requiredSemanticRefs": ["human-resources.employee.tax-identifier"],
+        "allowedResourceKeys": ["human-resources.funcionarios"],
+        "allowedComponentIds": ["praxis-dynamic-form"],
+        "allowedTools": ["search_business_concepts", "expand_semantic_neighborhood"],
+        "technicalReadBudget": { "maxResources": 1, "maxOpenApiDocuments": 0, "maxSchemas": 0, "maxComponentManifests": 0 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    },
+    {
+      "id": "cross-domain-procurement-finance-pt",
+      "family": "cross-domain",
+      "status": "extended",
+      "locale": "pt-BR",
+      "contextRef": "blank-page",
+      "userPrompt": "Como compras se relaciona com financeiro?",
+      "expected": {
+        "abstractionLevel": "domain",
+        "taskMode": "explain",
+        "retrievalProfile": "context",
+        "terminalAuthority": "answer",
+        "canApply": false,
+        "requiredSemanticRefs": ["procurement", "finance"],
+        "allowedResourceKeys": [],
+        "allowedComponentIds": [],
+        "allowedTools": ["describe_domain_context", "expand_semantic_neighborhood"],
+        "technicalReadBudget": { "maxResources": 0, "maxOpenApiDocuments": 0, "maxSchemas": 0, "maxComponentManifests": 0 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    },
+    {
+      "id": "execution-create-employee-operation-pt",
+      "family": "technical-execution",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page",
+      "userPrompt": "Qual operação cria um funcionário e quais dados ela exige?",
+      "expected": {
+        "abstractionLevel": "operation",
+        "taskMode": "execute",
+        "retrievalProfile": "execution",
+        "terminalAuthority": "answer",
+        "canApply": false,
+        "requiredSemanticRefs": ["human-resources.employee"],
+        "allowedResourceKeys": ["human-resources.funcionarios"],
+        "allowedComponentIds": [],
+        "allowedTools": ["search_business_concepts", "resolve_domain_bindings", "inspect_resource_contract", "inspect_operation"],
+        "technicalReadBudget": { "maxResources": 1, "maxOpenApiDocuments": 1, "maxSchemas": 1, "maxComponentManifests": 0 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    },
+    {
+      "id": "ui-create-employee-form-pt",
+      "family": "generative-ui",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page",
+      "userPrompt": "Crie um formulário completo para cadastrar funcionários.",
+      "expected": {
+        "abstractionLevel": "operation",
+        "taskMode": "materialize",
+        "retrievalProfile": "ui-materialization",
+        "terminalAuthority": "preview",
+        "canApply": true,
+        "requiredSemanticRefs": ["human-resources.employee", "human-resources.workforce-management"],
+        "allowedResourceKeys": ["human-resources.funcionarios"],
+        "allowedComponentIds": ["praxis-dynamic-form"],
+        "allowedTools": ["search_business_concepts", "discover_business_capabilities", "resolve_domain_bindings", "inspect_resource_contract", "inspect_operation", "discover_components_by_capability", "inspect_component_manifest", "validate_ui_composition_plan"],
+        "technicalReadBudget": { "maxResources": 1, "maxOpenApiDocuments": 1, "maxSchemas": 1, "maxComponentManifests": 1 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    },
+    {
+      "id": "ui-create-admissions-dashboard-pt",
+      "family": "generative-ui",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page",
+      "userPrompt": "Crie um painel de admissões com indicadores, filtros e uma lista das pessoas.",
+      "expected": {
+        "abstractionLevel": "context",
+        "taskMode": "materialize",
+        "retrievalProfile": "ui-materialization",
+        "terminalAuthority": "preview",
+        "canApply": true,
+        "requiredSemanticRefs": ["human-resources.employee-onboarding", "human-resources.employee"],
+        "allowedResourceKeys": ["human-resources.funcionarios", "human-resources.vw-perfil-heroi"],
+        "allowedComponentIds": ["praxis-filter", "praxis-chart", "praxis-table", "praxis-list"],
+        "allowedTools": ["discover_business_capabilities", "search_business_concepts", "resolve_domain_bindings", "inspect_resource_contract", "discover_components_by_capability", "inspect_component_manifest", "validate_ui_composition_plan"],
+        "technicalReadBudget": { "maxResources": 2, "maxOpenApiDocuments": 2, "maxSchemas": 2, "maxComponentManifests": 2 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    },
+    {
+      "id": "ambiguity-administrative-dashboard-pt",
+      "family": "ambiguity",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page",
+      "userPrompt": "Crie um painel administrativo bonito.",
+      "expected": {
+        "abstractionLevel": "enterprise",
+        "taskMode": "materialize",
+        "retrievalProfile": "global-domain",
+        "terminalAuthority": "clarify",
+        "canApply": false,
+        "requiredSemanticRefs": ["enterprise.domain-map"],
+        "allowedResourceKeys": [],
+        "allowedComponentIds": [],
+        "allowedTools": ["discover_domain_map", "discover_business_capabilities"],
+        "technicalReadBudget": { "maxResources": 0, "maxOpenApiDocuments": 0, "maxSchemas": 0, "maxComponentManifests": 0 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    },
+    {
+      "id": "resilience-vector-unavailable-hr-overview-pt",
+      "family": "resilience",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page-vector-unavailable",
+      "userPrompt": "O que existe em Recursos Humanos?",
+      "expected": {
+        "abstractionLevel": "domain",
+        "taskMode": "explain",
+        "retrievalProfile": "global-domain",
+        "terminalAuthority": "answer",
+        "canApply": false,
+        "requiredSemanticRefs": ["human-resources"],
+        "allowedResourceKeys": [],
+        "allowedComponentIds": [],
+        "allowedTools": ["describe_domain_context"],
+        "technicalReadBudget": { "maxResources": 0, "maxOpenApiDocuments": 0, "maxSchemas": 0, "maxComponentManifests": 0 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    },
+    {
+      "id": "governance-stale-release-blocked-pt",
+      "family": "governance",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page-stale-release",
+      "userPrompt": "Crie uma tela de funcionários usando os dados disponíveis.",
+      "expected": {
+        "abstractionLevel": "resource",
+        "taskMode": "materialize",
+        "retrievalProfile": "resource",
+        "terminalAuthority": "blocked",
+        "canApply": false,
+        "requiredSemanticRefs": [],
+        "allowedResourceKeys": [],
+        "allowedComponentIds": [],
+        "allowedTools": ["search_business_concepts", "resolve_domain_bindings"],
+        "technicalReadBudget": { "maxResources": 0, "maxOpenApiDocuments": 0, "maxSchemas": 0, "maxComponentManifests": 0 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    },
+    {
+      "id": "governance-cross-tenant-blocked-pt",
+      "family": "governance",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page-cross-scope",
+      "userPrompt": "Quais informações de funcionários eu posso usar?",
+      "expected": {
+        "abstractionLevel": "concept",
+        "taskMode": "discover",
+        "retrievalProfile": "context",
+        "terminalAuthority": "blocked",
+        "canApply": false,
+        "requiredSemanticRefs": [],
+        "allowedResourceKeys": [],
+        "allowedComponentIds": [],
+        "allowedTools": ["search_business_concepts"],
+        "technicalReadBudget": { "maxResources": 0, "maxOpenApiDocuments": 0, "maxSchemas": 0, "maxComponentManifests": 0 },
+        "provenance": { "materialSelectionCoverage": 1, "requireCanonicalRelease": true, "requireEvidenceRefs": true },
+        "safety": { "forbidUnlistedResources": true, "forbidUnlistedComponents": true, "forbidUnapprovedInference": true, "requireTenantEnvironmentMatch": true, "mutationRequiresPreview": true }
+      }
+    }
+  ]
+}

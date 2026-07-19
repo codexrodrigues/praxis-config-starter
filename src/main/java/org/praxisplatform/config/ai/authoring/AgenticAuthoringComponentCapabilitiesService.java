@@ -13,6 +13,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -41,6 +42,7 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private static final long DEFAULT_DEGRADED_RETRY_MS = 5_000L;
     private static final int REGISTRY_LOAD_QUEUE_CAPACITY = 1;
     private static final AtomicInteger REGISTRY_LOADER_SEQUENCE = new AtomicInteger();
+    private static final AtomicInteger REGISTRY_REFRESH_SEQUENCE = new AtomicInteger();
 
     private final AgenticAuthoringFormCapabilityCatalog formCatalog = AgenticAuthoringFormCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringTableCapabilityCatalog tableCatalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;
@@ -52,10 +54,14 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private final long registryLoadTimeoutMs;
     private final long degradedRetryMs;
     private final ThreadPoolExecutor registryLoadExecutor;
+    private final ThreadPoolExecutor registryRefreshExecutor;
     private volatile CachedCapabilities cachedCapabilities;
     private volatile CachedCapabilities degradedCapabilities;
     private volatile AgenticAuthoringComponentCapabilitiesResult lastKnownGood;
     private volatile Instant lastSuccessfulRegistryLoadAt;
+    private volatile boolean forceRefresh;
+    private final AtomicBoolean backgroundRefreshInFlight = new AtomicBoolean();
+    private volatile String lastRefreshFailureReason = "";
 
     public AgenticAuthoringComponentCapabilitiesService() {
         this(null, new ObjectMapper());
@@ -104,6 +110,7 @@ public class AgenticAuthoringComponentCapabilitiesService {
         this.registryLoadTimeoutMs = Math.max(1L, registryLoadTimeoutMs);
         this.degradedRetryMs = Math.max(0L, degradedRetryMs);
         this.registryLoadExecutor = aiRegistryRepository == null ? null : createRegistryLoadExecutor();
+        this.registryRefreshExecutor = aiRegistryRepository == null ? null : createRegistryRefreshExecutor();
     }
 
     public AgenticAuthoringComponentCapabilitiesResult listCapabilities() {
@@ -116,6 +123,15 @@ public class AgenticAuthoringComponentCapabilitiesService {
         if (isCurrent(degraded, now)) {
             return degraded.result();
         }
+        if (!forceRefresh && degraded != null) {
+            scheduleBackgroundRefresh();
+            return refreshingDegradedResult(degraded.result());
+        }
+        AgenticAuthoringComponentCapabilitiesResult stale = lastKnownGood;
+        if (!forceRefresh && stale != null) {
+            scheduleBackgroundRefresh();
+            return staleResult(stale);
+        }
         synchronized (this) {
             cached = cacheTtlMs > 0L ? cachedCapabilities : null;
             now = System.currentTimeMillis();
@@ -126,19 +142,38 @@ public class AgenticAuthoringComponentCapabilitiesService {
             if (isCurrent(degraded, now)) {
                 return degraded.result();
             }
-            return refreshCapabilities();
+            if (!forceRefresh && degraded != null) {
+                scheduleBackgroundRefresh();
+                return refreshingDegradedResult(degraded.result());
+            }
+            stale = lastKnownGood;
+            if (!forceRefresh && stale != null) {
+                scheduleBackgroundRefresh();
+                return staleResult(stale);
+            }
+            try {
+                return refreshCapabilities();
+            } finally {
+                forceRefresh = false;
+            }
         }
     }
 
     public synchronized void invalidateCapabilitiesCache() {
         cachedCapabilities = null;
         degradedCapabilities = null;
+        forceRefresh = true;
     }
 
     public synchronized AgenticAuthoringComponentCapabilitiesResult refreshCapabilitiesCache() {
         cachedCapabilities = null;
         degradedCapabilities = null;
-        return refreshCapabilities();
+        forceRefresh = true;
+        try {
+            return refreshCapabilities();
+        } finally {
+            forceRefresh = false;
+        }
     }
 
     AgenticAuthoringComponentCapabilitiesResult listBuiltInCapabilities() {
@@ -181,6 +216,7 @@ public class AgenticAuthoringComponentCapabilitiesService {
                             loadedAt,
                             loadedAt));
             lastKnownGood = governed;
+            lastRefreshFailureReason = "";
             degradedCapabilities = null;
             cacheSuccessfulResult(governed, System.currentTimeMillis());
             log.info(
@@ -191,6 +227,7 @@ public class AgenticAuthoringComponentCapabilitiesService {
         }
 
         cachedCapabilities = null;
+        lastRefreshFailureReason = load.failureReason();
         AgenticAuthoringComponentCapabilitiesResult degraded = degradedResult(load.failureReason());
         if (cacheTtlMs > 0L && degradedRetryMs > 0L) {
             degradedCapabilities = new CachedCapabilities(
@@ -200,6 +237,62 @@ public class AgenticAuthoringComponentCapabilitiesService {
             degradedCapabilities = null;
         }
         return degraded;
+    }
+
+    private void scheduleBackgroundRefresh() {
+        if (registryRefreshExecutor == null) {
+            return;
+        }
+        if (forceRefresh || !backgroundRefreshInFlight.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            registryRefreshExecutor.execute(() -> {
+                try {
+                    if (!forceRefresh
+                            && !isCurrent(cachedCapabilities, System.currentTimeMillis())) {
+                        refreshCapabilities();
+                    }
+                } finally {
+                    backgroundRefreshInFlight.set(false);
+                }
+            });
+        } catch (RejectedExecutionException ex) {
+            backgroundRefreshInFlight.set(false);
+            log.debug("Governed component capability background refresh is already queued.");
+        }
+    }
+
+    private AgenticAuthoringComponentCapabilitiesResult staleResult(
+            AgenticAuthoringComponentCapabilitiesResult governed) {
+        String reason = StringUtils.hasText(lastRefreshFailureReason)
+                ? lastRefreshFailureReason
+                : "registry-refresh-in-progress";
+        return new AgenticAuthoringComponentCapabilitiesResult(
+                RESULT_VERSION,
+                governed.catalogs(),
+                new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics(
+                        "last-known-good",
+                        true,
+                        reason,
+                        Instant.now(),
+                        lastSuccessfulRegistryLoadAt));
+    }
+
+    private AgenticAuthoringComponentCapabilitiesResult refreshingDegradedResult(
+            AgenticAuthoringComponentCapabilitiesResult degraded) {
+        String reason = StringUtils.hasText(lastRefreshFailureReason)
+                ? lastRefreshFailureReason
+                : "registry-refresh-in-progress";
+        return new AgenticAuthoringComponentCapabilitiesResult(
+                RESULT_VERSION,
+                degraded.catalogs(),
+                new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics(
+                        degraded.diagnostics().source(),
+                        true,
+                        reason,
+                        Instant.now(),
+                        lastSuccessfulRegistryLoadAt));
     }
 
     private void cacheSuccessfulResult(
@@ -346,6 +439,9 @@ public class AgenticAuthoringComponentCapabilitiesService {
         if (registryLoadExecutor != null) {
             registryLoadExecutor.shutdownNow();
         }
+        if (registryRefreshExecutor != null) {
+            registryRefreshExecutor.shutdownNow();
+        }
     }
 
     private ThreadPoolExecutor createRegistryLoadExecutor() {
@@ -353,6 +449,26 @@ public class AgenticAuthoringComponentCapabilitiesService {
             Thread thread = new Thread(
                     runnable,
                     "agentic-component-capabilities-registry-" + REGISTRY_LOADER_SEQUENCE.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        };
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                1,
+                1,
+                30L,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(REGISTRY_LOAD_QUEUE_CAPACITY),
+                threadFactory,
+                new ThreadPoolExecutor.AbortPolicy());
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
+    }
+
+    private ThreadPoolExecutor createRegistryRefreshExecutor() {
+        ThreadFactory threadFactory = runnable -> {
+            Thread thread = new Thread(
+                    runnable,
+                    "agentic-component-capabilities-refresh-" + REGISTRY_REFRESH_SEQUENCE.incrementAndGet());
             thread.setDaemon(true);
             return thread;
         };

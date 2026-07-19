@@ -33,6 +33,19 @@ public interface ApiMetadataRepository extends JpaRepository<ApiMetadata, Long> 
             String serviceKey,
             String releaseId);
 
+    @Query("""
+        SELECT e
+        FROM ApiMetadata e
+        WHERE e.tenantId = :tenantId
+          AND e.environment = :environment
+          AND (e.path = :resourcePath OR e.path LIKE CONCAT(:resourcePath, '/%'))
+        ORDER BY e.path, e.method
+    """)
+    List<ApiMetadata> findAllByTenantAndEnvironmentAndResourcePath(
+            @Param("tenantId") String tenantId,
+            @Param("environment") String environment,
+            @Param("resourcePath") String resourcePath);
+
     long countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
             String tenantId,
             String environment,

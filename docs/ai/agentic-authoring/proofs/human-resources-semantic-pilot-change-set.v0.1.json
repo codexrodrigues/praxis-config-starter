@@ -1,0 +1,319 @@
+{
+  "changeSetKey": "project-knowledge:human-resources:semantic-pilot:v0.1",
+  "status": "proposed",
+  "authorType": "system",
+  "authorId": "praxis-human-resources-reference-pilot",
+  "intent": "Teach Praxis a governed Human Resources context before technical resource discovery.",
+  "reason": "The assistant needs a compact business-level source for domain explanation and generative UI grounding without scanning every API endpoint.",
+  "patch": [
+    {
+      "operationId": "create-human-resources-context",
+      "operationType": "create_concept",
+      "target": {
+        "tenantId": "desenv",
+        "environment": "local",
+        "conceptKey": "human-resources.context"
+      },
+      "reason": "Materialize the purpose, boundary and ownership of Human Resources as governed machine-readable knowledge.",
+      "evidenceRefs": [
+        "domain-catalog:praxis-service:human-resources:025f0d304a66669b",
+        "rfc:machine-first-semantic-ir:2026-07"
+      ],
+      "confidence": 1.0,
+      "payload": {
+        "contextKey": "human-resources",
+        "nodeType": "context",
+        "label": "People and Human Resources",
+        "description": "The bounded business context responsible for workforce structure, employee lifecycle, organizational assignment, leave and payroll grounding. It provides governed meaning before technical API, schema or UI-component discovery.",
+        "semanticOwner": "people-operations",
+        "steward": "praxis-human-resources-domain-steward",
+        "locale": "en",
+        "aiVisibility": "allow",
+        "classification": "internal",
+        "dataCategory": "business_semantics",
+        "provenance": {
+          "claimId": "claim:human-resources:context:v0.1",
+          "sourceClass": "authored",
+          "sourceRefs": [
+            "domain-catalog:praxis-service:human-resources:025f0d304a66669b",
+            "rfc:machine-first-semantic-ir:2026-07"
+          ],
+          "derivationActivity": "reference-domain-pilot-authoring",
+          "agent": {
+            "type": "system",
+            "id": "praxis-human-resources-reference-pilot"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "create-workforce-management-capability",
+      "operationType": "create_concept",
+      "target": {
+        "tenantId": "desenv",
+        "environment": "local",
+        "conceptKey": "human-resources.capability.workforce-management"
+      },
+      "reason": "Represent the business capability that organizes employee lifecycle and workforce structure independently from endpoint layout.",
+      "evidenceRefs": [
+        "domain-catalog:praxis-service:human-resources:025f0d304a66669b",
+        "resource:human-resources.funcionarios"
+      ],
+      "confidence": 1.0,
+      "payload": {
+        "contextKey": "human-resources",
+        "nodeType": "business_capability",
+        "label": "Workforce Management",
+        "description": "Manage employee identity, lifecycle status, role, department and workforce structure while respecting privacy and employment governance.",
+        "semanticOwner": "people-operations",
+        "steward": "praxis-human-resources-domain-steward",
+        "locale": "en",
+        "aiVisibility": "allow",
+        "classification": "internal",
+        "dataCategory": "business_semantics",
+        "provenance": {
+          "claimId": "claim:human-resources:capability:workforce-management:v0.1",
+          "sourceClass": "authored",
+          "sourceRefs": [
+            "domain-catalog:praxis-service:human-resources:025f0d304a66669b",
+            "resource:human-resources.funcionarios"
+          ],
+          "derivationActivity": "reference-domain-pilot-authoring",
+          "agent": {
+            "type": "system",
+            "id": "praxis-human-resources-reference-pilot"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "create-workforce-count-metric",
+      "operationType": "create_concept",
+      "target": {
+        "tenantId": "desenv",
+        "environment": "local",
+        "conceptKey": "human-resources.metric.workforce-count"
+      },
+      "reason": "Give generative analytics a governed metric identity before selecting stats endpoints or chart components.",
+      "evidenceRefs": [
+        "domain-catalog:praxis-service:human-resources:025f0d304a66669b",
+        "stats:human-resources.funcionarios:count"
+      ],
+      "confidence": 1.0,
+      "payload": {
+        "contextKey": "human-resources",
+        "nodeType": "metric",
+        "label": "Workforce Count",
+        "description": "Count of employees in the accepted workforce scope, normally constrained by lifecycle status, tenant and environment before aggregation.",
+        "semanticOwner": "people-operations",
+        "steward": "praxis-human-resources-domain-steward",
+        "locale": "en",
+        "aiVisibility": "allow",
+        "classification": "internal",
+        "dataCategory": "business_metric",
+        "provenance": {
+          "claimId": "claim:human-resources:metric:workforce-count:v0.1",
+          "sourceClass": "authored",
+          "sourceRefs": [
+            "domain-catalog:praxis-service:human-resources:025f0d304a66669b",
+            "stats:human-resources.funcionarios:count"
+          ],
+          "derivationActivity": "reference-domain-pilot-authoring",
+          "agent": {
+            "type": "system",
+            "id": "praxis-human-resources-reference-pilot"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "alias-human-resources-context-pt-br",
+      "operationType": "add_alias",
+      "target": {
+        "tenantId": "desenv",
+        "environment": "local",
+        "conceptKey": "human-resources.context"
+      },
+      "reason": "Publish the preferred Brazilian Portuguese business term for the context.",
+      "evidenceRefs": ["rfc:machine-first-semantic-ir:2026-07"],
+      "confidence": 1.0,
+      "payload": {
+        "alias": "Recursos Humanos",
+        "aliasType": "preferred_term",
+        "locale": "pt-BR",
+        "provenance": {
+          "claimId": "claim:human-resources:context:alias:pt-BR:v0.1",
+          "sourceClass": "authored",
+          "sourceRefs": ["rfc:machine-first-semantic-ir:2026-07"],
+          "derivationActivity": "reference-domain-pilot-authoring",
+          "agent": {
+            "type": "system",
+            "id": "praxis-human-resources-reference-pilot"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "bind-human-resources-context-openapi-group",
+      "operationType": "add_binding",
+      "target": {
+        "tenantId": "desenv",
+        "environment": "local",
+        "conceptKey": "human-resources.context"
+      },
+      "reason": "Bind the authored context to the existing OpenAPI group without making the group the semantic source of truth.",
+      "evidenceRefs": ["domain-catalog:praxis-service:human-resources:025f0d304a66669b"],
+      "confidence": 1.0,
+      "payload": {
+        "bindingType": "external_reference",
+        "bindingKey": "openapi-group:human-resources",
+        "provenance": {
+          "claimId": "claim:human-resources:context:binding:openapi-group:v0.1",
+          "sourceClass": "authored",
+          "sourceRefs": ["domain-catalog:praxis-service:human-resources:025f0d304a66669b"],
+          "derivationActivity": "reference-domain-pilot-authoring",
+          "agent": {
+            "type": "system",
+            "id": "praxis-human-resources-reference-pilot"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "bind-workforce-management-funcionarios",
+      "operationType": "add_binding",
+      "target": {
+        "tenantId": "desenv",
+        "environment": "local",
+        "conceptKey": "human-resources.capability.workforce-management"
+      },
+      "reason": "Connect the accepted capability to the employee resource only after the capability has its own canonical identity.",
+      "evidenceRefs": ["resource:human-resources.funcionarios"],
+      "confidence": 1.0,
+      "payload": {
+        "bindingType": "api_resource",
+        "bindingKey": "human-resources.funcionarios",
+        "resourceKey": "human-resources.funcionarios",
+        "provenance": {
+          "claimId": "claim:human-resources:capability:workforce-management:binding:funcionarios:v0.1",
+          "sourceClass": "authored",
+          "sourceRefs": ["resource:human-resources.funcionarios"],
+          "derivationActivity": "reference-domain-pilot-authoring",
+          "agent": {
+            "type": "system",
+            "id": "praxis-human-resources-reference-pilot"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "relate-context-to-workforce-management",
+      "operationType": "add_relationship",
+      "target": {
+        "tenantId": "desenv",
+        "environment": "local",
+        "sourceConceptKey": "human-resources.context",
+        "targetConceptKey": "human-resources.capability.workforce-management"
+      },
+      "reason": "Declare that workforce management belongs to the governed Human Resources context.",
+      "evidenceRefs": ["rfc:machine-first-semantic-ir:2026-07"],
+      "confidence": 1.0,
+      "payload": {
+        "relationshipType": "contains",
+        "provenance": {
+          "claimId": "claim:human-resources:context:contains:workforce-management:v0.1",
+          "sourceClass": "authored",
+          "sourceRefs": ["rfc:machine-first-semantic-ir:2026-07"],
+          "derivationActivity": "reference-domain-pilot-authoring",
+          "agent": {
+            "type": "system",
+            "id": "praxis-human-resources-reference-pilot"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "relate-workforce-management-to-workforce-count",
+      "operationType": "add_relationship",
+      "target": {
+        "tenantId": "desenv",
+        "environment": "local",
+        "sourceConceptKey": "human-resources.capability.workforce-management",
+        "targetConceptKey": "human-resources.metric.workforce-count"
+      },
+      "reason": "Declare which governed metric measures the workforce-management capability.",
+      "evidenceRefs": ["stats:human-resources.funcionarios:count"],
+      "confidence": 1.0,
+      "payload": {
+        "relationshipType": "measured_by",
+        "provenance": {
+          "claimId": "claim:human-resources:capability:workforce-management:measured-by:workforce-count:v0.1",
+          "sourceClass": "authored",
+          "sourceRefs": ["stats:human-resources.funcionarios:count"],
+          "derivationActivity": "reference-domain-pilot-authoring",
+          "agent": {
+            "type": "system",
+            "id": "praxis-human-resources-reference-pilot"
+          }
+        }
+      }
+    },
+    {
+      "operationId": "evidence-human-resources-context",
+      "operationType": "add_evidence",
+      "target": {
+        "tenantId": "desenv",
+        "environment": "local",
+        "conceptKey": "human-resources.context"
+      },
+      "reason": "Attach an active governed evidence record so the approved context can be projected into Project Knowledge.",
+      "evidenceRefs": ["rfc:machine-first-semantic-ir:2026-07"],
+      "confidence": 1.0,
+      "payload": {
+        "evidenceKey": "evidence:human-resources:context:v0.1",
+        "evidenceType": "manual_review",
+        "sourceUri": "praxis-rfc://machine-first-semantic-ir/2026-07",
+        "sourcePointer": "/canonical-semantic-kernel/context",
+        "safeSummary": "Reviewed definition and boundary for the Human Resources context."
+      }
+    },
+    {
+      "operationId": "evidence-workforce-management-capability",
+      "operationType": "add_evidence",
+      "target": {
+        "tenantId": "desenv",
+        "environment": "local",
+        "conceptKey": "human-resources.capability.workforce-management"
+      },
+      "reason": "Attach governed evidence so the capability is available to progressive semantic retrieval.",
+      "evidenceRefs": ["domain-catalog:praxis-service:human-resources:025f0d304a66669b"],
+      "confidence": 1.0,
+      "payload": {
+        "evidenceKey": "evidence:human-resources:capability:workforce-management:v0.1",
+        "evidenceType": "catalog_release",
+        "sourceUri": "praxis-domain-catalog://praxis-service/human-resources",
+        "sourcePointer": "/nodes",
+        "safeSummary": "Reviewed capability synthesized from governed Human Resources resources and their business descriptions."
+      }
+    },
+    {
+      "operationId": "evidence-workforce-count-metric",
+      "operationType": "add_evidence",
+      "target": {
+        "tenantId": "desenv",
+        "environment": "local",
+        "conceptKey": "human-resources.metric.workforce-count"
+      },
+      "reason": "Attach governed evidence so analytics can resolve the metric before loading technical stats contracts.",
+      "evidenceRefs": ["stats:human-resources.funcionarios:count"],
+      "confidence": 1.0,
+      "payload": {
+        "evidenceKey": "evidence:human-resources:metric:workforce-count:v0.1",
+        "evidenceType": "catalog_release",
+        "sourceUri": "praxis-domain-catalog://praxis-service/human-resources",
+        "sourcePointer": "/nodes/human-resources.funcionarios.stats",
+        "safeSummary": "Reviewed workforce-count metric linked to the employee statistics capability."
+      }
+    }
+  ]
+}

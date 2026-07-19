@@ -115,6 +115,34 @@ public record AgenticAuthoringSemanticDecision(
                 groundedConfidence);
     }
 
+    AgenticAuthoringSemanticDecision withConstraints(JsonNode governedConstraints) {
+        return new AgenticAuthoringSemanticDecision(
+                schemaVersion,
+                decisionId,
+                operationKind,
+                artifactKind,
+                changeKind,
+                selectedResource,
+                visualizationDecision,
+                retrievalEvidence,
+                retrievedEvidence,
+                reviewRequired,
+                reviewReason,
+                previousDecisionRef,
+                refinementOf,
+                conversationId,
+                turnId,
+                userGoal,
+                activeObjective,
+                artifactIntent,
+                visualIntent,
+                governedConstraints,
+                refinement,
+                previousDecisionId,
+                rationale,
+                confidence);
+    }
+
     static AgenticAuthoringSemanticDecision from(
             String operationKind,
             String artifactKind,

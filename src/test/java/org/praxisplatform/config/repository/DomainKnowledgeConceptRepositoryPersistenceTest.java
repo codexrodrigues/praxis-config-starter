@@ -102,6 +102,26 @@ class DomainKnowledgeConceptRepositoryPersistenceTest {
                 });
     }
 
+    @Test
+    void unscopedEnumerationPrioritizesMacroKnowledgeBeforeResourceSpecificKnowledge() {
+        DomainKnowledgeConcept macro = concept(
+                "tenant-a", "dev", "human-resources", null,
+                "active", "approved", "allow", "human-resources.context", null);
+        macro.setNodeType("context");
+        DomainKnowledgeConcept resourceDerived = concept(
+                "tenant-a", "dev", "addresses", "addresses.items",
+                "active", "approved", "allow", "addresses.context", null);
+        resourceDerived.setNodeType("context");
+        conceptRepository.saveAll(List.of(resourceDerived, macro));
+
+        List<DomainKnowledgeConcept> results = conceptRepository.findGovernedProjectKnowledgeCandidates(
+                "tenant-a", "dev", null, null, "context", PageRequest.of(0, 1));
+
+        assertThat(results)
+                .extracting(DomainKnowledgeConcept::getConceptKey)
+                .containsExactly("human-resources.context");
+    }
+
     private DomainKnowledgeConcept concept(
             String tenantId,
             String environment,

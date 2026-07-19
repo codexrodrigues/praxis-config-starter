@@ -26,6 +26,7 @@ CONVERSATION_MESSAGES_JSON="${CONVERSATION_MESSAGES_JSON:-[]}"
 PENDING_CLARIFICATION_JSON="${PENDING_CLARIFICATION_JSON:-null}"
 ATTACHMENT_SUMMARIES_JSON="${ATTACHMENT_SUMMARIES_JSON:-[]}"
 CONTEXT_HINTS_JSON="${CONTEXT_HINTS_JSON:-}"
+ACTIVE_SEMANTIC_DECISION_JSON="${ACTIVE_SEMANTIC_DECISION_JSON:-null}"
 SESSION_ID="${SESSION_ID:-local-pre-intent-session}"
 STREAM_TIMEOUT_SECONDS="${STREAM_TIMEOUT_SECONDS:-180}"
 REQUIRE_TOOL_PLAN="${REQUIRE_TOOL_PLAN:-true}"
@@ -81,6 +82,7 @@ request_body="$(jq -n \
   --argjson pendingClarification "$PENDING_CLARIFICATION_JSON" \
   --argjson attachmentSummaries "$ATTACHMENT_SUMMARIES_JSON" \
   --argjson contextHints "$CONTEXT_HINTS_JSON" \
+  --argjson activeSemanticDecision "$ACTIVE_SEMANTIC_DECISION_JSON" \
   '{
     userPrompt: $userPrompt,
     targetApp: $targetApp,
@@ -98,6 +100,7 @@ request_body="$(jq -n \
     attachmentSummaries: $attachmentSummaries,
     contextHints: $contextHints,
     componentCapabilities: null,
+    activeSemanticDecision: $activeSemanticDecision,
     runtimeComponentObservations: null,
     runtimeComponentObservationTrustBoundary: null
   }')"

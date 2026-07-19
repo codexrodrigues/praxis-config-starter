@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -58,7 +59,14 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 }
                 """));
         AgenticAuthoringLlmPreIntentToolPlanningService service =
-                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper, 7);
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        null,
+                        7,
+                        2,
+                        250L,
+                        "gpt-5.6-luna");
 
         AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
                 request("quero criar algo que mostre informacoes dos empregados"),
@@ -67,6 +75,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         assertThat(result.planned()).isTrue();
         assertThat(result.providerInvocations()).singleElement().satisfies(invocation -> {
             assertThat(invocation.phase()).isEqualTo("pre_intent_tool_plan");
+            assertThat(invocation.model()).isEqualTo("gpt-5.6-luna");
             assertThat(invocation.status()).isEqualTo("success");
         });
         assertThat(result.plan().reason()).contains("fonte governada");
@@ -94,11 +103,17 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("where analytics are not the dominant requested outcome")
                 .contains("individual or single-record profile")
                 .contains("payroll, is itself requested")
+                .contains("semanticIntentClass=governed_domain_discovery")
+                .contains("groundingProfile=domain_context")
+                .contains("sobre quais assuntos posso criar")
+                .contains("not yet commanding creation")
                 .contains("domainDiscovery")
                 .contains("human-resources.funcionarios");
         assertThat(promptCaptor.getValue()).doesNotContain("\n  \"");
         assertThat(schemaCaptor.getValue().jsonSchema())
                 .contains("semanticIntentClass")
+                .contains("governed_domain_discovery")
+                .contains("mentioning those future artifacts does not make the request concrete authoring")
                 .contains("assistantMessage")
                 .contains("shouldRetrieveGovernedResources")
                 .contains("retrievalQuery")
@@ -106,28 +121,150 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("Dimensions, fields, filters, groupings")
                 .contains("collection dashboard with filters, charts, and a detail table");
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(7);
+        assertThat(configCaptor.getValue().getModel()).isEqualTo("gpt-5.6-luna");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(640);
         assertThat(configCaptor.getValue().getInvocationTrace()).isNotNull();
     }
 
     @Test
-    void includesTenantScopedGovernedDomainContextBeforePreIntentPlanning() throws Exception {
+    void plansCanonicalContextEnumerationForGovernedDomainDiscovery() throws Exception {
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "semanticIntentClass": "governed_domain_discovery",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "groundingProfile": "domain_context",
+                          "artifactKind": "dashboard",
+                          "retrievalQuery": null,
+                          "resourceSearchFocus": null,
+                          "reason": "Enumerate governed business contexts before choosing the dashboard subject."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("Quais temas administrativos estão disponíveis para eu criar um dashboard interativo?"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().semanticIntentClass()).isEqualTo("governed_domain_discovery");
+        assertThat(result.plan().resolvesPlatformGuidance()).isFalse();
+        assertThat(result.plan().toolCalls()).singleElement().satisfies(call -> {
+            assertThat(call.name()).isEqualTo(AgenticAuthoringToolRegistry.DISCOVER_DOMAIN_CONTEXTS);
+            assertThat(call.payload()).isEqualTo(new DomainKnowledgeToolRequest("", "", 0));
+        });
+    }
+
+    @Test
+    void preservesRequestedModelForNonOpenAiProviders() throws Exception {
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        when(providerManagementService.generateJson(
+                any(),
+                any(),
+                configCaptor.capture(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                  "semanticIntentClass": "platform_guidance",
+                  "assistantMessage": "Posso ajudar a criar formularios, tabelas, graficos e paineis.",
+                  "shouldRetrieveGovernedResources": false,
+                  "artifactKind": "unknown",
+                  "retrievalQuery": null,
+                  "reason": "A pergunta pede orientacao sobre as capacidades da plataforma."
+                }
+                """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        null,
+                        7,
+                        1,
+                        0L,
+                        "gpt-5.6-luna");
+        AgenticAuthoringTurnStreamRequest request = new AgenticAuthoringTurnStreamRequest(
+                "o que posso fazer aqui?",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/decision-playground",
+                objectMapper.createObjectNode(),
+                null,
+                "gemini",
+                "gemini-2.5-flash",
+                "test-key",
+                "session-1",
+                "turn-client-1",
+                List.of(),
+                null,
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                null);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request,
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(configCaptor.getValue().getProvider()).isEqualTo("gemini");
+        assertThat(configCaptor.getValue().getModel()).isEqualTo("gemini-2.5-flash");
+    }
+
+    @Test
+    void plansCapabilityGroundingBeforeOperationalApiDiscovery() throws Exception {
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "semanticIntentClass": "authoring_or_other",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "groundingProfile": "domain_capability",
+                          "artifactKind": "form",
+                          "retrievalQuery": null,
+                          "resourceSearchFocus": {
+                            "primaryBusinessEntity": null,
+                            "supportingConcepts": [],
+                            "desiredSurface": "form",
+                            "uncertainty": null,
+                            "rationale": "The business context is known; capability must be grounded first."
+                          },
+                          "reason": "Resolve the governed capability before bindings or endpoints."
+                        }
+                        """));
+        AgenticAuthoringTurnStreamRequest request = request(
+                "crie uma experiência para o domínio atual",
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode().put("contextKey", "human-resources"));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request,
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().toolCalls()).singleElement().satisfies(call -> {
+            assertThat(call.name()).isEqualTo(AgenticAuthoringToolRegistry.DISCOVER_DOMAIN_CAPABILITIES);
+            assertThat(call.routeClass()).isEqualTo("advisory_authoring");
+            assertThat(call.payload()).isEqualTo(new DomainKnowledgeToolRequest("human-resources", "", 0));
+        });
+    }
+
+    @Test
+    void doesNotForceUnscopedDomainCatalogRetrievalBeforeSemanticPlanning() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<JsonNode> contextHintsCaptor = ArgumentCaptor.forClass(JsonNode.class);
         AgenticAuthoringTurnStreamRequest request = request(
                 "crie um painel de afastamentos",
                 objectMapper.createObjectNode(),
                 objectMapper.createObjectNode().put("source", "page-builder"));
-        when(domainCatalogPromptContextService.buildPromptContext(
-                eq("crie um painel de afastamentos"),
-                contextHintsCaptor.capture(),
-                eq("tenant"),
-                eq("local")))
-                .thenReturn("""
-                        DOMAIN_CATALOG_CONTEXT
-                        schemaVersion: praxis.domain-catalog.context.v1
-                        serviceKey: praxis-service
-                        """);
         when(providerManagementService.generateJson(
                 promptCaptor.capture(),
                 any(),
@@ -157,10 +294,8 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         assertThat(result.planned()).isTrue();
         assertThat(promptCaptor.getValue())
                 .contains("praxis-agentic-authoring-semantic-orientation-context.v1")
-                .contains("DOMAIN_CATALOG_CONTEXT")
-                .contains("serviceKey: praxis-service");
-        assertThat(contextHintsCaptor.getValue().path("source").asText()).isEqualTo("page-builder");
-        assertThat(contextHintsCaptor.getValue().path("domainCatalog").path("enabled").asBoolean()).isTrue();
+                .doesNotContain("DOMAIN_CATALOG_CONTEXT");
+        verifyNoInteractions(domainCatalogPromptContextService);
         assertThat(request.contextHints().has("domainCatalog")).isFalse();
     }
 
@@ -240,12 +375,6 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
     @Test
     void resolvesPlatformGuidanceWithoutRecommendedIntentFromPraxisDomainSurfaceAndComponents() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        when(domainCatalogPromptContextService.buildPromptContext(
-                eq("O que posso fazer aqui?"),
-                any(),
-                eq("tenant"),
-                eq("local")))
-                .thenReturn("DOMAIN_CATALOG_CONTEXT\nresources: funcionarios, departamentos");
         when(providerManagementService.generateJson(
                 promptCaptor.capture(),
                 any(),
@@ -307,13 +436,13 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         assertThat(result.providerInvocations()).hasSize(1);
         assertThat(promptCaptor.getValue())
                 .contains("Praxis is a governed AI authoring platform")
-                .contains("DOMAIN_CATALOG_CONTEXT")
-                .contains("funcionarios, departamentos")
                 .contains("praxis-dynamic-form")
                 .contains("praxis-table")
                 .contains("praxis-chart")
                 .contains("Canonical response locale: en-US")
                 .contains("recommendedIntent is optional evidence");
+        assertThat(promptCaptor.getValue()).doesNotContain("DOMAIN_CATALOG_CONTEXT");
+        verifyNoInteractions(domainCatalogPromptContextService);
         assertThat(promptCaptor.getValue()).doesNotContain("\"recommendedIntent\"");
     }
 

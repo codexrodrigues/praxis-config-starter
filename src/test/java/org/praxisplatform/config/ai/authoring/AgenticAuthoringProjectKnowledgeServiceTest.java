@@ -30,6 +30,58 @@ class AgenticAuthoringProjectKnowledgeServiceTest {
     private final AiSensitiveDataRedactor redactor = new AiSensitiveDataRedactor();
 
     @Test
+    void projectsGovernedSemanticNodeTypeWhenLegacyProjectKnowledgeKindIsAbsent() {
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        AgenticAuthoringProjectKnowledgeService service = new AgenticAuthoringProjectKnowledgeService(
+                conceptRepository,
+                evidenceRepository,
+                objectMapper,
+                redactor);
+        DomainKnowledgeConcept context = concept(
+                "tenant-a",
+                "dev",
+                "human-resources",
+                null,
+                "active",
+                "approved",
+                "allow",
+                """
+                {
+                  "provenance": {
+                    "claimId": "claim:human-resources:context:v0.1",
+                    "sourceClass": "authored"
+                  }
+                }
+                """);
+        context.setConceptKey("human-resources.context");
+        context.setNodeType("context");
+        context.setLabel("Human Resources");
+        context.setDescription("Manages people, workforce structure and the employee lifecycle.");
+        context.setSemanticOwner("people-operations");
+        when(conceptRepository.findGovernedProjectKnowledgeCandidates(
+                eq("tenant-a"), eq("dev"), eq(null), eq(null), eq("context"), any(Pageable.class)))
+                .thenReturn(List.of(context));
+        givenActiveEvidence(evidenceRepository, context);
+
+        List<AgenticAuthoringProjectKnowledgeProjection> projections = service.retrieve(
+                new AgenticAuthoringProjectKnowledgeQuery(
+                        "tenant-a", "dev", null, null, List.of("context"), "context", 4));
+
+        assertThat(projections)
+                .singleElement()
+                .satisfies(projection -> {
+                    assertThat(projection.conceptKey()).isEqualTo("human-resources.context");
+                    assertThat(projection.kind()).isEqualTo("context");
+                    assertThat(projection.summary())
+                            .isEqualTo("Manages people, workforce structure and the employee lifecycle.");
+                    assertThat(projection.evidence()).contains(
+                            "project-knowledge-kind:context",
+                            "domain-knowledge:evidence-status:active");
+                });
+    }
+
+    @Test
     void retrievesOnlyGovernedMatchingProjectKnowledgeAsSafeProjection() {
         DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
         DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);

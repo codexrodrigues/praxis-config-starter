@@ -34,9 +34,44 @@ public class DomainKnowledgeChangeSetValidator {
             "revert_evidence"
     );
     private static final Set<String> EXECUTABLE_OPERATION_TYPES = Set.of(
+            "create_concept",
+            "add_alias",
+            "add_binding",
+            "add_relationship",
             "add_evidence",
             "revert_evidence"
     );
+    private static final Set<String> AUTHORED_NODE_TYPES = Set.of(
+            "context",
+            "concept",
+            "business_capability",
+            "process",
+            "business_event",
+            "policy",
+            "metric",
+            "actor"
+    );
+    private static final Set<String> AI_VISIBILITIES = Set.of(
+            "allow", "mask", "summarize_only", "deny");
+    private static final Set<String> ALIAS_TYPES = Set.of(
+            "preferred_term", "synonym", "abbreviation", "legacy_name",
+            "business_slang", "technical_name", "misspelling");
+    private static final Set<String> BINDING_TYPES = Set.of(
+            "api_resource", "api_operation", "dto_class", "dto_schema", "dto_field",
+            "entity_class", "entity_field", "service_method", "repository_projection",
+            "workflow_action", "ui_surface", "ui_schema_field", "option_source",
+            "form_config", "table_config", "rule_definition", "external_reference",
+            "component_capability", "event_schema");
+    private static final Set<String> RELATIONSHIP_TYPES = Set.of(
+            "contains", "part_of", "related_to", "has_field", "has_state", "has_action",
+            "has_surface", "has_event", "has_metric", "has_relationship", "allowed_in_state",
+            "selectable_when", "blocked_when", "blocked_in_state", "uses_concept", "references",
+            "depends_on", "computed_from", "triggers", "produces", "consumes", "applies_to",
+            "measured_by", "implemented_by", "maps_to", "same_as", "equivalent_to", "broader",
+            "narrower", "broader_than", "narrower_than", "impacts", "owned_by", "stewarded_by",
+            "governed_by", "materializes");
+    private static final Set<String> CLAIM_SOURCE_CLASSES = Set.of(
+            "authored", "extracted", "inferred");
     private static final Set<String> DESTRUCTIVE_OPERATION_TYPES = Set.of(
             "delete_concept",
             "delete_alias",
@@ -105,8 +140,17 @@ public class DomainKnowledgeChangeSetValidator {
         }
 
         Set<String> operationIds = new HashSet<>();
+        Set<String> claimIds = new HashSet<>();
         for (int i = 0; i < operations.size(); i++) {
-            validateOperation(tenantId, environment, request, operations.get(i), i, operationIds, issues);
+            validateOperation(
+                    tenantId,
+                    environment,
+                    request,
+                    operations.get(i),
+                    i,
+                    operationIds,
+                    claimIds,
+                    issues);
         }
 
         return report(issues, operations);
@@ -119,6 +163,7 @@ public class DomainKnowledgeChangeSetValidator {
             DomainKnowledgeChangeSetOperationRequest operation,
             int index,
             Set<String> operationIds,
+            Set<String> claimIds,
             List<DomainKnowledgeChangeSetValidationIssue> issues) {
         String pointer = "/patch/" + index;
         if (operation == null) {
@@ -156,7 +201,14 @@ public class DomainKnowledgeChangeSetValidator {
         }
         validateConfidence(operation.confidence(), pointer + "/confidence", issues);
         validateTargetScope(tenantId, environment, operation.target(), pointer + "/target", issues);
-        validatePayload(operationType, operation.target(), operation.payload(), pointer + "/payload", issues);
+        validatePayload(
+                operationType,
+                request.authorType(),
+                operation.target(),
+                operation.payload(),
+                pointer + "/payload",
+                claimIds,
+                issues);
     }
 
     private void validateConfidence(
@@ -190,9 +242,11 @@ public class DomainKnowledgeChangeSetValidator {
 
     private void validatePayload(
             String operationType,
+            String authorType,
             JsonNode target,
             JsonNode payload,
             String pointer,
+            Set<String> claimIds,
             List<DomainKnowledgeChangeSetValidationIssue> issues) {
         if (payload == null || payload.isNull() || !payload.isObject()) {
             error(issues, "payload_required", pointer, "payload object is required");
@@ -208,7 +262,64 @@ public class DomainKnowledgeChangeSetValidator {
             error(issues, "unsafe_evidence_ai_visibility", pointer + "/aiVisibility",
                     "unsafe evidence cannot be proposed as ai_visibility=allow");
         }
-        if ("add_evidence".equals(operationType)) {
+        if ("create_concept".equals(operationType)) {
+            requireTargetConceptKey(target, pointer, operationType, issues);
+            requireText(payload.path("contextKey").asText(null), pointer + "/contextKey",
+                    "context_key_required", "create_concept operations require payload.contextKey", issues);
+            requireText(payload.path("nodeType").asText(null), pointer + "/nodeType",
+                    "node_type_required", "create_concept operations require payload.nodeType", issues);
+            requireEnum(payload.path("nodeType").asText(null), AUTHORED_NODE_TYPES, pointer + "/nodeType",
+                    "unsupported_authored_node_type", issues);
+            requireText(payload.path("label").asText(null), pointer + "/label",
+                    "concept_label_required", "create_concept operations require payload.label", issues);
+            requireText(payload.path("description").asText(null), pointer + "/description",
+                    "concept_description_required", "create_concept operations require payload.description", issues);
+            requireText(payload.path("semanticOwner").asText(null), pointer + "/semanticOwner",
+                    "semantic_owner_required", "create_concept operations require payload.semanticOwner", issues);
+            requireEnum(payload.path("aiVisibility").asText(null), AI_VISIBILITIES,
+                    pointer + "/aiVisibility", "unsupported_ai_visibility", issues);
+            validateClaimProvenance(
+                    authorType, payload.path("provenance"), pointer + "/provenance", claimIds, issues);
+        } else if ("add_alias".equals(operationType)) {
+            requireTargetConceptKey(target, pointer, operationType, issues);
+            requireText(payload.path("alias").asText(null), pointer + "/alias",
+                    "alias_required", "add_alias operations require payload.alias", issues);
+            requireText(payload.path("aliasType").asText(null), pointer + "/aliasType",
+                    "alias_type_required", "add_alias operations require payload.aliasType", issues);
+            requireEnum(payload.path("aliasType").asText(null), ALIAS_TYPES,
+                    pointer + "/aliasType", "unsupported_alias_type", issues);
+            validateClaimProvenance(
+                    authorType, payload.path("provenance"), pointer + "/provenance", claimIds, issues);
+        } else if ("add_binding".equals(operationType)) {
+            requireTargetConceptKey(target, pointer, operationType, issues);
+            requireText(payload.path("bindingType").asText(null), pointer + "/bindingType",
+                    "binding_type_required", "add_binding operations require payload.bindingType", issues);
+            requireEnum(payload.path("bindingType").asText(null), BINDING_TYPES,
+                    pointer + "/bindingType", "unsupported_binding_type", issues);
+            requireText(payload.path("bindingKey").asText(null), pointer + "/bindingKey",
+                    "binding_key_required", "add_binding operations require payload.bindingKey", issues);
+            validateClaimProvenance(
+                    authorType, payload.path("provenance"), pointer + "/provenance", claimIds, issues);
+        } else if ("add_relationship".equals(operationType)) {
+            requireText(target == null ? null : target.path("sourceConceptKey").asText(null),
+                    pointer.replace("/payload", "/target") + "/sourceConceptKey",
+                    "source_concept_key_required",
+                    "add_relationship operations require target.sourceConceptKey",
+                    issues);
+            requireText(target == null ? null : target.path("targetConceptKey").asText(null),
+                    pointer.replace("/payload", "/target") + "/targetConceptKey",
+                    "target_concept_key_required",
+                    "add_relationship operations require target.targetConceptKey",
+                    issues);
+            requireText(payload.path("relationshipType").asText(null), pointer + "/relationshipType",
+                    "relationship_type_required",
+                    "add_relationship operations require payload.relationshipType",
+                    issues);
+            requireEnum(payload.path("relationshipType").asText(null), RELATIONSHIP_TYPES,
+                    pointer + "/relationshipType", "unsupported_relationship_type", issues);
+            validateClaimProvenance(
+                    authorType, payload.path("provenance"), pointer + "/provenance", claimIds, issues);
+        } else if ("add_evidence".equals(operationType)) {
             requireText(target == null ? null : target.path("conceptKey").asText(null),
                     pointer.replace("/payload", "/target") + "/conceptKey",
                     "target_concept_key_required",
@@ -231,6 +342,63 @@ public class DomainKnowledgeChangeSetValidator {
                     "evidence_key_required", "revert_evidence operations require payload.evidenceKey", issues);
             requireText(payload.path("revertReason").asText(null), pointer + "/revertReason",
                     "revert_reason_required", "revert_evidence operations require payload.revertReason", issues);
+        }
+    }
+
+    private void requireTargetConceptKey(
+            JsonNode target,
+            String payloadPointer,
+            String operationType,
+            List<DomainKnowledgeChangeSetValidationIssue> issues) {
+        requireText(target == null ? null : target.path("conceptKey").asText(null),
+                payloadPointer.replace("/payload", "/target") + "/conceptKey",
+                "target_concept_key_required",
+                operationType + " operations require target.conceptKey",
+                issues);
+    }
+
+    private void validateClaimProvenance(
+            String authorType,
+            JsonNode provenance,
+            String pointer,
+            Set<String> claimIds,
+            List<DomainKnowledgeChangeSetValidationIssue> issues) {
+        if (provenance == null || !provenance.isObject()) {
+            error(issues, "claim_provenance_required", pointer,
+                    "semantic claim operations require payload.provenance");
+            return;
+        }
+        String claimId = provenance.path("claimId").asText(null);
+        requireText(claimId, pointer + "/claimId",
+                "claim_id_required", "claim provenance requires claimId", issues);
+        if (StringUtils.hasText(claimId) && !claimIds.add(claimId.trim())) {
+            error(issues, "claim_id_duplicate", pointer + "/claimId",
+                    "claimId must be unique within a change set");
+        }
+        String sourceClass = normalize(provenance.path("sourceClass").asText(null));
+        requireText(sourceClass, pointer + "/sourceClass",
+                "claim_source_class_required", "claim provenance requires sourceClass", issues);
+        requireEnum(sourceClass, CLAIM_SOURCE_CLASSES, pointer + "/sourceClass",
+                "unsupported_claim_source_class", issues);
+        requireText(provenance.path("derivationActivity").asText(null), pointer + "/derivationActivity",
+                "derivation_activity_required", "claim provenance requires derivationActivity", issues);
+        requireText(provenance.path("agent").path("id").asText(null), pointer + "/agent/id",
+                "claim_agent_required", "claim provenance requires agent.id", issues);
+        if (!provenance.path("sourceRefs").isArray() || provenance.path("sourceRefs").isEmpty()) {
+            error(issues, "claim_source_refs_required", pointer + "/sourceRefs",
+                    "claim provenance requires at least one sourceRef");
+        }
+        if ("llm".equals(normalize(authorType)) && !"inferred".equals(sourceClass)) {
+            error(issues, "llm_claim_must_be_inferred", pointer + "/sourceClass",
+                    "LLM-authored semantic claims must use sourceClass=inferred");
+        }
+        if ("inferred".equals(sourceClass)) {
+            requireText(provenance.path("model").asText(null), pointer + "/model",
+                    "inferred_claim_model_required", "inferred claim provenance requires model", issues);
+            requireText(provenance.path("templateHash").asText(null), pointer + "/templateHash",
+                    "inferred_claim_template_hash_required",
+                    "inferred claim provenance requires templateHash",
+                    issues);
         }
     }
 
@@ -377,5 +545,9 @@ public class DomainKnowledgeChangeSetValidator {
 
     public static Set<String> executableOperationTypes() {
         return EXECUTABLE_OPERATION_TYPES;
+    }
+
+    static Set<String> relationshipTypes() {
+        return RELATIONSHIP_TYPES;
     }
 }

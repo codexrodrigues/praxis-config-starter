@@ -1,6 +1,7 @@
 package org.praxisplatform.config.ai.authoring;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -238,6 +239,7 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
     @Test
     void refreshesGovernedCapabilitiesAfterCacheTtl() throws Exception {
         AiRegistryRepository repository = mock(AiRegistryRepository.class);
+        CountDownLatch backgroundRefreshLoaded = new CountDownLatch(1);
         when(repository.findComponentCapabilityProjections(
                 "component_definition",
                 "component-definition",
@@ -256,7 +258,9 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
                                   }
                                 }
                                 """)))
-                .thenReturn(List.of(projection("praxis-tabs", """
+                .thenAnswer(invocation -> {
+                    backgroundRefreshLoaded.countDown();
+                    return List.of(projection("praxis-tabs", """
                                 {
                                   "componentDefinition": {
                                     "jsonSchema": {
@@ -268,19 +272,31 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
                                     }
                                   }
                                 }
-                                """)));
+                                """));
+                });
         AgenticAuthoringComponentCapabilitiesService service =
                 new AgenticAuthoringComponentCapabilitiesService(repository, new ObjectMapper(), 1L);
 
-        assertThat(service.listCapabilities().catalogs())
+        AgenticAuthoringComponentCapabilitiesResult initial = service.listCapabilities();
+        assertThat(initial.catalogs())
                 .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
                 .doesNotContain("praxis-tabs");
         Thread.sleep(5L);
 
-        assertThat(service.listCapabilities().catalogs())
+        long startedAtNanos = System.nanoTime();
+        AgenticAuthoringComponentCapabilitiesResult stale = service.listCapabilities();
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
+        assertThat(elapsedMs).isLessThan(500L);
+        assertThat(stale.diagnostics().source()).isEqualTo("last-known-good");
+        assertThat(stale.diagnostics().degradationReason()).isEqualTo("registry-refresh-in-progress");
+        assertThat(stale.catalogs())
+                .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
+                .doesNotContain("praxis-tabs");
+        assertThat(backgroundRefreshLoaded.await(1, TimeUnit.SECONDS)).isTrue();
+        assertThat(awaitComponent(service, "praxis-tabs", true).catalogs())
                 .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
                 .contains("praxis-tabs");
-        verify(repository, times(2)).findComponentCapabilityProjections(
+        verify(repository, atLeast(2)).findComponentCapabilityProjections(
                 "component_definition",
                 "component-definition",
                 "SYSTEM",
@@ -392,7 +408,14 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
             assertThat(first.diagnostics().degradationReason()).isEqualTo("registry-load-timeout");
             assertThat(second).isSameAs(first);
             Thread.sleep(20L);
-            AgenticAuthoringComponentCapabilitiesResult recovered = service.listCapabilities();
+            long retryStartedAtNanos = System.nanoTime();
+            AgenticAuthoringComponentCapabilitiesResult retrying = service.listCapabilities();
+            long retryElapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - retryStartedAtNanos);
+            assertThat(retryElapsedMs).isLessThan(500L);
+            assertThat(retrying.diagnostics().source()).isEqualTo("built-in-fallback");
+            assertThat(retrying.diagnostics().degradationReason()).isEqualTo("registry-load-timeout");
+            AgenticAuthoringComponentCapabilitiesResult recovered =
+                    awaitComponent(service, "praxis-tabs", true);
             assertThat(recovered.diagnostics().source()).isEqualTo("registry");
             assertThat(recovered.catalogs())
                     .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
@@ -412,6 +435,7 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
     @Test
     void preservesLastKnownGoodCatalogWhenRegistryRefreshTimesOut() throws Exception {
         AiRegistryRepository repository = mock(AiRegistryRepository.class);
+        CountDownLatch blockedRefreshStarted = new CountDownLatch(1);
         CountDownLatch blockedRefresh = new CountDownLatch(1);
         when(repository.findComponentCapabilityProjections(
                 "component_definition",
@@ -432,6 +456,7 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
                         }
                         """)))
                 .thenAnswer(invocation -> {
+                    blockedRefreshStarted.countDown();
                     try {
                         blockedRefresh.await();
                     } catch (InterruptedException ex) {
@@ -450,16 +475,31 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
         try {
             AgenticAuthoringComponentCapabilitiesResult current = service.listCapabilities();
             Thread.sleep(5L);
+            long startedAtNanos = System.nanoTime();
             AgenticAuthoringComponentCapabilitiesResult degraded = service.listCapabilities();
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
 
+            assertThat(elapsedMs).isLessThan(500L);
             assertThat(current.diagnostics().source()).isEqualTo("registry");
             assertThat(degraded.diagnostics().source()).isEqualTo("last-known-good");
-            assertThat(degraded.diagnostics().degradationReason()).isEqualTo("registry-load-timeout");
+            assertThat(degraded.diagnostics().degradationReason()).isEqualTo("registry-refresh-in-progress");
             assertThat(degraded.diagnostics().lastSuccessfulRegistryLoadAt())
                     .isEqualTo(current.diagnostics().lastSuccessfulRegistryLoadAt());
             assertThat(degraded.catalogs())
                     .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
                     .contains("praxis-tabs");
+            assertThat(blockedRefreshStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            long concurrentReadStartedAtNanos = System.nanoTime();
+            AgenticAuthoringComponentCapabilitiesResult concurrentRead = service.listCapabilities();
+            long concurrentReadElapsedMs =
+                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - concurrentReadStartedAtNanos);
+            assertThat(concurrentReadElapsedMs).isLessThan(500L);
+            assertThat(concurrentRead.diagnostics().source()).isEqualTo("last-known-good");
+            assertThat(concurrentRead.diagnostics().degradationReason())
+                    .isEqualTo("registry-refresh-in-progress");
+            Thread.sleep(50L);
+            assertThat(service.listCapabilities().diagnostics().degradationReason())
+                    .isEqualTo("registry-load-timeout");
         } finally {
             blockedRefresh.countDown();
             service.shutdown();
@@ -527,6 +567,7 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
     @Test
     void authoritativeEmptyRevisionDoesNotPreserveRemovedLastKnownGoodCapabilities() throws Exception {
         AiRegistryRepository repository = mock(AiRegistryRepository.class);
+        CountDownLatch emptyRevisionLoaded = new CountDownLatch(1);
         when(repository.findComponentCapabilityProjections(
                 "component_definition",
                 "component-definition",
@@ -534,7 +575,10 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
                 "GLOBAL",
                 100L))
                 .thenReturn(List.of(projection("praxis-tabs", manifestPayload("praxis-tabs"))))
-                .thenReturn(List.of());
+                .thenAnswer(invocation -> {
+                    emptyRevisionLoaded.countDown();
+                    return List.of();
+                });
         AgenticAuthoringComponentCapabilitiesService service =
                 new AgenticAuthoringComponentCapabilitiesService(
                         repository,
@@ -546,11 +590,18 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
         try {
             AgenticAuthoringComponentCapabilitiesResult current = service.listCapabilities();
             Thread.sleep(5L);
-            AgenticAuthoringComponentCapabilitiesResult emptyRevision = service.listCapabilities();
+            AgenticAuthoringComponentCapabilitiesResult stale = service.listCapabilities();
 
             assertThat(current.catalogs())
                     .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
                     .contains("praxis-tabs");
+            assertThat(stale.diagnostics().source()).isEqualTo("last-known-good");
+            assertThat(stale.catalogs())
+                    .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
+                    .contains("praxis-tabs");
+            assertThat(emptyRevisionLoaded.await(1, TimeUnit.SECONDS)).isTrue();
+            AgenticAuthoringComponentCapabilitiesResult emptyRevision =
+                    awaitComponent(service, "praxis-tabs", false);
             assertThat(emptyRevision.diagnostics().source()).isEqualTo("built-in-fallback");
             assertThat(emptyRevision.diagnostics().degradationReason()).isEqualTo("registry-empty");
             assertThat(emptyRevision.catalogs())
@@ -559,6 +610,26 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
         } finally {
             service.shutdown();
         }
+    }
+
+    private static AgenticAuthoringComponentCapabilitiesResult awaitComponent(
+            AgenticAuthoringComponentCapabilitiesService service,
+            String componentId,
+            boolean expected) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        AgenticAuthoringComponentCapabilitiesResult result = service.listCapabilities();
+        while (containsComponent(result, componentId) != expected && System.nanoTime() < deadline) {
+            Thread.sleep(10L);
+            result = service.listCapabilities();
+        }
+        assertThat(containsComponent(result, componentId)).isEqualTo(expected);
+        return result;
+    }
+
+    private static boolean containsComponent(
+            AgenticAuthoringComponentCapabilitiesResult result,
+            String componentId) {
+        return result.catalogs().stream().anyMatch(catalog -> componentId.equals(catalog.componentId()));
     }
 
     private static String manifestPayload(String componentId) {

@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.UUID;
 import org.praxisplatform.config.domain.DomainKnowledgeEvidence;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface DomainKnowledgeEvidenceRepository extends JpaRepository<DomainKnowledgeEvidence, UUID> {
 
@@ -41,4 +43,19 @@ public interface DomainKnowledgeEvidenceRepository extends JpaRepository<DomainK
             String environment,
             List<String> evidenceKeys,
             String status);
+
+    @Query("""
+        select e from DomainKnowledgeEvidence e
+        left join fetch e.sourceRelease
+        where e.tenantId = :tenantId
+          and e.environment = :environment
+          and e.subjectType = 'concept'
+          and e.subjectId in :subjectIds
+          and e.status = 'active'
+        order by e.evidenceKey asc
+    """)
+    List<DomainKnowledgeEvidence> findActiveProjectKnowledgeEvidenceForDerivedIndex(
+            @Param("tenantId") String tenantId,
+            @Param("environment") String environment,
+            @Param("subjectIds") List<UUID> subjectIds);
 }

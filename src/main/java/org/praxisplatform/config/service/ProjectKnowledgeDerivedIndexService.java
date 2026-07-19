@@ -14,4 +14,16 @@ public interface ProjectKnowledgeDerivedIndexService {
     void evidenceActivated(DomainKnowledgeConcept concept, DomainKnowledgeEvidence evidence);
 
     void evidenceDeactivated(DomainKnowledgeConcept concept, DomainKnowledgeEvidence evidence);
+
+    /** Rebuilds one derived release exclusively from canonical governed knowledge. */
+    ReconciliationResult reconcileRelease(String tenantId, String environment, String releaseId);
+
+    record ReconciliationResult(
+            String tenantId,
+            String environment,
+            String releaseId,
+            long expectedDocumentCount,
+            long publishedDocumentCount,
+            boolean vectorStoreAvailable) {
+    }
 }

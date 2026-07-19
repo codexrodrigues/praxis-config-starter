@@ -166,6 +166,10 @@ public class AgenticAuthoringIntentResolverService {
         String prompt = normalize(effectivePrompt);
         String discoveryPrompt = normalize(turn.answeredPendingClarification() ? turn.effectivePrompt() : effectivePrompt);
         AgenticAuthoringSemanticDecision activeDecision = request.activeSemanticDecision();
+        boolean serverIssuedQuickReplyContinuation = isServerIssuedQuickReplyContinuation(activeDecision);
+        if (serverIssuedQuickReplyContinuation) {
+            discoveryPrompt = governedContinuationDiscoveryPrompt(discoveryPrompt, activeDecision);
+        }
         AgenticAuthoringSemanticRefinement semanticRefinement = semanticRefinement(prompt, activeDecision, null);
         boolean decisionMemoryRefinement = semanticRefinement.active();
         String effectiveSelectedWidgetKey = effectiveSelectedWidgetKey(request);
@@ -175,6 +179,11 @@ public class AgenticAuthoringIntentResolverService {
         String operationKind = fallbackResolution.operationKind();
         String artifactKind = fallbackResolution.artifactKind();
         String changeKind = fallbackResolution.changeKind();
+        if (serverIssuedQuickReplyContinuation) {
+            operationKind = valueOrUnknown(activeDecision.operationKind());
+            artifactKind = valueOrUnknown(activeDecision.artifactKind());
+            changeKind = valueOrUnknown(activeDecision.changeKind());
+        }
         boolean contextualPreviewAction = isContextualPreviewAction(request);
         if (contextualPreviewAction) {
             operationKind = contextualPreviewOperationKind(request);
@@ -193,7 +202,8 @@ public class AgenticAuthoringIntentResolverService {
         }
         boolean shouldResolveLlmIntent = hasLlmIntentResolver
                 && !governedResourceConfirmation
-                && !contextualPreviewAction;
+                && !contextualPreviewAction
+                && !serverIssuedQuickReplyContinuation;
         boolean deterministicDashboardMaterialization = "dashboard".equals(artifactKind)
                 && ("create".equals(operationKind) || "explore".equals(operationKind))
                 && isConcreteDashboardMaterializationPrompt(prompt)
@@ -224,13 +234,15 @@ public class AgenticAuthoringIntentResolverService {
                         shouldResolveLlmIntent,
                         request,
                         target);
-        List<AgenticAuthoringCandidate> candidates = usePreIntentResourceDiscoveryAsPrimaryEvidence
-                ? contextHintCandidates(request)
-                : shouldResolveLlmIntent
-                        ? deferPreLlmApiMetadataDiscovery
-                                ? discoverPreLlmContextCandidates(discoveryPrompt, artifactKind, target)
-                                : discoverInitialCandidates(discoveryPrompt, artifactKind, target, tenantId, environment)
-                        : discoverCandidates(discoveryPrompt, artifactKind, target, tenantId, environment);
+        List<AgenticAuthoringCandidate> candidates = serverIssuedQuickReplyContinuation
+                ? discoverResolvedContinuationCandidates(activeDecision, artifactKind, tenantId, environment)
+                : usePreIntentResourceDiscoveryAsPrimaryEvidence
+                        ? contextHintCandidates(request)
+                        : shouldResolveLlmIntent
+                                ? deferPreLlmApiMetadataDiscovery
+                                        ? discoverPreLlmContextCandidates(discoveryPrompt, artifactKind, target)
+                                        : discoverInitialCandidates(discoveryPrompt, artifactKind, target, tenantId, environment)
+                                : discoverCandidates(discoveryPrompt, artifactKind, target, tenantId, environment);
         if (usePreIntentResourceDiscoveryAsPrimaryEvidence && candidates.isEmpty()) {
             candidates = shouldResolveLlmIntent
                     ? deferPreLlmApiMetadataDiscovery
@@ -277,10 +289,13 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = withPriorityCandidate(candidates, preLlmGovernedResourceChoiceCandidate);
             }
         }
-        AgenticAuthoringComponentCapabilitiesResult componentCapabilities = componentCapabilities();
+        AgenticAuthoringComponentCapabilitiesResult componentCapabilities = serverIssuedQuickReplyContinuation
+                ? new AgenticAuthoringComponentCapabilitiesService().listCapabilities()
+                : componentCapabilities();
         List<AgenticAuthoringCandidate> llmCandidateOptions = candidatesForLlmIntent(prompt, candidates);
         AgenticAuthoringLlmIntentResolution llmIntent = preIntentSemanticOrientationResolution(
                 shouldResolveLlmIntent,
+                llmResolutionRequest,
                 semanticOrientation);
         if (llmIntent == null) {
             llmIntent = preIntentGovernedEvidenceResolution(
@@ -320,7 +335,9 @@ public class AgenticAuthoringIntentResolverService {
                 && isLlmFollowUpKind(llmIntent, "new_instruction");
         boolean llmSecondPassUsed = false;
         boolean primaryLlmIntentProviderFailure = isPrimaryLlmIntentProviderFailure(shouldResolveLlmIntent, llmIntent);
-        boolean deterministicFallbackApplied = legacyKeywordFallbackEnabled && !shouldResolveLlmIntent
+        boolean deterministicFallbackApplied = legacyKeywordFallbackEnabled
+                && !shouldResolveLlmIntent
+                && !serverIssuedQuickReplyContinuation
                 || (legacyKeywordFallbackEnabled
                 && shouldResolveLlmIntent
                 && (llmIntent == null || (!llmIntent.resolved() && !primaryLlmIntentProviderFailure)));
@@ -778,6 +795,11 @@ public class AgenticAuthoringIntentResolverService {
                 selectedCandidate = activeDecisionCandidate;
                 candidates = withPriorityCandidate(candidates, selectedCandidate);
             }
+        }
+        if (serverIssuedQuickReplyContinuation) {
+            operationKind = valueOrUnknown(activeDecision.operationKind());
+            artifactKind = valueOrUnknown(activeDecision.artifactKind());
+            changeKind = valueOrUnknown(activeDecision.changeKind());
         }
         boolean unresolvedLlmWeakLexicalSelectionDeferred = shouldDeferUnresolvedLlmWeakLexicalSelection(
                 llmIntent,
@@ -1309,6 +1331,9 @@ public class AgenticAuthoringIntentResolverService {
         if (governedResourceConfirmation) {
             warnings = withWarning(warnings, "governed-resource-confirmation-deterministic");
         }
+        if (serverIssuedQuickReplyContinuation) {
+            warnings = withWarning(warnings, "server-issued-quick-reply-continuation-applied");
+        }
         if (semanticPolicyRefinedVisualProjection) {
             warnings = withWarning(warnings, "semantic-policy-refined-visual-projection");
         }
@@ -1406,6 +1431,10 @@ public class AgenticAuthoringIntentResolverService {
                 activeDecisionObjective(activeDecision, semanticRawPrompt(request, rawPrompt)),
                 decisionRationale(decisionMemoryRefinement, selectedCandidate),
                 semanticRefinement);
+        if (serverIssuedQuickReplyContinuation) {
+            semanticDecision = semanticDecision.withConstraints(
+                    resolvedQuickReplyContinuationConstraints(activeDecision));
+        }
         llmDiagnostics = withResolutionTelemetry(
                 llmDiagnostics,
                 shouldResolveLlmIntent,
@@ -1728,6 +1757,73 @@ public class AgenticAuthoringIntentResolverService {
                 "grafico", "graficos", "chart", "charts", "dashboard", "painel",
                 "visual", "visualizacao", "indicador", "indicadores", "kpi", "kpis");
         return refinementLanguage && visualLanguage;
+    }
+
+    private boolean isServerIssuedQuickReplyContinuation(AgenticAuthoringSemanticDecision activeDecision) {
+        return activeDecision != null
+                && activeDecision.constraints() != null
+                && "server-issued-quick-reply".equals(
+                        activeDecision.constraints().path("source").asText(""))
+                && !activeDecision.constraints().path("quickReplyId").asText("").isBlank();
+    }
+
+    private String governedContinuationDiscoveryPrompt(
+            String discoveryPrompt,
+            AgenticAuthoringSemanticDecision activeDecision) {
+        LinkedHashSet<String> terms = new LinkedHashSet<>();
+        if (activeDecision != null && activeDecision.constraints() != null) {
+            JsonNode conceptKeys = activeDecision.constraints().path("conceptKeys");
+            if (conceptKeys.isArray()) {
+                for (JsonNode conceptKey : conceptKeys) {
+                    String value = conceptKey.asText("").trim();
+                    if (!value.isBlank()) {
+                        terms.add(value);
+                    }
+                }
+            }
+        }
+        return normalize(String.join(" ", List.of(
+                valueOrDefault(discoveryPrompt, ""),
+                String.join(" ", terms))));
+    }
+
+    private List<AgenticAuthoringCandidate> discoverResolvedContinuationCandidates(
+            AgenticAuthoringSemanticDecision activeDecision,
+            String artifactKind,
+            String tenantId,
+            String environment) {
+        if (apiMetadataCandidateCatalog == null
+                || activeDecision == null
+                || activeDecision.constraints() == null) {
+            return List.of();
+        }
+        List<String> conceptKeys = new ArrayList<>();
+        JsonNode concepts = activeDecision.constraints().path("conceptKeys");
+        if (concepts.isArray()) {
+            concepts.forEach(node -> {
+                String value = node.asText("").trim();
+                if (!value.isBlank()) {
+                    conceptKeys.add(value);
+                }
+            });
+        }
+        return apiMetadataCandidateCatalog.discoverResolvedConcepts(
+                conceptKeys,
+                artifactKind,
+                tenantId,
+                environment);
+    }
+
+    private ObjectNode resolvedQuickReplyContinuationConstraints(
+            AgenticAuthoringSemanticDecision activeDecision) {
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("source", "resolved-quick-reply-continuation");
+        constraints.put("continuationDecisionId", valueOrDefault(activeDecision.decisionId(), ""));
+        JsonNode issuedConstraints = activeDecision.constraints();
+        constraints.put("quickReplyId", issuedConstraints.path("quickReplyId").asText(""));
+        constraints.put("continuationOf", issuedConstraints.path("continuationOf").asText(""));
+        constraints.set("conceptKeys", issuedConstraints.path("conceptKeys").deepCopy());
+        return constraints;
     }
 
     private AgenticAuthoringSemanticRefinement semanticRefinement(
@@ -2612,10 +2708,33 @@ public class AgenticAuthoringIntentResolverService {
 
     private AgenticAuthoringLlmIntentResolution preIntentSemanticOrientationResolution(
             boolean shouldResolveLlmIntent,
+            AgenticAuthoringIntentResolutionRequest request,
             AgenticAuthoringPreIntentToolPlan semanticOrientation) {
-        if (!shouldResolveLlmIntent
-                || semanticOrientation == null
-                || !semanticOrientation.resolvesPlatformGuidance()) {
+        if (!shouldResolveLlmIntent || semanticOrientation == null) {
+            return null;
+        }
+        if (semanticOrientation.resolvesGovernedDomainDiscovery()
+                && hasProgressiveGovernedDomainKnowledge(request)) {
+            return new AgenticAuthoringLlmIntentResolution(
+                    true,
+                    "explore",
+                    "api_catalog",
+                    "answer_api_catalog_question",
+                    null,
+                    null,
+                    "none",
+                    null,
+                    List.of(),
+                    List.of(),
+                    List.of(
+                            "llm-semantic-orientation-used",
+                            "llm-governed-domain-discovery-grounded-by-project-knowledge"),
+                    null,
+                    null,
+                    false,
+                    "domain_knowledge");
+        }
+        if (!semanticOrientation.resolvesPlatformGuidance()) {
             return null;
         }
         return new AgenticAuthoringLlmIntentResolution(
@@ -2636,6 +2755,16 @@ public class AgenticAuthoringIntentResolverService {
                 null,
                 false,
                 "platform_guidance");
+    }
+
+    private boolean hasProgressiveGovernedDomainKnowledge(AgenticAuthoringIntentResolutionRequest request) {
+        if (request == null || request.contextHints() == null) {
+            return false;
+        }
+        JsonNode projectKnowledge = request.contextHints().path("projectKnowledge");
+        return "domain_knowledge_concept".equals(projectKnowledge.path("source").asText(""))
+                && projectKnowledge.path("entries").isArray()
+                && !projectKnowledge.path("entries").isEmpty();
     }
 
     private AgenticAuthoringCandidate singleGovernedArtifactCandidate(

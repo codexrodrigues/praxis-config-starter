@@ -12,14 +12,18 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.praxisplatform.config.domain.ApiMetadata;
+import org.praxisplatform.config.dto.DomainCatalogContextResponse;
+import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.ContextRetrievalService;
+import org.praxisplatform.config.service.DomainCatalogIngestionService;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 
 @Tag("unit")
@@ -33,7 +37,7 @@ class AgenticAuthoringToolRegistryTest {
                 new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
 
         assertThat(registry.definitions())
-                .hasSize(9)
+                .hasSize(14)
                 .anySatisfy(definition -> {
                     assertThat(definition.name()).isEqualTo("searchApiResources");
                     assertThat(definition.allowedRoutes())
@@ -78,7 +82,197 @@ class AgenticAuthoringToolRegistryTest {
                         "searchExamples",
                         "searchSchemaFields",
                         "presentationAffordanceDiscovery",
-                        "resolveRuntimeRelatedSurface");
+                        "resolveRuntimeRelatedSurface",
+                        "discoverDomainContexts",
+                        "discoverDomainCapabilities",
+                        "discoverDomainConcepts",
+                        "inspectDomainBindings",
+                        "verifyDomainOperation");
+    }
+
+    @Test
+    void blocksPreIntentApiDiscoveryWithoutGovernedBinding() {
+        AgenticAuthoringDomainBindingService bindingService =
+                Mockito.mock(AgenticAuthoringDomainBindingService.class);
+        when(bindingService.resolve("tenant", "local", "human-resources.funcionarios", 6))
+                .thenReturn(List.of());
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                null,
+                null,
+                null,
+                objectMapper,
+                null,
+                null,
+                bindingService);
+        AgenticAuthoringResourceSearchFocus focus = new AgenticAuthoringResourceSearchFocus(
+                "human-resources.funcionarios", List.of(), "form", "", "governed subject");
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                        "pre_intent_resource_discovery",
+                        new AgenticAuthoringResourceCandidatesRequest(
+                                "employees", "create employee form", "form", 6, focus)),
+                new AiPrincipalContext("tenant", "user", "local", true),
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("operational-grounding-binding-required");
+    }
+
+    @Test
+    void exposesProgressiveDomainKnowledgeToolsWithGovernedReadOnlyScope() {
+        AgenticAuthoringProjectKnowledgeService projectKnowledgeService =
+                Mockito.mock(AgenticAuthoringProjectKnowledgeService.class);
+        when(projectKnowledgeService.retrieve(Mockito.any())).thenReturn(List.of());
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                null,
+                null,
+                null,
+                objectMapper,
+                null,
+                projectKnowledgeService);
+
+        assertThat(registry.definitions())
+                .filteredOn(definition -> definition.name().startsWith("discoverDomain"))
+                .hasSize(3)
+                .allSatisfy(definition -> {
+                    assertThat(definition.allowedPhases()).containsExactly("retrieveEvidence");
+                    assertThat(definition.sideEffectClass()).isEqualTo("read_only");
+                    assertThat(definition.governanceLevel()).isEqualTo("governed_semantic_grounding");
+                });
+        assertThat(registry.definitions())
+                .filteredOn(definition -> definition.name().equals("discoverDomainContexts"))
+                .singleElement()
+                .satisfies(definition -> assertThat(definition.ownerSurface())
+                        .isEqualTo("praxis-config-starter:domain-catalog+domain-knowledge"));
+        assertThat(registry.definitions())
+                .filteredOn(definition -> definition.name().equals("discoverDomainCapabilities")
+                        || definition.name().equals("discoverDomainConcepts"))
+                .allSatisfy(definition -> assertThat(definition.ownerSurface())
+                        .isEqualTo("praxis-config-starter:domain-knowledge"));
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.DISCOVER_DOMAIN_CAPABILITIES,
+                        "component_authoring",
+                        new DomainKnowledgeToolRequest("human-resources", null, 5)),
+                new AiPrincipalContext("tenant-a", "user-a", "dev", true),
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isTrue();
+        org.mockito.ArgumentCaptor<AgenticAuthoringProjectKnowledgeQuery> queryCaptor =
+                org.mockito.ArgumentCaptor.forClass(AgenticAuthoringProjectKnowledgeQuery.class);
+        Mockito.verify(projectKnowledgeService).retrieve(queryCaptor.capture());
+        assertThat(queryCaptor.getValue())
+                .extracting(
+                        AgenticAuthoringProjectKnowledgeQuery::tenantId,
+                        AgenticAuthoringProjectKnowledgeQuery::environment,
+                        AgenticAuthoringProjectKnowledgeQuery::contextKey,
+                        AgenticAuthoringProjectKnowledgeQuery::nodeType,
+                        AgenticAuthoringProjectKnowledgeQuery::limit)
+                .containsExactly("tenant-a", "dev", "human-resources", "business_capability", 5);
+    }
+
+    @Test
+    void domainContextDiscoveryEnumeratesGovernedCatalogWithoutUiHintsOrApprovedProjectKnowledge() {
+        AgenticAuthoringProjectKnowledgeService projectKnowledgeService =
+                Mockito.mock(AgenticAuthoringProjectKnowledgeService.class);
+        DomainCatalogIngestionService domainCatalogIngestionService =
+                Mockito.mock(DomainCatalogIngestionService.class);
+        JsonNode contextPayload = objectMapper.createObjectNode()
+                .put("contextKey", "human-resources")
+                .put("label", "Recursos Humanos")
+                .put("description", "Pessoas, cargos, departamentos e folha de pagamento.")
+                .put("lifecycle", "active")
+                .put("source", "openapi-group");
+        when(domainCatalogIngestionService.contextLatest(
+                "praxis-service",
+                "tenant-a",
+                "dev",
+                "context",
+                null,
+                null,
+                null,
+                1))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        null,
+                        "context",
+                        null,
+                        null,
+                        List.of(),
+                        List.of(new DomainCatalogItemResponse(
+                                UUID.randomUUID(),
+                                "praxis-service:human-resources.funcionarios:release",
+                                "context",
+                                "human-resources",
+                                "human-resources",
+                                null,
+                                null,
+                                null,
+                                contextPayload))));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                null,
+                null,
+                null,
+                objectMapper,
+                null,
+                projectKnowledgeService,
+                null,
+                null,
+                domainCatalogIngestionService,
+                "praxis-service");
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.DISCOVER_DOMAIN_CONTEXTS,
+                        "advisory_authoring",
+                        new DomainKnowledgeToolRequest(null, null, 1)),
+                new AiPrincipalContext("tenant-a", "user-a", "dev", true),
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.payload()).isInstanceOf(List.class);
+        assertThat((List<?>) result.payload())
+                .singleElement()
+                .isInstanceOfSatisfying(AgenticAuthoringProjectKnowledgeProjection.class, projection -> {
+                    assertThat(projection.conceptKey()).isEqualTo("human-resources");
+                    assertThat(projection.kind()).isEqualTo("context");
+                    assertThat(projection.summary()).contains("Pessoas", "departamentos");
+                    assertThat(projection.evidence()).contains("domain-catalog:context:human-resources");
+                });
+        Mockito.verifyNoInteractions(projectKnowledgeService);
+    }
+
+    @Test
+    void domainKnowledgeToolsFailClosedWithoutAuthenticatedScope() {
+        AgenticAuthoringProjectKnowledgeService projectKnowledgeService =
+                Mockito.mock(AgenticAuthoringProjectKnowledgeService.class);
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                null,
+                null,
+                null,
+                objectMapper,
+                null,
+                projectKnowledgeService);
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.DISCOVER_DOMAIN_CONTEXTS,
+                        "advisory_authoring",
+                        new DomainKnowledgeToolRequest(null, null, 4)),
+                null,
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("tool-principal-scope-required");
+        Mockito.verifyNoInteractions(projectKnowledgeService);
     }
 
     @Test

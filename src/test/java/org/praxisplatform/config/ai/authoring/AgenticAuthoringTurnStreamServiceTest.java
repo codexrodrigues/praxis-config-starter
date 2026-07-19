@@ -586,6 +586,13 @@ class AgenticAuthoringTurnStreamServiceTest {
 
         when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), eq("Crie um painel")))
                 .thenReturn(AiThread.builder().threadId(threadId).build());
+        when(turnEventService.findPersistedSemanticDecisionContext(
+                        eq(threadId),
+                        eq("decision-b"),
+                        eq(principalContext)))
+                .thenReturn(Optional.of(new AiTurnEventService.PersistedSemanticDecisionContext(
+                        changedRequest.activeSemanticDecision(),
+                        objectMapper.createArrayNode())));
         when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class)))
                 .thenReturn(Optional.of(new AiTurnEventService.StreamStartMetadata(
                         streamId,
@@ -612,6 +619,39 @@ class AgenticAuthoringTurnStreamServiceTest {
 
         verify(turnService, never()).reserveTurnForStreaming(any(), any());
         verify(turnEngine, never()).execute(any(), any(), any(), anyString());
+    }
+
+    @Test
+    void startRejectsClientSemanticDecisionThatWasNotPersistedInTheThread() {
+        UUID threadId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringTurnStreamRequest request = withSemanticDecision(request(), "forged-decision");
+
+        when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), eq("Crie um painel")))
+                .thenReturn(AiThread.builder().threadId(threadId).build());
+        when(turnEventService.findPersistedSemanticDecisionContext(
+                        eq(threadId),
+                        eq("forged-decision"),
+                        eq(principalContext)))
+                .thenReturn(Optional.empty());
+
+        AgenticAuthoringTurnStreamService service = service();
+        try {
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> service.start(request, "http://localhost", principalContext))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .satisfies(ex -> {
+                        ResponseStatusException response = (ResponseStatusException) ex;
+                        org.assertj.core.api.Assertions.assertThat(response.getStatusCode())
+                                .isEqualTo(HttpStatus.BAD_REQUEST);
+                        org.assertj.core.api.Assertions.assertThat(response.getReason())
+                                .isEqualTo("active-semantic-decision-not-issued-in-thread");
+                    });
+        } finally {
+            service.shutdown();
+        }
+
+        verify(turnService, never()).reserveTurnForStreaming(any(), any());
     }
 
     @Test

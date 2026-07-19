@@ -165,9 +165,14 @@ public class AgenticAuthoringTurnStreamService {
                 request.userPrompt());
         UUID threadId = thread.getThreadId();
         request = withCanonicalSessionId(request, threadId);
-        AgenticAuthoringSemanticDecision activeSemanticDecision = request.activeSemanticDecision() != null
-                ? request.activeSemanticDecision()
-                : turnEventService.findLatestSemanticDecision(threadId, principalContext).orElse(null);
+        ResolvedActiveSemanticDecision resolvedActiveSemanticDecision = resolveActiveSemanticDecision(
+                request,
+                threadId,
+                principalContext);
+        request = withPersistedResolvedCandidates(
+                request,
+                resolvedActiveSemanticDecision.issuedCandidateApis());
+        AgenticAuthoringSemanticDecision activeSemanticDecision = resolvedActiveSemanticDecision.decision();
         AgenticAuthoringTurnStreamRequest effectiveRequest = withActiveSemanticDecision(request, activeSemanticDecision);
         String requestHash = requestHash(effectiveRequest);
 
@@ -271,7 +276,7 @@ public class AgenticAuthoringTurnStreamService {
     private AgenticAuthoringTurnStreamRequest withActiveSemanticDecision(
             AgenticAuthoringTurnStreamRequest request,
             AgenticAuthoringSemanticDecision activeSemanticDecision) {
-        if (request == null || activeSemanticDecision == null || request.activeSemanticDecision() != null) {
+        if (request == null || activeSemanticDecision == null) {
             return request;
         }
         return new AgenticAuthoringTurnStreamRequest(
@@ -292,6 +297,64 @@ public class AgenticAuthoringTurnStreamService {
                 request.contextHints(),
                 request.componentCapabilities(),
                 activeSemanticDecision,
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
+    }
+
+    private ResolvedActiveSemanticDecision resolveActiveSemanticDecision(
+            AgenticAuthoringTurnStreamRequest request,
+            UUID threadId,
+            AiPrincipalContext principalContext) {
+        AgenticAuthoringSemanticDecision clientDecision = request == null
+                ? null
+                : request.activeSemanticDecision();
+        if (clientDecision == null) {
+            return new ResolvedActiveSemanticDecision(
+                    turnEventService.findLatestSemanticDecision(threadId, principalContext).orElse(null),
+                    objectMapper.createArrayNode());
+        }
+        String decisionId = clientDecision.decisionId();
+        return turnEventService.findPersistedSemanticDecisionContext(threadId, decisionId, principalContext)
+                .map(context -> new ResolvedActiveSemanticDecision(
+                        context.decision(),
+                        context.issuedCandidateApis()))
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "active-semantic-decision-not-issued-in-thread"));
+    }
+
+    private AgenticAuthoringTurnStreamRequest withPersistedResolvedCandidates(
+            AgenticAuthoringTurnStreamRequest request,
+            JsonNode issuedCandidateApis) {
+        if (request == null || issuedCandidateApis == null || !issuedCandidateApis.isArray() || issuedCandidateApis.isEmpty()) {
+            return request;
+        }
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        ObjectNode resolvedIntent = contextHints.path("resolvedIntent").isObject()
+                ? (ObjectNode) contextHints.path("resolvedIntent")
+                : contextHints.putObject("resolvedIntent");
+        resolvedIntent.set("candidateApis", issuedCandidateApis.deepCopy());
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                contextHints,
+                request.componentCapabilities(),
+                request.activeSemanticDecision(),
                 request.diagnostics(),
                 request.runtimeComponentObservations(),
                 request.runtimeComponentObservationTrustBoundary());
@@ -554,7 +617,28 @@ public class AgenticAuthoringTurnStreamService {
         if (turnEventService.isTerminalType(type) && !terminal.compareAndSet(false, true)) {
             return new StreamAppendResult(latestEvent(streamId, false), false);
         }
-        AiTurnEventEnvelope event = turnEventService.appendEvent(principalContext, streamId, threadId, turnId, type, payload);
+        long appendStartedAtNanos = System.nanoTime();
+        AiTurnEventEnvelope event = turnEventService.appendEvent(
+                principalContext,
+                streamId,
+                threadId,
+                turnId,
+                type,
+                payload);
+        long appendElapsedNanos = System.nanoTime() - appendStartedAtNanos;
+        String appendPhase = objectMapper.valueToTree(payload).path("phase").asText("unspecified");
+        Metrics.timer(
+                        "praxis.ai.authoring.stream.event.append",
+                        "type", safeMetricTag(type),
+                        "phase", safeMetricTag(appendPhase))
+                .record(appendElapsedNanos, TimeUnit.NANOSECONDS);
+        if (appendElapsedNanos >= TimeUnit.MILLISECONDS.toNanos(250L)) {
+            log.debug(
+                    "Agentic authoring persisted event append was slow (type={}, phase={}, elapsedMs={}).",
+                    safeMetricTag(type),
+                    safeMetricTag(appendPhase),
+                    TimeUnit.NANOSECONDS.toMillis(appendElapsedNanos));
+        }
         rememberLatestEvent(streamId, event);
         replayCursorByStream
                 .computeIfAbsent(streamId, ignored -> new AtomicLong(0))
@@ -1453,5 +1537,10 @@ public class AgenticAuthoringTurnStreamService {
     }
 
     private record CapacityOwner(String tenantKey, String tenantUserKey) {
+    }
+
+    private record ResolvedActiveSemanticDecision(
+            AgenticAuthoringSemanticDecision decision,
+            JsonNode issuedCandidateApis) {
     }
 }

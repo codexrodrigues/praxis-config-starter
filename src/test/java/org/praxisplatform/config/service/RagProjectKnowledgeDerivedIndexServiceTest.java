@@ -18,16 +18,22 @@ import org.praxisplatform.config.domain.DomainKnowledgeEvidence;
 import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
+import org.praxisplatform.config.repository.DomainKnowledgeConceptRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository;
 import org.springframework.ai.document.Document;
 
 @Tag("unit")
 class RagProjectKnowledgeDerivedIndexServiceTest {
 
     private final RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+    private final DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+    private final DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
     private final RagProjectKnowledgeDerivedIndexService service = new RagProjectKnowledgeDerivedIndexService(
             ragVectorStoreService,
             new ObjectMapper(),
-            new AiSensitiveDataRedactor());
+            new AiSensitiveDataRedactor(),
+            conceptRepository,
+            evidenceRepository);
 
     @Test
     void publishesSanitizedProjectKnowledgeDocumentForActiveEvidence() {
@@ -65,6 +71,8 @@ class RagProjectKnowledgeDerivedIndexServiceTest {
                 .containsEntry(RagMetadataKeys.DOMAIN_KNOWLEDGE_EVIDENCE_ID, evidence.getId().toString())
                 .containsEntry(RagMetadataKeys.DOMAIN_KNOWLEDGE_EVIDENCE_STATUS, "active")
                 .containsEntry(RagMetadataKeys.AI_VISIBILITY, "allow");
+        assertThat(document.getMetadata().get(RagMetadataKeys.CONTENT_HASH))
+                .isEqualTo(org.praxisplatform.config.rag.RagDocumentIdentity.sha256(document.getText()));
         assertThat(document.getMetadata()).doesNotContainKeys("payload", "sourceUri", "sourcePointer", "rawPayload");
     }
 
@@ -130,6 +138,56 @@ class RagProjectKnowledgeDerivedIndexServiceTest {
                 .asString()
                 .contains("tenant-a/dev/knowledge_")
                 .contains("project_knowledge");
+    }
+
+    @Test
+    void keepsDocumentIdentityStableButChangesContentHashWhenCanonicalProjectionChanges() {
+        DomainKnowledgeConcept concept = concept(
+                "allow",
+                "{\"kind\":\"project_preference\",\"summary\":\"Initial safe summary\"}");
+        DomainKnowledgeEvidence evidence = activeEvidence(concept);
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+
+        service.evidenceActivated(concept, evidence);
+        concept.setPayload(
+                "{\"kind\":\"project_preference\",\"summary\":\"Revised safe summary\"}");
+        service.evidenceActivated(concept, evidence);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Document>> documentsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(ragVectorStoreService, org.mockito.Mockito.times(2))
+                .upsertDocuments(documentsCaptor.capture());
+        Document first = documentsCaptor.getAllValues().get(0).get(0);
+        Document revised = documentsCaptor.getAllValues().get(1).get(0);
+
+        assertThat(revised.getId()).isEqualTo(first.getId());
+        assertThat(revised.getText()).isNotEqualTo(first.getText());
+        assertThat(revised.getMetadata().get(RagMetadataKeys.CONTENT_HASH))
+                .isNotEqualTo(first.getMetadata().get(RagMetadataKeys.CONTENT_HASH));
+    }
+
+    @Test
+    void reconcilesOneReleaseFromCanonicalGovernedRowsAndPurgesStaleDocumentsFirst() {
+        DomainKnowledgeConcept concept = concept(
+                "allow",
+                "{\"kind\":\"business_capability\",\"summary\":\"Manage employees\"}");
+        DomainKnowledgeEvidence evidence = activeEvidence(concept);
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(conceptRepository.findGovernedProjectKnowledgeForDerivedIndex("tenant-a", "dev"))
+                .thenReturn(List.of(concept));
+        when(evidenceRepository.findActiveProjectKnowledgeEvidenceForDerivedIndex(
+                        "tenant-a", "dev", List.of(concept.getId())))
+                .thenReturn(List.of(evidence));
+
+        ProjectKnowledgeDerivedIndexService.ReconciliationResult result =
+                service.reconcileRelease("tenant-a", "dev", "project-knowledge");
+
+        assertThat(result.vectorStoreAvailable()).isTrue();
+        assertThat(result.expectedDocumentCount()).isEqualTo(1);
+        assertThat(result.publishedDocumentCount()).isEqualTo(1);
+        verify(ragVectorStoreService).deleteDocumentsByRelease(
+                "tenant-a", "dev", "project-knowledge", RagResourceTypes.PROJECT_KNOWLEDGE);
+        verify(ragVectorStoreService).upsertDocuments(anyList());
     }
 
     private DomainKnowledgeConcept concept(String aiVisibility, String payload) {

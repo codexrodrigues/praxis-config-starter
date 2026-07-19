@@ -83,7 +83,7 @@ public class AgenticAuthoringProjectKnowledgeService {
                 continue;
             }
             JsonNode payload = payload(candidate);
-            String kind = text(payload, "kind");
+            String kind = firstText(text(payload, "kind"), candidate.getNodeType());
             if (!matchesKind(kind, query.kinds())) {
                 continue;
             }
@@ -109,8 +109,8 @@ public class AgenticAuthoringProjectKnowledgeService {
                         text(payload, "safeSummary"),
                         text(payload, "summary"),
                         text(payload, "explanation"),
-                        concept.getLabel(),
-                        concept.getDescription()));
+                        concept.getDescription(),
+                        concept.getLabel()));
         String sourceSummary = safeText(firstText(
                 text(payload, "sourceSummary"),
                 text(payload, "source"),

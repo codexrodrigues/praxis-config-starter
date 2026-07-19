@@ -105,6 +105,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                     ? dashboardPlan(request, candidate, visualizationDecision)
                     : tablePlan(candidate);
         };
+        preserveComponentSelectionAudit(request, plan);
         String providerArtifactKind = chartOnly ? "chart" : dashboardMaterialization ? "dashboard" : artifactKind;
         return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
                 true,
@@ -112,6 +113,21 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 List.of("ui-composition-plan-provider:generic-resource-" + providerArtifactKind),
                 plan,
                 emptyCompiledFormPatch()));
+    }
+
+    private void preserveComponentSelectionAudit(
+            AgenticAuthoringPlanRequest request,
+            ObjectNode plan) {
+        JsonNode selection = request == null || request.contextHints() == null
+                ? MissingNode.getInstance()
+                : request.contextHints().path("componentSelection");
+        if (plan == null || !selection.isObject()) {
+            return;
+        }
+        ObjectNode diagnostics = plan.path("diagnostics") instanceof ObjectNode existing
+                ? existing
+                : plan.putObject("diagnostics");
+        diagnostics.set("componentSelection", selection.deepCopy());
     }
 
     private Optional<AgenticAuthoringUiCompositionPlanResult> governedAnalyticsFailure(

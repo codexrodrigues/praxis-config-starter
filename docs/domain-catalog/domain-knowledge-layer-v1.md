@@ -450,8 +450,18 @@ coordinates, `materializationKey` and `sourceHash`. It must not expose raw
 prompts, assistant drafts, authored conditions, parameters or materialized
 payload bodies.
 
-Domain Knowledge change sets support additive evidence and governed evidence
-reversal. `add_evidence` persists governed evidence against an existing concept
+Domain Knowledge change sets support governed semantic creation, additive evidence and evidence
+reversal. `create_concept`, `add_alias`, `add_binding` and `add_relationship` materialize only
+after validation and explicit approval. Their payloads carry claim-level provenance with a stable
+claim id, `authored|extracted|inferred` source class, source refs, derivation activity and agent.
+An LLM proposal cannot self-declare an authored claim: it must use `inferred` and identify its
+model and template hash. Apply owns the final `active` lifecycle and `approved` curation state.
+Every applied semantic claim creates a canonical evidence row keyed by its unique `claimId`, so
+provenance remains queryable even for aliases without a payload column. Concept claim evidence
+also feeds the governed Project Knowledge derived index; alias, binding and relationship evidence
+remains auditable without being promoted to prompt context as an independent concept.
+
+`add_evidence` persists governed evidence against an existing concept
 after validation, approval and apply. `revert_evidence` does not delete
 evidence; it requires the target evidence to be `active`, in the same
 tenant/environment and attached to the target concept, then marks it
@@ -460,12 +470,16 @@ tenant/environment and attached to the target concept, then marks it
 evidence payloads, evidence keys, replacement keys, source pointers, source
 URIs, patch hashes, prompts or chat history.
 
-Validation publishes operation capability diagnostics so reviewers can
-distinguish operation types proposed by the semantic model from operation types
-that are executable in the current backend. In this cut, only `add_evidence`
-and `revert_evidence` are executable. Planned concept, alias, binding and
-relationship operations remain non-executable until a canonical applier and
-lifecycle/indexing proof exist, and they are rejected before approval.
+Validation publishes operation capability diagnostics so reviewers can distinguish operation
+types proposed by the semantic model from operation types executable in the backend. This cut
+executes `create_concept`, `add_alias`, `add_binding`, `add_relationship`, `add_evidence` and
+`revert_evidence`. `update_concept_summary` and `set_concept_visibility` remain proposed but
+non-executable. Destructive and generic replacement operations remain rejected.
+
+Migration `V38__expand_domain_knowledge_semantic_ir_relationships.sql` adds the small Semantic IR
+relationship vocabulary required by the pilot, including `part_of`, `related_to`, `produces`,
+`consumes`, `applies_to`, `measured_by`, `implemented_by`, `broader` and `narrower`, while retaining
+all previously accepted Domain Catalog v0.2 relationships.
 
 Definition status transitions accept a compact decision payload. Actor and
 scope are resolved from server authentication:

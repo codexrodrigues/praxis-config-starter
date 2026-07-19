@@ -24,4 +24,9 @@ public class NoopProjectKnowledgeDerivedIndexService implements ProjectKnowledge
     public void evidenceDeactivated(DomainKnowledgeConcept concept, DomainKnowledgeEvidence evidence) {
         // No derived Project Knowledge index is published in this beta slice.
     }
+
+    @Override
+    public ReconciliationResult reconcileRelease(String tenantId, String environment, String releaseId) {
+        return new ReconciliationResult(tenantId, environment, releaseId, 0, 0, false);
+    }
 }

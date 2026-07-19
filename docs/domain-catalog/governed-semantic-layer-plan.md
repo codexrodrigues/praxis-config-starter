@@ -4,6 +4,11 @@ Status: implementation planning
 Date: 2026-04-22  
 Classification: `arquitetural` / `contrato-publico`
 
+Evolution note: the machine-first retrieval, provenance and generative UI direction is defined
+in [`../2026-07-machine-first-semantic-ir-rfc.md`](../2026-07-machine-first-semantic-ir-rfc.md).
+This plan remains the implementation baseline for v0.2 ingestion and governed Domain Knowledge;
+the later RFC does not create a parallel catalog.
+
 This plan turns the current Domain Catalog foundation into a governed semantic
 layer that can be consumed by authoring tools, RAG, prompt context builders and
 runtime clients without source-code inspection or keyword routing.

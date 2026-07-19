@@ -19,6 +19,38 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
             new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper);
 
     @Test
+    void preservesComponentSelectionEvidenceInPlanDiagnosticsOnly() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("componentSelection")
+                .put("schemaVersion", "praxis-agentic-authoring-component-selection.v1")
+                .put("source", "resolved-semantic-decision+governed-component-capabilities")
+                .putArray("acceptedCandidates")
+                .addObject()
+                .put("componentId", "praxis-chart")
+                .put("manifestVersion", "1.0.0");
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie um dashboard",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                dashboardIntent("/api/acme/orders", List.of()),
+                "session-1",
+                "turn-1",
+                List.of(),
+                null,
+                List.of(),
+                contextHints);
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(request).orElseThrow();
+
+        assertThat(result.uiCompositionPlan().path("diagnostics").path("componentSelection")
+                .path("acceptedCandidates").path(0).path("componentId").asText())
+                .isEqualTo("praxis-chart");
+        assertThat(result.compiledFormPatch().toString()).doesNotContain("componentSelection");
+    }
+
+    @Test
     void createsHostNeutralDashboardFromSelectedCandidate() {
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Crie um dashboard de acompanhamento",

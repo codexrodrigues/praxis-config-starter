@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -61,6 +62,60 @@ class AgenticAuthoringTurnEngineTest {
     private Path tempDir;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void guaranteesReviewMeaningForApplicablePreviewWithoutReplacingNaturalCopy() {
+        AgenticAuthoringTurnStreamRequest request = previewMessageRequest("pt-BR");
+
+        String enriched = AgenticAuthoringTurnEngine.ensureReviewablePreviewMessage(
+                "Criei uma tabela com os dados confirmados.",
+                request,
+                true);
+        String preserved = AgenticAuthoringTurnEngine.ensureReviewablePreviewMessage(
+                "Pré-visualização criada. Revise antes de salvar.",
+                request,
+                true);
+
+        assertThat(enriched).endsWith("A prévia está pronta para revisão antes de salvar.");
+        assertThat(preserved).isEqualTo("Pré-visualização criada. Revise antes de salvar.");
+    }
+
+    @Test
+    void guaranteesReviewMeaningInCanonicalNonPortugueseLocaleOnlyWhenApplicable() {
+        AgenticAuthoringTurnStreamRequest request = previewMessageRequest("en-US");
+
+        assertThat(AgenticAuthoringTurnEngine.ensureReviewablePreviewMessage(
+                "Created a table with confirmed data.",
+                request,
+                true))
+                .endsWith("The preview is ready for review before saving.");
+        assertThat(AgenticAuthoringTurnEngine.ensureReviewablePreviewMessage(
+                "Could not create the table.",
+                request,
+                false))
+                .isEqualTo("Could not create the table.");
+    }
+
+    private AgenticAuthoringTurnStreamRequest previewMessageRequest(String responseLocale) {
+        return new AgenticAuthoringTurnStreamRequest(
+                "",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-test",
+                null,
+                "session",
+                "turn",
+                List.of(),
+                null,
+                List.of(),
+                objectMapper.createObjectNode().put("responseLocale", responseLocale),
+                null,
+                null);
+    }
 
     @Test
     void projectsBoundedTurnProviderTelemetryOnlyWhenDetailedDiagnosticsAreRequested() {
@@ -196,6 +251,93 @@ class AgenticAuthoringTurnEngineTest {
                 .contains("Criar gráfico")
                 .contains("praxis-agentic-authoring-semantic-decision.v1")
                 .contains("consultative-api-catalog-projection");
+        JsonNode createTableReply = null;
+        for (JsonNode reply : result.path("quickReplies")) {
+            if (reply.path("id").asText("").startsWith("consultative-create-table:")) {
+                createTableReply = reply;
+                break;
+            }
+        }
+        org.assertj.core.api.Assertions.assertThat(createTableReply).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(createTableReply.path("semanticDecision").path("operationKind").asText())
+                .isEqualTo("create");
+        org.assertj.core.api.Assertions.assertThat(createTableReply.path("semanticDecision").path("artifactKind").asText())
+                .isEqualTo("table");
+        org.assertj.core.api.Assertions.assertThat(createTableReply.path("semanticDecision").path("changeKind").asText())
+                .isEqualTo("create_artifact");
+        org.assertj.core.api.Assertions.assertThat(createTableReply.path("semanticDecision").path("constraints").path("source").asText())
+                .isEqualTo("server-issued-quick-reply");
+        org.assertj.core.api.Assertions.assertThat(createTableReply.path("semanticDecision").path("constraints").path("quickReplyId").asText())
+                .startsWith("consultative-create-table:");
+    }
+
+    @Test
+    void governedDomainConsultativeResultClearsUnrelatedResolvedResource() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringCandidate unrelated = new AgenticAuthoringCandidate(
+                "/api/risk-intelligence/ameacas",
+                "post",
+                "/schemas/filtered?path=/api/risk-intelligence/ameacas&operation=post&schemaType=request",
+                "/api/risk-intelligence/ameacas",
+                "POST",
+                0.51,
+                "unrelated semantic retrieval",
+                List.of("api-metadata", "semantic-retrieval"));
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(advisoryCatalogIntent(unrelated));
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        ObjectNode evidence = objectMapper.createObjectNode();
+        evidence.put("source", "domain_knowledge_concept");
+        evidence.putArray("entries").addObject()
+                .put("conceptKey", "human-resources")
+                .put("summary", "Pessoas, funcionários e departamentos.");
+        when(consultativeAnswerService.answer(
+                        any(AgenticAuthoringTurnStreamRequest.class),
+                        any(),
+                        eq("tenant"),
+                        eq("user"),
+                        eq("local")))
+                .thenReturn(Optional.of(new AgenticAuthoringConsultativeAnswer(
+                        "domain_knowledge",
+                        "answer_governed_domain_discovery",
+                        "O tema disponível é Recursos Humanos.",
+                        null,
+                        List.of(),
+                        evidence,
+                        List.of())));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                null,
+                null,
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                consultativeAnswerService);
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(
+                request("Sobre quais assuntos posso criar tabelas para obter informações visuais?"),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        JsonNode resolved = result.path("intentResolution");
+        org.assertj.core.api.Assertions.assertThat(resolved.path("selectedCandidate").isMissingNode()
+                        || resolved.path("selectedCandidate").isNull())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(resolved.path("semanticDecision").path("selectedResource").isNull())
+                .isTrue();
+        org.assertj.core.api.Assertions.assertThat(
+                        resolved.path("semanticDecision").path("constraints").path("conceptKeys").toString())
+                .contains("human-resources");
+        org.assertj.core.api.Assertions.assertThat(resolved.path("warnings").toString())
+                .contains("governed-domain-discovery-cleared-ungrounded-resource-selection")
+                .doesNotContain("risk-intelligence");
     }
 
     @Test
@@ -6747,6 +6889,67 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void governedDomainDiscoveryOffersGroundedMaterializationContinuations() {
+        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+        when(providerManagementService.generateText(
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("## Recursos Humanos\n\nVocê pode explorar funcionários e departamentos.");
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                providerManagementService,
+                objectMapper,
+                null);
+        com.fasterxml.jackson.databind.node.ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("preIntentSemanticOrientation")
+                .put("semanticIntentClass", "governed_domain_discovery");
+        com.fasterxml.jackson.databind.node.ObjectNode projectKnowledge = contextHints.putObject("projectKnowledge");
+        projectKnowledge.put("source", "domain_knowledge_concept");
+        projectKnowledge.putArray("entries")
+                .addObject()
+                .put("conceptKey", "human-resources.funcionarios")
+                .put("summary", "Cadastro governado de funcionários e seus departamentos.");
+
+        Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                requestWithContextHints(
+                        "Sobre quais assuntos posso criar tabelas ou dashboards?",
+                        contextHints),
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                "tenant",
+                "user",
+                "local");
+
+        org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+        org.assertj.core.api.Assertions.assertThat(answer.get().category()).isEqualTo("domain_knowledge");
+        org.assertj.core.api.Assertions.assertThat(answer.get().quickReplies())
+                .extracting(AgenticAuthoringQuickReply::label)
+                .containsExactly("Criar uma tabela", "Montar um dashboard", "Ver dados disponíveis");
+        org.assertj.core.api.Assertions.assertThat(answer.get().quickReplies())
+                .allSatisfy(reply -> {
+                    org.assertj.core.api.Assertions.assertThat(reply.contextHints().path("continuationOf").asText())
+                            .isEqualTo("governed_domain_discovery");
+                    org.assertj.core.api.Assertions.assertThat(reply.contextHints().path("conceptKeys").toString())
+                            .contains("human-resources.funcionarios");
+                    org.assertj.core.api.Assertions.assertThat(reply.semanticDecision()).isNotNull();
+                    org.assertj.core.api.Assertions.assertThat(reply.semanticDecision().path("decisionId").asText())
+                            .isNotBlank();
+                    org.assertj.core.api.Assertions.assertThat(
+                                    reply.semanticDecision().path("constraints").path("quickReplyId").asText())
+                            .isEqualTo(reply.id());
+                    org.assertj.core.api.Assertions.assertThat(reply.value().asText()).isEqualTo(reply.prompt());
+                });
+        AgenticAuthoringQuickReply exploreData = answer.get().quickReplies().get(2);
+        org.assertj.core.api.Assertions.assertThat(exploreData.semanticDecision().path("operationKind").asText())
+                .isEqualTo("explore");
+        org.assertj.core.api.Assertions.assertThat(exploreData.semanticDecision().path("artifactKind").asText())
+                .isEqualTo("api_catalog");
+        org.assertj.core.api.Assertions.assertThat(exploreData.semanticDecision().path("changeKind").asText())
+                .isEqualTo("answer_api_catalog_question");
+    }
+
+    @Test
     void consultativePlatformQuestionDoesNotPreloadDomainEvidence() {
         AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
         AgenticAuthoringConsultativeApiCatalogProjectionService projectionService =
@@ -8559,7 +8762,11 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
         ArgumentCaptor<AgenticAuthoringProjectKnowledgeQuery> knowledgeQuery =
                 ArgumentCaptor.forClass(AgenticAuthoringProjectKnowledgeQuery.class);
-        verify(projectKnowledgeService).retrieve(knowledgeQuery.capture());
+        verify(projectKnowledgeService, times(2)).retrieve(knowledgeQuery.capture());
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getAllValues().get(0).nodeType())
+                .isEqualTo("context");
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getAllValues().get(0).kinds())
+                .containsExactly("context");
         org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().tenantId()).isEqualTo("tenant");
         org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().environment()).isEqualTo("local");
         org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().contextKey()).isEqualTo("human-resources");
@@ -8875,7 +9082,7 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void skipsGovernedProjectKnowledgeRetrievalWhenIntentHasNoSemanticScope() throws Exception {
+    void retrievesOnlyTheMacroContextPackWhenIntentHasNoSemanticScope() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringProjectKnowledgeService projectKnowledgeService = Mockito.mock(
@@ -8898,12 +9105,17 @@ class AgenticAuthoringTurnEngineTest {
                 .execute(request("Crie uma pagina com abas e componentes"), principalContext, sink);
 
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
-        verify(projectKnowledgeService, never()).retrieve(any());
+        ArgumentCaptor<AgenticAuthoringProjectKnowledgeQuery> knowledgeQuery =
+                ArgumentCaptor.forClass(AgenticAuthoringProjectKnowledgeQuery.class);
+        verify(projectKnowledgeService).retrieve(knowledgeQuery.capture());
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().nodeType()).isEqualTo("context");
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().kinds()).containsExactly("context");
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().limit()).isEqualTo(4);
         org.assertj.core.api.Assertions.assertThat(sink.payloads)
-                .noneSatisfy(payload -> {
+                .anySatisfy(payload -> {
                     com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
                     org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
-                            .isEqualTo("projectKnowledge.retrieve");
+                            .isEqualTo("projectKnowledge.result");
                 });
     }
 
@@ -8932,11 +9144,15 @@ class AgenticAuthoringTurnEngineTest {
                 .execute(request(), principalContext, sink);
 
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
-        verify(projectKnowledgeService).retrieve(any());
+        verify(projectKnowledgeService, times(2)).retrieve(any());
         ArgumentCaptor<AgenticAuthoringPlanRequest> planRequest =
                 ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
         verify(previewService).preview(planRequest.capture(), eq("tenant"), eq("user"), eq("local"));
-        org.assertj.core.api.Assertions.assertThat(planRequest.getValue().contextHints()).isNull();
+        org.assertj.core.api.Assertions.assertThat(planRequest.getValue().contextHints()
+                        .path("projectKnowledge")
+                        .path("influenceCount")
+                        .asInt())
+                .isZero();
         org.assertj.core.api.Assertions.assertThat(sink.payloads)
                 .anySatisfy(payload -> {
                     JsonNode node = objectMapper.valueToTree(payload);
@@ -8977,7 +9193,9 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
         ArgumentCaptor<AgenticAuthoringProjectKnowledgeQuery> knowledgeQuery =
                 ArgumentCaptor.forClass(AgenticAuthoringProjectKnowledgeQuery.class);
-        verify(projectKnowledgeService).retrieve(knowledgeQuery.capture());
+        verify(projectKnowledgeService, times(2)).retrieve(knowledgeQuery.capture());
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getAllValues().get(0).nodeType())
+                .isEqualTo("context");
         org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().contextKey())
                 .isEqualTo("human-resources");
         org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().resourceKey())
@@ -9158,13 +9376,25 @@ class AgenticAuthoringTurnEngineTest {
                 ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
         verify(previewService, Mockito.times(2)).preview(planRequest.capture(), eq("tenant"), eq("user"), eq("local"));
         org.assertj.core.api.Assertions.assertThat(planRequest.getAllValues().get(0).contextHints())
-                .isNull();
+                .isNotNull();
+        org.assertj.core.api.Assertions.assertThat(planRequest.getAllValues().get(0)
+                        .contextHints()
+                        .path("componentSelection")
+                        .path("schemaVersion")
+                        .asText())
+                .isEqualTo("praxis-agentic-authoring-component-selection.v1");
         org.assertj.core.api.Assertions.assertThat(planRequest.getAllValues().get(1)
                         .contextHints()
                         .path("repair")
                         .path("classification")
-                        .asText())
+                .asText())
                 .isEqualTo("retryable");
+        org.assertj.core.api.Assertions.assertThat(planRequest.getAllValues().get(1)
+                        .contextHints()
+                        .path("componentSelection")
+                        .path("source")
+                        .asText())
+                .isEqualTo("resolved-semantic-decision+governed-component-capabilities");
         org.assertj.core.api.Assertions.assertThat(sink.payloads)
                 .anySatisfy(payload -> {
                     com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);

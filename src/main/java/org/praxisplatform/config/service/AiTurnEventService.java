@@ -2,7 +2,9 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -10,6 +12,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringSemanticDecision;
 import org.praxisplatform.config.domain.AiTurn;
 import org.praxisplatform.config.domain.AiTurnEvent;
@@ -18,7 +21,14 @@ import org.praxisplatform.config.repository.AiTurnRepository;
 import org.praxisplatform.config.repository.AiTurnEventRepository;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.support.JdbcUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,13 +36,45 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AiTurnEventService {
+
+    private static final String ATOMIC_POSTGRES_APPEND_SQL = """
+            with reserved as (
+                update ai_turn
+                   set next_event_seq = next_event_seq + 1,
+                       terminal_event_type = case
+                           when :terminal then :normalizedEventType
+                           else terminal_event_type
+                       end,
+                       updated_at = :createdAt
+                 where thread_id = :threadId
+                   and turn_id = :turnId
+                   and terminal_event_type is null
+                returning next_event_seq - 1 as seq
+            ), inserted as (
+                insert into ai_turn_event (
+                    tenant_id, user_id, environment, stream_id, thread_id, turn_id,
+                    seq, event_id, event_type, payload, created_at
+                )
+                select :tenantId, :userId, :environment, :streamId, :threadId, :turnId,
+                       reserved.seq, :eventId, :eventType, cast(:payload as jsonb), :createdAt
+                  from reserved
+                returning seq
+            )
+            select seq from inserted
+            """;
 
     private final AiTurnEventRepository turnEventRepository;
     private final AiTurnRepository turnRepository;
     private final ObjectMapper objectMapper;
     private final AiSensitiveDataRedactor sensitiveDataRedactor;
     private final ConcurrentHashMap<String, ReentrantLock> turnLocks = new ConcurrentHashMap<>();
+    private volatile Boolean postgresAtomicAppendAvailable;
+
+    @Autowired(required = false)
+    @Qualifier("configNamedParameterJdbcTemplate")
+    private NamedParameterJdbcTemplate configJdbcTemplate;
 
     @Value("${praxis.ai.stream.event-schema-version:v1}")
     private String eventSchemaVersion;
@@ -76,6 +118,24 @@ public class AiTurnEventService {
         ReentrantLock lock = turnLocks.computeIfAbsent(key, k -> new ReentrantLock());
         lock.lock();
         try {
+            JsonNode payloadNode = toPayloadNode(payload);
+            UUID resolvedEventId = eventId != null ? eventId : UUID.randomUUID();
+            Instant createdAt = Instant.now();
+            if (supportsPostgresAtomicAppend()) {
+                AiTurnEventEnvelope atomic = appendEventAtomically(
+                        principalContext,
+                        streamId,
+                        threadId,
+                        turnId,
+                        eventType,
+                        payloadNode,
+                        resolvedEventId,
+                        createdAt);
+                if (atomic != null) {
+                    return atomic;
+                }
+                return resolveRejectedAtomicAppend(streamId, threadId, turnId, eventType);
+            }
             AiTurn turn = lockTurnForAppend(threadId, turnId);
             AiTurnEvent terminalEvent = terminalEvent(turn, threadId, turnId);
             boolean terminal = isTerminalType(eventType);
@@ -88,8 +148,6 @@ public class AiTurnEventService {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Turn already reached terminal state.");
             }
             long nextSeq = reserveNextSequence(turn, eventType);
-            UUID resolvedEventId = eventId != null ? eventId : UUID.randomUUID();
-            JsonNode payloadNode = toPayloadNode(payload);
             AiTurnEvent entity = AiTurnEvent.builder()
                     .tenantId(principalContext.tenantId())
                     .userId(principalContext.userId())
@@ -101,7 +159,7 @@ public class AiTurnEventService {
                     .eventId(resolvedEventId)
                     .eventType(eventType)
                     .payload(serializePayload(payloadNode))
-                    .createdAt(Instant.now())
+                    .createdAt(createdAt)
                     .build();
             try {
                 AiTurnEvent saved = turnEventRepository.saveAndFlush(entity);
@@ -114,6 +172,104 @@ public class AiTurnEventService {
             if (!lock.hasQueuedThreads()) {
                 turnLocks.remove(key, lock);
             }
+        }
+    }
+
+    private AiTurnEventEnvelope appendEventAtomically(
+            AiPrincipalContext principalContext,
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            String eventType,
+            JsonNode payload,
+            UUID eventId,
+            Instant createdAt) {
+        MapSqlParameterSource parameters = new MapSqlParameterSource()
+                .addValue("tenantId", principalContext.tenantId())
+                .addValue("userId", principalContext.userId())
+                .addValue("environment", principalContext.environment())
+                .addValue("streamId", streamId)
+                .addValue("threadId", threadId)
+                .addValue("turnId", turnId)
+                .addValue("eventId", eventId)
+                .addValue("eventType", eventType)
+                .addValue("normalizedEventType", eventType.trim().toLowerCase())
+                .addValue("terminal", isTerminalType(eventType))
+                .addValue("payload", serializePayload(payload))
+                .addValue("createdAt", Timestamp.from(createdAt));
+        try {
+            List<Long> sequences = configJdbcTemplate.query(
+                    ATOMIC_POSTGRES_APPEND_SQL,
+                    parameters,
+                    (resultSet, rowNumber) -> resultSet.getLong("seq"));
+            if (sequences.isEmpty()) {
+                return null;
+            }
+            AiTurnEvent persisted = AiTurnEvent.builder()
+                    .tenantId(principalContext.tenantId())
+                    .userId(principalContext.userId())
+                    .environment(principalContext.environment())
+                    .streamId(streamId)
+                    .threadId(threadId)
+                    .turnId(turnId)
+                    .seq(sequences.get(0))
+                    .eventId(eventId)
+                    .eventType(eventType)
+                    .payload(serializePayload(payload))
+                    .createdAt(createdAt)
+                    .build();
+            return toEnvelope(persisted);
+        } catch (DataIntegrityViolationException ex) {
+            throw mapIntegrityViolation(ex);
+        } catch (DataAccessException ex) {
+            Throwable cause = ex.getMostSpecificCause();
+            log.error(
+                    "Atomic PostgreSQL turn event append failed: {}",
+                    cause != null ? cause.getMessage() : ex.getMessage());
+            throw ex;
+        }
+    }
+
+    private AiTurnEventEnvelope resolveRejectedAtomicAppend(
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            String eventType) {
+        AiTurn turn = turnRepository.findByThreadIdAndTurnId(threadId, turnId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "Turn reservation is missing before appending stream events."));
+        AiTurnEvent terminalEvent = terminalEvent(turn, threadId, turnId);
+        if (terminalEvent != null
+                && isTerminalType(eventType)
+                && safeUuidEquals(terminalEvent.getStreamId(), streamId)
+                && safeEquals(normalize(terminalEvent.getEventType()), normalize(eventType))) {
+            return toEnvelope(terminalEvent);
+        }
+        throw new ResponseStatusException(HttpStatus.CONFLICT, "Turn already reached terminal state.");
+    }
+
+    private boolean supportsPostgresAtomicAppend() {
+        Boolean cached = postgresAtomicAppendAvailable;
+        if (cached != null) {
+            return cached;
+        }
+        if (configJdbcTemplate == null || configJdbcTemplate.getJdbcTemplate().getDataSource() == null) {
+            postgresAtomicAppendAvailable = false;
+            return false;
+        }
+        try {
+            String databaseName = JdbcUtils.extractDatabaseMetaData(
+                    configJdbcTemplate.getJdbcTemplate().getDataSource(),
+                    "getDatabaseProductName");
+            boolean supported = databaseName != null && databaseName.toLowerCase().contains("postgresql");
+            postgresAtomicAppendAvailable = supported;
+            return supported;
+        } catch (CannotGetJdbcConnectionException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            postgresAtomicAppendAvailable = false;
+            return false;
         }
     }
 
@@ -282,6 +438,121 @@ public class AiTurnEventService {
                 .filter(node -> node != null && node.isObject() && node.hasNonNull("decisionId"))
                 .map(node -> objectMapper.convertValue(node, AgenticAuthoringSemanticDecision.class))
                 .findFirst();
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public Optional<AgenticAuthoringSemanticDecision> findPersistedSemanticDecision(
+            UUID threadId,
+            String decisionId,
+            AiPrincipalContext principalContext) {
+        return findPersistedSemanticDecisionContext(threadId, decisionId, principalContext)
+                .map(PersistedSemanticDecisionContext::decision);
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public Optional<PersistedSemanticDecisionContext> findPersistedSemanticDecisionContext(
+            UUID threadId,
+            String decisionId,
+            AiPrincipalContext principalContext) {
+        if (threadId == null || decisionId == null || decisionId.isBlank() || principalContext == null) {
+            return Optional.empty();
+        }
+        return turnEventRepository.findResultEventsByThreadIdOrderByNewest(threadId).stream()
+                .filter(event -> isOwnedByPrincipal(event, principalContext))
+                .map(event -> persistedSemanticDecisionContext(parsePayload(event.getPayload()), decisionId))
+                .flatMap(Optional::stream)
+                .findFirst();
+    }
+
+    private Optional<PersistedSemanticDecisionContext> persistedSemanticDecisionContext(
+            JsonNode payload,
+            String decisionId) {
+        JsonNode quickReplies = payload == null ? null : payload.path("quickReplies");
+        if (quickReplies != null && quickReplies.isArray()) {
+            for (JsonNode reply : quickReplies) {
+                JsonNode decision = reply.path("semanticDecision");
+                Optional<AgenticAuthoringSemanticDecision> matched = semanticDecision(decision, decisionId);
+                if (matched.isPresent()) {
+                    ArrayNode issuedCandidateApis = issuedCandidateApis(payload);
+                    return Optional.of(new PersistedSemanticDecisionContext(
+                            matched.get(),
+                            issuedCandidateApis));
+                }
+            }
+        }
+        return semanticDecision(
+                        payload == null ? null : payload.path("intentResolution").path("semanticDecision"),
+                        decisionId)
+                .map(decision -> new PersistedSemanticDecisionContext(
+                        decision,
+                        objectMapper.createArrayNode()));
+    }
+
+    private ArrayNode issuedCandidateApis(JsonNode payload) {
+        ArrayNode candidates = objectMapper.createArrayNode();
+        java.util.Set<String> resourcePaths = new java.util.LinkedHashSet<>();
+        JsonNode persistedCandidates = payload == null
+                ? null
+                : payload.path("intentResolution").path("apiCatalogAnswer").path("candidateApis");
+        if (persistedCandidates != null && persistedCandidates.isArray()) {
+            for (JsonNode candidate : persistedCandidates) {
+                candidates.add(candidate.deepCopy());
+                String resourcePath = candidate.path("resourcePath").asText("").trim();
+                if (!resourcePath.isBlank()) {
+                    resourcePaths.add(resourcePath);
+                }
+            }
+        }
+        JsonNode entries = payload == null ? null : payload.path("evidenceBundle").path("entries");
+        if (entries == null || !entries.isArray()) {
+            return candidates;
+        }
+        for (JsonNode entry : entries) {
+            JsonNode evidence = entry.path("evidence");
+            if (!evidence.isArray()) {
+                continue;
+            }
+            for (JsonNode reference : evidence) {
+                String value = reference.asText("").trim();
+                if (!value.startsWith("source-release:")) {
+                    continue;
+                }
+                String[] parts = value.split(":", 4);
+                if (parts.length < 3 || !parts[2].matches("[a-zA-Z0-9._-]+") || !parts[2].contains(".")) {
+                    continue;
+                }
+                String resourcePath = "/api/" + parts[2].replace('.', '/');
+                if (!resourcePaths.add(resourcePath)) {
+                    continue;
+                }
+                ObjectNode candidate = candidates.addObject();
+                candidate.put("resourcePath", resourcePath);
+                candidate.put("score", 0.90d);
+                candidate.put("reason", "resource linked by the governed domain source release");
+                candidate.putArray("evidence")
+                        .add("domain-catalog-grounding")
+                        .add("server-issued-domain-evidence");
+            }
+        }
+        return candidates;
+    }
+
+    private Optional<AgenticAuthoringSemanticDecision> semanticDecision(JsonNode node, String decisionId) {
+        if (node == null
+                || !node.isObject()
+                || !decisionId.equals(node.path("decisionId").asText(""))) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(objectMapper.convertValue(node, AgenticAuthoringSemanticDecision.class));
+        } catch (IllegalArgumentException ignored) {
+            return Optional.empty();
+        }
+    }
+
+    public record PersistedSemanticDecisionContext(
+            AgenticAuthoringSemanticDecision decision,
+            JsonNode issuedCandidateApis) {
     }
 
     public boolean isTerminalType(String eventType) {

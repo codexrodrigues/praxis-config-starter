@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://praxisplatform.org/schemas/ai/semantic-grounding-generative-ui-corpus.v0.1.schema.json",
+  "title": "Praxis machine-first semantic grounding and generative UI corpus",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "kind", "contexts", "cases"],
+  "properties": {
+    "version": { "const": "0.1.0" },
+    "kind": { "const": "praxis.semantic-grounding.generative-ui-corpus" },
+    "description": { "type": "string", "minLength": 1 },
+    "contexts": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/context" }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "strings": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenantId", "environment", "targetApp", "targetComponentId", "currentRoute", "currentPage", "runtimeEvidence"],
+      "properties": {
+        "tenantId": { "type": "string", "minLength": 1 },
+        "environment": { "type": "string", "minLength": 1 },
+        "targetApp": { "type": "string", "minLength": 1 },
+        "targetComponentId": { "type": "string", "minLength": 1 },
+        "currentRoute": { "type": "string", "minLength": 1 },
+        "currentPage": { "type": "object" },
+        "runtimeEvidence": { "enum": ["none", "untrusted_frontend_observation"] },
+        "selectedResourceKey": { "type": ["string", "null"] },
+        "selectedComponentId": { "type": ["string", "null"] },
+        "faults": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "family", "status", "locale", "contextRef", "userPrompt", "expected"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "family": {
+          "enum": [
+            "platform-capability",
+            "global-domain",
+            "current-surface",
+            "cross-domain",
+            "business-concept",
+            "technical-execution",
+            "generative-ui",
+            "ambiguity",
+            "governance",
+            "resilience"
+          ]
+        },
+        "status": { "enum": ["must-pass", "extended"] },
+        "locale": { "enum": ["pt-BR", "en-US"] },
+        "contextRef": { "type": "string", "minLength": 1 },
+        "userPrompt": { "type": "string", "minLength": 1 },
+        "expected": { "$ref": "#/$defs/expected" }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "abstractionLevel",
+        "taskMode",
+        "retrievalProfile",
+        "terminalAuthority",
+        "canApply",
+        "requiredSemanticRefs",
+        "allowedResourceKeys",
+        "allowedComponentIds",
+        "allowedTools",
+        "technicalReadBudget",
+        "provenance",
+        "safety"
+      ],
+      "properties": {
+        "abstractionLevel": {
+          "enum": ["platform", "enterprise", "domain", "context", "concept", "resource", "operation"]
+        },
+        "taskMode": { "enum": ["explain", "discover", "author", "execute", "materialize"] },
+        "retrievalProfile": {
+          "enum": ["platform", "global-domain", "context", "resource", "execution", "ui-materialization"]
+        },
+        "terminalAuthority": { "enum": ["answer", "clarify", "preview", "blocked"] },
+        "canApply": { "type": "boolean" },
+        "requiredSemanticRefs": { "$ref": "#/$defs/strings" },
+        "allowedResourceKeys": { "$ref": "#/$defs/strings" },
+        "allowedComponentIds": { "$ref": "#/$defs/strings" },
+        "allowedTools": { "$ref": "#/$defs/strings" },
+        "technicalReadBudget": { "$ref": "#/$defs/technicalReadBudget" },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "safety": { "$ref": "#/$defs/safety" }
+      }
+    },
+    "technicalReadBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxResources", "maxOpenApiDocuments", "maxSchemas", "maxComponentManifests"],
+      "properties": {
+        "maxResources": { "type": "integer", "minimum": 0 },
+        "maxOpenApiDocuments": { "type": "integer", "minimum": 0 },
+        "maxSchemas": { "type": "integer", "minimum": 0 },
+        "maxComponentManifests": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["materialSelectionCoverage", "requireCanonicalRelease", "requireEvidenceRefs"],
+      "properties": {
+        "materialSelectionCoverage": { "type": "number", "minimum": 0, "maximum": 1 },
+        "requireCanonicalRelease": { "type": "boolean" },
+        "requireEvidenceRefs": { "type": "boolean" }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "forbidUnlistedResources",
+        "forbidUnlistedComponents",
+        "forbidUnapprovedInference",
+        "requireTenantEnvironmentMatch",
+        "mutationRequiresPreview"
+      ],
+      "properties": {
+        "forbidUnlistedResources": { "type": "boolean" },
+        "forbidUnlistedComponents": { "type": "boolean" },
+        "forbidUnapprovedInference": { "type": "boolean" },
+        "requireTenantEnvironmentMatch": { "type": "boolean" },
+        "mutationRequiresPreview": { "type": "boolean" }
+      }
+    }
+  }
+}

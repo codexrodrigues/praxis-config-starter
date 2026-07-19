@@ -2872,13 +2872,21 @@ public class AgenticAuthoringPreviewService {
             ObjectNode semanticAxis,
             StatsCapabilityFieldDescriptor capability) {
         String axisLabel = normalize(semanticAxis.path("label").asText(""));
+        String axisConcept = normalize(semanticAxis.path("concept").asText(""));
         String capabilityLabel = normalize(capability.label());
-        int score = !axisLabel.isBlank() && axisLabel.equals(capabilityLabel) ? 12 : 0;
+        // The semantic concept is the stable business meaning. Presentation labels may be
+        // deliberately richer (for example "Funcionários por departamento") and DTO fields
+        // may expose a display projection (departamentoNome), while the governed stats
+        // capability executes through its canonical dimension (departamento).
+        int score = (!axisLabel.isBlank() && axisLabel.equals(capabilityLabel))
+                        || (!axisConcept.isBlank() && axisConcept.equals(capabilityLabel))
+                ? 12
+                : 0;
         Set<String> normalizedAliases = capability.aliases().stream()
                 .map(this::normalize)
                 .filter(alias -> !alias.isBlank())
                 .collect(java.util.stream.Collectors.toSet());
-        if (normalizedAliases.contains(normalize(semanticAxis.path("concept").asText("")))
+        if (normalizedAliases.contains(axisConcept)
                 || normalizedAliases.contains(normalize(semanticAxis.path("field").asText("")))
                 || normalizedAliases.contains(axisLabel)) {
             score = Math.max(score, 12);

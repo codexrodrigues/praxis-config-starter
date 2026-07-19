@@ -6,7 +6,7 @@
     "blank-page-employee-domain": {
       "targetApp": "praxis-ui-angular",
       "targetComponentId": "praxis-dynamic-page-builder",
-      "currentRoute": "/decision-playground",
+      "currentRoute": "/page-builder-ia",
       "currentPage": { "widgets": [] },
       "selectedWidgetKey": null,
       "contextHints": {
@@ -30,6 +30,22 @@
             "surfaces": ["Cadastrar funcionário", "Obter funcionário", "Perfil 360"]
           }
         ]
+      }
+    },
+    "blank-page-governed-domain-runtime": {
+      "targetApp": "praxis-ui-angular",
+      "targetComponentId": "praxis-dynamic-page-builder",
+      "currentRoute": "/page-builder-ia",
+      "currentPage": { "widgets": [] },
+      "selectedWidgetKey": null,
+      "contextHints": {
+        "agenticApplyTarget": {
+          "schemaVersion": "praxis-agentic-authoring-apply-target.v1",
+          "componentType": "praxis-dynamic-page",
+          "componentId": "page-builder-ia",
+          "scope": "user",
+          "mode": "create"
+        }
       }
     },
     "blank-page-employee-domain-platform-opportunity": {
@@ -422,6 +438,146 @@
     }
   ],
   "journeys": [
+    {
+      "id": "governed-domain-to-available-data-pt",
+      "family": "refinement",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page-governed-domain-runtime",
+      "turns": [
+        {
+          "id": "discover-governed-domain",
+          "userPrompt": "Sobre quais assuntos posso criar tabelas para obter informações visuais?",
+          "currentPageSource": "context",
+          "expected": {
+            "intent": {
+              "operationKinds": ["explore", "explain"],
+              "artifactKinds": ["api_catalog"],
+              "changeKinds": ["answer_api_catalog_question", "answer_catalog_question"],
+              "resourcePaths": [null, "/api/human-resources/funcionarios"]
+            },
+            "terminal": {
+              "eventTypes": ["result"],
+              "canApply": false,
+              "preview": "forbidden",
+              "minimumQuickReplies": 3,
+              "forbiddenPhases": ["preview.plan", "preview.compile"]
+            },
+            "assistantMessage": {
+              "minimumCharacters": 80,
+              "requiredConceptGroups": [
+                ["funcionário", "funcionario", "recursos humanos"],
+                ["tabela", "dashboard", "painel", "visualização", "visualizacao"]
+              ],
+              "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+            },
+            "safety": {
+              "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
+              "forbidUnlistedResourcePaths": true,
+              "mutationRequiresPreview": true
+            }
+          }
+        },
+        {
+          "id": "select-available-data",
+          "userPrompt": "Para esses temas governados, explique quais recursos e campos confirmados estão disponíveis.",
+          "currentPageSource": "context",
+          "quickReplySelection": {
+            "replyId": "governed-domain:explore-data",
+            "requireSemanticDecision": true
+          },
+          "expected": {
+            "intent": {
+              "operationKinds": ["explore", "explain"],
+              "artifactKinds": ["api_catalog"],
+              "changeKinds": ["answer_api_catalog_question", "answer_catalog_question", "api_catalog_followup"],
+              "resourcePaths": [null, "/api/human-resources/funcionarios"]
+            },
+            "terminal": {
+              "eventTypes": ["result"],
+              "canApply": false,
+              "preview": "forbidden",
+              "minimumQuickReplies": 0,
+              "forbiddenPhases": ["preview.plan", "preview.compile"]
+            },
+            "assistantMessage": {
+              "minimumCharacters": 60,
+              "requiredConceptGroups": [
+                ["funcionário", "funcionario", "recursos humanos"],
+                ["campo", "dado", "recurso"]
+              ],
+              "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+            },
+            "safety": {
+              "allowedResourcePathPrefixes": ["/api/human-resources"],
+              "forbidUnlistedResourcePaths": true,
+              "mutationRequiresPreview": true
+            }
+          },
+          "lineage": {
+            "sameThread": true,
+            "distinctTurn": true,
+            "activeDecisionFromPreviousTurn": true,
+            "activeDecisionSource": "selected-quick-reply"
+          }
+        },
+        {
+          "id": "materialize-selected-data-table",
+          "userPrompt": "Crie uma tabela filtrável usando a fonte confirmada.",
+          "currentPageSource": "context",
+          "quickReplySelection": {
+            "replyId": "consultative-create-table:human-resources-vw-analytics-folha-pagamento",
+            "requireSemanticDecision": true
+          },
+          "expected": {
+            "intent": {
+              "operationKinds": ["create"],
+              "artifactKinds": ["table"],
+              "changeKinds": ["create_artifact", "create_table"],
+              "resourcePaths": ["/api/human-resources/vw-analytics-folha-pagamento"]
+            },
+            "terminal": {
+              "eventTypes": ["result"],
+              "canApply": true,
+              "preview": "required",
+              "minimumQuickReplies": 0,
+              "forbiddenPhases": []
+            },
+            "assistantMessage": {
+              "minimumCharacters": 60,
+              "requiredConceptGroups": [
+                ["tabela", "table"],
+                ["folha", "pagamento"],
+                ["prévia", "previa", "preview", "pré-visualização", "pre-visualizacao", "visualização", "visualizacao", "revisar", "revise"]
+              ],
+              "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+            },
+            "safety": {
+              "allowedResourcePathPrefixes": ["/api/human-resources"],
+              "forbidUnlistedResourcePaths": true,
+              "mutationRequiresPreview": true
+            },
+            "persistence": {
+              "apply": "required",
+              "readback": "exact-page",
+              "conditionalReplay": "same-state",
+              "staleRetry": "precondition-failed",
+              "cleanup": "required"
+            }
+          },
+          "pageAssertions": {
+            "requiredColumnFields": ["nomeCompleto", "cargo", "departamento", "salarioBruto"],
+            "uniqueColumnFields": true
+          },
+          "lineage": {
+            "sameThread": true,
+            "distinctTurn": true,
+            "activeDecisionFromPreviousTurn": true,
+            "activeDecisionSource": "selected-quick-reply"
+          }
+        }
+      ]
+    },
     {
       "id": "platform-guidance-to-employee-dashboard-pt",
       "family": "refinement",

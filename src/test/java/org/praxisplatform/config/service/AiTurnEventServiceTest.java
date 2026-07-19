@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -25,9 +27,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.domain.AiTurn;
 import org.praxisplatform.config.domain.AiTurnStatus;
 import org.praxisplatform.config.domain.AiTurnEvent;
+import org.praxisplatform.config.dto.AiTurnEventEnvelope;
 import org.praxisplatform.config.repository.AiTurnRepository;
 import org.praxisplatform.config.repository.AiTurnEventRepository;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -212,6 +218,36 @@ class AiTurnEventServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void shouldAppendPostgresEventWithSingleAtomicStatement() {
+        UUID streamId = UUID.randomUUID();
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        NamedParameterJdbcTemplate jdbcTemplate = mock(NamedParameterJdbcTemplate.class);
+        ReflectionTestUtils.setField(service, "configJdbcTemplate", jdbcTemplate);
+        ReflectionTestUtils.setField(service, "postgresAtomicAppendAvailable", true);
+        when(jdbcTemplate.query(
+                anyString(),
+                any(MapSqlParameterSource.class),
+                any(RowMapper.class)))
+                .thenReturn(List.of(7L));
+
+        AiTurnEventEnvelope envelope = service.appendEvent(
+                new AiPrincipalContext("tenant-a", "user-a", "prod", true),
+                streamId,
+                threadId,
+                turnId,
+                "status",
+                Map.of("phase", "intent.resolve"));
+
+        assertThat(envelope.getSeq()).isEqualTo(7L);
+        assertThat(envelope.getType()).isEqualTo("status");
+        assertThat(envelope.getPayload().path("phase").asText()).isEqualTo("intent.resolve");
+        verify(turnRepository, never()).findByThreadIdAndTurnIdForUpdate(threadId, turnId);
+        verify(repository, never()).saveAndFlush(any(AiTurnEvent.class));
+    }
+
+    @Test
     void shouldPersistOnlySafeQuickReplyContextHintProjection() throws Exception {
         UUID streamId = UUID.randomUUID();
         UUID threadId = UUID.randomUUID();
@@ -318,6 +354,95 @@ class AiTurnEventServiceTest {
     @Test
     void intentResolvedIsNotTerminal() {
         assertThat(service.isTerminalType("intent.resolved")).isFalse();
+    }
+
+    @Test
+    void shouldResolveSemanticDecisionIssuedByQuickReplyInOwnedThread() throws Exception {
+        UUID streamId = UUID.randomUUID();
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        AiTurnEvent result = event(
+                streamId,
+                threadId,
+                turnId,
+                8L,
+                UUID.randomUUID(),
+                "tenant-a",
+                "user-a",
+                "prod");
+        result.setEventType("result");
+        ObjectNode payload = objectMapper.createObjectNode();
+        ObjectNode decision = payload.putArray("quickReplies")
+                .addObject()
+                .putObject("semanticDecision");
+        decision.put("schemaVersion", "praxis-agentic-authoring-semantic-decision.v1");
+        decision.put("decisionId", "governed-choice-1");
+        decision.put("operationKind", "explore");
+        decision.put("artifactKind", "api_catalog");
+        decision.put("changeKind", "answer_api_catalog_question");
+        decision.putObject("constraints").put("quickReplyId", "governed-domain:explore-data");
+        payload.putObject("intentResolution")
+                .putObject("apiCatalogAnswer")
+                .putArray("candidateApis")
+                .addObject()
+                .put("resourcePath", "/api/human-resources/funcionarios");
+        payload.putObject("evidenceBundle")
+                .putArray("entries")
+                .addObject()
+                .putArray("evidence")
+                .add("source-release:praxis-service:human-resources.departamentos:release-hash");
+        result.setPayload(objectMapper.writeValueAsString(payload));
+
+        when(repository.findResultEventsByThreadIdOrderByNewest(threadId)).thenReturn(List.of(result));
+
+        Optional<org.praxisplatform.config.ai.authoring.AgenticAuthoringSemanticDecision> resolved =
+                service.findPersistedSemanticDecision(
+                        threadId,
+                        "governed-choice-1",
+                        new AiPrincipalContext("tenant-a", "user-a", "prod", true));
+
+        assertThat(resolved).isPresent();
+        assertThat(resolved.orElseThrow().artifactKind()).isEqualTo("api_catalog");
+        assertThat(resolved.orElseThrow().constraints().path("quickReplyId").asText())
+                .isEqualTo("governed-domain:explore-data");
+        AiTurnEventService.PersistedSemanticDecisionContext context =
+                service.findPersistedSemanticDecisionContext(
+                                threadId,
+                                "governed-choice-1",
+                                new AiPrincipalContext("tenant-a", "user-a", "prod", true))
+                        .orElseThrow();
+        assertThat(context.issuedCandidateApis()).hasSize(2);
+        assertThat(context.issuedCandidateApis().get(0).path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(context.issuedCandidateApis().get(1).path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/departamentos");
+    }
+
+    @Test
+    void shouldNotResolveSemanticDecisionFromAnotherPrincipal() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        AiTurnEvent result = event(
+                UUID.randomUUID(),
+                threadId,
+                UUID.randomUUID(),
+                8L,
+                UUID.randomUUID(),
+                "tenant-a",
+                "another-user",
+                "prod");
+        result.setEventType("result");
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.putObject("intentResolution")
+                .putObject("semanticDecision")
+                .put("decisionId", "foreign-decision");
+        result.setPayload(objectMapper.writeValueAsString(payload));
+        when(repository.findResultEventsByThreadIdOrderByNewest(threadId)).thenReturn(List.of(result));
+
+        assertThat(service.findPersistedSemanticDecision(
+                        threadId,
+                        "foreign-decision",
+                        new AiPrincipalContext("tenant-a", "user-a", "prod", true)))
+                .isEmpty();
     }
 
     @Test
