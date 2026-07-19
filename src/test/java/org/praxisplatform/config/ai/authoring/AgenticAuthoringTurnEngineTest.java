@@ -289,6 +289,9 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
         org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
                 .isEqualTo("Create dashboards with detail tables, filters, and forms.");
+        JsonNode intentResolved = firstPayloadOfType(sink, "intent.resolved");
+        org.assertj.core.api.Assertions.assertThat(intentResolved.path("userFacingUnderstanding").asText())
+                .isEqualTo("Create dashboards with detail tables, filters, and forms.");
         org.assertj.core.api.Assertions.assertThat(
                 result.path("decisionDiagnostics").path("resolvedIntentAnswerUsed").asBoolean()).isTrue();
         org.assertj.core.api.Assertions.assertThat(

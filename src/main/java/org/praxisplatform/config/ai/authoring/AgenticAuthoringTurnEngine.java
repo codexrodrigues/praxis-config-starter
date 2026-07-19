@@ -343,7 +343,7 @@ public class AgenticAuthoringTurnEngine {
             }
             AgenticAuthoringTurnRoute route = routeClassifier.classify(request, intentResolution, state);
             state = state.withRouteClass(route.routeClass());
-            emitIntentResolved(eventSink, intentResolution, route);
+            emitIntentResolved(eventSink, intentResolution, route, request);
             AgenticAuthoringTurnOutcome postIntentConsultativeOutcome = maybeAnswerPostIntentConsultative(
                     request,
                     principalContext,
@@ -414,7 +414,7 @@ public class AgenticAuthoringTurnEngine {
                 artifactReconciliationAttempted = artifactReconciliation.attempted();
                 route = routeClassifier.classify(request, intentResolution, state);
                 state = state.withRouteClass(route.routeClass());
-                emitIntentResolved(eventSink, intentResolution, route);
+                emitIntentResolved(eventSink, intentResolution, route, request);
                 emitStatus(
                         eventSink,
                         "intent.resolve.grounding",
@@ -4456,7 +4456,8 @@ public class AgenticAuthoringTurnEngine {
     private void emitIntentResolved(
             AgenticAuthoringTurnEventSink eventSink,
             AgenticAuthoringIntentResolutionResult intentResolution,
-            AgenticAuthoringTurnRoute route) {
+            AgenticAuthoringTurnRoute route,
+            AgenticAuthoringTurnStreamRequest request) {
         if (eventSink == null || eventSink.terminalReached() || intentResolution == null) {
             return;
         }
@@ -4466,7 +4467,7 @@ public class AgenticAuthoringTurnEngine {
         payload.put("semanticDecisionRef", semanticDecision == null ? "" : safeText(semanticDecision.decisionId()));
         payload.put("routeClass", route == null ? "" : safeText(route.routeClass()));
         payload.put("resolved", intentResolution.valid());
-        payload.put("userFacingUnderstanding", intentResolvedUserFacingUnderstanding(intentResolution, route));
+        payload.put("userFacingUnderstanding", intentResolvedUserFacingUnderstanding(intentResolution, route, request));
         payload.put("requiresClarification", route != null && "needs_clarification".equals(route.routeClass()));
         payload.put("canMaterialize", route != null && route.allowsPreview() && intentResolution.valid());
         payload.put("fallbackKind", intentResolvedFallbackKind(intentResolution));
@@ -4481,10 +4482,13 @@ public class AgenticAuthoringTurnEngine {
 
     private String intentResolvedUserFacingUnderstanding(
             AgenticAuthoringIntentResolutionResult intentResolution,
-            AgenticAuthoringTurnRoute route) {
+            AgenticAuthoringTurnRoute route,
+            AgenticAuthoringTurnStreamRequest request) {
         String assistantMessage = safeText(intentResolution.assistantMessage());
         if (!assistantMessage.isBlank()) {
-            return curatedResourceLabel(publicAssistantMessage(assistantMessage), intentResolution.selectedCandidate());
+            return curatedResourceLabel(
+                    publicAssistantMessage(assistantMessage, request),
+                    intentResolution.selectedCandidate());
         }
         String routeClass = route == null ? "" : safeText(route.routeClass());
         String operation = safeText(intentResolution.operationKind());
