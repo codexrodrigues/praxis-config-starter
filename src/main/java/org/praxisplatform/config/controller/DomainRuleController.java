@@ -123,16 +123,22 @@ public class DomainRuleController {
     public ResponseEntity<DomainRulePublicationResponse> publish(
             @RequestBody DomainRulePublicationRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-Env", required = false) String environment) {
-        return ResponseEntity.ok(domainRuleService.publish(request, tenantId, environment));
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, "RULE_SNAPSHOT_PUBLISHER");
+        return ResponseEntity.ok(domainRuleService.publish(request, principal));
     }
 
     @PostMapping("/materializations")
     public ResponseEntity<DomainRuleMaterializationResponse> createMaterialization(
             @RequestBody DomainRuleMaterializationRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-Env", required = false) String environment) {
-        return ResponseEntity.accepted().body(domainRuleService.createMaterialization(request, tenantId, environment));
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, "RULE_DEFINITION_AUTHOR");
+        return ResponseEntity.accepted().body(domainRuleService.createMaterialization(request, principal));
     }
 
     @GetMapping("/materializations")
@@ -159,16 +165,28 @@ public class DomainRuleController {
             @PathVariable UUID materializationId,
             @RequestBody DomainRuleStatusTransitionRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-Env", required = false) String environment) {
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, requiredMaterializationRole(request));
         return ResponseEntity.ok(domainRuleService.transitionMaterializationStatus(
                 materializationId,
                 request,
-                tenantId,
-                environment));
+                principal));
     }
 
     private boolean isAuthorTransition(DomainRuleDefinitionStatusTransitionRequest request) {
         return request != null
                 && ("draft".equals(request.status()) || "proposed".equals(request.status()));
+    }
+
+    private String requiredMaterializationRole(DomainRuleStatusTransitionRequest request) {
+        if (request != null && ("draft".equals(request.status()) || "pending_review".equals(request.status()))) {
+            return "RULE_DEFINITION_AUTHOR";
+        }
+        if (request != null && "applied".equals(request.status())) {
+            return "RULE_SNAPSHOT_PUBLISHER";
+        }
+        return "RULE_SNAPSHOT_OPERATOR";
     }
 }

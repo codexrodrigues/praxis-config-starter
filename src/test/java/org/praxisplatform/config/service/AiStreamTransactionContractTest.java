@@ -111,8 +111,7 @@ class AiStreamTransactionContractTest {
                 DomainRuleService.class.getMethod(
                         "createMaterialization",
                         org.praxisplatform.config.dto.DomainRuleMaterializationRequest.class,
-                        String.class,
-                        String.class),
+                        DomainRuleGovernancePrincipal.class),
                 DomainRuleService.class.getMethod(
                         "materializations",
                         String.class,
@@ -126,8 +125,7 @@ class AiStreamTransactionContractTest {
                         "transitionMaterializationStatus",
                         UUID.class,
                         org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest.class,
-                        String.class,
-                        String.class));
+                        DomainRuleGovernancePrincipal.class));
 
         for (Method method : methods) {
             assertTxManager(method, ConfigTransactionManagerNames.CONFIG);

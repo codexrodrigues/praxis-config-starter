@@ -253,11 +253,8 @@ class DomainRuleServiceTest {
                         intake.definition().id(),
                         null,
                         true,
-                        "human",
-                        "procurement-owner",
                         null),
-                "tenant-a",
-                "dev");
+                principal("procurement-owner"));
 
         assertThat(intake.grounding().path("decisionDiagnostics").path("decisionStage").asText())
                 .isEqualTo("intake");
@@ -606,11 +603,8 @@ class DomainRuleServiceTest {
                         definitionId,
                         null,
                         true,
-                        "human",
-                        "finance-owner",
                         null),
-                "tenant-a",
-                "dev");
+                principal("finance-owner"));
 
         assertThat(response.publicationStatus()).isEqualTo("published");
         assertThat(response.explainability().path("decisionDiagnostics").path("predictedMaterializationCount").asInt())
@@ -732,11 +726,8 @@ class DomainRuleServiceTest {
                         definitionId,
                         null,
                         true,
-                        "human",
-                        "payroll-manager",
                         null),
-                "tenant-a",
-                "dev");
+                principal("payroll-manager"));
 
         assertThat(response.publicationStatus()).isEqualTo("published");
         assertThat(response.explainability().path("decisionDiagnostics").path("predictedMaterializationCount").asInt())
@@ -981,9 +972,7 @@ class DomainRuleServiceTest {
                     }
                     """),
                 "hash-123",
-                null,
-                "llm",
-                "openai:gpt-5.4-mini"), "tenant-a", "dev");
+                null), principal("migration-factory"));
 
         assertThat(response.id()).isNotNull();
         assertThat(response.ruleDefinitionId()).isEqualTo(definitionId);
@@ -1073,9 +1062,7 @@ class DomainRuleServiceTest {
                 "pending_review",
                 objectMapper.readTree("{\"id\":\"lgpd-cpf-guidance\"}"),
                 "hash-123",
-                null,
-                "llm",
-                "openai:gpt-5.4-mini"), "tenant-a", "dev");
+                null), principal("migration-factory"));
 
         assertThat(response.id()).isEqualTo(materializationId);
         assertThat(response.sourceHash()).isEqualTo("hash-123");
@@ -1149,9 +1136,7 @@ class DomainRuleServiceTest {
                 "pending_review",
                 objectMapper.readTree("{\"id\":\"lgpd-cpf-guidance\"}"),
                 "hash-123",
-                null,
-                "llm",
-                "openai:gpt-5.4-mini"), "tenant-a", "dev"))
+                null), principal("migration-factory")))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("Rule materialization key already belongs to another definition");
 
@@ -1193,17 +1178,15 @@ class DomainRuleServiceTest {
                 "ready",
                 null,
                 "hash-selection-eligibility",
-                null,
-                "llm",
-                "openai:gpt-5.4-mini"), "tenant-a", "dev"))
+                null), principal("migration-factory")))
                 .isInstanceOf(ConfigurationIngestionException.class)
-                .hasMessageContaining("status must be one of [draft, pending_review, applied, failed, superseded, reverted]");
+                .hasMessageContaining("status must be one of [draft, pending_review]");
 
         verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
     }
 
     @Test
-    void blocksAppliedMaterializationCreationWhenDefinitionIsNotActive() {
+    void blocksAppliedMaterializationCreationEvenWhenDefinitionIsNotActive() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
         DomainRuleService service = service(definitionRepository, materializationRepository);
@@ -1237,17 +1220,15 @@ class DomainRuleServiceTest {
                 "applied",
                 null,
                 "hash-selection-eligibility",
-                null,
-                "llm",
-                "openai:gpt-5.4-mini"), "tenant-a", "dev"))
+                null), principal("migration-factory")))
                 .isInstanceOf(ConfigurationIngestionException.class)
-                .hasMessageContaining("Rule materialization can only be applied when its definition is active");
+                .hasMessageContaining("status must be one of [draft, pending_review]");
 
         verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
     }
 
     @Test
-    void createsAppliedMaterializationWhenDefinitionIsActive() {
+    void blocksAppliedMaterializationCreationEvenWhenDefinitionIsActive() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
         DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
@@ -1269,13 +1250,7 @@ class DomainRuleServiceTest {
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
-        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
-            DomainRuleMaterialization materialization = invocation.getArgument(0);
-            materialization.onInsert();
-            return materialization;
-        });
-
-        var response = service.createMaterialization(new DomainRuleMaterializationRequest(
+        assertThatThrownBy(() -> service.createMaterialization(new DomainRuleMaterializationRequest(
                 definitionId,
                 "procurement.suppliers.rule.selection-eligibility:option_source:supplier",
                 "option_source",
@@ -1287,25 +1262,12 @@ class DomainRuleServiceTest {
                 "applied",
                 null,
                 "hash-selection-eligibility",
-                null,
-                "llm",
-                "openai:gpt-5.4-mini"), "tenant-a", "dev");
+                null), principal("migration-factory")))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("status must be one of [draft, pending_review]");
 
-        assertThat(response.status()).isEqualTo("applied");
-        assertThat(response.appliedAt()).isNotNull();
-        assertThat(response.appliedByType()).isEqualTo("llm");
-        assertThat(response.appliedBy()).isEqualTo("openai:gpt-5.4-mini");
-        ArgumentCaptor<DomainRuleEvent> eventCaptor = ArgumentCaptor.forClass(DomainRuleEvent.class);
-        verify(eventRepository, org.mockito.Mockito.times(2)).save(eventCaptor.capture());
-        assertThat(eventCaptor.getAllValues()).extracting(DomainRuleEvent::getEventType)
-                .containsExactly("materialization.created", "materialization.applied");
-        assertThat(eventCaptor.getAllValues()).last().satisfies(event -> {
-            assertThat(event.getTargetLayer()).isEqualTo("option_source");
-            assertThat(event.getTargetArtifactType()).isEqualTo("resource-option-source");
-            assertThat(event.getTargetArtifactKey()).isEqualTo("supplier");
-            assertThat(event.getMaterializationKey()).isEqualTo("procurement.suppliers.rule.selection-eligibility:option_source:supplier");
-            assertThat(event.getSourceHash()).isEqualTo("hash-selection-eligibility");
-        });
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
+        verify(eventRepository, org.mockito.Mockito.never()).save(any(DomainRuleEvent.class));
     }
 
     @Test
@@ -1356,9 +1318,7 @@ class DomainRuleServiceTest {
                 "pending_review",
                 null,
                 "hash-selection-eligibility",
-                null,
-                "llm",
-                "openai:gpt-5.4-mini"), "tenant-a", "dev");
+                null), principal("migration-factory"));
 
         assertThat(response.targetLayer()).isEqualTo("option_source");
         assertThat(response.targetArtifactType()).isEqualTo("resource-option-source");
@@ -1428,9 +1388,7 @@ class DomainRuleServiceTest {
                 "pending_review",
                 null,
                 "hash-status-validation",
-                null,
-                "llm",
-                "openai:gpt-5.4-mini"), "tenant-a", "dev");
+                null), principal("migration-factory"));
 
         assertThat(response.targetLayer()).isEqualTo("backend_validation");
         assertThat(response.targetArtifactType()).isEqualTo("resource-validation");
@@ -1483,9 +1441,7 @@ class DomainRuleServiceTest {
                 "pending_review",
                 null,
                 "hash-selection-eligibility",
-                null,
-                "llm",
-                "openai:gpt-5.4-mini"), "tenant-b", "dev"))
+                null), new DomainRuleGovernancePrincipal("tenant-b", "migration-factory", "dev")))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("Rule tenantId does not match request scope");
 
@@ -2020,6 +1976,8 @@ class DomainRuleServiceTest {
                 .definition("{\"summary\":\"Impedir seleção de fornecedores bloqueados.\"}")
                 .parameters("{\"optionSourceKey\":\"supplier\"}")
                 .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
+                .approvedBy("domain-approver")
+                .approvedAt(Instant.parse("2026-04-27T00:00:00Z"))
                 .build();
         DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
                 .id(UUID.randomUUID())
@@ -2054,16 +2012,13 @@ class DomainRuleServiceTest {
                         definitionId,
                         null,
                         true,
-                        "human",
-                        "procurement-owner",
                         objectMapper.createObjectNode().put("raw", "must not leak publication notes")),
-                "tenant-a",
-                "dev");
+                principal("procurement-owner"));
 
         assertThat(response.publicationStatus()).isEqualTo("published");
         assertThat(response.publicationReadiness()).isEqualTo("ready_to_publish");
         assertThat(response.definition().status()).isEqualTo("active");
-        assertThat(response.definition().approvedBy()).isEqualTo("procurement-owner");
+        assertThat(response.definition().approvedBy()).isEqualTo("domain-approver");
         assertThat(response.explainability().path("recommendedAction").asText()).isEqualTo("materialize_or_activate");
         assertThat(response.explainability()
                 .path("publicationDiagnostics")
@@ -2090,7 +2045,7 @@ class DomainRuleServiceTest {
                         "materialization.applied",
                         "publication.completed");
         assertThat(eventCaptor.getAllValues().get(2)).satisfies(event -> {
-            assertThat(event.getActorType()).isEqualTo("human");
+            assertThat(event.getActorType()).isEqualTo("authenticated");
             assertThat(event.getActor()).isEqualTo("procurement-owner");
             assertThat(event.getStatus()).isEqualTo("requested");
             assertThat(event.getSafeMetadata()).contains("\"publicationReadiness\":\"ready_to_publish\"");
@@ -2098,7 +2053,7 @@ class DomainRuleServiceTest {
             assertThat(event.getSafeMetadata()).doesNotContain("must not leak");
         });
         assertThat(eventCaptor.getAllValues().get(4)).satisfies(event -> {
-            assertThat(event.getActorType()).isEqualTo("human");
+            assertThat(event.getActorType()).isEqualTo("authenticated");
             assertThat(event.getActor()).isEqualTo("procurement-owner");
             assertThat(event.getStatus()).isEqualTo("published");
             assertThat(event.getSafeMetadata()).contains("\"materializationCount\":1");
@@ -2108,7 +2063,7 @@ class DomainRuleServiceTest {
     }
 
     @Test
-    void blocksPublicationWhenActorIsNotAuthorizedByGovernance() {
+    void publicationUsesAuthenticatedPublisherWithoutConflatingItWithDomainApprover() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
         DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
@@ -2138,21 +2093,21 @@ class DomainRuleServiceTest {
                 "procurement.suppliers",
                 List.of("approved", "active")))
                 .thenReturn(List.of());
+        when(definitionRepository.save(any(DomainRuleDefinition.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
 
-        assertThatThrownBy(() -> service.publish(
+        var response = service.publish(
                 new DomainRulePublicationRequest(
                         definitionId,
                         null,
-                        true,
-                        "human",
-                        "finance-owner",
+                        false,
                         null),
-                "tenant-a",
-                "dev"))
-                .isInstanceOf(ConfigurationIngestionException.class)
-                .hasMessageContaining("actor is not authorized by governance");
+                principal("release-manager"));
 
-        verify(definitionRepository, org.mockito.Mockito.never()).save(any(DomainRuleDefinition.class));
+        assertThat(response.publicationStatus()).isEqualTo("published");
+        assertThat(response.materializations()).isEmpty();
+        assertThat(response.definition().approvedBy()).isNull();
+        verify(definitionRepository).save(definition);
         verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
     }
 
@@ -2212,11 +2167,8 @@ class DomainRuleServiceTest {
                         definitionId,
                         null,
                         true,
-                        "human",
-                        "procurement-owner",
                         null),
-                "tenant-a",
-                "dev");
+                principal("procurement-owner"));
 
         assertThat(response.publicationStatus()).isEqualTo("published");
         assertThat(response.explainability()
@@ -2283,11 +2235,8 @@ class DomainRuleServiceTest {
                         definitionId,
                         List.of(materializationId),
                         true,
-                        "human",
-                        "procurement-owner",
                         null),
-                "tenant-a",
-                "dev"))
+                principal("procurement-owner")))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("Rule materialization status is not publishable: failed");
 
@@ -2331,11 +2280,8 @@ class DomainRuleServiceTest {
                         definitionId,
                         null,
                         true,
-                        "human",
-                        "procurement-owner",
                         null),
-                "tenant-a",
-                "dev");
+                principal("procurement-owner"));
 
         assertThat(response.publicationStatus()).isEqualTo("blocked");
         assertThat(response.publicationReadiness()).isEqualTo("blocked_by_definition_status");
@@ -2428,11 +2374,8 @@ class DomainRuleServiceTest {
                         definitionId,
                         null,
                         true,
-                        "human",
-                        "procurement-owner",
                         null),
-                "tenant-a",
-                "dev");
+                principal("procurement-owner"));
 
         assertThat(response.publicationStatus()).isEqualTo("published");
         assertThat(response.explainability()
@@ -2561,21 +2504,15 @@ class DomainRuleServiceTest {
                         definitionId,
                         null,
                         true,
-                        "human",
-                        "procurement-owner",
                         null),
-                "tenant-a",
-                "dev");
+                principal("procurement-owner"));
         var secondResponse = service.publish(
                 new DomainRulePublicationRequest(
                         definitionId,
                         null,
                         true,
-                        "human",
-                        "procurement-owner",
                         null),
-                "tenant-a",
-                "dev");
+                principal("procurement-owner"));
 
         assertThat(firstResponse.publicationStatus()).isEqualTo("published");
         assertThat(firstResponse.materializations()).hasSize(2)
@@ -2694,11 +2631,8 @@ class DomainRuleServiceTest {
                         definitionId,
                         null,
                         true,
-                        "human",
-                        "procurement-owner",
                         null),
-                "tenant-a",
-                "dev"))
+                principal("procurement-owner")))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("Derived rule materialization key already exists without a sourceHash");
 
@@ -2790,11 +2724,8 @@ class DomainRuleServiceTest {
                         definitionId,
                         null,
                         true,
-                        "human",
-                        "procurement-owner",
                         null),
-                "tenant-a",
-                "dev"))
+                principal("procurement-owner")))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("Rule materialization key already belongs to another definition");
 
@@ -2886,21 +2817,15 @@ class DomainRuleServiceTest {
                         inactiveDefinitionId,
                         null,
                         true,
-                        "human",
-                        "procurement-owner",
                         null),
-                "tenant-a",
-                "dev");
+                principal("procurement-owner"));
         var suspendedResponse = service.publish(
                 new DomainRulePublicationRequest(
                         suspendedDefinitionId,
                         null,
                         true,
-                        "human",
-                        "procurement-owner",
                         null),
-                "tenant-a",
-                "dev");
+                principal("procurement-owner"));
 
         assertThat(inactiveResponse.materializations()).hasSize(2);
         assertThat(inactiveResponse.materializations())
@@ -2984,11 +2909,8 @@ class DomainRuleServiceTest {
                         definitionId,
                         null,
                         true,
-                        "human",
-                        "procurement-owner",
                         null),
-                "tenant-a",
-                "dev");
+                principal("procurement-owner"));
 
         assertThat(response.publicationStatus()).isEqualTo("published");
         assertThat(response.materializations()).singleElement()
@@ -3043,11 +2965,8 @@ class DomainRuleServiceTest {
                         definitionId,
                         null,
                         true,
-                        "human",
-                        "privacy-office",
                         null),
-                "tenant-a",
-                "dev");
+                principal("privacy-office"));
 
         assertThat(response.publicationStatus()).isEqualTo("blocked");
         assertThat(response.publicationReadiness()).isEqualTo("approval_required");
@@ -3117,17 +3036,62 @@ class DomainRuleServiceTest {
                 materializationId,
                 new DomainRuleStatusTransitionRequest(
                         "applied",
-                        "llm",
-                        "openai:gpt-5.4-mini",
                         objectMapper.readTree("{\"checks\":[\"schema-compatible\"]}")),
-                "tenant-a",
-                "dev");
+                principal("release-operator"));
 
         assertThat(response.status()).isEqualTo("applied");
-        assertThat(response.appliedByType()).isEqualTo("llm");
-        assertThat(response.appliedBy()).isEqualTo("openai:gpt-5.4-mini");
+        assertThat(response.appliedByType()).isEqualTo("authenticated");
+        assertThat(response.appliedBy()).isEqualTo("release-operator");
         assertThat(response.appliedAt()).isNotNull();
         assertThat(response.validationResult().path("checks").get(0).asText()).isEqualTo("schema-compatible");
+        verify(materializationRepository).save(materialization);
+    }
+
+    @Test
+    void reappliesMaterializationWithCurrentAuthenticatedActorAndTimestamp() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID materializationId = UUID.randomUUID();
+        Instant previousApplication = Instant.parse("2026-07-01T10:15:30Z");
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(UUID.randomUUID())
+                .ruleKey("rule-a")
+                .version(1)
+                .ruleType("visual_guidance")
+                .status("active")
+                .definition("{}")
+                .parameters("{}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
+                .build();
+        DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
+                .id(materializationId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(definition)
+                .materializationKey("form:rule-a")
+                .targetLayer("form_config")
+                .targetArtifactType("praxis-dynamic-form")
+                .targetArtifactKey("funcionarios-form-demo")
+                .status("draft")
+                .materializedPayload("{}")
+                .appliedByType("authenticated")
+                .appliedBy("previous-operator")
+                .appliedAt(previousApplication)
+                .build();
+        when(materializationRepository.findById(materializationId)).thenReturn(Optional.of(materialization));
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.transitionMaterializationStatus(
+                materializationId,
+                new DomainRuleStatusTransitionRequest(
+                        "applied",
+                        objectMapper.readTree("{\"checks\":[\"revalidated\"]}")),
+                principal("current-operator"));
+
+        assertThat(response.appliedByType()).isEqualTo("authenticated");
+        assertThat(response.appliedBy()).isEqualTo("current-operator");
+        assertThat(response.appliedAt()).isAfter(previousApplication);
         verify(materializationRepository).save(materialization);
     }
 
@@ -3165,11 +3129,8 @@ class DomainRuleServiceTest {
                 materializationId,
                 new DomainRuleStatusTransitionRequest(
                         "applied",
-                        "llm",
-                        "openai:gpt-5.4-mini",
                         objectMapper.readTree("{\"checks\":[\"schema-compatible\"]}")),
-                "tenant-a",
-                "dev"))
+                principal("release-operator")))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("Rule materialization status transition is not allowed: reverted -> applied");
 
@@ -3211,11 +3172,8 @@ class DomainRuleServiceTest {
                 materializationId,
                 new DomainRuleStatusTransitionRequest(
                         "applied",
-                        "llm",
-                        "openai:gpt-5.4-mini",
                         objectMapper.readTree("{\"checks\":[\"schema-compatible\"]}")),
-                "tenant-a",
-                "dev"))
+                principal("release-operator")))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("Rule materialization can only be applied when its definition is active");
 

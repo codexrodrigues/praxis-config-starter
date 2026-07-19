@@ -1193,6 +1193,7 @@ paths:
       tags: [domain-rules]
       operationId: publishDomainRule
       summary: Publica definicao governada e materializa projecoes elegiveis
+      description: Usa exclusivamente identidade e escopo resolvidos pelo servidor; os headers sao hints de contexto e nao autoridade.
       parameters:
         - $ref: '#/components/parameters/TenantIdHeader'
         - $ref: '#/components/parameters/EnvHeader'
@@ -1215,12 +1216,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
+        '403':
+          description: Principal autenticado ausente ou sem `RULE_SNAPSHOT_PUBLISHER`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
 
   /api/praxis/config/domain-rules/materializations:
     post:
       tags: [domain-rules]
       operationId: createDomainRuleMaterialization
-      summary: Registra uma materializacao derivada da decisao governada
+      summary: Registra um target draft derivado da decisao governada
+      description: Nao ativa o target e nao realiza homologacao de negocio; identidade e escopo sao resolvidos pelo servidor.
       parameters:
         - $ref: '#/components/parameters/TenantIdHeader'
         - $ref: '#/components/parameters/EnvHeader'
@@ -1239,6 +1247,12 @@ paths:
                 $ref: '#/components/schemas/DomainRuleMaterializationResponse'
         '400':
           description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '403':
+          description: Principal autenticado ausente ou sem `RULE_DEFINITION_AUTHOR`
           content:
             application/json:
               schema:
@@ -1291,6 +1305,7 @@ paths:
       tags: [domain-rules]
       operationId: transitionDomainRuleMaterializationStatus
       summary: Transiciona status de materializacao derivada
+      description: Resolve o principal no servidor e aplica role por estagio; nenhuma identidade declarada no payload e aceita.
       parameters:
         - $ref: '#/components/parameters/TenantIdHeader'
         - $ref: '#/components/parameters/EnvHeader'
@@ -1315,6 +1330,12 @@ paths:
                 $ref: '#/components/schemas/DomainRuleMaterializationResponse'
         '400':
           description: Requisicao invalida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '403':
+          description: Principal autenticado ausente ou sem a role exigida pelo status alvo
           content:
             application/json:
               schema:
@@ -4068,7 +4089,7 @@ components:
 
     DomainRuleActorType:
       type: string
-      enum: [ai, llm, human, system]
+      enum: [ai, llm, human, system, authenticated]
 
     DomainRuleDefinitionRequest:
       type: object
@@ -4678,7 +4699,7 @@ components:
 
     DomainRulePublicationRequest:
       type: object
-      description: Publica uma definicao governada ja aprovada. O endpoint nao aprova draft/proposed; definicoes governadas publicaveis precisam estar `approved` ou `active` e o ator deve ser `human` ou `system` autorizado por `governance.requiredApprovals` ou `governance.authorizedApprovers`.
+      description: Publica uma definicao governada ja aprovada. O endpoint nao aprova draft/proposed; identidade, tenant e ambiente sao resolvidos pelo servidor, e o principal autenticado precisa da role `RULE_SNAPSHOT_PUBLISHER`.
       properties:
         ruleDefinitionId:
           type: string
@@ -4691,13 +4712,6 @@ components:
         applyEligibleMaterializations:
           type: boolean
           default: true
-        publishedByType:
-          description: Tipo do ator que solicita a publicacao. Para definicoes governadas, apenas `human` e `system` podem publicar.
-          $ref: '#/components/schemas/DomainRuleActorType'
-        publishedBy:
-          type: string
-          nullable: true
-          description: Identificador do ator autorizado pela governanca da definicao.
         publicationNotes:
           $ref: '#/components/schemas/DomainRuleJsonObject'
       additionalProperties: false
@@ -4750,6 +4764,7 @@ components:
 
     DomainRuleMaterializationRequest:
       type: object
+      description: Registra somente um target draft governado. A criacao aceita `draft` ou `pending_review`; identidade e escopo vem do principal autenticado com `RULE_DEFINITION_AUTHOR`.
       properties:
         ruleDefinitionId:
           type: string
@@ -4780,11 +4795,6 @@ components:
           nullable: true
         validationResult:
           $ref: '#/components/schemas/DomainRuleJsonObject'
-        appliedByType:
-          $ref: '#/components/schemas/DomainRuleActorType'
-        appliedBy:
-          type: string
-          nullable: true
       additionalProperties: false
 
     DomainRuleMaterializationResponse:
@@ -4804,6 +4814,13 @@ components:
             ruleVersion:
               type: integer
               nullable: true
+            appliedByType:
+              description: Classificacao persistida do ator que aplicou o target. Novas operacoes autenticadas usam `authenticated`.
+              $ref: '#/components/schemas/DomainRuleActorType'
+            appliedBy:
+              type: string
+              nullable: true
+              description: Identidade server-side do principal que aplicou o target; nunca e aceita no payload de mutacao.
             decisionDiagnostics:
               $ref: '#/components/schemas/DomainRuleDecisionDiagnostics'
             createdAt:
@@ -4822,16 +4839,11 @@ components:
 
     DomainRuleStatusTransitionRequest:
       type: object
-      description: Transicao de materializacao; a identidade operacional ainda pertence ao fluxo especifico de materializacao.
+      description: Transicao de materializacao. Identidade, tenant e ambiente sao resolvidos pelo servidor; `draft`/`pending_review` exigem `RULE_DEFINITION_AUTHOR`, `applied` exige `RULE_SNAPSHOT_PUBLISHER` e estados operacionais exigem `RULE_SNAPSHOT_OPERATOR`.
       properties:
         status:
           type: string
           description: Status alvo da definicao ou materializacao.
-        decidedByType:
-          $ref: '#/components/schemas/DomainRuleActorType'
-        decidedBy:
-          type: string
-          nullable: true
         validationResult:
           $ref: '#/components/schemas/DomainRuleJsonObject'
       additionalProperties: false

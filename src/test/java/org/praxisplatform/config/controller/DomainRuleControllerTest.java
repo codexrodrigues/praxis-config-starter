@@ -252,9 +252,7 @@ class DomainRuleControllerTest {
                 "pending_review",
                 null,
                 null,
-                null,
-                "llm",
-                "agent");
+                null);
         DomainRuleMaterializationResponse response = new DomainRuleMaterializationResponse(
                 UUID.randomUUID(),
                 "tenant-a",
@@ -279,12 +277,12 @@ class DomainRuleControllerTest {
                 null,
                 null,
                 null);
-        when(service.createMaterialization(request, "tenant-a", "dev")).thenReturn(response);
+        when(service.createMaterialization(request, PRINCIPAL)).thenReturn(response);
 
-        var entity = controller.createMaterialization(request, "tenant-a", "dev");
+        var entity = controller.createMaterialization(request, "tenant-a", "dev", servletRequest());
 
         assertThat(entity.getBody()).isSameAs(response);
-        verify(service).createMaterialization(request, "tenant-a", "dev");
+        verify(service).createMaterialization(request, PRINCIPAL);
     }
 
     @Test
@@ -382,8 +380,6 @@ class DomainRuleControllerTest {
                 definitionId,
                 List.of(),
                 true,
-                "human",
-                "procurement-owner",
                 null);
         DomainRulePublicationResponse response = new DomainRulePublicationResponse(
                 UUID.randomUUID(),
@@ -401,12 +397,12 @@ class DomainRuleControllerTest {
                 List.of(),
                 null,
                 java.time.Instant.now());
-        when(service.publish(request, "tenant-a", "dev")).thenReturn(response);
+        when(service.publish(request, PRINCIPAL)).thenReturn(response);
 
-        var entity = controller.publish(request, "tenant-a", "dev");
+        var entity = controller.publish(request, "tenant-a", "dev", servletRequest());
 
         assertThat(entity.getBody()).isSameAs(response);
-        verify(service).publish(request, "tenant-a", "dev");
+        verify(service).publish(request, PRINCIPAL);
     }
 
     @Test
@@ -417,8 +413,6 @@ class DomainRuleControllerTest {
         UUID materializationId = UUID.randomUUID();
         DomainRuleStatusTransitionRequest request = new DomainRuleStatusTransitionRequest(
                 "applied",
-                "human",
-                "privacy-office",
                 null);
         DomainRuleMaterializationResponse response = new DomainRuleMaterializationResponse(
                 materializationId,
@@ -444,13 +438,66 @@ class DomainRuleControllerTest {
                 null,
                 null,
                 null);
-        when(service.transitionMaterializationStatus(materializationId, request, "tenant-a", "dev"))
+        when(service.transitionMaterializationStatus(materializationId, request, PRINCIPAL))
                 .thenReturn(response);
 
-        var entity = controller.transitionMaterializationStatus(materializationId, request, "tenant-a", "dev");
+        var entity = controller.transitionMaterializationStatus(
+                materializationId, request, "tenant-a", "dev", servletRequest());
 
         assertThat(entity.getBody()).isSameAs(response);
-        verify(service).transitionMaterializationStatus(materializationId, request, "tenant-a", "dev");
+        verify(service).transitionMaterializationStatus(materializationId, request, PRINCIPAL);
+    }
+
+    @Test
+    void mutableMaterializationBoundariesResolveStageSpecificServerRoles() {
+        DomainRuleService service = mock(DomainRuleService.class);
+        DomainRuleGovernancePrincipalResolver resolver = mock(DomainRuleGovernancePrincipalResolver.class);
+        DomainRuleController controller = new DomainRuleController(service, resolver);
+        HttpServletRequest servletRequest = servletRequest();
+        UUID definitionId = UUID.randomUUID();
+        UUID materializationId = UUID.randomUUID();
+        DomainRuleMaterializationRequest draft = new DomainRuleMaterializationRequest(
+                definitionId,
+                "rule-a:backend-validation",
+                "backend_validation",
+                "resource-validation",
+                "resource-a",
+                "/validationPolicy",
+                null,
+                "rule-a",
+                "draft",
+                null,
+                "sha256:source",
+                null);
+        DomainRulePublicationRequest publication = new DomainRulePublicationRequest(
+                definitionId, List.of(), true, null);
+        DomainRuleStatusTransitionRequest applied = new DomainRuleStatusTransitionRequest("applied", null);
+        DomainRuleStatusTransitionRequest failed = new DomainRuleStatusTransitionRequest("failed", null);
+
+        when(resolver.resolve(servletRequest, "caller-tenant", "caller-env", "RULE_DEFINITION_AUTHOR"))
+                .thenReturn(PRINCIPAL);
+        when(resolver.resolve(servletRequest, "caller-tenant", "caller-env", "RULE_SNAPSHOT_PUBLISHER"))
+                .thenReturn(PRINCIPAL);
+        when(resolver.resolve(servletRequest, "caller-tenant", "caller-env", "RULE_SNAPSHOT_OPERATOR"))
+                .thenReturn(PRINCIPAL);
+
+        controller.createMaterialization(draft, "caller-tenant", "caller-env", servletRequest);
+        controller.publish(publication, "caller-tenant", "caller-env", servletRequest);
+        controller.transitionMaterializationStatus(
+                materializationId, applied, "caller-tenant", "caller-env", servletRequest);
+        controller.transitionMaterializationStatus(
+                materializationId, failed, "caller-tenant", "caller-env", servletRequest);
+
+        verify(resolver).resolve(
+                servletRequest, "caller-tenant", "caller-env", "RULE_DEFINITION_AUTHOR");
+        verify(resolver, org.mockito.Mockito.times(2)).resolve(
+                servletRequest, "caller-tenant", "caller-env", "RULE_SNAPSHOT_PUBLISHER");
+        verify(resolver).resolve(
+                servletRequest, "caller-tenant", "caller-env", "RULE_SNAPSHOT_OPERATOR");
+        verify(service).createMaterialization(draft, PRINCIPAL);
+        verify(service).publish(publication, PRINCIPAL);
+        verify(service).transitionMaterializationStatus(materializationId, applied, PRINCIPAL);
+        verify(service).transitionMaterializationStatus(materializationId, failed, PRINCIPAL);
     }
 
     private DomainRuleController controller(DomainRuleService service) {

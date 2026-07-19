@@ -56,8 +56,8 @@ public class DomainRuleService {
     private static final List<String> INITIAL_DEFINITION_STATUSES = List.of("draft", "proposed");
     private static final List<String> MATERIALIZATION_STATUSES = List.of(
             "draft", "pending_review", "applied", "failed", "superseded", "reverted");
+    private static final List<String> INITIAL_MATERIALIZATION_STATUSES = List.of("draft", "pending_review");
     private static final List<String> COVERAGE_STATUSES = List.of("approved", "active");
-    private static final List<String> GOVERNANCE_ACTOR_TYPES = List.of("human", "system");
 
     private final DomainRuleDefinitionRepository definitionRepository;
     private final DomainRuleMaterializationRepository materializationRepository;
@@ -484,14 +484,16 @@ public class DomainRuleService {
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRulePublicationResponse publish(
             DomainRulePublicationRequest request,
-            String tenantId,
-            String environment) {
+            DomainRuleGovernancePrincipal principal) {
         if (request == null) {
             throw new ConfigurationIngestionException("Domain rule publication request is required");
         }
         if (request.ruleDefinitionId() == null) {
             throw new ConfigurationIngestionException("ruleDefinitionId is required");
         }
+        requirePrincipal(principal);
+        String tenantId = principal.tenantId();
+        String environment = principal.environment();
 
         DomainRuleDefinition definition = definitionRepository.findById(request.ruleDefinitionId())
                 .orElseThrow(() -> new ConfigurationIngestionException(
@@ -541,16 +543,14 @@ public class DomainRuleService {
                     withBlockedPublicationDiagnostics(simulation.explainability(), readiness, definition),
                     Instant.now());
         }
-        requireGovernedDecisionAuthorization(definition, request.publishedByType(), request.publishedBy(), "publication");
-
         Instant publicationRequestedAt = Instant.now();
         UUID publicationId = UUID.randomUUID();
         recordPublicationEvent(
                 definition,
                 "publication.requested",
                 publicationRequestedAt,
-                request.publishedByType(),
-                request.publishedBy(),
+                "authenticated",
+                principal.actorRef(),
                 "Decision publication requested",
                 "requested",
                 readiness,
@@ -558,12 +558,6 @@ public class DomainRuleService {
                 publicationId);
         if (isPublishableDefinitionStatus(definition.getStatus())) {
             definition.setStatus("active");
-            if (!StringUtils.hasText(definition.getApprovedBy()) && StringUtils.hasText(request.publishedBy())) {
-                definition.setApprovedBy(request.publishedBy().trim());
-            }
-            if (definition.getApprovedAt() == null) {
-                definition.setApprovedAt(publicationRequestedAt);
-            }
             if (definition.getActivatedAt() == null) {
                 definition.setActivatedAt(publicationRequestedAt);
             }
@@ -577,6 +571,7 @@ public class DomainRuleService {
                 simulation.predictedMaterializations(),
                 tenantId,
                 environment,
+                principal,
                 publicationRequestedAt,
                 materializationOutcomes);
         Instant publicationCompletedAt = Instant.now();
@@ -587,8 +582,8 @@ public class DomainRuleService {
                 definition,
                 "publication.completed",
                 publicationCompletedAt,
-                request.publishedByType(),
-                request.publishedBy(),
+                "authenticated",
+                principal.actorRef(),
                 "Decision publication completed",
                 "published",
                 readiness,
@@ -616,8 +611,7 @@ public class DomainRuleService {
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleMaterializationResponse createMaterialization(
             DomainRuleMaterializationRequest request,
-            String tenantId,
-            String environment) {
+            DomainRuleGovernancePrincipal principal) {
         if (request == null) {
             throw new ConfigurationIngestionException("Domain rule materialization request is required");
         }
@@ -628,6 +622,9 @@ public class DomainRuleService {
         requireText(request.targetLayer(), "targetLayer");
         requireText(request.targetArtifactType(), "targetArtifactType");
         requireText(request.targetArtifactKey(), "targetArtifactKey");
+        requirePrincipal(principal);
+        String tenantId = principal.tenantId();
+        String environment = principal.environment();
 
         DomainRuleDefinition definition = definitionRepository.findById(request.ruleDefinitionId())
                 .orElseThrow(() -> new ConfigurationIngestionException("Rule definition not found: " + request.ruleDefinitionId()));
@@ -636,10 +633,7 @@ public class DomainRuleService {
         String status = requireAllowedStatus(
                 normalizeOrDefault(request.status(), "draft"),
                 "status",
-                MATERIALIZATION_STATUSES);
-        if ("applied".equals(status) && !"active".equals(definition.getStatus())) {
-            throw new ConfigurationIngestionException("Rule materialization can only be applied when its definition is active");
-        }
+                INITIAL_MATERIALIZATION_STATUSES);
         String materializationKey = request.materializationKey().trim();
         DomainRuleMaterialization existing = materializationRepository
                 .findByTenantIdAndEnvironmentAndMaterializationKey(
@@ -668,28 +662,14 @@ public class DomainRuleService {
         if (request.validationResult() != null && !request.validationResult().isNull()) {
             materialization.setValidationResult(write(request.validationResult()));
         }
-        materialization.setAppliedByType(normalize(request.appliedByType()));
-        materialization.setAppliedBy(normalize(request.appliedBy()));
-        if ("applied".equals(status)) {
-            materialization.setAppliedAt(Instant.now());
-        }
         DomainRuleMaterialization saved = materializationRepository.save(materialization);
         recordMaterializationEvent(
                 saved,
                 "materialization.created",
                 saved.getCreatedAt(),
-                "system",
-                "domain-rule-materialization",
+                "authenticated",
+                principal.actorRef(),
                 "Decision materialization created");
-        if ("applied".equals(saved.getStatus())) {
-            recordMaterializationEvent(
-                    saved,
-                    "materialization.applied",
-                    saved.getAppliedAt(),
-                    saved.getAppliedByType(),
-                    saved.getAppliedBy(),
-                    "Decision materialization applied");
-        }
         return toResponse(saved);
     }
 
@@ -1329,36 +1309,6 @@ public class DomainRuleService {
         requireRequiredApprovals(governance);
     }
 
-    private void requireGovernedDecisionAuthorization(
-            DomainRuleDefinition definition,
-            String actorType,
-            String actor,
-            String action) {
-        if (definition == null || !isGovernedDecision(
-                definition.getRuleType(),
-                read(definition.getDefinition()),
-                read(definition.getParameters()))) {
-            return;
-        }
-        JsonNode governance = read(definition.getGovernance());
-        ArrayNode requiredApprovals = requireRequiredApprovals(governance);
-        String normalizedActorType = normalizeOrDefault(actorType, "human");
-        if (!GOVERNANCE_ACTOR_TYPES.contains(normalizedActorType)) {
-            throw new ConfigurationIngestionException(
-                    "Governed domain rule " + action + " requires a human or system actor");
-        }
-        String normalizedActor = normalize(actor);
-        if (!StringUtils.hasText(normalizedActor)) {
-            throw new ConfigurationIngestionException(
-                    "Governed domain rule " + action + " requires an authorized actor");
-        }
-        List<String> authorizedApprovers = authorizedApprovers(governance, requiredApprovals);
-        if (!authorizedApprovers.contains(normalizedActor)) {
-            throw new ConfigurationIngestionException(
-                    "Governed domain rule " + action + " actor is not authorized by governance");
-        }
-    }
-
     private void requireDefinitionApproverAuthorization(
             DomainRuleDefinition definition,
             String actor,
@@ -1733,6 +1683,7 @@ public class DomainRuleService {
             JsonNode predictedMaterializations,
             String tenantId,
             String environment,
+            DomainRuleGovernancePrincipal principal,
             Instant now,
             ArrayNode materializationOutcomes) {
         boolean applyEligibleMaterializations = request.applyEligibleMaterializations() == null
@@ -1798,7 +1749,7 @@ public class DomainRuleService {
                                 "Rule materialization status is not publishable: " + materialization.getStatus());
                     }
                 })
-                .map(materialization -> maybeApplyMaterialization(materialization, request, now))
+                .map(materialization -> maybeApplyMaterialization(materialization, principal, now))
                 .map(this::toResponse)
                 .toList();
     }
@@ -2288,15 +2239,13 @@ public class DomainRuleService {
 
     private DomainRuleMaterialization maybeApplyMaterialization(
             DomainRuleMaterialization materialization,
-            DomainRulePublicationRequest request,
+            DomainRuleGovernancePrincipal principal,
             Instant now) {
         if ("draft".equals(materialization.getStatus()) || "pending_review".equals(materialization.getStatus())) {
             materialization.setStatus("applied");
-            materialization.setAppliedByType(normalizeOrDefault(request.publishedByType(), "human"));
-            materialization.setAppliedBy(normalize(request.publishedBy()));
-            if (materialization.getAppliedAt() == null) {
-                materialization.setAppliedAt(now);
-            }
+            materialization.setAppliedByType("authenticated");
+            materialization.setAppliedBy(principal.actorRef());
+            materialization.setAppliedAt(now);
             DomainRuleMaterialization saved = materializationRepository.save(materialization);
             recordMaterializationEvent(
                     saved,
@@ -2431,14 +2380,16 @@ public class DomainRuleService {
     public DomainRuleMaterializationResponse transitionMaterializationStatus(
             UUID materializationId,
             DomainRuleStatusTransitionRequest request,
-            String tenantId,
-            String environment) {
+            DomainRuleGovernancePrincipal principal) {
         if (materializationId == null) {
             throw new ConfigurationIngestionException("materializationId is required");
         }
         if (request == null) {
             throw new ConfigurationIngestionException("Domain rule status transition request is required");
         }
+        requirePrincipal(principal);
+        String tenantId = principal.tenantId();
+        String environment = principal.environment();
         String status = requireAllowedStatus(request.status(), "status", MATERIALIZATION_STATUSES);
         DomainRuleMaterialization materialization = materializationRepository.findById(materializationId)
                 .orElseThrow(() -> new ConfigurationIngestionException("Rule materialization not found: " + materializationId));
@@ -2452,13 +2403,9 @@ public class DomainRuleService {
         String previousStatus = materialization.getStatus();
         materialization.setStatus(status);
         materialization.setValidationResult(writeNullable(request.validationResult()));
-        if (StringUtils.hasText(request.decidedByType())) {
-            materialization.setAppliedByType(request.decidedByType().trim());
-        }
-        if (StringUtils.hasText(request.decidedBy())) {
-            materialization.setAppliedBy(request.decidedBy().trim());
-        }
-        if ("applied".equals(status) && materialization.getAppliedAt() == null) {
+        if ("applied".equals(status) && !"applied".equals(previousStatus)) {
+            materialization.setAppliedByType("authenticated");
+            materialization.setAppliedBy(principal.actorRef());
             materialization.setAppliedAt(Instant.now());
         }
         DomainRuleMaterialization saved = materializationRepository.save(materialization);

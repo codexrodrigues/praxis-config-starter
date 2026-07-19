@@ -399,6 +399,12 @@ digest. In corporate mode the host must map the IAM roles
 `RULE_DEFINITION_AUTHOR`, `RULE_DEFINITION_APPROVER`,
 `RULE_COMPOSITION_APPROVER`, `RULE_SNAPSHOT_PUBLISHER` and
 `RULE_SNAPSHOT_OPERATOR`; actor names sent in request bodies are not accepted.
+The same server-side identity boundary applies to legacy publication and
+materialization endpoints: draft creation uses `RULE_DEFINITION_AUTHOR`,
+application/publication uses `RULE_SNAPSHOT_PUBLISHER`, and failure,
+supersession or reversion uses `RULE_SNAPSHOT_OPERATOR`. Creating a
+materialization accepts only `draft` or `pending_review`; this technical draft
+step neither requires nor claims business homologation.
 Definition approval is append-only, rejects self-approval and is tied to the
 exact canonical definition hash. The Config Starter rejects source, composition
 or catalog drift and never treats
