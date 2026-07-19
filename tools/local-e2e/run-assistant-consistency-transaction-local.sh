@@ -138,55 +138,32 @@ expected_widget_count="$(jq -r '.preview.compiledFormPatch.patch.page.widgets | 
 first_widget_count="$(jq -r '.payload.widgets | length' "$ARTIFACTS_DIR/transaction.readback-1.response.json")"
 test "$first_widget_count" = "$expected_widget_count"
 
-second_apply_status="$(curl -sS --max-time 60 \
+duplicate_create_status="$(curl -sS --max-time 60 \
   -D "$ARTIFACTS_DIR/transaction.apply-2.headers" \
   -o "$ARTIFACTS_DIR/transaction.apply-2.response.json" \
   -w '%{http_code}' \
   -X POST "$apply_uri" "${headers[@]}" -H "X-Updated-By: $UPDATED_BY" -H "If-Match: $first_etag" \
   --data-binary @"$ARTIFACTS_DIR/transaction.apply.request.json")"
-test "$second_apply_status" = "200"
-jq -e '.applied == true' "$ARTIFACTS_DIR/transaction.apply-2.response.json" >/dev/null
-second_version="$(jq -r '.version' "$ARTIFACTS_DIR/transaction.apply-2.response.json")"
-test "$second_version" = "$((first_version + 1))"
-second_etag_raw="$(jq -r '.etag // empty' "$ARTIFACTS_DIR/transaction.apply-2.response.json")"
-second_etag="$(etag_header "$ARTIFACTS_DIR/transaction.apply-2.headers")"
-test -n "$second_etag_raw"
-test "$second_etag" = "\"$second_etag_raw\""
-test "$second_etag" != "$first_etag"
-latest_etag="$second_etag"
+test "$duplicate_create_status" = "400"
+jq -e '.message == "agentic-turn-result-create-precondition-mismatch"' \
+  "$ARTIFACTS_DIR/transaction.apply-2.response.json" >/dev/null
 
 second_get_status="$(curl -sS --max-time 30 \
   -D "$ARTIFACTS_DIR/transaction.readback-2.headers" \
   -o "$ARTIFACTS_DIR/transaction.readback-2.response.json" \
   -w '%{http_code}' "$ui_uri" "${headers[@]}")"
 test "$second_get_status" = "200"
-test "$(etag_header "$ARTIFACTS_DIR/transaction.readback-2.headers")" = "$second_etag"
-test "$(jq -r '.version' "$ARTIFACTS_DIR/transaction.readback-2.response.json")" = "$second_version"
+test "$(etag_header "$ARTIFACTS_DIR/transaction.readback-2.headers")" = "$first_etag"
+test "$(jq -r '.version' "$ARTIFACTS_DIR/transaction.readback-2.response.json")" = "$first_version"
 second_page="$(jq -S -c '.payload' "$ARTIFACTS_DIR/transaction.readback-2.response.json")"
 test "$second_page" = "$expected_page"
 second_widget_count="$(jq -r '.payload.widgets | length' "$ARTIFACTS_DIR/transaction.readback-2.response.json")"
 test "$second_widget_count" = "$expected_widget_count"
 
-stale_status="$(curl -sS --max-time 60 \
-  -o "$ARTIFACTS_DIR/transaction.stale-retry.response.txt" \
-  -w '%{http_code}' \
-  -X POST "$apply_uri" "${headers[@]}" -H "X-Updated-By: $UPDATED_BY" -H "If-Match: $first_etag" \
-  --data-binary @"$ARTIFACTS_DIR/transaction.apply.request.json")"
-test "$stale_status" = "412"
-
-after_stale_status="$(curl -sS --max-time 30 \
-  -D "$ARTIFACTS_DIR/transaction.after-stale.headers" \
-  -o "$ARTIFACTS_DIR/transaction.after-stale.response.json" \
-  -w '%{http_code}' "$ui_uri" "${headers[@]}")"
-test "$after_stale_status" = "200"
-test "$(etag_header "$ARTIFACTS_DIR/transaction.after-stale.headers")" = "$second_etag"
-test "$(jq -r '.version' "$ARTIFACTS_DIR/transaction.after-stale.response.json")" = "$second_version"
-test "$(jq -S -c '.payload' "$ARTIFACTS_DIR/transaction.after-stale.response.json")" = "$expected_page"
-
 delete_status="$(curl -sS --max-time 30 \
   -o "$ARTIFACTS_DIR/transaction.delete.response.txt" \
   -w '%{http_code}' \
-  -X DELETE "$ui_uri" "${headers[@]}" -H "If-Match: $second_etag")"
+  -X DELETE "$ui_uri" "${headers[@]}" -H "If-Match: $first_etag")"
 test "$delete_status" = "204"
 cleanup_complete=true
 latest_etag=""
@@ -201,7 +178,6 @@ jq -n \
   --arg componentType "$COMPONENT_TYPE" \
   --arg componentId "$component_id" \
   --argjson initialVersion "$first_version" \
-  --argjson replayVersion "$second_version" \
   --argjson widgetCount "$expected_widget_count" \
   --argjson durationSeconds "$duration_seconds" \
   '{
@@ -209,13 +185,11 @@ jq -n \
     componentType: $componentType,
     componentId: $componentId,
     exactReadback: true,
-    conditionalReplayApplied: true,
-    replayStateExact: true,
+    duplicateCreateBlocked: true,
+    stateUnchangedAfterDuplicate: true,
     widgetCountStable: true,
-    staleRetryBlocked: true,
     cleanupDeleted: true,
     initialVersion: $initialVersion,
-    replayVersion: $replayVersion,
     widgetCount: $widgetCount,
     durationSeconds: $durationSeconds
   }' | tee "$ARTIFACTS_DIR/transaction-summary.json"

@@ -64,6 +64,7 @@ python3 - "$CORPUS_PATH" "$ARTIFACTS_DIR" "$PROFILE" "$REPETITIONS" "$CASE_IDS" 
 import json
 import pathlib
 import sys
+from copy import deepcopy
 
 corpus_path = pathlib.Path(sys.argv[1])
 artifacts_dir = pathlib.Path(sys.argv[2])
@@ -123,7 +124,10 @@ if not selected:
 runs = []
 for repetition in range(1, repetitions + 1):
     for kind, unit in selected:
-        context = contexts[unit["contextRef"]]
+        context = deepcopy(contexts[unit["contextRef"]])
+        apply_target = (context.get("contextHints") or {}).get("agenticApplyTarget")
+        if apply_target is not None:
+            apply_target["componentId"] = f"assistant-consistency-{repetition}-{unit['id']}"
         turns = unit.get("turns") if kind == "journey" else [unit]
         previous_relative = None
         for turn_index, turn in enumerate(turns, start=1):
@@ -289,9 +293,10 @@ if [[ "$REUSE_EXISTING_ARTIFACTS" != "true" ]]; then
 
     persistence_apply="$(jq -r '.expected.persistence.apply // empty' "$case_dir/case.json")"
     if [[ "$runner_exit" = "0" && "$persistence_apply" = "required" ]]; then
-      echo "--- transactional apply/readback/replay/cleanup proof ---"
+      echo "--- transactional create/readback/duplicate-guard/cleanup proof ---"
       set +e
       ARTIFACTS_DIR="$case_dir" \
+        COMPONENT_ID="$(jq -r '.contextHints.agenticApplyTarget.componentId // empty' "$case_dir/context.json")" \
         BASE_URL="$BASE_URL" \
         ORIGIN="$ORIGIN" \
         TENANT_ID="$TENANT_ID" \
@@ -516,10 +521,9 @@ for run in plan["runs"]:
             transaction_checks = {
                 "applied": True,
                 "exactReadback": True,
-                "conditionalReplayApplied": True,
-                "replayStateExact": True,
+                "duplicateCreateBlocked": True,
+                "stateUnchangedAfterDuplicate": True,
                 "widgetCountStable": True,
-                "staleRetryBlocked": True,
                 "cleanupDeleted": True,
             }
             for field, expected_value in transaction_checks.items():
@@ -528,10 +532,9 @@ for run in plan["runs"]:
                         f"transaction {field} {transaction.get(field)!r} expected {expected_value!r}"
                     )
             initial_version = transaction.get("initialVersion")
-            replay_version = transaction.get("replayVersion")
-            if not isinstance(initial_version, int) or replay_version != initial_version + 1:
+            if not isinstance(initial_version, int) or initial_version != 1:
                 failures.append(
-                    f"transaction versions {initial_version!r}->{replay_version!r} do not prove conditional replay"
+                    f"transaction initial version {initial_version!r} does not prove isolated create"
                 )
         else:
             failures.append("transaction summary absent")

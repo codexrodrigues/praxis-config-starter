@@ -10,6 +10,13 @@
       "currentPage": { "widgets": [] },
       "selectedWidgetKey": null,
       "contextHints": {
+        "agenticApplyTarget": {
+          "schemaVersion": "praxis-agentic-authoring-apply-target.v1",
+          "componentType": "praxis-dynamic-page",
+          "componentId": "page-builder-ia",
+          "scope": "user",
+          "mode": "create"
+        },
         "domainDiscovery": [
           {
             "resourceKey": "operations.missoes",
@@ -107,6 +114,13 @@
       "contextHints": {
         "selectedWidgetKey": "funcionarios-table",
         "selectedComponentId": "praxis-table",
+        "agenticApplyTarget": {
+          "schemaVersion": "praxis-agentic-authoring-apply-target.v1",
+          "componentType": "praxis-dynamic-page",
+          "componentId": "page-builder-ia",
+          "scope": "user",
+          "mode": "create"
+        },
         "authoringManifestRef": {
           "componentId": "praxis-table",
           "source": "PRAXIS_TABLE_AUTHORING_MANIFEST"
