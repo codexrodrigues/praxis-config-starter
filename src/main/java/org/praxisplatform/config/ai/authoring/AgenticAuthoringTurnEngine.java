@@ -2351,6 +2351,7 @@ public class AgenticAuthoringTurnEngine {
                 Map.of(
                         "schemaVersion", safeText(plan.schemaVersion()),
                         "toolCallCount", Math.min(plan.toolCalls().size(), MAX_TOOL_CALLS_PER_TURN),
+                        "requiresFullIntentResolution", plan.requiresFullIntentResolution(),
                         "reason", safeText(plan.reason()))));
         AgenticAuthoringResourceCandidatesResult resourceDiscovery = null;
         List<AgenticAuthoringProjectKnowledgeProjection> domainKnowledge = new ArrayList<>();
@@ -2400,7 +2401,10 @@ public class AgenticAuthoringTurnEngine {
         }
         return new PreIntentToolPlanExecution(
                 resourceDiscovery,
-                "governed_domain_discovery".equals(plan.semanticIntentClass()) ? plan : null,
+                plan.requiresFullIntentResolution()
+                                || "governed_domain_discovery".equals(plan.semanticIntentClass())
+                        ? plan
+                        : null,
                 List.copyOf(domainKnowledge),
                 List.copyOf(domainBindings),
                 List.copyOf(verifiedOperations),

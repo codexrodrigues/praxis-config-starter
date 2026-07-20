@@ -778,6 +778,17 @@ public class AgenticAuthoringPreviewService {
                     warnings,
                     schemaBaseUrl,
                     schemaFetchCache);
+            uiCompositionPlan = groundTableQueryContextFilters(
+                    request,
+                    uiCompositionPlan,
+                    warnings,
+                    schemaBaseUrl,
+                    schemaFetchCache);
+            if (warnings.contains("table-query-filter-schema-grounding-incomplete")) {
+                addAllOnce(failureCodes, List.of("table-query-filter-schema-grounding-incomplete"));
+                technicallyValid = false;
+                semanticallyValid = false;
+            }
             if (provider instanceof AgenticAuthoringGenericUiCompositionPlanProvider genericProvider
                     && uiCompositionPlan instanceof ObjectNode uiCompositionPlanObject
                     && genericProvider.reflowPrunedDashboard(request, uiCompositionPlanObject)) {
@@ -1909,6 +1920,29 @@ public class AgenticAuthoringPreviewService {
             addWarningOnce(warnings, "semantic-chart-count-metric-normalized-for-stats-contract");
             addWarningOnce(warnings, "semantic-chart-count-metric-preserved-for-record-count");
             warnings.remove("semantic-chart-metric-schema-verification-unsupported-field");
+        }
+        return copy;
+    }
+
+    private JsonNode groundTableQueryContextFilters(
+            AgenticAuthoringPlanRequest request,
+            JsonNode uiCompositionPlan,
+            List<String> warnings,
+            String schemaBaseUrl,
+            PreviewSchemaFetchCache schemaFetchCache) {
+        if (!containsComponent(uiCompositionPlan, "praxis-table")) {
+            return uiCompositionPlan;
+        }
+        Optional<Map<String, SchemaFieldDescriptor>> filterFields =
+                filterSchemaFields(request, schemaBaseUrl, schemaFetchCache);
+        if (filterFields.isEmpty() || filterFields.get().isEmpty()) {
+            return uiCompositionPlan;
+        }
+        JsonNode copy = uiCompositionPlan.deepCopy();
+        if (copy.path("widgets") instanceof ArrayNode widgets) {
+            for (JsonNode widget : widgets) {
+                alignTableQueryContextFilters(widget, filterFields.get(), null, warnings);
+            }
         }
         return copy;
     }
@@ -3442,6 +3476,7 @@ public class AgenticAuthoringPreviewService {
             for (int i = widgetArray.size() - 1; i >= 0; i--) {
                 JsonNode widget = widgetArray.get(i);
                 alignAuxiliaryWidgetBindings(widget, schemaFields, filterSchemaFields, schemaResult, warnings);
+                alignTableQueryContextFilters(widget, filterSchemaFields, schemaResult, warnings);
                 JsonNode axis = widget.path("inputs").path("config").path("semanticAxis");
                 if (!(axis instanceof ObjectNode axisObject)) {
                     continue;
@@ -3592,6 +3627,34 @@ public class AgenticAuthoringPreviewService {
             resolvedAxisFields.forEach(fieldsArray::add);
             alignFilterFields(widget, filterSchemaFields, schemaResult, warnings);
         }
+    }
+
+    private void alignTableQueryContextFilters(
+            JsonNode widget,
+            Map<String, SchemaFieldDescriptor> filterSchemaFields,
+            SchemaFetchResult schemaResult,
+            List<String> warnings) {
+        if (!"praxis-table".equals(widget.path("componentId").asText(""))
+                || !(widget.path("inputs").path("queryContext").path("filters") instanceof ObjectNode filters)
+                || filters.isEmpty()) {
+            return;
+        }
+        ObjectNode aligned = objectMapper.createObjectNode();
+        filters.fields().forEachRemaining(entry -> {
+            Optional<SchemaFieldDescriptor> resolved = resolveSchemaField(
+                    axisProbe(entry.getKey()),
+                    filterSchemaFields);
+            if (resolved.isPresent()) {
+                aligned.set(resolved.get().name(), entry.getValue().deepCopy());
+            }
+        });
+        if (aligned.size() != filters.size()) {
+            addWarningOnce(warnings, "table-query-filter-schema-grounding-incomplete");
+            return;
+        }
+        filters.removeAll();
+        filters.setAll(aligned);
+        addWarningOnce(warnings, "table-query-filter-schema-grounded");
     }
 
     private void normalizeFilterQueryContextBindings(

@@ -667,6 +667,7 @@ for run in plan["runs"]:
 
     column_fields = []
     selected_config = {}
+    selected_inputs = {}
     if has_preview:
         composition = preview.get("uiCompositionPlan")
         composition = composition if isinstance(composition, dict) else {}
@@ -684,20 +685,23 @@ for run in plan["runs"]:
             config = inputs.get("config") if isinstance(inputs.get("config"), dict) else {}
             if widget.get("key") == selected_widget_key:
                 selected_config = config
+                selected_inputs = inputs
             for column in config.get("columns") or []:
                 if isinstance(column, dict) and isinstance(column.get("field"), str):
                     column_fields.append(column["field"])
         if not selected_config:
-            selected_config = next((
-                inputs.get("config", {})
+            selected_inputs = next((
+                inputs
                 for widget in composition.get("widgets") or []
                 for inputs in (widget_inputs(widget),)
                 if isinstance(widget, dict)
                 and isinstance(inputs.get("config"), dict)
                 and isinstance(inputs.get("config", {}).get("columns"), list)
             ), {})
+            selected_config = selected_inputs.get("config", {}) if isinstance(selected_inputs, dict) else {}
     page_assertions = case.get("pageAssertions")
     asserted_config_values = {}
+    asserted_input_values = {}
     if isinstance(page_assertions, dict):
         missing_columns = [
             field for field in page_assertions.get("requiredColumnFields", [])
@@ -736,6 +740,15 @@ for run in plan["runs"]:
             elif not same_json_value(actual_value, expected_value):
                 failures.append(
                     f"preview config value at {pointer!r} {actual_value!r} expected {expected_value!r}"
+                )
+        for pointer, expected_value in page_assertions.get("requiredInputValues", {}).items():
+            actual_value = json_pointer(selected_inputs, pointer)
+            asserted_input_values[pointer] = None if actual_value is MISSING else actual_value
+            if actual_value is MISSING:
+                failures.append(f"preview inputs missing required value at {pointer!r}")
+            elif not same_json_value(actual_value, expected_value):
+                failures.append(
+                    f"preview inputs value at {pointer!r} {actual_value!r} expected {expected_value!r}"
                 )
 
     start_response_path = case_dir / "turn.start.response.json"

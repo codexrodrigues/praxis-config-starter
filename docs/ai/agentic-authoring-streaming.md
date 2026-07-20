@@ -562,6 +562,10 @@ explicito. Sem esse escopo, a orientacao semantica decide primeiro o nivel neces
 progressivamente `discoverDomainContexts`, `discoverDomainCapabilities`, `discoverDomainConcepts`,
 `inspectDomainBindings`, `verifyDomainOperation` ou `searchApiResources`. Isso evita varrer o
 catalogo inteiro antes de saber se a pergunta exige dominio, binding ou endpoint.
+Bindings aprovados reforcam e habilitam verificacao operacional exata, mas sua ausencia durante a
+adocao progressiva do Semantic IR nao apaga candidatos ja governados por Domain Catalog, API Metadata
+e schema. Nesse caso `searchApiResources` continua a descoberta e preserva a proveniencia efetiva;
+materializacao segue sujeita aos gates de elegibilidade, schema, capability, preview e revisao.
 
 Perguntas que enumeram os dominios, temas ou assuntos de negocio efetivamente disponiveis usam a
 classe semantica interna `governed_domain_discovery`. Ela nao e orientacao generica nem autoria de

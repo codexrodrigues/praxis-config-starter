@@ -33,7 +33,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private static final int MAX_PLANNER_CONTEXT_ARRAY_ITEMS = 8;
     private static final int MAX_PLANNER_PAGE_WIDGETS = 12;
     private static final int MAX_PLANNER_TEXT_LENGTH = 700;
-    private static final int MAX_PLANNER_USER_PROMPT_LENGTH = 1400;
+    private static final int MAX_PLANNER_USER_PROMPT_LENGTH = 1100;
     private static final int DEFAULT_PLANNING_BUDGET_SECONDS = 12;
     private static final int DEFAULT_PROVIDER_ATTEMPTS = 2;
     private static final long DEFAULT_PROVIDER_RETRY_DELAY_MS = 250L;
@@ -350,7 +350,10 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     text(result, "reason"),
                     List.of(),
                     semanticIntentClass,
-                    assistantMessage));
+                    assistantMessage,
+                    false,
+                    result.path("queryConstraints").deepCopy(),
+                    text(result, "artifactKind")));
         }
         if (!result.path("shouldRetrieveGovernedResources").asBoolean(false)) {
             return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
@@ -358,7 +361,10 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     text(result, "reason"),
                     List.of(),
                     semanticIntentClass,
-                    ""));
+                    "",
+                    result.path("requiresFullIntentResolution").asBoolean(false),
+                    result.path("queryConstraints").deepCopy(),
+                    text(result, "artifactKind")));
         }
         String groundingProfile = text(result, "groundingProfile");
         if (!List.of("domain_context", "domain_capability", "domain_concept", "domain_binding", "operation_verification", "api_resource")
@@ -372,6 +378,11 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         AgenticAuthoringResourceSearchFocus resourceSearchFocus =
                 resourceSearchFocus(result.path("resourceSearchFocus"));
         resourceSearchFocus = reconcileDomainDiscoveryResourceFocus(request, resourceSearchFocus);
+        boolean requiresFullIntentResolution = result.path("requiresFullIntentResolution").asBoolean(false)
+                || "authoring_or_other".equals(semanticIntentClass)
+                && resourceSearchFocus != null
+                && resourceSearchFocus.supportingConcepts() != null
+                && !resourceSearchFocus.supportingConcepts().isEmpty();
         retrievalQuery = focusedRetrievalQuery(retrievalQuery, resourceSearchFocus);
         String artifactKind = text(result, "artifactKind");
         if (!List.of("page", "dashboard", "chart", "table", "form", "api_catalog").contains(artifactKind)) {
@@ -384,7 +395,10 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 text(result, "reason"),
                 List.of(toolCall),
                 semanticIntentClass,
-                ""));
+                "",
+                requiresFullIntentResolution,
+                result.path("queryConstraints").deepCopy(),
+                artifactKind));
     }
 
     private AgenticAuthoringToolCall progressiveToolCall(
@@ -521,6 +535,13 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
 
                 Set semanticIntentClass=authoring_or_other when the user requests creation, editing, removal,
                 inspection, a concrete domain artifact, or another intent that needs the complete governed resolver.
+                A request to show records on an empty canvas is UI authoring even without a component name.
+                Preserve its constraints for schema-grounded materialization.
+                Encode every user-authored data predicate in queryConstraints.filters. Do not encode resource paths,
+                endpoints, component identifiers or retrieval metadata as data filters. Use an empty filters array when
+                the user did not request a data subset.
+                Set requiresFullIntentResolution=true when concrete authoring includes a predicate, subset, field value,
+                grouping, ordering, aggregation or layout constraint. Resource discovery alone never resolves these.
                 For that class, leave assistantMessage empty and decide whether to run searchApiResources before
                 authoring. Select groundingProfile progressively: domain_context for macro business orientation,
                 domain_capability when a governed context is known but the business capability is not, domain_concept
@@ -885,6 +906,32 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 "Semantic routing decision authored by the model. Use governed_domain_discovery for questions asking which business subjects, themes, or domains can be used for possible tables, dashboards, forms, or pages; mentioning those future artifacts does not make the request concrete authoring.");
         properties.putObject("assistantMessage").put("type", "string");
         properties.putObject("shouldRetrieveGovernedResources").put("type", "boolean");
+        properties.putObject("requiresFullIntentResolution")
+                .put("type", "boolean")
+                .put("description", "True when resource discovery cannot preserve every requested constraint.");
+        ObjectNode queryConstraints = properties.putObject("queryConstraints");
+        queryConstraints.put("type", "object");
+        ObjectNode queryConstraintProperties = queryConstraints.putObject("properties");
+        ObjectNode queryFilters = queryConstraintProperties.putObject("filters");
+        queryFilters.put("type", "array");
+        ObjectNode queryFilter = queryFilters.putObject("items");
+        queryFilter.put("type", "object");
+        ObjectNode queryFilterProperties = queryFilter.putObject("properties");
+        queryFilterProperties.putObject("concept").put("type", "string");
+        queryFilterProperties.putObject("field").put("type", "string");
+        ObjectNode queryOperator = queryFilterProperties.putObject("operator");
+        queryOperator.put("type", "string");
+        queryOperator.putArray("enum").add("eq").add("contains").add("in").add("gte").add("lte").add("between");
+        ObjectNode queryValue = queryFilterProperties.putObject("value");
+        ArrayNode queryValueAlternatives = queryValue.putArray("anyOf");
+        queryValueAlternatives.addObject().put("type", "string");
+        queryValueAlternatives.addObject().put("type", "number");
+        queryValueAlternatives.addObject().put("type", "boolean");
+        queryValueAlternatives.addObject().put("type", "null");
+        queryFilter.putArray("required").add("concept").add("field").add("operator").add("value");
+        queryFilter.put("additionalProperties", false);
+        queryConstraints.putArray("required").add("filters");
+        queryConstraints.put("additionalProperties", false);
         ObjectNode groundingProfile = properties.putObject("groundingProfile");
         groundingProfile.put("type", "string");
         groundingProfile.putArray("enum")
@@ -931,6 +978,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 .add("semanticIntentClass")
                 .add("assistantMessage")
                 .add("shouldRetrieveGovernedResources")
+                .add("requiresFullIntentResolution")
+                .add("queryConstraints")
                 .add("groundingProfile")
                 .add("artifactKind")
                 .add("retrievalQuery")

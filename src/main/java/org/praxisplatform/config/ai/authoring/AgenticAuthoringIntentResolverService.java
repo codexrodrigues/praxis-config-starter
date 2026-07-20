@@ -303,7 +303,8 @@ public class AgenticAuthoringIntentResolverService {
                     llmResolutionRequest,
                     effectivePrompt,
                     target,
-                    llmCandidateOptions);
+                    llmCandidateOptions,
+                    semanticOrientation);
         }
         if (llmIntent == null) {
             llmIntent = resolveLlmIntent(
@@ -318,6 +319,10 @@ public class AgenticAuthoringIntentResolverService {
                     userId,
                     environment);
         }
+        llmIntent = normalizeConstrainedAuthoringResolution(
+                llmIntent,
+                semanticOrientation,
+                llmCandidateOptions);
         semanticRefinement = semanticRefinement(prompt, activeDecision, llmIntent);
         decisionMemoryRefinement = semanticRefinement.active();
         JsonNode llmDiagnostics = llmDiagnostics(
@@ -2632,8 +2637,10 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringIntentResolutionRequest request,
             String effectivePrompt,
             AgenticAuthoringTarget target,
-            List<AgenticAuthoringCandidate> candidates) {
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
         if (!shouldResolveLlmIntent
+                || semanticOrientation != null && semanticOrientation.requiresFullIntentResolution()
                 || request == null
                 || request.pendingClarification() != null
                 || request.activeSemanticDecision() != null
@@ -2755,6 +2762,72 @@ public class AgenticAuthoringIntentResolverService {
                 null,
                 false,
                 "platform_guidance");
+    }
+
+    private AgenticAuthoringLlmIntentResolution normalizeConstrainedAuthoringResolution(
+            AgenticAuthoringLlmIntentResolution resolution,
+            AgenticAuthoringPreIntentToolPlan semanticOrientation,
+            List<AgenticAuthoringCandidate> candidates) {
+        JsonNode orientedConstraints = semanticOrientation == null ? null : semanticOrientation.queryConstraints();
+        JsonNode governedConstraints = orientedConstraints != null
+                        && orientedConstraints.path("filters").isArray()
+                        && !orientedConstraints.path("filters").isEmpty()
+                ? orientedConstraints
+                : resolution == null ? null : resolution.queryConstraints();
+        String governedArtifactKind = constrainedOrientationArtifactKind(semanticOrientation, resolution);
+        if (resolution == null
+                || semanticOrientation == null
+                || !semanticOrientation.requiresFullIntentResolution()
+                || !"authoring_or_other".equals(semanticOrientation.semanticIntentClass())
+                || governedConstraints == null
+                || !governedConstraints.path("filters").isArray()
+                || governedConstraints.path("filters").isEmpty()
+                || candidates == null
+                || candidates.size() != 1
+                || !List.of("table", "page", "dashboard", "chart").contains(governedArtifactKind)) {
+            return resolution;
+        }
+        List<String> warnings = new ArrayList<>(resolution.warnings() == null ? List.of() : resolution.warnings());
+        if (!warnings.contains("llm-constrained-authoring-resource-confirmation-normalized")) {
+            warnings.add("llm-constrained-authoring-resource-confirmation-normalized");
+        }
+        return new AgenticAuthoringLlmIntentResolution(
+                true,
+                "create",
+                governedArtifactKind,
+                "create_artifact",
+                candidates.get(0).resourcePath(),
+                resolution.resourceSearchQuery(),
+                "none",
+                resolution.assistantMessage(),
+                resolution.quickReplies(),
+                List.of(),
+                List.copyOf(warnings),
+                resolution.consultativeRetrievalPlan(),
+                resolution.visualizationDecision(),
+                false,
+                "component_authoring",
+                governedConstraints,
+                resolution.providerInvocations());
+    }
+
+    private String constrainedOrientationArtifactKind(
+            AgenticAuthoringPreIntentToolPlan semanticOrientation,
+            AgenticAuthoringLlmIntentResolution resolution) {
+        if (semanticOrientation != null
+                && List.of("table", "page", "dashboard", "chart").contains(semanticOrientation.artifactKind())) {
+            return semanticOrientation.artifactKind();
+        }
+        if (semanticOrientation != null && semanticOrientation.toolCalls() != null) {
+            for (AgenticAuthoringToolCall toolCall : semanticOrientation.toolCalls()) {
+                if (toolCall != null
+                        && toolCall.payload() instanceof AgenticAuthoringResourceCandidatesRequest resourceRequest
+                        && List.of("table", "page", "dashboard", "chart").contains(resourceRequest.artifactKind())) {
+                    return resourceRequest.artifactKind();
+                }
+            }
+        }
+        return resolution == null ? "unknown" : resolution.artifactKind();
     }
 
     private boolean hasProgressiveGovernedDomainKnowledge(AgenticAuthoringIntentResolutionRequest request) {

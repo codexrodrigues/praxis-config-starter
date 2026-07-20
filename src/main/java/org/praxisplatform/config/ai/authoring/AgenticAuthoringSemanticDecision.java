@@ -241,7 +241,9 @@ public record AgenticAuthoringSemanticDecision(
                 safe(activeObjective).isBlank() ? safe(userGoal) : safe(activeObjective),
                 artifactIntent(operationKind, artifactKind, changeKind),
                 visualIntent,
-                null,
+                llmIntent == null || llmIntent.queryConstraints() == null
+                        ? null
+                        : llmIntent.queryConstraints().deepCopy(),
                 normalizeRefinement(semanticRefinement),
                 previousDecisionId,
                 safe(rationale),

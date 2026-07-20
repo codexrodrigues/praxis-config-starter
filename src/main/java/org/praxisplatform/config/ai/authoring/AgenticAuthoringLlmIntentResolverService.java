@@ -247,6 +247,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 resolution.visualizationDecision(),
                 resolution.requiresGovernedAuthoring(),
                 resolution.semanticIntentClass(),
+                resolution.queryConstraints(),
                 providerInvocations == null ? List.of() : List.copyOf(providerInvocations));
     }
 
@@ -1201,7 +1202,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 resolution.consultativeRetrievalPlan(),
                 resolution.visualizationDecision(),
                 resolution.requiresGovernedAuthoring(),
-                resolution.semanticIntentClass());
+                resolution.semanticIntentClass(),
+                resolution.queryConstraints(),
+                resolution.providerInvocations());
     }
 
     private AgenticAuthoringLlmIntentResolution withFastIntentWarning(
@@ -1226,7 +1229,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 resolution.consultativeRetrievalPlan(),
                 resolution.visualizationDecision(),
                 resolution.requiresGovernedAuthoring(),
-                resolution.semanticIntentClass());
+                resolution.semanticIntentClass(),
+                resolution.queryConstraints(),
+                resolution.providerInvocations());
     }
 
     private AgenticAuthoringLlmIntentResolution withWarning(
@@ -1252,7 +1257,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 resolution.consultativeRetrievalPlan(),
                 resolution.visualizationDecision(),
                 resolution.requiresGovernedAuthoring(),
-                resolution.semanticIntentClass());
+                resolution.semanticIntentClass(),
+                resolution.queryConstraints(),
+                resolution.providerInvocations());
     }
 
     private String fastIntentPrompt(
@@ -1422,6 +1429,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Use artifactKind "page" for general layout or content composition where analytics are not the dominant requested outcome.
                 Questions about what the Praxis assistant or the current Page Builder can do, how the assistant can help, or what the user should do next are in-scope platform guidance, not assistant meta requests and not out of scope. Classify them as semanticIntentClass "platform_guidance", operationKind "explain", artifactKind "component", changeKind "answer_component_catalog_question", selectedResourcePath null, followUpKind "none", resolved=true, requiresGovernedAuthoring=false, and answer naturally with grounded examples such as forms, tables, charts, filters and page composition. Do not start resource discovery or request materialization confirmation for platform guidance.
                 If the user asks which governed data can be used to create a table, form, chart, dashboard, page or other component, classify the turn as a consultative catalog answer: operationKind "explore" or "explain", artifactKind "api_catalog", changeKind "answer_api_catalog_question". Do not select a weak resource or ask for a materialization confirmation before answering the catalog question.
+                Distinguish that question from a direct request to show, display, list or present concrete records on the current empty authoring canvas. The direct request is component_authoring even when the user omits the component name: select a read/list candidate, choose a suitable governed visual component such as a table, preserve requested filters in visualizationDecision, and return a reviewable preview. Never choose a create/POST operation merely because it ranks above the read operation for the same resource when the requested outcome is visualization.
                 If authoringScopePolicy is present and the semantic user intent is a loose instruction, assistant meta request, greeting, or unrelated ask that does not request an authorable UI/business decision, answer as an informational chat reply using the policy outOfScopeResponseType; do not create a component preview, edit plan, or governed authoring route.
                 For a requested page organized as accordion/acordeon/expansion panels, use artifactKind "page", operationKind "create", layoutKind "accordion_layout" or "single_column_expansion_page", primaryComponent "praxis-expansion", and no chart axes unless the user asks for a chart.
                 For a requested page organized as tabs/abas, use artifactKind "page", operationKind "create", layoutKind "tabs_layout", primaryComponent "praxis-tabs", and no chart axes unless the user asks for a chart.
@@ -1430,6 +1438,12 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Set requiresGovernedAuthoring=true for reusable governed business decisions, policies, compliance/access/eligibility/approval/privacy/enforcement rules, backend validations, option-source eligibility, approval gates, or shared rules that must go through shared-rule authoring.
                 When requiresGovernedAuthoring=true, do not classify the turn as a materializable dashboard, chart, table, form or page preview. Use operationKind "create" or "modify", artifactKind "unknown", changeKind "route_shared_rule_authoring", and leave visualizationDecision null.
                 Keep requiresGovernedAuthoring=false only for local visual formatting, masks, badges, labels, component configuration, layout, filters, columns, and consultative catalog questions.
+                For component authoring that requests a data subset, preserve every requested predicate in queryConstraints.filters.
+                Author field with the best semantic business-field name supported by governed evidence. When the canonical
+                schema name is not yet available, propose a concise conceptual field name instead of null; post-intent
+                schema grounding must validate, canonicalize or reject it before materialization. Preserve concept,
+                operator and value independently so no predicate is lost if field grounding needs clarification.
+                Do not omit a predicate merely because the resource itself was resolved.
                 Contrast the semantic scope before choosing an artifact:
                 - "Create a rule so blocked suppliers cannot be selected in purchases" is a reusable business constraint: requiresGovernedAuthoring=true, artifactKind "unknown", changeKind "route_shared_rule_authoring".
                 - "Show a blocked-supplier badge in this local table" is local presentation: requiresGovernedAuthoring=false and may materialize a table edit.
@@ -1437,7 +1451,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Never reinterpret a requested business rule as a dashboard or page merely because the selected resource exposes fields that could be visualized.
                 If the requested source/component cannot be resolved with this compact evidence, set resolved=false and leave visualizationDecision null.
                 Keep assistantMessage short and natural in the user's language.
-                Always include quickReplies, clarificationQuestions, warnings, visualizationDecision and consultativeRetrievalPlan fields.
+                Always include quickReplies, clarificationQuestions, warnings, visualizationDecision, consultativeRetrievalPlan and queryConstraints fields.
 
                 Compact context:
                 %s
@@ -1701,6 +1715,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 artifactKind,
                 changeKind,
                 requiresGovernedAuthoring);
+        JsonNode queryConstraints = result.path("queryConstraints").isObject()
+                ? result.path("queryConstraints").deepCopy()
+                : null;
         if ("platform_guidance".equals(semanticIntentClass)) {
             boolean tupleAlreadyConsistent = resolved
                     && "explain".equals(operationKind)
@@ -1802,7 +1819,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 consultativeRetrievalPlan,
                 visualizationDecision,
                 requiresGovernedAuthoring,
-                semanticIntentClass));
+                semanticIntentClass,
+                queryConstraints,
+                List.of()));
     }
 
     private AgenticAuthoringVisualizationDecision normalizeVisualizationDecisionForArtifact(
@@ -2038,6 +2057,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         arrayOfStrings(properties, "warnings");
         properties.set("visualizationDecision", visualizationDecisionSchema());
         properties.set("consultativeRetrievalPlan", consultativeRetrievalPlanSchema());
+        properties.set("queryConstraints", queryConstraintsSchema());
 
         ObjectNode reply = objectMapper.createObjectNode();
         reply.put("type", "object");
@@ -2078,11 +2098,37 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .add("requiresGovernedAuthoring")
                 .add("visualizationDecision")
                 .add("consultativeRetrievalPlan")
+                .add("queryConstraints")
                 .add("quickReplies")
                 .add("clarificationQuestions")
                 .add("warnings");
         root.put("additionalProperties", false);
         return root.toString();
+    }
+
+    private ObjectNode queryConstraintsSchema() {
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("type", "object");
+        ObjectNode properties = constraints.putObject("properties");
+        ObjectNode filters = properties.putObject("filters");
+        filters.put("type", "array");
+        ObjectNode filter = filters.putObject("items");
+        filter.put("type", "object");
+        ObjectNode filterProperties = filter.putObject("properties");
+        filterProperties.putObject("concept").put("type", "string");
+        filterProperties.putObject("field").put("type", "string");
+        stringEnum(filterProperties, "operator", List.of("eq", "contains", "in", "gte", "lte", "between"));
+        ObjectNode value = filterProperties.putObject("value");
+        ArrayNode valueAlternatives = value.putArray("anyOf");
+        valueAlternatives.addObject().put("type", "string");
+        valueAlternatives.addObject().put("type", "number");
+        valueAlternatives.addObject().put("type", "boolean");
+        valueAlternatives.addObject().put("type", "null");
+        filter.putArray("required").add("concept").add("field").add("operator").add("value");
+        filter.put("additionalProperties", false);
+        constraints.putArray("required").add("filters");
+        constraints.put("additionalProperties", false);
+        return constraints;
     }
 
     private ObjectNode consultativeRetrievalPlanSchema() {

@@ -1,5 +1,6 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
 
 public record AgenticAuthoringPreIntentToolPlan(
@@ -7,7 +8,10 @@ public record AgenticAuthoringPreIntentToolPlan(
         String reason,
         List<AgenticAuthoringToolCall> toolCalls,
         String semanticIntentClass,
-        String assistantMessage
+        String assistantMessage,
+        boolean requiresFullIntentResolution,
+        JsonNode queryConstraints,
+        String artifactKind
 ) {
 
     public AgenticAuthoringPreIntentToolPlan {
@@ -20,13 +24,23 @@ public record AgenticAuthoringPreIntentToolPlan(
                 ? "authoring_or_other"
                 : semanticIntentClass.trim();
         assistantMessage = assistantMessage == null ? "" : assistantMessage.trim();
+        artifactKind = artifactKind == null || artifactKind.isBlank() ? "unknown" : artifactKind.trim();
+    }
+
+    public AgenticAuthoringPreIntentToolPlan(
+            String schemaVersion,
+            String reason,
+            List<AgenticAuthoringToolCall> toolCalls,
+            String semanticIntentClass,
+            String assistantMessage) {
+        this(schemaVersion, reason, toolCalls, semanticIntentClass, assistantMessage, false, null, "unknown");
     }
 
     public AgenticAuthoringPreIntentToolPlan(
             String schemaVersion,
             String reason,
             List<AgenticAuthoringToolCall> toolCalls) {
-        this(schemaVersion, reason, toolCalls, "authoring_or_other", "");
+        this(schemaVersion, reason, toolCalls, "authoring_or_other", "", false, null, "unknown");
     }
 
     public boolean resolvesPlatformGuidance() {

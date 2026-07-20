@@ -91,13 +91,32 @@ class AgenticAuthoringToolRegistryTest {
     }
 
     @Test
-    void blocksPreIntentApiDiscoveryWithoutGovernedBinding() {
+    void keepsCanonicalApiDiscoveryAvailableWhileGovernedBindingIsNotYetAuthored() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ApiMetadata employeeMetadata = new ApiMetadata(
+                "/api/human-resources/funcionarios",
+                "GET",
+                "funcionarios,rh,pessoas",
+                "Funcionários",
+                "Lista funcionários por departamento",
+                "listFuncionarios",
+                null,
+                "{\"type\":\"object\"}",
+                "[]",
+                "{}",
+                null);
+        when(repository.findAll()).thenReturn(List.of(employeeMetadata));
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant", "local", "default", "v1"))
+                .thenReturn(List.of(employeeMetadata));
         AgenticAuthoringDomainBindingService bindingService =
                 Mockito.mock(AgenticAuthoringDomainBindingService.class);
         when(bindingService.resolve("tenant", "local", "human-resources.funcionarios", 6))
                 .thenReturn(List.of());
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
-                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                new AgenticAuthoringResourceDiscoveryService(
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                        objectMapper),
                 null,
                 null,
                 null,
@@ -106,19 +125,21 @@ class AgenticAuthoringToolRegistryTest {
                 null,
                 bindingService);
         AgenticAuthoringResourceSearchFocus focus = new AgenticAuthoringResourceSearchFocus(
-                "human-resources.funcionarios", List.of(), "form", "", "governed subject");
+                "human-resources.funcionarios", List.of("departamento"), "table", "", "governed subject");
 
         AgenticAuthoringToolResult result = registry.execute(
                 new AgenticAuthoringToolCall(
                         AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
                         "pre_intent_resource_discovery",
                         new AgenticAuthoringResourceCandidatesRequest(
-                                "employees", "create employee form", "form", 6, focus)),
+                                "funcionarios departamento", "listar funcionarios por departamento", "table", 6, focus)),
                 new AiPrincipalContext("tenant", "user", "local", true),
                 "retrieveEvidence");
 
-        assertThat(result.valid()).isFalse();
-        assertThat(result.errorCode()).isEqualTo("operational-grounding-binding-required");
+        assertThat(result.valid()).isTrue();
+        assertThat(result.safeDiagnostics())
+                .containsEntry("candidateCount", 1)
+                .doesNotContainEntry("retrievalSource", "none");
     }
 
     @Test

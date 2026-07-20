@@ -371,6 +371,51 @@
       }
     },
     {
+      "id": "employee-filtered-table-implicit-component-pt",
+      "family": "open-creation",
+      "status": "must-pass",
+      "locale": "pt-BR",
+      "contextRef": "blank-page-employee-domain",
+      "userPrompt": "mostre as informacoes dos funcionarios que sao da area de TI",
+      "expected": {
+        "intent": {
+          "operationKinds": ["create"],
+          "artifactKinds": ["table"],
+          "changeKinds": ["create_artifact", "create_table"],
+          "resourcePaths": ["/api/human-resources/funcionarios"]
+        },
+        "terminal": {
+          "eventTypes": ["result"],
+          "canApply": true,
+          "preview": "required",
+          "minimumQuickReplies": 0,
+          "forbiddenPhases": []
+        },
+        "assistantMessage": {
+          "minimumCharacters": 60,
+          "requiredConceptGroups": [
+            ["tabela", "table", "lista", "listagem"],
+            ["funcionário", "funcionario", "employee"],
+            ["TI", "departamento", "área", "area"],
+            ["prévia", "previa", "preview", "revisar", "visualização", "visualizacao"]
+          ],
+          "forbiddenTerms": ["changeKind", "operationKind", "artifactKind", "tool loop"]
+        },
+        "safety": {
+          "allowedResourcePathPrefixes": ["/api/human-resources/funcionarios"],
+          "forbidUnlistedResourcePaths": true,
+          "mutationRequiresPreview": true
+        }
+      },
+      "pageAssertions": {
+        "requiredColumnFields": ["nomeCompleto", "departamentoNome"],
+        "uniqueColumnFields": true,
+        "requiredInputValues": {
+          "/queryContext/filters/departamentoNome": "TI"
+        }
+      }
+    },
+    {
       "id": "platform-what-can-i-do-en",
       "family": "platform-discovery",
       "status": "extended",

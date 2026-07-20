@@ -59,7 +59,8 @@
         "locale": { "enum": ["pt-BR", "en-US"] },
         "contextRef": { "type": "string", "minLength": 1 },
         "userPrompt": { "type": "string", "minLength": 1 },
-        "expected": { "$ref": "#/$defs/expected" }
+        "expected": { "$ref": "#/$defs/expected" },
+        "pageAssertions": { "$ref": "#/$defs/pageAssertions" }
       }
     },
     "journey": {
@@ -132,6 +133,12 @@
           }
         },
         "requiredConfigValues": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^/" },
+          "additionalProperties": true
+        },
+        "requiredInputValues": {
           "type": "object",
           "minProperties": 1,
           "propertyNames": { "pattern": "^/" },

@@ -621,13 +621,11 @@ public class AgenticAuthoringToolRegistry {
                         principalContext == null ? null : principalContext.environment(),
                         resourceKey,
                         6);
-                if (bindings.isEmpty()) {
-                    return AgenticAuthoringToolResult.failure(
-                            call.name(),
-                            "operational-grounding-binding-required",
-                            "API discovery requires an approved active-evidence Domain Knowledge binding.");
-                }
-                if (operationalVerificationService != null) {
+                // A Domain Knowledge binding strengthens and verifies an already grounded resource;
+                // it must not erase canonical API Metadata/Domain Catalog/schema evidence while a
+                // host is progressively adopting the semantic IR. Exact verification remains
+                // mandatory once a binding exists.
+                if (!bindings.isEmpty() && operationalVerificationService != null) {
                     AgenticAuthoringOperationalBindingVerificationService.VerificationResult verification =
                             operationalVerificationService.verify(resourceKey, null, principalContext);
                     if (!verification.verified()) {

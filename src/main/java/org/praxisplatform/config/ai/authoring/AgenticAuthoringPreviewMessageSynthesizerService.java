@@ -482,7 +482,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
                 || intentResolution.selectedCandidate() == null
                 || isLocalEditorialComposition(request, intentResolution, warnings)
                 || (failureCodes != null && !failureCodes.isEmpty())
-                || !hasGovernedResolvedCandidate(intentResolution)) {
+                || !hasGovernedResolvedCandidate(intentResolution, warnings)) {
             return "";
         }
         String sourceLabel = selectedResourceLabel(intentResolution);
@@ -506,7 +506,9 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         return AgenticAuthoringPresentationText.assistantReply(sanitizeTechnicalLanguage(message.toString(), intentResolution));
     }
 
-    private boolean hasGovernedResolvedCandidate(AgenticAuthoringIntentResolutionResult intentResolution) {
+    private boolean hasGovernedResolvedCandidate(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            List<String> previewWarnings) {
         if (intentResolution == null || intentResolution.selectedCandidate() == null) {
             return false;
         }
@@ -515,9 +517,11 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
                 && containsWarning(warnings, "llm-pre-intent-resource-discovery-used")) {
             return true;
         }
-        return containsWarning(warnings, "llm-fast-intent-resolution-used")
-                && containsCandidateEvidence(intentResolution.selectedCandidate(), "tool-search-api-resources")
-                && containsCandidateEvidence(intentResolution.selectedCandidate(), "schema-available");
+        return (containsWarning(warnings, "llm-fast-intent-resolution-used")
+                        && containsCandidateEvidence(intentResolution.selectedCandidate(), "tool-search-api-resources")
+                        && containsCandidateEvidence(intentResolution.selectedCandidate(), "schema-available"))
+                || (containsCandidateEvidence(intentResolution.selectedCandidate(), "domain-catalog-grounding")
+                        && containsWarning(previewWarnings, "table-query-filter-schema-grounded"));
     }
 
     private boolean containsCandidateEvidence(AgenticAuthoringCandidate candidate, String evidence) {

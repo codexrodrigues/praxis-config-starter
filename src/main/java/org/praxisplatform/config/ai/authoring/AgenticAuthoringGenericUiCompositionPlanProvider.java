@@ -99,11 +99,11 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             case "dashboard" -> dashboardPlan(request, candidate, visualizationDecision);
             case "table" -> dashboardMaterialization
                     ? dashboardPlan(request, candidate, visualizationDecision)
-                    : tablePlan(candidate);
+                    : tablePlan(request, candidate);
             case "page" -> pagePlan(candidate, visualizationDecision);
             default -> dashboardMaterialization
                     ? dashboardPlan(request, candidate, visualizationDecision)
-                    : tablePlan(candidate);
+                    : tablePlan(request, candidate);
         };
         preserveComponentSelectionAudit(request, plan);
         String providerArtifactKind = chartOnly ? "chart" : dashboardMaterialization ? "dashboard" : artifactKind;
@@ -301,13 +301,73 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 semanticDecision.retrievedEvidence());
     }
 
-    private ObjectNode tablePlan(AgenticAuthoringCandidate candidate) {
+    private ObjectNode tablePlan(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringCandidate candidate) {
         ObjectNode plan = basePlan("single-table-page");
         String tableKey = widgetKey(candidate, "table");
         addTable(plan.putArray("widgets"), candidate, tableKey, "main");
+        applyGovernedQueryConstraints(plan, request);
         addSingleTableCanvas(plan, candidate, tableKey);
         addSingleTableDeviceLayouts(plan, tableKey);
         return plan;
+    }
+
+    private void applyGovernedQueryConstraints(
+            ObjectNode plan,
+            AgenticAuthoringPlanRequest request) {
+        AgenticAuthoringSemanticDecision decision = request == null || request.intentResolution() == null
+                ? null
+                : request.intentResolution().semanticDecision();
+        JsonNode authoredFilters = decision == null || decision.constraints() == null
+                ? MissingNode.getInstance()
+                : decision.constraints().path("filters");
+        if (!authoredFilters.isArray() || authoredFilters.isEmpty()) {
+            return;
+        }
+        for (JsonNode widget : plan.path("widgets")) {
+            if (!(widget instanceof ObjectNode widgetObject)
+                    || !"praxis-table".equals(widget.path("componentId").asText(""))) {
+                continue;
+            }
+            ObjectNode inputs = widgetObject.path("inputs") instanceof ObjectNode existingInputs
+                    ? existingInputs
+                    : widgetObject.putObject("inputs");
+            ObjectNode queryContext = inputs.path("queryContext") instanceof ObjectNode existingQueryContext
+                    ? existingQueryContext
+                    : inputs.putObject("queryContext");
+            ObjectNode filters = queryContext.path("filters") instanceof ObjectNode existingFilters
+                    ? existingFilters
+                    : queryContext.putObject("filters");
+            for (JsonNode filter : authoredFilters) {
+                String field = valueOrDefault(
+                        filter.path("field").asText(""),
+                        filter.path("concept").asText(""));
+                JsonNode value = filter.path("value");
+                if (!field.isBlank() && !value.isMissingNode() && !value.isNull()) {
+                    filters.set(field, value.deepCopy());
+                }
+            }
+            if (!filters.isEmpty()) {
+                ArrayNode bindingOrder = widgetObject.withArray("bindingOrder");
+                if (!containsText(bindingOrder, "queryContext")) {
+                    bindingOrder.add("queryContext");
+                }
+                ObjectNode diagnostics = plan.path("diagnostics") instanceof ObjectNode existingDiagnostics
+                        ? existingDiagnostics
+                        : plan.putObject("diagnostics");
+                diagnostics.put("queryConstraintsMaterialized", true);
+            }
+        }
+    }
+
+    private boolean containsText(ArrayNode values, String expected) {
+        for (JsonNode value : values) {
+            if (expected.equals(value.asText(""))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private ObjectNode dashboardPlan(
