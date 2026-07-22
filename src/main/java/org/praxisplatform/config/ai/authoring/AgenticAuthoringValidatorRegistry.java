@@ -297,6 +297,7 @@ public final class AgenticAuthoringValidatorRegistry {
             "open-mode-supported",
             "modal-size-valid",
             "drawer-runtime-available",
+            "drawer-position-lifecycle-stable",
             "drawer-adapter-available-when-needed",
             "back-policy-valid",
             "settings-panel-shell-compatible",
@@ -764,8 +765,9 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "table-child-operation-delegated", "form-child-operation-delegated" -> validateCrudChildPatchDelegated(operationId, planOperation, failures);
                 case "query-context-valid", "filter-criteria-bridge-valid", "crud-context-stable" -> validateCrudSerializableObjectInputs(operationId, planOperation, failures);
                 case "open-mode-binding-complete", "open-mode-supported", "drawer-adapter-available-when-needed" -> validateCrudOpenMode(operationId, planOperation, failures);
-                case "drawer-runtime-available" -> {
+                case "drawer-runtime-available", "drawer-position-lifecycle-stable" -> {
                     // CRUD drawer uses the built-in dialog-backed runtime; host drawer adapters are optional presentation boundaries.
+                    // Position persistence across open/maximize/restore is proven by the CRUD runtime contract.
                 }
                 case "resource-create-supported", "resource-edit-supported", "resource-view-supported", "resource-delete-supported" -> validateCrudResourceCapability(operationId, validatorId, planOperation, config, failures);
                 case "delete-action-exists" -> validateCrudDeleteActionExists(operationId, config, failures);
