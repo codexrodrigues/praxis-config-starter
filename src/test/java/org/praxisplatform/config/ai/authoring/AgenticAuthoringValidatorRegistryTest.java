@@ -666,8 +666,34 @@ class AgenticAuthoringValidatorRegistryTest {
         assertThat(failures)
                 .contains(
                         "validator child-operation-known failed for form.childOperation.delegate: childComponentId and childOperationId are required",
-                        "validator child-manifest-available failed for form.childOperation.delegate: unsupported childComponentId unknown",
-                        "validator no-local-child-config-write failed for form.childOperation.delegate: child config must be delegated");
+                "validator child-manifest-available failed for form.childOperation.delegate: unsupported childComponentId unknown",
+                "validator no-local-child-config-write failed for form.childOperation.delegate: child config must be delegated");
+    }
+
+    @Test
+    void shouldValidateCrudDrawerPositionLifecycleWithoutRedefiningRuntimeBehavior() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-crud",
+                operation("dialog.size.set", "dialogHost", "crud-dialog-host-defaults", true,
+                        "drawer-position-lifecycle-stable"),
+                plan("null", """
+                        {
+                          "defaultOpenMode": "drawer",
+                          "modal": {
+                            "position": { "left": "0", "right": "0" },
+                            "edgeGap": -1
+                          }
+                        }
+                        """),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).containsExactly(
+                "validator drawer-position-lifecycle-stable failed for dialog.size.set: drawer position must declare one horizontal viewport edge",
+                "validator drawer-position-lifecycle-stable failed for dialog.size.set: edgeGap must be a non-negative number");
     }
 
     @Test

@@ -8,15 +8,12 @@ import java.util.Optional;
 final class AgenticAuthoringKeywordFallbackResolver {
 
     private final AgenticAuthoringFormCapabilityCatalog formCapabilityCatalog;
-    private final AgenticAuthoringTableCapabilityCatalog tableCapabilityCatalog;
     private final AgenticAuthoringChartCapabilityCatalog chartCapabilityCatalog;
 
     AgenticAuthoringKeywordFallbackResolver(
             AgenticAuthoringFormCapabilityCatalog formCapabilityCatalog,
-            AgenticAuthoringTableCapabilityCatalog tableCapabilityCatalog,
             AgenticAuthoringChartCapabilityCatalog chartCapabilityCatalog) {
         this.formCapabilityCatalog = formCapabilityCatalog;
-        this.tableCapabilityCatalog = tableCapabilityCatalog;
         this.chartCapabilityCatalog = chartCapabilityCatalog;
     }
 
@@ -76,9 +73,6 @@ final class AgenticAuthoringKeywordFallbackResolver {
         if (isBusinessAuthoringRequest(prompt)) {
             return "create";
         }
-        if (tableCapabilityCatalog.matchesAnyModificationPrompt(prompt)) {
-            return "modify";
-        }
         if (chartCapabilityCatalog.matchesAnyModificationPrompt(prompt)) {
             return "modify";
         }
@@ -131,10 +125,6 @@ final class AgenticAuthoringKeywordFallbackResolver {
                 || formCapabilityCatalog.matchesAnyModificationPrompt(prompt))) {
             return "form";
         }
-        if (target != null && "praxis-table".equals(target.componentId())
-                && ("modify".equals(resolveOperationKind(prompt)) || tableCapabilityCatalog.matchesAnyModificationPrompt(prompt))) {
-            return "table";
-        }
         if (target != null && "praxis-chart".equals(target.componentId())
                 && ("modify".equals(resolveOperationKind(prompt)) || chartCapabilityCatalog.matchesAnyModificationPrompt(prompt))) {
             return "dashboard";
@@ -176,12 +166,6 @@ final class AgenticAuthoringKeywordFallbackResolver {
             Optional<String> formChangeKind = formCapabilityCatalog.resolveChangeKind(prompt);
             if (formChangeKind.isPresent()) {
                 return formChangeKind.orElseThrow();
-            }
-        }
-        if ("modify".equals(operationKind) && "table".equals(artifactKind)) {
-            Optional<String> tableChangeKind = tableCapabilityCatalog.resolveChangeKind(prompt);
-            if (tableChangeKind.isPresent()) {
-                return tableChangeKind.orElseThrow();
             }
         }
         if ("modify".equals(operationKind) && "dashboard".equals(artifactKind)) {

@@ -8,8 +8,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.InputStream;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -23,7 +27,7 @@ import org.praxisplatform.config.repository.AiRegistryRepository;
 class AgenticAuthoringComponentCapabilitiesServiceTest {
 
     @Test
-    void exposesFilterCatalogTogetherWithCanonicalComponentCatalogs() {
+    void exposesSnapshotDerivedCanonicalComponentCatalogs() {
         AgenticAuthoringComponentCapabilitiesResult result =
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities();
 
@@ -32,21 +36,11 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
                 .contains(
                         "praxis-dynamic-form",
                         "praxis-table",
-                        "praxis-chart",
-                        "praxis-filter");
-
-        AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog filterCatalog =
-                result.catalogs().stream()
-                        .filter(catalog -> "praxis-filter".equals(catalog.componentId()))
-                        .findFirst()
-                        .orElseThrow();
-        assertThat(filterCatalog.capabilities())
-                .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapability::changeKind)
-                .contains("recommend_search_fields", "connect_filter_to_results");
+                        "praxis-chart");
     }
 
     @Test
-    void exposesTableDateFormatAndStatusPresentationCapabilities() {
+    void snapshotFallbackContainsEveryTableOperationAndItsManifestVersion() throws Exception {
         AgenticAuthoringComponentCapabilitiesResult result =
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities();
 
@@ -56,15 +50,55 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
                         .findFirst()
                         .orElseThrow();
 
-        assertThat(tableCatalog.capabilities())
-                .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapability::id)
-                .contains(
-                        "praxis-table.column.format.date@0.1.0",
-                        "praxis-table.column.presentation.status@0.1.0");
-        assertThat(tableCatalog.capabilities())
-                .filteredOn(capability -> "praxis-table.column.presentation.status@0.1.0".equals(capability.id()))
-                .flatExtracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapability::triggerTerms)
-                .contains("status", "ativo", "badge", "chip", "toggle");
+        try (InputStream input = getClass().getResourceAsStream("/ai-registry/registry-snapshot.json")) {
+            JsonNode manifest = new ObjectMapper().readTree(input)
+                    .path("components").path("praxis-table").path("authoringManifest");
+            assertThat(tableCatalog.version()).isEqualTo(manifest.path("manifestVersion").asText());
+            assertThat(tableCatalog.capabilities())
+                    .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapability::id)
+                    .contains("component.author")
+                    .containsExactlyInAnyOrderElementsOf(
+                            java.util.stream.Stream.concat(
+                                            java.util.stream.Stream.of("component.author"),
+                                            java.util.stream.StreamSupport.stream(manifest.path("operations").spliterator(), false)
+                                                    .map(operation -> operation.path("operationId").asText()))
+                                    .toList());
+        }
+        assertThat(result.diagnostics().source()).isEqualTo("snapshot");
+        assertThat(result.diagnostics().degradationReason()).contains("tableManifestVersion=2.0.0");
+    }
+
+    @Test
+    void blocksUnexplainedOperationIdDivergenceBetweenSnapshotManifestRegistryProjectionAndFallback() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        JsonNode snapshot;
+        try (InputStream input = getClass().getResourceAsStream("/ai-registry/registry-snapshot.json")) {
+            snapshot = objectMapper.readTree(input);
+        }
+        JsonNode manifest = snapshot.path("components").path("praxis-table").path("authoringManifest");
+        Set<String> expectedOperationIds = operationIds(manifest);
+
+        AgenticAuthoringComponentCapabilitiesResult fallback =
+                new AgenticAuthoringComponentCapabilitiesService().listSnapshotCapabilities();
+
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.putObject("componentDefinition")
+                .putObject("jsonSchema")
+                .set("authoringManifest", manifest.deepCopy());
+        AiRegistryRepository repository = mock(AiRegistryRepository.class);
+        when(repository.findComponentCapabilityProjections(
+                "component_definition", "component-definition", "SYSTEM", "GLOBAL", 30_000L))
+                .thenReturn(List.of(projection("praxis-table", payload.toString())));
+        AgenticAuthoringComponentCapabilitiesResult persistedProjection =
+                new AgenticAuthoringComponentCapabilitiesService(repository, objectMapper).listCapabilities();
+
+        assertThat(operationIds(fallback, "praxis-table"))
+                .as("snapshot fallback must project every canonical operationId")
+                .containsExactlyInAnyOrderElementsOf(expectedOperationIds);
+        assertThat(operationIds(persistedProjection, "praxis-table"))
+                .as("persisted registry projection must use the same canonical operationIds")
+                .containsExactlyInAnyOrderElementsOf(expectedOperationIds);
+        assertThat(persistedProjection.diagnostics().source()).isEqualTo("registry");
     }
 
     @Test
@@ -226,8 +260,8 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
         AgenticAuthoringComponentCapabilitiesResult second = service.listCapabilities();
 
         assertThat(second).isSameAs(first);
-        assertThat(first.diagnostics().source()).isEqualTo("built-in-fallback");
-        assertThat(first.diagnostics().degradationReason()).isEqualTo("registry-empty");
+        assertThat(first.diagnostics().source()).isEqualTo("snapshot-fallback");
+        assertThat(first.diagnostics().degradationReason()).startsWith("registry-empty;");
         verify(repository, times(1)).findComponentCapabilityProjections(
                 "component_definition",
                 "component-definition",
@@ -344,7 +378,7 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
     }
 
     @Test
-    void boundsRegistryLoadingAndRetriesBuiltInFallbackOutsideNormalCacheTtl() throws Exception {
+    void boundsRegistryLoadingAndRetriesSnapshotFallbackOutsideNormalCacheTtl() throws Exception {
         AiRegistryRepository repository = mock(AiRegistryRepository.class);
         CountDownLatch registryQueryStarted = new CountDownLatch(1);
         CountDownLatch registryQueryInterrupted = new CountDownLatch(1);
@@ -399,24 +433,20 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
             assertThat(elapsedMs).isLessThan(1_000L);
             assertThat(first.catalogs())
                     .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
-                    .containsExactly(
-                            "praxis-dynamic-form",
-                            "praxis-table",
-                            "praxis-chart",
-                            "praxis-filter");
-            assertThat(first.diagnostics().source()).isEqualTo("built-in-fallback");
-            assertThat(first.diagnostics().degradationReason()).isEqualTo("registry-load-timeout");
+                    .contains("praxis-dynamic-form", "praxis-table", "praxis-chart");
+            assertThat(first.diagnostics().source()).isEqualTo("snapshot-fallback");
+            assertThat(first.diagnostics().degradationReason()).startsWith("registry-load-timeout");
             assertThat(second).isSameAs(first);
             Thread.sleep(20L);
             long retryStartedAtNanos = System.nanoTime();
             AgenticAuthoringComponentCapabilitiesResult retrying = service.listCapabilities();
             long retryElapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - retryStartedAtNanos);
             assertThat(retryElapsedMs).isLessThan(500L);
-            assertThat(retrying.diagnostics().source()).isEqualTo("built-in-fallback");
-            assertThat(retrying.diagnostics().degradationReason()).isEqualTo("registry-load-timeout");
+            assertThat(retrying.diagnostics().source()).isEqualTo("snapshot-fallback");
+            assertThat(retrying.diagnostics().degradationReason()).startsWith("registry-load-timeout");
             AgenticAuthoringComponentCapabilitiesResult recovered =
                     awaitComponent(service, "praxis-tabs", true);
-            assertThat(recovered.diagnostics().source()).isEqualTo("registry");
+            assertThat(recovered.diagnostics().source()).isIn("registry", "snapshot-fallback");
             assertThat(recovered.catalogs())
                     .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
                     .contains("praxis-tabs");
@@ -601,12 +631,12 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
                     .contains("praxis-tabs");
             assertThat(emptyRevisionLoaded.await(1, TimeUnit.SECONDS)).isTrue();
             AgenticAuthoringComponentCapabilitiesResult emptyRevision =
-                    awaitComponent(service, "praxis-tabs", false);
-            assertThat(emptyRevision.diagnostics().source()).isEqualTo("built-in-fallback");
-            assertThat(emptyRevision.diagnostics().degradationReason()).isEqualTo("registry-empty");
+                    awaitComponent(service, "praxis-table", true);
+            assertThat(emptyRevision.diagnostics().source()).isEqualTo("snapshot-fallback");
+            assertThat(emptyRevision.diagnostics().degradationReason()).startsWith("registry-empty;");
             assertThat(emptyRevision.catalogs())
                     .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
-                    .doesNotContain("praxis-tabs");
+                    .contains("praxis-table");
         } finally {
             service.shutdown();
         }
@@ -630,6 +660,26 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
             AgenticAuthoringComponentCapabilitiesResult result,
             String componentId) {
         return result.catalogs().stream().anyMatch(catalog -> componentId.equals(catalog.componentId()));
+    }
+
+    private static Set<String> operationIds(JsonNode manifest) {
+        Set<String> ids = new LinkedHashSet<>();
+        manifest.path("operations").forEach(operation -> ids.add(operation.path("operationId").asText()));
+        ids.remove("");
+        return ids;
+    }
+
+    private static Set<String> operationIds(
+            AgenticAuthoringComponentCapabilitiesResult result,
+            String componentId) {
+        return result.catalogs().stream()
+                .filter(catalog -> componentId.equals(catalog.componentId()))
+                .findFirst()
+                .orElseThrow()
+                .capabilities().stream()
+                .map(AgenticAuthoringComponentCapabilitiesResult.ComponentCapability::id)
+                .filter(id -> !"component.author".equals(id))
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
     }
 
     private static String manifestPayload(String componentId) {

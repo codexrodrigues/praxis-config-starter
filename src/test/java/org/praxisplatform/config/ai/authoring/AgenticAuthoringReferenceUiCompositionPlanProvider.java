@@ -43,7 +43,6 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
             new PayrollBreakdown("payrollProfile", "Perfil", "profile", "selectedPayrollProfile", "group-by", "bar");
 
     private final ObjectMapper objectMapper;
-    private final AgenticAuthoringTableCapabilityCatalog tableCapabilityCatalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringChartCapabilityCatalog chartCapabilityCatalog = AgenticAuthoringChartCapabilityCatalog.INSTANCE;
 
     private record LocalEditorialWorkspaceSpec(
@@ -274,12 +273,10 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
                 || request.intentResolution() == null || request.intentResolution().target() == null) {
             return false;
         }
-        String prompt = normalize(request.userPrompt());
         return "modify".equals(request.intentResolution().operationKind())
                 && "table".equals(request.intentResolution().artifactKind())
                 && "rename_or_relabel".equals(request.intentResolution().changeKind())
-                && tableCapabilityCatalog.supports("rename_or_relabel", prompt)
-                && containsAny(prompt, "tabela", "grid", "lista", "listagem");
+                && "praxis-table".equals(request.intentResolution().target().componentId());
     }
 
     private String extractTitleAfterPara(String prompt) {
@@ -2757,24 +2754,15 @@ public class AgenticAuthoringReferenceUiCompositionPlanProvider implements Agent
     }
 
     private String resolveFormatField(String prompt) {
-        return tableCapabilityCatalog.resolveField(
-                "set_column_format",
-                normalize(prompt == null ? "" : prompt))
-                .orElseGet(() -> resolveKnownColumnField(prompt));
+        return resolveKnownColumnField(prompt);
     }
 
     private String resolveVisibilityField(String prompt) {
-        return tableCapabilityCatalog.resolveField(
-                "set_column_visibility",
-                normalize(prompt == null ? "" : prompt))
-                .orElseGet(() -> resolveKnownColumnField(prompt));
+        return resolveKnownColumnField(prompt);
     }
 
     private String resolveOrderField(String prompt) {
-        return tableCapabilityCatalog.resolveField(
-                "set_column_order",
-                normalize(prompt == null ? "" : prompt))
-                .orElseGet(() -> resolveKnownColumnField(prompt));
+        return resolveKnownColumnField(prompt);
     }
 
     private boolean isKnownChartChangeKind(String changeKind) {

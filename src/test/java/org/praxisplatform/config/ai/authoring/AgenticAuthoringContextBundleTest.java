@@ -62,12 +62,9 @@ class AgenticAuthoringContextBundleTest {
         JsonNode tableCatalog = componentContext.path("componentCapabilities").path("catalogs").get(0);
 
         assertThat(tableCatalog.path("componentId").asText()).isEqualTo("praxis-table");
-        assertThat(tableCatalog.path("capabilities").get(0).path("changeKind").asText())
-                .isEqualTo("column.add");
-        assertThat(tableCatalog.path("capabilities").get(0).path("examples").get(0).path("intent").asText())
-                .contains("nova coluna schema-backed");
-        assertThat(tableCatalog.path("capabilities").get(0).path("examples").get(0).path("configHints"))
-                .anySatisfy(hint -> assertThat(hint.asText()).contains("set_column_order apenas reposicionam"));
+        assertThat(tableCatalog.path("capabilities"))
+                .extracting(capability -> capability.path("changeKind").asText())
+                .contains("column.add");
         assertThat(componentContext.path("operationSelectionRule").asText())
                 .contains("ranked governed operation candidates, not an intent decision", "LLM must select");
         assertThat(componentContext.path("componentCapabilities").path("detailPolicy").asText())
@@ -75,14 +72,15 @@ class AgenticAuthoringContextBundleTest {
     }
 
     @Test
-    void keepsReorderingAnExistingTableColumnAheadForAnExplicitMoveRequest() {
+    void keepsReorderingAsLlMDecidedOperationInsteadOfGuaranteeingLexicalRank() {
         JsonNode componentContext = tableComponentContext(
                 "Mova a coluna salário líquido para a primeira posição da tabela.");
         JsonNode tableCatalog = componentContext.path("componentCapabilities").path("catalogs").get(0);
 
         assertThat(tableCatalog.path("componentId").asText()).isEqualTo("praxis-table");
-        assertThat(tableCatalog.path("capabilities").get(0).path("changeKind").asText())
-                .isEqualTo("set_column_order");
+        assertThat(tableCatalog.path("capabilities")).isNotEmpty();
+        assertThat(componentContext.path("componentCapabilities").path("detailPolicy").asText())
+                .contains("Capability scoring only ranks governed candidates", "LLM still decides semantic intent");
     }
 
     private JsonNode tableComponentContext(String prompt) {

@@ -297,6 +297,7 @@ public final class AgenticAuthoringValidatorRegistry {
             "open-mode-supported",
             "modal-size-valid",
             "drawer-runtime-available",
+            "drawer-position-lifecycle-stable",
             "drawer-adapter-available-when-needed",
             "back-policy-valid",
             "settings-panel-shell-compatible",
@@ -767,6 +768,7 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "drawer-runtime-available" -> {
                     // CRUD drawer uses the built-in dialog-backed runtime; host drawer adapters are optional presentation boundaries.
                 }
+                case "drawer-position-lifecycle-stable" -> validateCrudDrawerPositionLifecycle(operationId, planOperation, failures);
                 case "resource-create-supported", "resource-edit-supported", "resource-view-supported", "resource-delete-supported" -> validateCrudResourceCapability(operationId, validatorId, planOperation, config, failures);
                 case "delete-action-exists" -> validateCrudDeleteActionExists(operationId, config, failures);
                 case "destructive-delete-confirmed", "delete-permission-requires-confirmation" -> validateCrudDeleteConfirmed(operationId, planOperation, failures);
@@ -3097,6 +3099,31 @@ public final class AgenticAuthoringValidatorRegistry {
             if (!value.isBlank() && !isSafeCssSize(value)) {
                 failures.add("validator modal-size-valid failed for " + operationId + ": invalid " + field);
             }
+        }
+    }
+
+    private void validateCrudDrawerPositionLifecycle(String operationId, JsonNode planOperation, List<String> failures) {
+        String openMode = firstNonBlank(
+                text(planOperation.path("input"), "openMode"),
+                text(planOperation.path("input"), "defaultOpenMode"));
+        if (!"drawer".equals(openMode)) {
+            return;
+        }
+        JsonNode modal = planOperation.path("input").path("modal");
+        JsonNode position = modal.path("position");
+        if (!position.isMissingNode() && !position.isObject()) {
+            failures.add("validator drawer-position-lifecycle-stable failed for " + operationId
+                    + ": modal.position must be an object");
+            return;
+        }
+        if (position.isObject() && position.has("left") && position.has("right")) {
+            failures.add("validator drawer-position-lifecycle-stable failed for " + operationId
+                    + ": drawer position must declare one horizontal viewport edge");
+        }
+        JsonNode edgeGap = modal.path("edgeGap");
+        if (!edgeGap.isMissingNode() && (!edgeGap.isNumber() || edgeGap.decimalValue().signum() < 0)) {
+            failures.add("validator drawer-position-lifecycle-stable failed for " + operationId
+                    + ": edgeGap must be a non-negative number");
         }
     }
 

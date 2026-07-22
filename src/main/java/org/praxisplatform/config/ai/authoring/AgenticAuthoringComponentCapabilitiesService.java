@@ -3,6 +3,7 @@ package org.praxisplatform.config.ai.authoring;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
+import java.io.InputStream;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -44,10 +45,7 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private static final AtomicInteger REGISTRY_LOADER_SEQUENCE = new AtomicInteger();
     private static final AtomicInteger REGISTRY_REFRESH_SEQUENCE = new AtomicInteger();
 
-    private final AgenticAuthoringFormCapabilityCatalog formCatalog = AgenticAuthoringFormCapabilityCatalog.INSTANCE;
-    private final AgenticAuthoringTableCapabilityCatalog tableCatalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;
-    private final AgenticAuthoringChartCapabilityCatalog chartCatalog = AgenticAuthoringChartCapabilityCatalog.INSTANCE;
-    private final AgenticAuthoringFilterCapabilityCatalog filterCatalog = AgenticAuthoringFilterCapabilityCatalog.INSTANCE;
+    private static final String SNAPSHOT_RESOURCE = "ai-registry/registry-snapshot.json";
     private final AiRegistryRepository aiRegistryRepository;
     private final ObjectMapper objectMapper;
     private final long cacheTtlMs;
@@ -176,29 +174,29 @@ public class AgenticAuthoringComponentCapabilitiesService {
         }
     }
 
-    AgenticAuthoringComponentCapabilitiesResult listBuiltInCapabilities() {
-        return builtInCapabilities(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics(
-                "built-in",
+    AgenticAuthoringComponentCapabilitiesResult listSnapshotCapabilities() {
+        return snapshotCapabilities(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics(
+                "snapshot",
                 false,
-                null,
+                snapshotProvenance(),
                 Instant.now(),
                 lastSuccessfulRegistryLoadAt));
     }
 
-    AgenticAuthoringComponentCapabilitiesResult listBuiltInFallback(String reason) {
-        return builtInCapabilities(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics(
-                "built-in-fallback",
+    AgenticAuthoringComponentCapabilitiesResult listSnapshotFallback(String reason) {
+        return snapshotCapabilities(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics(
+                "snapshot-fallback",
                 true,
-                reason,
+                snapshotDiagnostic(reason),
                 Instant.now(),
                 lastSuccessfulRegistryLoadAt));
     }
 
     private AgenticAuthoringComponentCapabilitiesResult refreshCapabilities() {
         if (aiRegistryRepository == null || registryLoadExecutor == null) {
-            AgenticAuthoringComponentCapabilitiesResult builtIn = listBuiltInCapabilities();
-            cacheSuccessfulResult(builtIn, System.currentTimeMillis());
-            return builtIn;
+            AgenticAuthoringComponentCapabilitiesResult snapshot = listSnapshotCapabilities();
+            cacheSuccessfulResult(snapshot, System.currentTimeMillis());
+            return snapshot;
         }
 
         long loadStartedAtNanos = System.nanoTime();
@@ -320,32 +318,32 @@ public class AgenticAuthoringComponentCapabilitiesService {
         if (!isTransientFailure(reason)) {
             lastKnownGood = null;
         }
-        return builtInCapabilities(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics(
-                "built-in-fallback",
+        return snapshotCapabilities(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics(
+                "snapshot-fallback",
                 true,
-                reason,
+                snapshotDiagnostic(reason),
                 resolvedAt,
                 lastSuccessfulRegistryLoadAt));
     }
 
-    private AgenticAuthoringComponentCapabilitiesResult builtInCapabilities(
+    private AgenticAuthoringComponentCapabilitiesResult snapshotCapabilities(
             AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics diagnostics) {
+        SnapshotCapabilitySource snapshot = loadSnapshotCapabilitySource();
+        Map<String, AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> catalogs = new LinkedHashMap<>();
+        snapshot.projections().stream()
+                .map(this::toRegistryCatalog)
+                .filter(Objects::nonNull)
+                .forEach(catalog -> putCatalog(catalogs, catalog));
         return new AgenticAuthoringComponentCapabilitiesResult(
                 RESULT_VERSION,
-                List.of(
-                        toCatalog(formCatalog.componentId(), formCatalog.version(), formCatalog.capabilities()),
-                        toCatalog(tableCatalog.componentId(), tableCatalog.version(), tableCatalog.capabilities()),
-                        toCatalog(chartCatalog.componentId(), chartCatalog.version(), chartCatalog.capabilities()),
-                        toCatalog(filterCatalog.componentId(), filterCatalog.version(), filterCatalog.capabilities())),
+                List.copyOf(catalogs.values()),
                 diagnostics);
     }
 
     private AgenticAuthoringComponentCapabilitiesResult mergeCapabilities(
             List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> registryCatalogs,
             AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics diagnostics) {
-        Map<String, AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> catalogs =
-                new LinkedHashMap<>();
-        builtInCapabilities(diagnostics).catalogs().forEach(catalog -> putCatalog(catalogs, catalog));
+        Map<String, AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> catalogs = new LinkedHashMap<>();
         registryCatalogs.forEach(catalog -> putCatalog(catalogs, catalog));
         return new AgenticAuthoringComponentCapabilitiesResult(
                 RESULT_VERSION,
@@ -394,14 +392,14 @@ public class AgenticAuthoringComponentCapabilitiesService {
                             SYSTEM_SCOPE_KEY,
                             registryLoadTimeoutMs));
         } catch (RejectedExecutionException ex) {
-            log.warn("Governed component capability loading is saturated; using built-in authoring catalogs only.");
+            log.warn("Governed component capability loading is saturated; using the derived registry snapshot fallback.");
             return RegistryCatalogLoad.failed("registry-load-saturated");
         }
         try {
             List<AiRegistryComponentCapabilityProjection> registries =
                     registryLoad.get(registryLoadTimeoutMs, TimeUnit.MILLISECONDS);
             if (registries == null || registries.isEmpty()) {
-                log.warn("Governed component capability query returned no authoring manifests; using built-in catalogs.");
+                log.warn("Governed component capability query returned no authoring manifests; using the derived registry snapshot fallback.");
                 return RegistryCatalogLoad.failed("registry-empty");
             }
             List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> catalogs = registries.stream()
@@ -409,7 +407,7 @@ public class AgenticAuthoringComponentCapabilitiesService {
                     .filter(Objects::nonNull)
                     .toList();
             if (catalogs.isEmpty()) {
-                log.warn("Governed component capability query returned no valid catalogs; using built-in catalogs.");
+                log.warn("Governed component capability query returned no valid catalogs; using the derived registry snapshot fallback.");
                 return RegistryCatalogLoad.failed("registry-catalog-empty");
             }
             return RegistryCatalogLoad.successful(catalogs);
@@ -417,18 +415,18 @@ public class AgenticAuthoringComponentCapabilitiesService {
             registryLoad.cancel(true);
             registryLoadExecutor.purge();
             log.warn(
-                    "Governed component capability loading exceeded {} ms; using built-in authoring catalogs only.",
+                    "Governed component capability loading exceeded {} ms; using the derived registry snapshot fallback.",
                     registryLoadTimeoutMs);
             return RegistryCatalogLoad.failed("registry-load-timeout");
         } catch (InterruptedException ex) {
             registryLoad.cancel(true);
             registryLoadExecutor.purge();
             Thread.currentThread().interrupt();
-            log.warn("Governed component capability loading was interrupted; using built-in authoring catalogs only.");
+            log.warn("Governed component capability loading was interrupted; using the derived registry snapshot fallback.");
             return RegistryCatalogLoad.failed("registry-load-interrupted");
         } catch (ExecutionException | RuntimeException ex) {
             log.warn(
-                    "Failed to load governed component capabilities from ai_registry; using built-in authoring catalogs only.",
+                    "Failed to load governed component capabilities from ai_registry; using the derived registry snapshot fallback.",
                     ex.getCause() == null ? ex : ex.getCause());
             return RegistryCatalogLoad.failed("registry-load-failed");
         }
@@ -624,39 +622,82 @@ public class AgenticAuthoringComponentCapabilitiesService {
         }
     }
 
-    private AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog toCatalog(
-            String componentId,
+    private SnapshotCapabilitySource loadSnapshotCapabilitySource() {
+        try (InputStream input = getClass().getClassLoader().getResourceAsStream(SNAPSHOT_RESOURCE)) {
+            if (input == null) {
+                return SnapshotCapabilitySource.unavailable("snapshot-missing");
+            }
+            JsonNode snapshot = objectMapper.readTree(input);
+            JsonNode components = snapshot.path("components");
+            if (!components.isObject()) {
+                return SnapshotCapabilitySource.unavailable("snapshot-components-missing");
+            }
+            List<AiRegistryComponentCapabilityProjection> projections = new ArrayList<>();
+            components.fields().forEachRemaining(entry -> {
+                JsonNode component = entry.getValue();
+                JsonNode manifest = component.path("authoringManifest");
+                if (!manifest.isObject()) {
+                    return;
+                }
+                projections.add(new AiRegistryComponentCapabilityProjection(
+                        entry.getKey(),
+                        text(component, "description"),
+                        text(component, "friendlyName"),
+                        text(component, "selector"),
+                        component.path("tags").toString(),
+                        manifest.toString()));
+            });
+            return projections.isEmpty()
+                    ? SnapshotCapabilitySource.unavailable("snapshot-authoring-manifests-missing")
+                    : new SnapshotCapabilitySource(
+                            List.copyOf(projections),
+                            firstText(snapshot, "version", "unknown"),
+                            text(snapshot, "generatedAt"),
+                            null);
+        } catch (Exception ex) {
+            log.warn("Unable to load the derived AI registry snapshot capability fallback.", ex);
+            return SnapshotCapabilitySource.unavailable("snapshot-unreadable");
+        }
+    }
+
+    private String snapshotProvenance() {
+        SnapshotCapabilitySource snapshot = loadSnapshotCapabilitySource();
+        return snapshotDiagnostic(snapshot.unavailableReason());
+    }
+
+    private String snapshotDiagnostic(String reason) {
+        SnapshotCapabilitySource snapshot = loadSnapshotCapabilitySource();
+        String suffix = "snapshotVersion=" + snapshot.version()
+                + "; generatedAt=" + snapshot.generatedAt()
+                + "; tableManifestVersion=" + snapshot.tableManifestVersion();
+        return StringUtils.hasText(reason) ? reason + "; " + suffix : suffix;
+    }
+
+    private record SnapshotCapabilitySource(
+            List<AiRegistryComponentCapabilityProjection> projections,
             String version,
-            List<AgenticAuthoringComponentCapabilityCatalog.ComponentCapability> capabilities) {
-        return new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog(
-                componentId,
-                version,
-                capabilities.stream().map(this::toCapability).toList());
-    }
+            String generatedAt,
+            String unavailableReason) {
+        static SnapshotCapabilitySource unavailable(String reason) {
+            return new SnapshotCapabilitySource(List.of(), "unavailable", "", reason);
+        }
 
-    private AgenticAuthoringComponentCapabilitiesResult.ComponentCapability toCapability(
-            AgenticAuthoringComponentCapabilityCatalog.ComponentCapability capability) {
-        return new AgenticAuthoringComponentCapabilitiesResult.ComponentCapability(
-                capability.id(),
-                capability.changeKind(),
-                capability.triggerTerms(),
-                capability.fieldAliases().stream().map(this::toFieldAlias).toList(),
-                capability.examples().stream().map(this::toExample).toList());
-    }
+        String tableManifestVersion() {
+            return projections.stream()
+                    .filter(projection -> "praxis-table".equals(projection.registryKey()))
+                    .map(AiRegistryComponentCapabilityProjection::authoringManifestJson)
+                    .map(payload -> readManifestVersion(payload))
+                    .findFirst()
+                    .orElse("missing");
+        }
 
-    private AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample toExample(
-            AgenticAuthoringComponentCapabilityCatalog.ComponentCapabilityExample example) {
-        return new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample(
-                example.prompt(),
-                example.intent(),
-                example.configHints());
-    }
-
-    private AgenticAuthoringComponentCapabilitiesResult.ComponentFieldAlias toFieldAlias(
-            AgenticAuthoringComponentCapabilityCatalog.ComponentFieldAlias alias) {
-        return new AgenticAuthoringComponentCapabilitiesResult.ComponentFieldAlias(
-                alias.field(),
-                alias.aliases());
+        private static String readManifestVersion(String payload) {
+            try {
+                return new ObjectMapper().readTree(payload).path("manifestVersion").asText("missing");
+            } catch (Exception ex) {
+                return "invalid";
+            }
+        }
     }
 
     private List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> nullToEmpty(

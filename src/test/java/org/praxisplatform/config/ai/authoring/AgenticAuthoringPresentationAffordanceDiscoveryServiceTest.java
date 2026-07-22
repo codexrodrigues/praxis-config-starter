@@ -55,7 +55,7 @@ class AgenticAuthoringPresentationAffordanceDiscoveryServiceTest {
                 AgenticAuthoringPresentationAffordanceCatalog.load(
                         "ai-authoring/table-presentation-affordances.v0.json");
 
-        assertThat(catalog.version()).isEqualTo("0.1.0");
+        assertThat(catalog.version()).isEqualTo("0.2.0");
         assertThat(catalog.componentId()).isEqualTo("praxis-table");
         assertThat(catalog.defaultTargetKind()).isEqualTo("column");
         assertThat(catalog.sourceRef()).isEqualTo("@praxisui/core:ColumnDefinition");

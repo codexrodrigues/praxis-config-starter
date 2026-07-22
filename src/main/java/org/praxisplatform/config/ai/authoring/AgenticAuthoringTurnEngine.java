@@ -2243,13 +2243,13 @@ public class AgenticAuthoringTurnEngine {
                             Map.entry("preloadCompletedBeforeAwait", componentCapabilitiesLoad.completedBeforeAwait()),
                             Map.entry("fallbackSynchronousLoad", componentCapabilitiesLoad.fallbackSynchronousLoad()),
                             Map.entry("timedOut", componentCapabilitiesLoad.timedOut()),
-                            Map.entry("fallbackBuiltIn", componentCapabilitiesLoad.fallbackBuiltIn()),
+                            Map.entry("fallbackSnapshot", componentCapabilitiesLoad.fallbackSnapshot()),
                             Map.entry("awaitElapsedMs", componentCapabilitiesLoad.awaitElapsedMs()),
                             Map.entry("preloadAgeMs", componentCapabilitiesLoad.preloadAgeMs()),
                             Map.entry(
                                     "source",
                                     catalogDiagnostics == null
-                                            ? componentCapabilitiesService == null ? "built-in" : "unknown"
+                                            ? componentCapabilitiesService == null ? "snapshot" : "unknown"
                                             : catalogDiagnostics.source()),
                             Map.entry("degraded", catalogDegraded),
                             Map.entry(
@@ -2299,19 +2299,19 @@ public class AgenticAuthoringTurnEngine {
         long awaitStartedAtNanos = System.nanoTime();
         if (preloadedCapabilities == null) {
             AgenticAuthoringComponentCapabilitiesResult result;
-            boolean fallbackBuiltIn = false;
+            boolean fallbackSnapshot = false;
             try {
                 result = loadServerComponentCapabilities();
             } catch (RuntimeException ex) {
-                log.warn("Component capabilities failed before preload; using built-in catalogs.", ex);
-                result = loadBuiltInComponentCapabilities("preload-failed");
-                fallbackBuiltIn = true;
+                log.warn("Component capabilities failed before preload; using derived registry snapshot.", ex);
+                result = loadSnapshotComponentCapabilities("preload-failed");
+                fallbackSnapshot = true;
             }
             if (result == null) {
-                result = loadBuiltInComponentCapabilities("preload-empty");
-                fallbackBuiltIn = true;
+                result = loadSnapshotComponentCapabilities("preload-empty");
+                fallbackSnapshot = true;
             } else {
-                fallbackBuiltIn = isBuiltInFallback(result);
+                fallbackSnapshot = isSnapshotFallback(result);
             }
             return new ComponentCapabilitiesLoadResult(
                     result,
@@ -2319,7 +2319,7 @@ public class AgenticAuthoringTurnEngine {
                     false,
                     false,
                     false,
-                    fallbackBuiltIn,
+                    fallbackSnapshot,
                     elapsedMs(awaitStartedAtNanos),
                     0L);
         }
@@ -2335,9 +2335,9 @@ public class AgenticAuthoringTurnEngine {
             } else {
                 throw new TimeoutException("Component capability preload deadline elapsed.");
             }
-            boolean fallbackBuiltIn = result == null || isBuiltInFallback(result);
+            boolean fallbackSnapshot = result == null || isSnapshotFallback(result);
             if (result == null) {
-                result = loadBuiltInComponentCapabilities("preload-empty");
+                result = loadSnapshotComponentCapabilities("preload-empty");
             }
             return new ComponentCapabilitiesLoadResult(
                     result,
@@ -2345,16 +2345,16 @@ public class AgenticAuthoringTurnEngine {
                     completedBeforeAwait,
                     false,
                     false,
-                    fallbackBuiltIn,
+                    fallbackSnapshot,
                     elapsedMs(awaitStartedAtNanos),
                     elapsedMs(preloadedCapabilities.startedAtNanos()));
         } catch (TimeoutException ex) {
             preloadedCapabilities.future().cancel(true);
             log.warn(
-                    "Component capability preload exceeded {} ms; continuing with built-in catalogs.",
+                    "Component capability preload exceeded {} ms; continuing with derived registry snapshot.",
                     componentCapabilitiesPreloadTimeoutMs);
             return new ComponentCapabilitiesLoadResult(
-                    loadBuiltInComponentCapabilities("preload-timeout"),
+                    loadSnapshotComponentCapabilities("preload-timeout"),
                     true,
                     completedBeforeAwait,
                     false,
@@ -2365,9 +2365,9 @@ public class AgenticAuthoringTurnEngine {
         } catch (InterruptedException ex) {
             preloadedCapabilities.future().cancel(true);
             Thread.currentThread().interrupt();
-            log.warn("Component capability preload was interrupted; continuing with built-in catalogs.");
+            log.warn("Component capability preload was interrupted; continuing with derived registry snapshot.");
             return new ComponentCapabilitiesLoadResult(
-                    loadBuiltInComponentCapabilities("preload-interrupted"),
+                    loadSnapshotComponentCapabilities("preload-interrupted"),
                     true,
                     completedBeforeAwait,
                     false,
@@ -2376,9 +2376,9 @@ public class AgenticAuthoringTurnEngine {
                     elapsedMs(awaitStartedAtNanos),
                     elapsedMs(preloadedCapabilities.startedAtNanos()));
         } catch (ExecutionException | CancellationException ex) {
-            log.warn("Component capability preload failed; continuing with built-in catalogs.", ex);
+            log.warn("Component capability preload failed; continuing with derived registry snapshot.", ex);
             return new ComponentCapabilitiesLoadResult(
-                    loadBuiltInComponentCapabilities("preload-failed"),
+                    loadSnapshotComponentCapabilities("preload-failed"),
                     true,
                     completedBeforeAwait,
                     false,
@@ -2410,7 +2410,7 @@ public class AgenticAuthoringTurnEngine {
             boolean completedBeforeAwait,
             boolean fallbackSynchronousLoad,
             boolean timedOut,
-            boolean fallbackBuiltIn,
+            boolean fallbackSnapshot,
             long awaitElapsedMs,
             long preloadAgeMs) {
     }
@@ -2421,19 +2421,19 @@ public class AgenticAuthoringTurnEngine {
                 : componentCapabilitiesService.listCapabilities();
     }
 
-    private AgenticAuthoringComponentCapabilitiesResult loadBuiltInComponentCapabilities(String reason) {
+    private AgenticAuthoringComponentCapabilitiesResult loadSnapshotComponentCapabilities(String reason) {
         AgenticAuthoringComponentCapabilitiesResult result = componentCapabilitiesService == null
                 ? null
-                : componentCapabilitiesService.listBuiltInFallback(reason);
+                : componentCapabilitiesService.listSnapshotFallback(reason);
         return result == null
-                ? new AgenticAuthoringComponentCapabilitiesService().listBuiltInFallback(reason)
+                ? new AgenticAuthoringComponentCapabilitiesService().listSnapshotFallback(reason)
                 : result;
     }
 
-    private boolean isBuiltInFallback(AgenticAuthoringComponentCapabilitiesResult result) {
+    private boolean isSnapshotFallback(AgenticAuthoringComponentCapabilitiesResult result) {
         return result != null
                 && result.diagnostics() != null
-                && "built-in-fallback".equals(result.diagnostics().source());
+                && "snapshot-fallback".equals(result.diagnostics().source());
     }
 
     private AgenticAuthoringTurnStreamRequest withGroundedRuntimeComponentContext(

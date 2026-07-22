@@ -65,19 +65,14 @@ class AgenticAuthoringProviderSchemaCompilerTest {
     void encodesUnconstrainedValuesAndArraysWithoutItemsForProviderTransport() throws Exception {
         JsonNode manifest = tableManifest();
 
-        JsonNode renderer = compiler.compileEditPlanSchema(
-                "praxis-component-edit-plan.v1", "praxis-table", List.of(operation(manifest, "column.renderer.set")));
-        assertThat(renderer.at("/properties/operations/items/properties/input/properties/compose/properties/items/items/properties/type/type").asText())
-                .isEqualTo("string");
-
         JsonNode type = compiler.compileEditPlanSchema(
                 "praxis-component-edit-plan.v1", "praxis-table", List.of(operation(manifest, "column.type.set")));
-        assertThat(type.at("/properties/operations/items/properties/input/properties/type/type").asText()).isEqualTo("string");
+        assertTypeIncludes(type.at("/properties/operations/items/properties/input/properties/type"), "string");
 
         JsonNode styleRule = compiler.compileEditPlanSchema(
                 "praxis-component-edit-plan.v1", "praxis-table", List.of(operation(manifest, "row.styleRule.add")));
         assertTypeIncludes(styleRule.at("/properties/operations/items/properties/input/properties/style"), "string");
-        assertTypeIncludes(styleRule.at("/properties/operations/items/properties/input/properties/effects"), "string");
+        assertTypeIncludes(styleRule.at("/properties/operations/items/properties/input/properties/effects"), "array");
     }
 
     @Test

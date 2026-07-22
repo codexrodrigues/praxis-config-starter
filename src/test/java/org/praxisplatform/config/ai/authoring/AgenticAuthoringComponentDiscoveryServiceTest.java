@@ -49,7 +49,7 @@ class AgenticAuthoringComponentDiscoveryServiceTest {
     }
 
     @Test
-    void doesNotExpandBroadSemanticRefsIntoUnrelatedComponentCatalogs() {
+    void keepsGovernedTableRelatedCatalogsButExcludesUnrelatedComponentFamilies() {
         AgenticAuthoringSemanticDecision decision = new AgenticAuthoringSemanticDecision(
                 AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
                 "decision-2",
@@ -73,9 +73,9 @@ class AgenticAuthoringComponentDiscoveryServiceTest {
         assertThat(result.acceptedCandidates())
                 .extracting(AgenticAuthoringComponentDiscoveryService.ComponentCandidate::componentId)
                 .startsWith("praxis-chart")
-                .doesNotContain("praxis-table-rule-builder", "praxis-tabs");
-        assertThat(result.acceptedCandidates())
-                .allSatisfy(candidate -> assertThat(candidate.matchedCapabilityIds()).hasSizeLessThan(10));
+                .contains("praxis-table", "praxis-table-rule-builder")
+                .doesNotContain("praxis-tabs");
+        assertThat(result.acceptedCandidates()).hasSizeLessThanOrEqualTo(5);
     }
 
     private AgenticAuthoringSemanticDecision decision(AgenticAuthoringVisualizationDecision visualization) {

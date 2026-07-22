@@ -28,8 +28,8 @@ public record AgenticAuthoringComponentCapabilitiesResult(
             description = "Proveniência e estado de atualização usados para avaliar se o catálogo representa a revisão governada corrente ou uma contingência observável.")
     public record ComponentCapabilityDiagnostics(
             @Schema(
-                    description = "Origem efetiva do catálogo: registry, last-known-good, built-in-fallback ou built-in.",
-                    allowableValues = {"registry", "last-known-good", "built-in-fallback", "built-in"})
+                    description = "Origem efetiva do catálogo: registry, last-known-good, snapshot-fallback ou snapshot.",
+                    allowableValues = {"registry", "last-known-good", "snapshot-fallback", "snapshot"})
             String source,
             @Schema(description = "Indica que a revisão corrente do AI Registry não pôde ser materializada nesta leitura.")
             boolean degraded,

@@ -38,12 +38,10 @@ public class AgenticAuthoringIntentResolverService {
     private final ObjectMapper objectMapper;
     private final String domainCatalogServiceKey;
     private final AgenticAuthoringFormCapabilityCatalog formCapabilityCatalog = AgenticAuthoringFormCapabilityCatalog.INSTANCE;
-    private final AgenticAuthoringTableCapabilityCatalog tableCapabilityCatalog = AgenticAuthoringTableCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringChartCapabilityCatalog chartCapabilityCatalog = AgenticAuthoringChartCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringKeywordFallbackResolver keywordFallbackResolver =
             new AgenticAuthoringKeywordFallbackResolver(
                     formCapabilityCatalog,
-                    tableCapabilityCatalog,
                     chartCapabilityCatalog);
     private final boolean legacyKeywordFallbackEnabled;
     private final AgenticAuthoringConversationTurnOrchestrator conversationTurnOrchestrator =

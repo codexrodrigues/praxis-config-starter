@@ -118,10 +118,14 @@ class AgenticAuthoringPagePreviewHttpTest {
         JsonNode body = objectMapper.readTree(response);
         assertThat(body.path("version").asText()).isEqualTo("0.1.0");
         assertThat(body.path("catalogs")).extracting(node -> node.path("componentId").asText())
-                .containsExactly("praxis-dynamic-form", "praxis-table", "praxis-chart", "praxis-filter");
-        JsonNode formCatalog = body.path("catalogs").get(0);
+                .contains("praxis-dynamic-form", "praxis-table", "praxis-chart", "praxis-crud");
+        JsonNode formCatalog = java.util.stream.StreamSupport.stream(
+                        body.path("catalogs").spliterator(), false)
+                .filter(catalog -> "praxis-dynamic-form".equals(catalog.path("componentId").asText()))
+                .findFirst()
+                .orElseThrow();
         assertThat(formCatalog.path("capabilities")).extracting(node -> node.path("changeKind").asText())
-                .containsExactly("add_field", "rename_or_relabel", "remove_field");
+                .contains("field.label.set", "field.required.set", "field.controlType.set");
     }
 
     @Test

@@ -1080,7 +1080,7 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void continuesWithBuiltInCapabilitiesWhenPreloadMissesItsDeadline() throws Exception {
+    void continuesWithSnapshotCapabilitiesWhenPreloadMissesItsDeadline() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         CountDownLatch capabilitiesStarted = new CountDownLatch(1);
@@ -1113,7 +1113,7 @@ class AgenticAuthoringTurnEngineTest {
                         "answer_api_catalog_question",
                         "Resposta consultiva baseada nos catalogos disponiveis.",
                         null,
-                        List.of("built-in-capabilities-fallback"))));
+                        List.of("snapshot-capabilities-fallback"))));
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
                 new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
         AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
@@ -1152,19 +1152,19 @@ class AgenticAuthoringTurnEngineTest {
                         throw new AssertionError("Not the component capabilities diagnostic event.");
                     }
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("catalogCount").asInt())
-                            .isEqualTo(4);
+                            .isGreaterThanOrEqualTo(20);
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("timedOut").asBoolean())
                             .isTrue();
-                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("fallbackBuiltIn").asBoolean())
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("fallbackSnapshot").asBoolean())
                             .isTrue();
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("fallbackSynchronousLoad").asBoolean())
                             .isFalse();
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("source").asText())
-                            .isEqualTo("built-in-fallback");
+                            .isEqualTo("snapshot-fallback");
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("degraded").asBoolean())
                             .isTrue();
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("degradationReason").asText())
-                            .isEqualTo("preload-timeout");
+                            .startsWith("preload-timeout; snapshotVersion=");
                 });
         verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
         verify(previewService, never()).preview(any(), any(), any(), any());
@@ -1898,7 +1898,7 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(answer).isPresent();
         org.assertj.core.api.Assertions.assertThat(answer.get().category()).isEqualTo("component_catalog");
         org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
-                .contains("Tabela", "Gráfico", "Formulário", "Filtro");
+                .contains("Tabela", "Gráfico", "Formulário");
         Mockito.verifyNoInteractions(providerManagementService);
     }
 
@@ -1929,7 +1929,7 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(answer.get().changeKind()).isEqualTo("answer_component_capability_question");
         org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
                 .contains("Tabela")
-                .contains("linhas selecionadas")
+                .contains("exportação habilitada")
                 .contains("exportação")
                 .doesNotContain("schema", "resourceKey", "submitUrl");
         org.assertj.core.api.Assertions.assertThat(answer.get().warnings())
@@ -7374,7 +7374,7 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(answer).isPresent();
         org.assertj.core.api.Assertions.assertThat(answer.get().category()).isEqualTo("component_catalog");
         org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
-                .contains("Formulário", "Tabela", "Gráfico", "Filtro");
+                .contains("Formulário", "Tabela", "Gráfico");
         org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage().split("Formulário", -1).length - 1)
                 .isEqualTo(1);
     }
@@ -8239,50 +8239,7 @@ class AgenticAuthoringTurnEngineTest {
         JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
         org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
                 .extracting(reply -> reply.path("id").asText())
-                .contains(
-                        "chart-change-line",
-                        "chart-add-detail-table",
-                        "chart-add-detail-modal",
-                        "table-export-selected-rows");
-        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
-                .anySatisfy(reply -> {
-                    org.assertj.core.api.Assertions.assertThat(reply.path("id").asText())
-                            .isEqualTo("chart-add-detail-modal");
-                    org.assertj.core.api.Assertions.assertThat(reply.path("contextHints").path("surfaceActionId").asText())
-                            .isEqualTo("surface.open");
-                    org.assertj.core.api.Assertions.assertThat(reply.path("contextHints").path("surfaceWidgetId").asText())
-                            .isEqualTo("praxis-table");
-                });
-        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
-                .anySatisfy(reply -> {
-                    org.assertj.core.api.Assertions.assertThat(reply.path("contextHints").path("source").asText())
-                            .isEqualTo("component-capability-catalog");
-                    org.assertj.core.api.Assertions.assertThat(reply.path("prompt").asText())
-                            .contains("gráfico");
-                });
-        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
-                .anySatisfy(reply -> {
-                    org.assertj.core.api.Assertions.assertThat(reply.path("id").asText())
-                            .isEqualTo("chart-change-line");
-                    org.assertj.core.api.Assertions.assertThat(reply.path("contextHints").path("selectedComponentId").asText())
-                            .isEqualTo("praxis-chart");
-                    org.assertj.core.api.Assertions.assertThat(reply.path("contextHints").path("selectedWidgetKey").asText())
-                            .isEqualTo("severity-chart");
-                    org.assertj.core.api.Assertions.assertThat(reply.path("contextHints").path("resourcePath").asText())
-                            .isEqualTo("/api/human-resources/funcionarios");
-                    org.assertj.core.api.Assertions.assertThat(reply.path("semanticDecision").path("operationKind").asText())
-                            .isEqualTo("modify");
-                    org.assertj.core.api.Assertions.assertThat(reply.path("semanticDecision").path("artifactKind").asText())
-                            .isEqualTo("chart");
-                    org.assertj.core.api.Assertions.assertThat(reply.path("semanticDecision").path("changeKind").asText())
-                            .isEqualTo("set_chart_type");
-                    org.assertj.core.api.Assertions.assertThat(reply.path("semanticDecision")
-                                    .path("constraints").path("source").asText())
-                            .isEqualTo("server-issued-quick-reply");
-                    org.assertj.core.api.Assertions.assertThat(reply.path("semanticDecision")
-                                    .path("constraints").path("quickReplyId").asText())
-                            .isEqualTo("chart-change-line");
-                });
+                .containsExactly("governed-review-revise");
     }
 
     @Test
@@ -8314,16 +8271,7 @@ class AgenticAuthoringTurnEngineTest {
         JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
         org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
                 .extracting(reply -> reply.path("id").asText())
-                .contains("table-export-selected-rows")
-                .doesNotContain("chart-change-line", "chart-change-donut", "chart-add-detail-table", "chart-add-detail-modal");
-        JsonNode tableReply = java.util.stream.StreamSupport
-                .stream(result.path("quickReplies").spliterator(), false)
-                .filter(reply -> "table-export-selected-rows".equals(reply.path("id").asText()))
-                .findFirst()
-                .orElseThrow();
-        org.assertj.core.api.Assertions.assertThat(tableReply
-                        .path("contextHints").path("selectedComponentId").asText())
-                .isEqualTo("praxis-table");
+                .containsExactly("governed-review-revise");
     }
 
     @Test

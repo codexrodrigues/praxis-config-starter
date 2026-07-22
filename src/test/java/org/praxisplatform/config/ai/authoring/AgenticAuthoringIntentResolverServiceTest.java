@@ -25,6 +25,33 @@ class AgenticAuthoringIntentResolverServiceTest {
     private final AgenticAuthoringIntentResolverService service =
             new AgenticAuthoringIntentResolverService(objectMapper, quickstartCandidateCatalog());
 
+    private AgenticAuthoringIntentResolverService tableRefinementService(
+            String operationId,
+            String resourcePath) {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(), Mockito.anyString(), Mockito.any(), Mockito.any(), Mockito.anyList(),
+                        Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "modify",
+                        "table",
+                        operationId,
+                        resourcePath,
+                        null,
+                        "new_instruction",
+                        "A alteração foi semanticamente resolvida.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        return new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+    }
+
     @Test
     void carriesLlmAuthoredResourceSearchIntoSameTurnDiscoveryToolContext() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
@@ -5619,8 +5646,10 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void resolvesSelectedTableCurrencyFormatModificationAgainstExistingPage() {
         ObjectNode page = payrollTablePage();
+        AgenticAuthoringIntentResolverService semanticService = tableRefinementService(
+                "column.format.set", "/api/human-resources/folhas-pagamento");
 
-        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+        AgenticAuthoringIntentResolutionResult result = semanticService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Formate a coluna salario liquido da tabela como moeda em reais",
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
@@ -5634,7 +5663,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("modify");
         assertThat(result.artifactKind()).isEqualTo("table");
-        assertThat(result.changeKind()).isEqualTo("set_column_format");
+        assertThat(result.changeKind()).isEqualTo("column.format.set");
         assertThat(result.target().widgetKey()).isEqualTo("payroll-table");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/folhas-pagamento");
         assertThat(result.selectedCandidate().operation()).isEqualTo("get");
@@ -5645,8 +5674,10 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void resolvesSelectedTableVisibilityModificationAgainstExistingPage() {
         ObjectNode page = payrollTablePage();
+        AgenticAuthoringIntentResolverService semanticService = tableRefinementService(
+                "column.visibility.set", "/api/human-resources/folhas-pagamento");
 
-        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+        AgenticAuthoringIntentResolutionResult result = semanticService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Oculte a coluna total descontos da tabela",
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
@@ -5660,7 +5691,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("modify");
         assertThat(result.artifactKind()).isEqualTo("table");
-        assertThat(result.changeKind()).isEqualTo("set_column_visibility");
+        assertThat(result.changeKind()).isEqualTo("column.visibility.set");
         assertThat(result.target().widgetKey()).isEqualTo("payroll-table");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/folhas-pagamento");
         assertThat(result.selectedCandidate().operation()).isEqualTo("get");
@@ -5671,8 +5702,10 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void resolvesSelectedTableOrderModificationAgainstExistingPage() {
         ObjectNode page = payrollTablePage();
+        AgenticAuthoringIntentResolverService semanticService = tableRefinementService(
+                "column.order.set", "/api/human-resources/folhas-pagamento");
 
-        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+        AgenticAuthoringIntentResolutionResult result = semanticService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Mova a coluna salario liquido da tabela para o inicio",
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
@@ -5686,7 +5719,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("modify");
         assertThat(result.artifactKind()).isEqualTo("table");
-        assertThat(result.changeKind()).isEqualTo("set_column_order");
+        assertThat(result.changeKind()).isEqualTo("column.order.set");
         assertThat(result.target().widgetKey()).isEqualTo("payroll-table");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/folhas-pagamento");
         assertThat(result.selectedCandidate().operation()).isEqualTo("get");
@@ -6717,7 +6750,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.apiCatalogAnswer()).isNull();
         assertThat(result.candidates()).isEmpty();
         assertThat(result.assistantMessage())
-                .contains("tabela", "linhas selecionadas", "escopo limitado aos registros selecionados")
+                .contains("tabela", "linhas selecionadas", "apenas as linhas marcadas")
                 .doesNotContain(
                         "/api/",
                         "/schemas/",
@@ -8597,7 +8630,9 @@ class AgenticAuthoringIntentResolverServiceTest {
 
     @Test
     void naturalTableColumnVisibilityRefinementTargetsSelectedTable() {
-        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+        AgenticAuthoringIntentResolverService semanticService = tableRefinementService(
+                "column.visibility.set", "/api/operations/missoes");
+        AgenticAuthoringIntentResolutionResult result = semanticService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "deixe somente Missão, Local, Severidade e Ocorrido em",
                 "praxis-ui-angular",
                 "praxis-table",
@@ -8611,7 +8646,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("modify");
         assertThat(result.artifactKind()).isEqualTo("table");
-        assertThat(result.changeKind()).isEqualTo("set_column_visibility");
+        assertThat(result.changeKind()).isEqualTo("column.visibility.set");
         assertThat(result.target().widgetKey()).isEqualTo("missions-table");
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/operations/missoes");
     }
