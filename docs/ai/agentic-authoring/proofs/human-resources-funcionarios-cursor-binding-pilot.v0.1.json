@@ -1,0 +1,46 @@
+{
+  "changeSetKey": "agentic-authoring:human-resources:funcionarios:cursor-binding:v0.1",
+  "status": "proposed",
+  "authorType": "system",
+  "authorId": "praxis-human-resources-reference-pilot",
+  "intent": "Bind the governed employee concept to its canonical cursor-filter operation for AI resource grounding.",
+  "reason": "Allow the assistant to resolve the already accepted employee resource through an exact, capability-verifiable operation before using vector retrieval.",
+  "patch": [
+    {
+      "operationId": "bind-funcionarios-cursor-operation",
+      "operationType": "add_binding",
+      "target": {
+        "tenantId": "agentic-authoring-local-pre-intent",
+        "environment": "local",
+        "conceptKey": "human-resources.funcionarios"
+      },
+      "reason": "The cursor filter is the canonical collection operation for bounded employee tables and supports governed filter request and response schemas.",
+      "evidenceRefs": [
+        "domain-catalog:praxis-service:human-resources.funcionarios:634e4b662761823d",
+        "resource-capabilities:human-resources.funcionarios:cursor"
+      ],
+      "confidence": 1.0,
+      "payload": {
+        "bindingType": "api_operation",
+        "bindingKey": "cursor",
+        "resourceKey": "human-resources.funcionarios",
+        "apiPath": "/api/human-resources/funcionarios/filter/cursor",
+        "apiMethod": "POST",
+        "schemaPointer": "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+        "provenance": {
+          "claimId": "claim:human-resources:funcionarios:api-operation:cursor:v0.1",
+          "sourceClass": "authored",
+          "sourceRefs": [
+            "domain-catalog:praxis-service:human-resources.funcionarios:634e4b662761823d",
+            "resource-capabilities:human-resources.funcionarios:cursor"
+          ],
+          "derivationActivity": "reference-domain-pilot-operational-binding",
+          "agent": {
+            "type": "system",
+            "id": "praxis-human-resources-reference-pilot"
+          }
+        }
+      }
+    }
+  ]
+}

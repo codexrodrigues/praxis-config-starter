@@ -63,6 +63,7 @@ public class AgenticAuthoringTurnStreamService {
     private static final int WORKER_QUEUE_CAPACITY = 500;
     private static final int SCHEDULER_POOL_SIZE = 2;
     private static final long TERMINAL_TOMBSTONE_SECONDS = 60L;
+    private static final long PERSISTED_TERMINAL_RECONCILIATION_SECONDS = 5L;
     private static final String REQUEST_FINGERPRINT_SCHEMA_VERSION =
             "praxis-agentic-authoring-turn-request-fingerprint.v1";
     private static final String IDEMPOTENCY_CONFLICT_REASON =
@@ -95,6 +96,7 @@ public class AgenticAuthoringTurnStreamService {
     private final Map<UUID, Instant> streamStartedAtByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicBoolean> terminalByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AiTurnEventEnvelope> latestEventByStream = new ConcurrentHashMap<>();
+    private final Map<UUID, AtomicLong> persistedReconciliationNanosByStream = new ConcurrentHashMap<>();
     private final Map<UUID, CapacityOwner> capacityOwnersByStream = new ConcurrentHashMap<>();
     private final Map<String, AtomicInteger> tenantActiveCounts = new ConcurrentHashMap<>();
     private final Map<String, AtomicInteger> tenantUserActiveCounts = new ConcurrentHashMap<>();
@@ -146,7 +148,7 @@ public class AgenticAuthoringTurnStreamService {
         request = withGroundedRuntimeComponentContext(request);
         request = withRequestBaseUrl(request, baseUrl);
         UUID turnId = stableUuid("agentic-authoring-turn", request.clientTurnId());
-        UUID requestedThreadId = parseUuid(request.sessionId());
+        UUID requestedThreadId = requestedThreadId(request);
         AiOrchestratorRequest threadRequest = AiOrchestratorRequest.builder()
                 .componentId(nonBlank(request.targetComponentId(), "praxis-dynamic-page-builder"))
                 .componentType("page-builder")
@@ -271,6 +273,18 @@ public class AgenticAuthoringTurnStreamService {
             }
             throw ex;
         }
+    }
+
+    private UUID requestedThreadId(AgenticAuthoringTurnStreamRequest request) {
+        if (request == null) {
+            return null;
+        }
+        UUID explicitSessionId = parseUuid(request.sessionId());
+        if (explicitSessionId != null) {
+            return explicitSessionId;
+        }
+        AgenticAuthoringSemanticDecision activeDecision = request.activeSemanticDecision();
+        return activeDecision == null ? null : parseUuid(activeDecision.conversationId());
     }
 
     private AgenticAuthoringTurnStreamRequest withActiveSemanticDecision(
@@ -710,7 +724,7 @@ public class AgenticAuthoringTurnStreamService {
                     complete(streamId);
                     return;
                 }
-                AiTurnEventEnvelope tail = latestEvent(streamId, true);
+                AiTurnEventEnvelope tail = latestEvent(streamId, false);
                 String phase = heartbeatPhase(tail);
                 Map<String, Object> diagnostics = new java.util.LinkedHashMap<>();
                 diagnostics.put("source", "backend-processing-progress-watchdog");
@@ -1068,6 +1082,7 @@ public class AgenticAuthoringTurnStreamService {
         }
         terminalByStream.remove(streamId);
         latestEventByStream.remove(streamId);
+        persistedReconciliationNanosByStream.remove(streamId);
     }
 
     private void cancelProcessing(UUID streamId, boolean mayInterruptIfRunning) {
@@ -1107,8 +1122,21 @@ public class AgenticAuthoringTurnStreamService {
     }
 
     private boolean terminalReached(UUID streamId) {
-        AiTurnEventEnvelope latestEvent = latestEvent(streamId, true);
-        return latestEvent != null && turnEventService.isTerminalType(latestEvent.getType());
+        AtomicBoolean terminal = terminalByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean(false));
+        if (terminal.get()) {
+            return true;
+        }
+        AiTurnEventEnvelope latestEvent = latestEvent(streamId, false);
+        if (latestEvent != null && turnEventService.isTerminalType(latestEvent.getType())) {
+            terminal.set(true);
+            return true;
+        }
+        latestEvent = latestEventWithPeriodicPersistenceReconciliation(streamId);
+        boolean reached = latestEvent != null && turnEventService.isTerminalType(latestEvent.getType());
+        if (reached) {
+            terminal.set(true);
+        }
+        return reached;
     }
 
     private AiTurnEventEnvelope latestEvent(UUID streamId) {
@@ -1124,13 +1152,16 @@ public class AgenticAuthoringTurnStreamService {
             return cached;
         }
         AiTurnEventEnvelope persisted = turnEventService.findLastEvent(streamId).orElse(null);
+        persistedReconciliationNanosByStream
+                .computeIfAbsent(streamId, ignored -> new AtomicLong())
+                .set(System.nanoTime());
         rememberLatestEvent(streamId, persisted);
         AiTurnEventEnvelope reconciled = latestEventByStream.get(streamId);
         return reconciled != null ? reconciled : persisted;
     }
 
     private boolean isStillLatestEvent(UUID streamId, AiTurnEventEnvelope observedEvent) {
-        AiTurnEventEnvelope latestEvent = latestEvent(streamId, true);
+        AiTurnEventEnvelope latestEvent = latestEvent(streamId, false);
         if (observedEvent == null) {
             return latestEvent == null;
         }
@@ -1143,6 +1174,31 @@ public class AgenticAuthoringTurnStreamService {
         return observedEvent.getSeq() == latestEvent.getSeq()
                 && java.util.Objects.equals(observedEvent.getType(), latestEvent.getType())
                 && java.util.Objects.equals(observedEvent.getTimestamp(), latestEvent.getTimestamp());
+    }
+
+    private AiTurnEventEnvelope latestEventWithPeriodicPersistenceReconciliation(UUID streamId) {
+        if (streamId == null) {
+            return null;
+        }
+        AtomicLong reconciledAt = persistedReconciliationNanosByStream
+                .computeIfAbsent(streamId, ignored -> new AtomicLong());
+        long now = System.nanoTime();
+        long previous = reconciledAt.get();
+        long interval = TimeUnit.SECONDS.toNanos(PERSISTED_TERMINAL_RECONCILIATION_SECONDS);
+        if (previous > 0L && now - previous < interval) {
+            return latestEvent(streamId, false);
+        }
+        if (!reconciledAt.compareAndSet(previous, now)) {
+            return latestEvent(streamId, false);
+        }
+        try {
+            AiTurnEventEnvelope persisted = turnEventService.findLastEvent(streamId).orElse(null);
+            rememberLatestEvent(streamId, persisted);
+            return latestEvent(streamId, false);
+        } catch (RuntimeException ex) {
+            reconciledAt.compareAndSet(now, previous);
+            throw ex;
+        }
     }
 
     private void rememberLatestEvent(UUID streamId, AiTurnEventEnvelope event) {

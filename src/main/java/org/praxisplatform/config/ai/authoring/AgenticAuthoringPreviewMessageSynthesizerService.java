@@ -115,7 +115,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         try {
             String generated = providerManagementService.generateText(
                     synthesisPrompt(request, intentResolution, uiCompositionPlan, valid, failureCodes, warnings),
-                    AiCallConfig.builder()
+                    AiCallConfig.agenticAuthoringBuilder()
                             .provider(request.provider())
                             .model(request.model())
                             .apiKey(request.apiKey())
@@ -519,7 +519,10 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         }
         return (containsWarning(warnings, "llm-fast-intent-resolution-used")
                         && containsCandidateEvidence(intentResolution.selectedCandidate(), "tool-search-api-resources")
-                        && containsCandidateEvidence(intentResolution.selectedCandidate(), "schema-available"))
+                        && (containsCandidateEvidence(intentResolution.selectedCandidate(), "schema-available")
+                                || containsCandidateEvidence(
+                                        intentResolution.selectedCandidate(),
+                                        "schema-grounding-verified")))
                 || (containsCandidateEvidence(intentResolution.selectedCandidate(), "domain-catalog-grounding")
                         && containsWarning(previewWarnings, "table-query-filter-schema-grounded"));
     }

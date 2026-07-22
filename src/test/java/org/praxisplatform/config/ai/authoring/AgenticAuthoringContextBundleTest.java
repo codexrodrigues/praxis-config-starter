@@ -38,6 +38,11 @@ class AgenticAuthoringContextBundleTest {
 
         JsonNode componentContext = bundle.path("componentContext");
         assertThat(componentContext.path("authorableComponents")).hasSize(8);
+        assertThat(componentContext.path("authorableComponents").toString())
+                .doesNotContain("changeKinds", "semanticTerms");
+        assertThat(componentContext.path("platformGuide").path("componentFamilyCount").asInt())
+                .isEqualTo(8);
+        assertThat(componentContext.path("platformGuide").has("componentFamilies")).isFalse();
         assertThat(componentContext.path("componentCapabilities").path("totalCatalogs").asInt()).isEqualTo(8);
         assertThat(componentContext.path("componentCapabilities").path("includedCatalogs").asInt())
                 .isLessThanOrEqualTo(6);

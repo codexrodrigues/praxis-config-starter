@@ -200,8 +200,94 @@ class AgenticAuthoringRuntimeComponentGroundingService {
                 groundedAffordances.set("activeOperationRefs", activeOperationRefs);
                 activeOperationRefs.forEach(item -> allowedOperations.add(item.asText()));
             }
+            JsonNode visualMaterialization = affordances.path("visualMaterialization");
+            if (visualMaterialization.isObject()) {
+                ObjectNode groundedVisualMaterialization = objectMapper.createObjectNode();
+                copyAllowedText(
+                        visualMaterialization,
+                        groundedVisualMaterialization,
+                        "inlineStyle",
+                        Set.of("supported", "blocked", "unknown"));
+                copyAllowedText(
+                        visualMaterialization,
+                        groundedVisualMaterialization,
+                        "governedClass",
+                        Set.of("supported", "unknown"));
+                ArrayNode constraintRefs = allowedTextArray(
+                        visualMaterialization.path("constraintRefs"),
+                        Set.of("csp.strict-style-src", "host.style-policy"),
+                        8);
+                if (!constraintRefs.isEmpty()) {
+                    groundedVisualMaterialization.set("constraintRefs", constraintRefs);
+                }
+                JsonNode surfacePresetCatalog = visualMaterialization.path("surfacePresetCatalog");
+                if (surfacePresetCatalog.isObject()) {
+                    ObjectNode groundedCatalog = objectMapper.createObjectNode();
+                    copyAllowedText(
+                            surfacePresetCatalog,
+                            groundedCatalog,
+                            "catalogId",
+                            Set.of("praxis-table.conditional-surface"));
+                    copyAllowedText(
+                            surfacePresetCatalog,
+                            groundedCatalog,
+                            "catalogVersion",
+                            Set.of("0.2.0"));
+                    copyAllowedText(
+                            surfacePresetCatalog,
+                            groundedCatalog,
+                            "themeRef",
+                            Set.of("material-system"));
+                    copyAllowedText(
+                            surfacePresetCatalog,
+                            groundedCatalog,
+                            "themeMode",
+                            Set.of("light", "dark", "high-contrast", "unknown"));
+                    ArrayNode supportedScopes = allowedTextArray(
+                            surfacePresetCatalog.path("supportedScopes"),
+                            Set.of("row", "cell"),
+                            2);
+                    ArrayNode supportedPresetIds = allowedTextArray(
+                            surfacePresetCatalog.path("supportedPresetIds"),
+                            Set.of("success", "warning", "danger", "highlight"),
+                            4);
+                    groundedCatalog.set("supportedScopes", supportedScopes);
+                    groundedCatalog.set("supportedPresetIds", supportedPresetIds);
+                    if (groundedCatalog.path("catalogId").isTextual()
+                            && groundedCatalog.path("catalogVersion").isTextual()) {
+                        groundedVisualMaterialization.set("surfacePresetCatalog", groundedCatalog);
+                    }
+                }
+                if (!groundedVisualMaterialization.isEmpty()) {
+                    groundedAffordances.set("visualMaterialization", groundedVisualMaterialization);
+                }
+            }
         }
         return component;
+    }
+
+    private void copyAllowedText(JsonNode source, ObjectNode target, String field, Set<String> allowed) {
+        String value = text(source.path(field));
+        if (allowed.contains(value)) {
+            target.put(field, value);
+        }
+    }
+
+    private ArrayNode allowedTextArray(JsonNode source, Set<String> allowed, int limit) {
+        ArrayNode result = objectMapper.createArrayNode();
+        if (source == null || !source.isArray()) {
+            return result;
+        }
+        for (JsonNode item : source) {
+            if (result.size() >= limit) {
+                break;
+            }
+            String value = text(item);
+            if (allowed.contains(value)) {
+                result.add(value);
+            }
+        }
+        return result;
     }
 
     private ArrayNode relationSurfaceRefs(JsonNode source, int limit) {

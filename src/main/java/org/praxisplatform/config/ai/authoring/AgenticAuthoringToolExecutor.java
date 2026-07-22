@@ -13,4 +13,11 @@ interface AgenticAuthoringToolExecutor {
             AiPrincipalContext principalContext) {
         return execute(call);
     }
+
+    default AgenticAuthoringToolResult execute(
+            AgenticAuthoringToolCall call,
+            AiPrincipalContext principalContext,
+            String requestBaseUrl) {
+        return execute(call, principalContext);
+    }
 }

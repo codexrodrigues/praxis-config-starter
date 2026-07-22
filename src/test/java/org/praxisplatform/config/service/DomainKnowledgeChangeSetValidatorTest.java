@@ -30,7 +30,7 @@ class DomainKnowledgeChangeSetValidatorTest {
         assertThat(report.issues()).isEmpty();
         assertThat(report.proposedOperationTypes()).containsExactly("add_evidence");
         assertThat(report.executableOperationTypes()).containsExactly(
-                "add_alias", "add_binding", "add_evidence", "add_relationship", "create_concept", "revert_evidence");
+                "add_alias", "add_binding", "add_evidence", "add_relationship", "approve_concept", "create_concept", "revert_evidence");
         assertThat(report.executablePatchOperationTypes()).containsExactly("add_evidence");
         assertThat(report.nonExecutableOperationTypes()).isEmpty();
     }
@@ -99,6 +99,28 @@ class DomainKnowledgeChangeSetValidatorTest {
 
         assertThat(report.valid()).isTrue();
         assertThat(report.executablePatchOperationTypes()).containsExactly("create_concept");
+        assertThat(report.nonExecutableOperationTypes()).isEmpty();
+    }
+
+    @Test
+    void acceptsGovernedApprovalOfProjectedConcept() {
+        var request = new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:hr:funcionarios:approve:v1",
+                "proposed",
+                "system",
+                "praxis-reference-pilot",
+                "Approve projected employee concept",
+                "A reviewed catalog concept must become eligible for governed operational bindings.",
+                List.of(operation(
+                        "op-approve-funcionarios",
+                        "approve_concept",
+                        conceptTarget("human-resources.funcionarios"),
+                        semanticConceptPayload())));
+
+        var report = validator.validateCreateRequest(TENANT, ENVIRONMENT, request);
+
+        assertThat(report.valid()).isTrue();
+        assertThat(report.executablePatchOperationTypes()).containsExactly("approve_concept");
         assertThat(report.nonExecutableOperationTypes()).isEmpty();
     }
 

@@ -1,8 +1,13 @@
 package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import io.micrometer.core.instrument.Metrics;
+import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.LongSupplier;
 import lombok.extern.slf4j.Slf4j;
+import org.praxisplatform.config.domain.DomainCatalogReleaseChangedEvent;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.dto.DomainFederationContextQueryResponse;
@@ -12,6 +17,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.util.StringUtils;
 
 @Service
@@ -21,29 +28,55 @@ public class DomainCatalogPromptContextService {
 
     private static final int DEFAULT_LIMIT = 12;
     private static final int MAX_LIMIT = 30;
+    private static final long DEFAULT_RESOURCE_IDENTITY_CACHE_TTL_MS = 300_000L;
+    private static final int DEFAULT_RESOURCE_IDENTITY_CACHE_MAX_ENTRIES = 256;
 
     private final DomainCatalogIngestionService domainCatalogIngestionService;
     private final DomainFederationQueryService domainFederationQueryService;
     private final String defaultServiceKey;
+    private final long resourceIdentityCacheTtlMs;
+    private final int resourceIdentityCacheMaxEntries;
+    private final LongSupplier currentTimeMillis;
+    private final ConcurrentHashMap<ResourceIdentityCacheKey, ResourceIdentityCacheEntry> resourceIdentityCache =
+            new ConcurrentHashMap<>();
 
     public DomainCatalogPromptContextService(DomainCatalogIngestionService domainCatalogIngestionService) {
-        this(domainCatalogIngestionService, null, "praxis-service");
+        this(domainCatalogIngestionService, null, "praxis-service", DEFAULT_RESOURCE_IDENTITY_CACHE_TTL_MS,
+                DEFAULT_RESOURCE_IDENTITY_CACHE_MAX_ENTRIES, System::currentTimeMillis);
     }
 
     public DomainCatalogPromptContextService(
             DomainCatalogIngestionService domainCatalogIngestionService,
             DomainFederationQueryService domainFederationQueryService) {
-        this(domainCatalogIngestionService, domainFederationQueryService, "praxis-service");
+        this(domainCatalogIngestionService, domainFederationQueryService, "praxis-service",
+                DEFAULT_RESOURCE_IDENTITY_CACHE_TTL_MS, DEFAULT_RESOURCE_IDENTITY_CACHE_MAX_ENTRIES,
+                System::currentTimeMillis);
     }
 
     @Autowired
     public DomainCatalogPromptContextService(
             DomainCatalogIngestionService domainCatalogIngestionService,
             DomainFederationQueryService domainFederationQueryService,
-            @Value("${praxis.domain-catalog.service-key:praxis-service}") String defaultServiceKey) {
+            @Value("${praxis.domain-catalog.service-key:praxis-service}") String defaultServiceKey,
+            @Value("${praxis.domain-catalog.prompt-context.resource-identity-cache-ttl-ms:300000}") long cacheTtlMs,
+            @Value("${praxis.domain-catalog.prompt-context.resource-identity-cache-max-entries:256}") int cacheMaxEntries) {
+        this(domainCatalogIngestionService, domainFederationQueryService, defaultServiceKey, cacheTtlMs,
+                cacheMaxEntries, System::currentTimeMillis);
+    }
+
+    DomainCatalogPromptContextService(
+            DomainCatalogIngestionService domainCatalogIngestionService,
+            DomainFederationQueryService domainFederationQueryService,
+            String defaultServiceKey,
+            long cacheTtlMs,
+            int cacheMaxEntries,
+            LongSupplier currentTimeMillis) {
         this.domainCatalogIngestionService = domainCatalogIngestionService;
         this.domainFederationQueryService = domainFederationQueryService;
         this.defaultServiceKey = defaultServiceKey;
+        this.resourceIdentityCacheTtlMs = Math.max(1L, cacheTtlMs);
+        this.resourceIdentityCacheMaxEntries = Math.max(1, cacheMaxEntries);
+        this.currentTimeMillis = currentTimeMillis;
     }
 
     public String buildPromptContext(
@@ -61,6 +94,116 @@ public class DomainCatalogPromptContextService {
         String contextBlock = formatContext(request, tenantId, environment);
         String relationshipBlock = formatRelationships(request.relationships(), tenantId, environment);
         return appendOptionalPromptBlock(contextBlock, relationshipBlock);
+    }
+
+    /**
+     * Projects only the canonical business-resource identities of the current host. This compact
+     * index is baseline semantic context for the LLM: it avoids scanning endpoints while leaving
+     * fields, capabilities, bindings and live data to the progressive grounding tools.
+     */
+    public String buildResourceIdentityContext(
+            String tenantId,
+            String environment,
+            int limit) {
+        int effectiveLimit = clampLimit(limit);
+        ResourceIdentityCacheKey cacheKey = new ResourceIdentityCacheKey(
+                normalizeScope(tenantId), normalizeScope(environment), defaultServiceKey, effectiveLimit);
+        long now = currentTimeMillis.getAsLong();
+        ResourceIdentityCacheEntry cached = resourceIdentityCache.get(cacheKey);
+        if (cached != null && cached.expiresAtMillis() > now) {
+            Metrics.counter("domain_catalog_prompt_context_cache_total", "status", "hit").increment();
+            return cached.context();
+        }
+        if (cached != null) {
+            resourceIdentityCache.remove(cacheKey, cached);
+        }
+        Metrics.counter("domain_catalog_prompt_context_cache_total", "status", "miss").increment();
+        try {
+            DomainCatalogContextResponse context = domainCatalogIngestionService.contextLatest(
+                    defaultServiceKey,
+                    tenantId,
+                    environment,
+                    "node",
+                    null,
+                    "concept",
+                    null,
+                    effectiveLimit);
+            if (context == null || context.items() == null || context.items().isEmpty()) {
+                return "";
+            }
+            StringBuilder builder = new StringBuilder("DOMAIN_RESOURCE_IDENTITY_CATALOG\nitems:\n");
+            for (DomainCatalogItemResponse item : context.items()) {
+                JsonNode payload = item.payload();
+                String resourceKey = firstText(
+                        text(payload == null ? null : payload.path("metadata"), "resourceKey"),
+                        text(payload, "resourceKey"),
+                        item.itemKey());
+                if (!StringUtils.hasText(resourceKey)) {
+                    continue;
+                }
+                builder.append("- resourceKey=")
+                        .append(resourceKey)
+                        .append(" | label=")
+                        .append(label(item));
+                String description = firstText(
+                        text(payload, "description"),
+                        text(payload == null ? null : payload.path("businessGlossary"), "description"));
+                if (StringUtils.hasText(description)) {
+                    builder.append(" | description=").append(compact(description, 220));
+                }
+                builder.append('\n');
+            }
+            String promptContext = builder.toString().trim();
+            cacheResourceIdentityContext(cacheKey, promptContext, now);
+            return promptContext;
+        } catch (RuntimeException ex) {
+            log.debug(
+                    "Could not build canonical domain resource identity context for tenant={}, environment={}: {}",
+                    tenantId,
+                    environment,
+                    ex.getClass().getSimpleName());
+            return "";
+        }
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void onDomainCatalogReleaseChanged(DomainCatalogReleaseChangedEvent event) {
+        String tenantId = normalizeScope(event.tenantId());
+        String environment = normalizeScope(event.environment());
+        long removed = resourceIdentityCache.keySet().stream()
+                .filter(key -> key.tenantId().equals(tenantId) && key.environment().equals(environment))
+                .filter(key -> resourceIdentityCache.remove(key) != null)
+                .count();
+        if (removed > 0) {
+            Metrics.counter("domain_catalog_prompt_context_cache_total", "status", "invalidated").increment(removed);
+        }
+    }
+
+    private void cacheResourceIdentityContext(
+            ResourceIdentityCacheKey cacheKey,
+            String promptContext,
+            long now) {
+        if (!StringUtils.hasText(promptContext)) {
+            return;
+        }
+        resourceIdentityCache.entrySet().removeIf(entry -> entry.getValue().expiresAtMillis() <= now);
+        if (resourceIdentityCache.size() >= resourceIdentityCacheMaxEntries && !resourceIdentityCache.containsKey(cacheKey)) {
+            resourceIdentityCache.entrySet().stream()
+                    .min(Comparator.comparingLong(entry -> entry.getValue().createdAtMillis()))
+                    .ifPresent(entry -> resourceIdentityCache.remove(entry.getKey(), entry.getValue()));
+        }
+        resourceIdentityCache.put(cacheKey, new ResourceIdentityCacheEntry(
+                promptContext, now, now + resourceIdentityCacheTtlMs));
+    }
+
+    private static String normalizeScope(String value) {
+        return value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private record ResourceIdentityCacheKey(String tenantId, String environment, String serviceKey, int limit) {
+    }
+
+    private record ResourceIdentityCacheEntry(String context, long createdAtMillis, long expiresAtMillis) {
     }
 
     private DomainCatalogRequest resolveRequest(String userPrompt, JsonNode contextHints) {
@@ -516,6 +659,14 @@ public class DomainCatalogPromptContextService {
             return base;
         }
         return base + "\n\n" + extra;
+    }
+
+    private String compact(String value, int maxLength) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String compact = value.replaceAll("\\s+", " ").trim();
+        return compact.length() <= maxLength ? compact : compact.substring(0, maxLength).trim();
     }
 
     private String nullToDash(String value) {

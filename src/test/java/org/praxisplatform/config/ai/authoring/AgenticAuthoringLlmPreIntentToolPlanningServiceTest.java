@@ -103,17 +103,30 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("where analytics are not the dominant requested outcome")
                 .contains("individual or single-record profile")
                 .contains("payroll, is itself requested")
+                .contains("what is being measured or explained")
+                .contains("payroll is primaryBusinessEntity")
+                .contains("employee headcount, status, role")
+                .contains("canonical payroll analytical resource")
                 .contains("semanticIntentClass=governed_domain_discovery")
                 .contains("groundingProfile=domain_context")
                 .contains("sobre quais assuntos posso criar")
                 .contains("not yet commanding creation")
                 .contains("domainDiscovery")
-                .contains("human-resources.funcionarios");
+                .contains("human-resources.funcionarios")
+                .contains("Artifact kind and defaults are not constraints")
+                .contains("generic governed dashboard request")
+                .contains("specific measured business subject")
+                .contains("relevant axes and metrics")
+                .contains("Feasibility questions stay platform_guidance")
+                .contains("they do not")
+                .contains("informações salariais")
+                .contains("dos funcionários?");
         assertThat(promptCaptor.getValue()).doesNotContain("\n  \"");
         assertThat(schemaCaptor.getValue().jsonSchema())
                 .contains("semanticIntentClass")
                 .contains("governed_domain_discovery")
-                .contains("mentioning those future artifacts does not make the request concrete authoring")
+                .contains("feasibility or capability questions")
+                .contains("without an explicit creation or modification request")
                 .contains("assistantMessage")
                 .contains("shouldRetrieveGovernedResources")
                 .contains("retrievalQuery")
@@ -124,6 +137,154 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         assertThat(configCaptor.getValue().getModel()).isEqualTo("gpt-5.6-luna");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(640);
         assertThat(configCaptor.getValue().getInvocationTrace()).isNotNull();
+    }
+
+    @Test
+    void promotesResolvedExecutableDomainConceptToOperationalResourceSearch() throws Exception {
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "semanticIntentClass": "authoring_or_other",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "groundingProfile": "domain_concept",
+                          "artifactKind": "table",
+                          "retrievalQuery": "funcionarios da area de tecnologia",
+                          "resourceSearchFocus": {
+                            "primaryBusinessEntity": "human-resources.funcionarios",
+                            "supportingConcepts": ["area tecnologia"],
+                            "desiredSurface": "table",
+                            "excludedConcepts": [],
+                            "rationale": "Canonical employee resource resolved by the LLM."
+                          },
+                          "requiresFullIntentResolution": true,
+                          "reason": "Resolve employees and the requested business filter."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("mostre as informacoes dos funcionarios que sao da area de tecnologia"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().toolCalls()).singleElement().satisfies(call -> {
+            assertThat(call.name()).isEqualTo(AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES);
+            assertThat(call.routeClass()).isEqualTo("pre_intent_resource_discovery");
+            assertThat(call.payload()).isInstanceOfSatisfying(
+                    AgenticAuthoringResourceCandidatesRequest.class,
+                    payload -> assertThat(payload.resourceSearchFocus().primaryBusinessEntity())
+                            .isEqualTo("human-resources.funcionarios"));
+        });
+    }
+
+    @Test
+    void supportingConceptsDoNotForceFullResolutionWithoutExecutableConstraints() throws Exception {
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "semanticIntentClass": "authoring_or_other",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "groundingProfile": "api_resource",
+                          "artifactKind": "dashboard",
+                          "retrievalQuery": "painel administrativo de funcionarios",
+                          "resourceSearchFocus": {
+                            "primaryBusinessEntity": "human-resources.funcionarios",
+                            "supportingConcepts": ["departamento", "cargo", "status"],
+                            "desiredSurface": "painel administrativo",
+                            "excludedConcepts": [],
+                            "rationale": "Use concepts only to enrich retrieval of the employee resource."
+                          },
+                          "queryConstraints": {"filters": []},
+                          "requiresFullIntentResolution": false,
+                          "reason": "The semantic intent is complete after governed resource discovery."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("crie um painel administrativo para acompanhar funcionarios"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().requiresFullIntentResolution()).isFalse();
+        assertThat(result.plan().queryConstraints().path("filters")).isEmpty();
+    }
+
+    @Test
+    void retriesConcreteFullIntentWhenLlmDropsThePrimaryBusinessEntity() throws Exception {
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(
+                        objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "semanticIntentClass": "authoring_or_other",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "groundingProfile": "domain_context",
+                          "artifactKind": "table",
+                          "retrievalQuery": "registros de funcionários por departamentos de engenharia e inteligência artificial",
+                          "resourceSearchFocus": {
+                            "primaryBusinessEntity": null,
+                            "supportingConcepts": ["engenharia", "inteligência artificial"],
+                            "desiredSurface": "tabela",
+                            "uncertainty": "a entidade canônica ainda precisa ser descoberta",
+                            "rationale": "O pedido concreto requer recurso, campo e valores governados."
+                          },
+                          "requiresFullIntentResolution": true,
+                          "reason": "Criar uma tabela filtrada exige descoberta operacional."
+                        }
+                        """),
+                        objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "semanticIntentClass": "authoring_or_other",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "groundingProfile": "api_resource",
+                          "artifactKind": "table",
+                          "retrievalQuery": "registros de funcionários por departamentos de engenharia e inteligência artificial",
+                          "resourceSearchFocus": {
+                            "primaryBusinessEntity": "human-resources.funcionarios",
+                            "supportingConcepts": ["engenharia", "inteligência artificial"],
+                            "desiredSurface": "tabela",
+                            "uncertainty": null,
+                            "rationale": "O catálogo identifica funcionários como o sujeito exibido."
+                          },
+                          "requiresFullIntentResolution": true,
+                          "reason": "Criar uma tabela filtrada exige descoberta operacional."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("preciso de uma tabela com funcionários de engenharia e inteligência artificial"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().toolCalls()).singleElement().satisfies(call -> {
+            assertThat(call.name()).isEqualTo(AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES);
+            assertThat(call.routeClass()).isEqualTo("pre_intent_resource_discovery");
+            assertThat(call.payload()).isInstanceOfSatisfying(
+                    AgenticAuthoringResourceCandidatesRequest.class,
+                    payload -> {
+                        assertThat(payload.resourceSearchFocus().primaryBusinessEntity())
+                                .isEqualTo("human-resources.funcionarios");
+                        assertThat(payload.retrievalQuery())
+                                .contains("primary business entity: human-resources.funcionarios")
+                                .contains("semantic query: registros de funcionários");
+                    });
+        });
+        assertThat(result.providerInvocations()).hasSize(2);
     }
 
     @Test
@@ -259,7 +420,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
     }
 
     @Test
-    void doesNotForceUnscopedDomainCatalogRetrievalBeforeSemanticPlanning() throws Exception {
+    void suppliesOnlyCompactCanonicalResourceIdentitiesBeforeSemanticPlanning() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         AgenticAuthoringTurnStreamRequest request = request(
                 "crie um painel de afastamentos",
@@ -281,6 +442,12 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                           "reason": "O painel depende de dados governados de afastamentos."
                         }
                         """));
+        when(domainCatalogPromptContextService.buildResourceIdentityContext("tenant", "local", 30))
+                .thenReturn("""
+                        DOMAIN_RESOURCE_IDENTITY_CATALOG
+                        items:
+                        - resourceKey=human-resources.ferias-afastamentos | label=Férias e afastamentos
+                        """);
         AgenticAuthoringLlmPreIntentToolPlanningService service =
                 new AgenticAuthoringLlmPreIntentToolPlanningService(
                         providerManagementService,
@@ -294,14 +461,133 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         assertThat(result.planned()).isTrue();
         assertThat(promptCaptor.getValue())
                 .contains("praxis-agentic-authoring-semantic-orientation-context.v1")
+                .contains("DOMAIN_RESOURCE_IDENTITY_CATALOG")
+                .contains("human-resources.ferias-afastamentos")
                 .doesNotContain("DOMAIN_CATALOG_CONTEXT");
-        verifyNoInteractions(domainCatalogPromptContextService);
+        verify(domainCatalogPromptContextService)
+                .buildResourceIdentityContext("tenant", "local", 30);
         assertThat(request.contextHints().has("domainCatalog")).isFalse();
     }
 
     @Test
+    void broadDomainCatalogAvailabilityDoesNotTriggerDetailedRetrievalBeforeSemanticOrientation() throws Exception {
+        AgenticAuthoringTurnStreamRequest request = request(
+                "monte uma tabela com pessoas da empresa",
+                objectMapper.createObjectNode(),
+                objectMapper.readTree("""
+                        {
+                          "source": "page-builder",
+                          "domainCatalog": {
+                            "mode": "domain-360",
+                            "status": "ready",
+                            "serviceKey": "praxis-service"
+                          }
+                        }
+                        """));
+        when(domainCatalogPromptContextService.buildResourceIdentityContext("tenant", "local", 30))
+                .thenReturn("DOMAIN_RESOURCE_IDENTITY_CATALOG\nitems:\n- resourceKey=human-resources.funcionarios | label=Funcionários");
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "semanticIntentClass": "authoring_or_other",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "artifactKind": "table",
+                          "retrievalQuery": "funcionários",
+                          "resourceSearchFocus": {
+                            "primaryBusinessEntity": "human-resources.funcionarios",
+                            "supportingConcepts": [],
+                            "desiredSurface": "table",
+                            "uncertainty": "",
+                            "rationale": "Recurso canônico identificado."
+                          },
+                          "requiresFullIntentResolution": false,
+                          "groundingProfile": "api_resource",
+                          "reason": "A tabela depende do recurso governado."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        domainCatalogPromptContextService);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request,
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        verify(domainCatalogPromptContextService)
+                .buildResourceIdentityContext("tenant", "local", 30);
+        verify(domainCatalogPromptContextService, times(0))
+                .buildPromptContext(any(), any(), any(), any());
+    }
+
+    @Test
+    void explicitBusinessScopeStillAddsDetailedGovernedContext() throws Exception {
+        AgenticAuthoringTurnStreamRequest request = request(
+                "monte uma tabela de funcionários",
+                objectMapper.createObjectNode(),
+                objectMapper.readTree("""
+                        {
+                          "domainCatalog": {
+                            "serviceKey": "praxis-service",
+                            "resourceKey": "human-resources.funcionarios"
+                          }
+                        }
+                        """));
+        when(domainCatalogPromptContextService.buildResourceIdentityContext("tenant", "local", 30))
+                .thenReturn("DOMAIN_RESOURCE_IDENTITY_CATALOG\nitems:\n- resourceKey=human-resources.funcionarios | label=Funcionários");
+        when(domainCatalogPromptContextService.buildPromptContext(
+                eq("monte uma tabela de funcionários"),
+                any(),
+                eq("tenant"),
+                eq("local")))
+                .thenReturn("DOMAIN_CATALOG_CONTEXT\nresourceKey: human-resources.funcionarios");
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "semanticIntentClass": "authoring_or_other",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "artifactKind": "table",
+                          "retrievalQuery": "funcionários",
+                          "resourceSearchFocus": {
+                            "primaryBusinessEntity": "human-resources.funcionarios",
+                            "supportingConcepts": [],
+                            "desiredSurface": "table",
+                            "uncertainty": "",
+                            "rationale": "Recurso canônico identificado."
+                          },
+                          "requiresFullIntentResolution": false,
+                          "groundingProfile": "api_resource",
+                          "reason": "A tabela depende do recurso governado."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        domainCatalogPromptContextService);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request,
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        verify(domainCatalogPromptContextService).buildPromptContext(
+                eq("monte uma tabela de funcionários"),
+                any(),
+                eq("tenant"),
+                eq("local"));
+    }
+
+    @Test
     void preservesExplicitDomainCatalogOptOutBeforePreIntentPlanning() throws Exception {
-        ArgumentCaptor<JsonNode> contextHintsCaptor = ArgumentCaptor.forClass(JsonNode.class);
         AgenticAuthoringTurnStreamRequest request = request(
                 "ajuste apenas o espaçamento visual",
                 objectMapper.createObjectNode(),
@@ -312,11 +598,6 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                           }
                         }
                         """));
-        when(domainCatalogPromptContextService.buildPromptContext(
-                eq("ajuste apenas o espaçamento visual"),
-                contextHintsCaptor.capture(),
-                eq("tenant"),
-                eq("local"))).thenReturn("");
         when(providerManagementService.generateJson(
                 any(),
                 any(),
@@ -339,7 +620,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
 
         service.plan(request, new AiPrincipalContext("tenant", "user", "local", true));
 
-        assertThat(contextHintsCaptor.getValue().path("domainCatalog").path("enabled").asBoolean()).isFalse();
+        verifyNoInteractions(domainCatalogPromptContextService);
     }
 
     @Test
@@ -420,6 +701,12 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 base.currentPage(), base.selectedWidgetKey(), base.provider(), base.model(), base.apiKey(),
                 base.sessionId(), base.clientTurnId(), base.conversationMessages(), base.pendingClarification(),
                 base.attachmentSummaries(), base.contextHints(), capabilities);
+        when(domainCatalogPromptContextService.buildResourceIdentityContext("tenant", "local", 30))
+                .thenReturn("""
+                        DOMAIN_RESOURCE_IDENTITY_CATALOG
+                        items:
+                        - resourceKey=human-resources.funcionarios | label=Funcionários
+                        """);
         AgenticAuthoringLlmPreIntentToolPlanningService service =
                 new AgenticAuthoringLlmPreIntentToolPlanningService(
                         providerManagementService,
@@ -439,10 +726,15 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("praxis-dynamic-form")
                 .contains("praxis-table")
                 .contains("praxis-chart")
+                .contains("DOMAIN_RESOURCE_IDENTITY_CATALOG")
+                .contains("human-resources.funcionarios")
                 .contains("Canonical response locale: en-US")
-                .contains("recommendedIntent is optional evidence");
+                .contains("recommendedIntent is optional evidence")
+                .doesNotContain("\"changeKinds\"")
+                .doesNotContain("\"semanticTerms\"");
         assertThat(promptCaptor.getValue()).doesNotContain("DOMAIN_CATALOG_CONTEXT");
-        verifyNoInteractions(domainCatalogPromptContextService);
+        verify(domainCatalogPromptContextService)
+                .buildResourceIdentityContext("tenant", "local", 30);
         assertThat(promptCaptor.getValue()).doesNotContain("\"recommendedIntent\"");
     }
 
@@ -729,7 +1021,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("middle omitted for planner performance")
                 .contains("userPromptOriginalLength")
                 .contains("head_tail_compacted");
-        assertThat(promptCaptor.getValue().length()).isLessThan(12_000);
+        assertThat(promptCaptor.getValue().length()).isLessThan(12_500);
         assertThat(promptCaptor.getValue()).doesNotContain(longMiddle);
     }
 

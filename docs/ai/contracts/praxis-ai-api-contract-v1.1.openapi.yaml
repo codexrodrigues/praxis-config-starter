@@ -14,10 +14,54 @@ tags:
   - name: ai-stream
   - name: ai-authoring
   - name: ai-triage
+  - name: ai-transcription
   - name: domain-rules
   - name: domain-knowledge
 
 paths:
+  /api/praxis/config/ai/transcriptions:
+    post:
+      tags: [ai-transcription]
+      operationId: transcribeAssistantAudio
+      summary: Transcreve áudio do composer pela fronteira governada do provider configurado
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio]
+              properties:
+                audio:
+                  type: string
+                  format: binary
+                language:
+                  type: string
+                  description: Idioma BCP 47 preferencial para reconhecimento.
+      responses:
+        '200':
+          description: Texto transcrito sem submissão automática do turno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiAudioTranscriptionResponse'
+        '400':
+          description: Áudio ausente, vazio, inválido ou acima do limite
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+        '422':
+          description: Provider configurado sem capability de transcrição
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
   /api/praxis/config/ai/patch:
     post:
       tags: [ai-patch]
@@ -1572,7 +1616,7 @@ components:
       required: false
       schema:
         type: string
-        default: 8120c06a6daa75a0ddad250da394bbc54f92128fb2d229e6c3ea848841fc768c
+        default: f991cfb03ef0f6a283505c034a7afe40fbb089fb254d3a9251a5c35848d0a2b5
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1602,7 +1646,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 8120c06a6daa75a0ddad250da394bbc54f92128fb2d229e6c3ea848841fc768c
+        example: f991cfb03ef0f6a283505c034a7afe40fbb089fb254d3a9251a5c35848d0a2b5
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -4978,6 +5022,24 @@ components:
           type: string
           nullable: true
       additionalProperties: true
+
+    AiAudioTranscriptionResponse:
+      type: object
+      required: [schemaVersion, text, provider]
+      properties:
+        schemaVersion:
+          type: string
+          enum: [praxis-ai-audio-transcription.v1]
+        text:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+          nullable: true
+        language:
+          type: string
+          nullable: true
 
     ProblemResponse:
       type: object

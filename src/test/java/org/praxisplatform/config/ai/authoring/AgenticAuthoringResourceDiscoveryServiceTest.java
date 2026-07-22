@@ -64,12 +64,15 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
         ObjectNode analyticsCapabilities = objectMapper.createObjectNode();
         analyticsCapabilities.putObject("stats").putArray("fields").addObject()
                 .put("field", "severidade")
-                .put("groupByEligible", true);
+                .put("label", "Severidade")
+                .put("type", "string")
+                .put("groupByEligible", true)
+                .put("internalQuery", "must-not-leak");
         ObjectNode collectionCapabilities = objectMapper.createObjectNode();
         collectionCapabilities.putObject("stats").putArray("fields");
         when(capabilities.fetchCapabilitiesResult(
                 Mockito.eq(analytics.resourcePath()),
-                Mockito.isNull(),
+                Mockito.eq("http://localhost:8088"),
                 Mockito.eq("tenant"),
                 Mockito.eq("user"),
                 Mockito.eq("local"))).thenReturn(ResourceCapabilitiesFetchResult.success(
@@ -77,7 +80,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                         "http://localhost" + analytics.resourcePath() + "/capabilities"));
         when(capabilities.fetchCapabilitiesResult(
                 Mockito.eq(numericCollection.resourcePath()),
-                Mockito.isNull(),
+                Mockito.eq("http://localhost:8088"),
                 Mockito.eq("tenant"),
                 Mockito.eq("user"),
                 Mockito.eq("local"))).thenReturn(ResourceCapabilitiesFetchResult.success(
@@ -98,7 +101,8 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                         null,
                         "dashboard",
                         6),
-                new AiPrincipalContext("tenant", "user", "local", true));
+                new AiPrincipalContext("tenant", "user", "local", true),
+                "http://localhost:8088");
 
         assertThat(result.candidates())
                 .extracting(AgenticAuthoringCandidate::resourcePath)
@@ -114,7 +118,14 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 .containsEntry("analyticsCapabilityGroundingRequired", true)
                 .containsEntry("analyticsCapabilityVerifiedCandidateCount", 1)
                 .containsEntry("analyticsCapabilityExcludedCandidateCount", 1)
-                .containsEntry("analyticsCapabilityFetchCount", 2);
+                .containsEntry("analyticsCapabilityFetchCount", 2)
+                .hasEntrySatisfying("analyticsCapabilityFieldCatalogs", value -> assertThat(value.toString())
+                        .contains("severidade", "Severidade", "groupByEligible")
+                        .doesNotContain("internalQuery", "must-not-leak"))
+                .hasEntrySatisfying("analyticsCapabilityExclusions", value -> assertThat(value.toString())
+                        .contains(numericCollection.resourcePath())
+                        .contains("success")
+                        .contains("statsFieldsPresent=false"));
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.JsonValue;
+import com.openai.core.MultipartField;
 import com.openai.core.http.AsyncStreamResponse;
 import com.openai.core.http.HttpResponseFor;
 import com.openai.errors.OpenAIIoException;
@@ -12,7 +13,12 @@ import com.openai.errors.OpenAIServiceException;
 import com.openai.helpers.ResponseAccumulator;
 import com.openai.models.Reasoning;
 import com.openai.models.ReasoningEffort;
+import com.openai.models.audio.AudioModel;
+import com.openai.models.audio.transcriptions.TranscriptionCreateParams;
+import com.openai.models.audio.transcriptions.TranscriptionCreateResponse;
 import com.openai.models.ResponseFormatJsonObject;
+import com.openai.models.responses.ContainerAuto;
+import com.openai.models.responses.FunctionShellTool;
 import com.openai.models.responses.Response;
 import com.openai.models.responses.ResponseCreateParams;
 import com.openai.models.responses.ResponseFormatTextJsonSchemaConfig;
@@ -21,7 +27,9 @@ import com.openai.models.responses.ResponseOutputMessage;
 import com.openai.models.responses.ResponseStreamEvent;
 import com.openai.models.responses.ResponseTextConfig;
 import com.openai.models.responses.ResponseUsage;
+import com.openai.models.responses.SkillReference;
 import jakarta.annotation.PreDestroy;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.net.URI;
@@ -67,8 +75,10 @@ public class SpringAiOpenAiService implements AiProvider {
     private static final String PROVIDER = "openai";
     private static final String TRANSPORT = "openai-responses-sdk";
     private static final String STRUCTURED_OUTPUT_NAME = "praxis_response";
+    private static final String DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe";
 
     private final ObjectMapper objectMapper;
+    private final OpenAiHostedSkillProperties hostedSkillProperties;
     private final AtomicReference<DefaultClientHolder> defaultClient = new AtomicReference<>();
 
     @Value("${spring.ai.openai.api-key:#{null}}")
@@ -129,6 +139,66 @@ public class SpringAiOpenAiService implements AiProvider {
     @Override
     public String generateText(String prompt, AiCallConfig config) {
         return callResponses(prompt, config, PreparedSchema.none(), false).text();
+    }
+
+    @Override
+    public boolean supportsAudioTranscription(AiCallConfig config) {
+        return true;
+    }
+
+    @Override
+    public String transcribeAudio(AiAudioTranscriptionRequest request, AiCallConfig config) {
+        if (request == null || request.audio() == null || request.audio().length == 0) {
+            throw new IllegalArgumentException("Audio payload is required.");
+        }
+        MultipartField<java.io.InputStream> audioFile = MultipartField.<java.io.InputStream>builder()
+                .value(new ByteArrayInputStream(request.audio()))
+                .filename(resolveAudioFileName(request.fileName()))
+                .contentType(resolveAudioContentType(request.contentType()))
+                .build();
+        TranscriptionCreateParams.Builder params = TranscriptionCreateParams.builder()
+                .file(audioFile)
+                .model(AudioModel.of(resolveTranscriptionModel(config)));
+        String language = normalizeTranscriptionLanguage(request.language());
+        if (language != null) {
+            params.language(language);
+        }
+        try (ClientLease lease = acquireClient(config)) {
+            TranscriptionCreateResponse transcription = lease.client().audio().transcriptions().create(params.build());
+            String text = transcription.asTranscription().text();
+            if (text == null || text.isBlank()) {
+                throw new IllegalStateException("Audio transcription returned no text.");
+            }
+            return text.trim();
+        } catch (AiProviderCallException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw classifyCallFailure(exception);
+        }
+    }
+
+    private String resolveTranscriptionModel(AiCallConfig config) {
+        String configured = config != null ? config.getModel() : null;
+        return configured != null && configured.toLowerCase(java.util.Locale.ROOT).contains("transcrib")
+                ? configured.trim()
+                : DEFAULT_TRANSCRIPTION_MODEL;
+    }
+
+    private String resolveAudioFileName(String fileName) {
+        return fileName == null || fileName.isBlank() ? "audio.webm" : fileName.trim();
+    }
+
+    private String resolveAudioContentType(String contentType) {
+        return contentType == null || contentType.isBlank() ? "application/octet-stream" : contentType.trim();
+    }
+
+    private String normalizeTranscriptionLanguage(String language) {
+        if (language == null || language.isBlank()) {
+            return null;
+        }
+        String normalized = language.trim();
+        int separator = normalized.indexOf('-');
+        return (separator > 0 ? normalized.substring(0, separator) : normalized).toLowerCase(java.util.Locale.ROOT);
     }
 
     @Override
@@ -395,7 +465,27 @@ public class SpringAiOpenAiService implements AiProvider {
         if (jsonMode) {
             builder.text(buildTextConfig(preparedSchema));
         }
+        addHostedSkills(builder, config);
         return builder.build();
+    }
+
+    private void addHostedSkills(ResponseCreateParams.Builder response, AiCallConfig config) {
+        if (config == null || config.getExecutionProfile() == null) {
+            return;
+        }
+        List<OpenAiHostedSkillProperties.Reference> references =
+                hostedSkillProperties.referencesFor(config.getExecutionProfile());
+        if (references.isEmpty()) {
+            return;
+        }
+        ContainerAuto.Builder environment = ContainerAuto.builder();
+        references.forEach(reference -> environment.addSkill(SkillReference.builder()
+                .skillId(reference.getId().trim())
+                .version(reference.resolvedVersion())
+                .build()));
+        response.addTool(FunctionShellTool.builder()
+                .environment(environment.build())
+                .build());
     }
 
     private ResponseTextConfig buildTextConfig(PreparedSchema preparedSchema) {

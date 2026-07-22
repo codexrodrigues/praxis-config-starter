@@ -72,7 +72,7 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThat(readableValues(response.validationResult().path("proposedOperationTypes")))
                 .containsExactly("add_evidence");
         assertThat(readableValues(response.validationResult().path("executableOperationTypes")))
-                .containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "create_concept", "revert_evidence");
+                .containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "approve_concept", "create_concept", "revert_evidence");
         assertThat(readableValues(response.validationResult().path("executablePatchOperationTypes")))
                 .containsExactly("add_evidence");
         assertThat(readableValues(response.validationResult().path("nonExecutableOperationTypes")))
@@ -286,7 +286,7 @@ class DomainKnowledgeChangeSetServiceTest {
                 .extracting(org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationIssue::code)
                 .contains("non_executable_operation_type");
         assertThat(validation.proposedOperationTypes()).containsExactly("update_concept_summary");
-        assertThat(validation.executableOperationTypes()).containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "create_concept", "revert_evidence");
+        assertThat(validation.executableOperationTypes()).containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "approve_concept", "create_concept", "revert_evidence");
         assertThat(validation.executablePatchOperationTypes()).isEmpty();
         assertThat(validation.nonExecutableOperationTypes()).containsExactly("update_concept_summary");
         ArgumentCaptor<DomainKnowledgeChangeSet> captor = ArgumentCaptor.forClass(DomainKnowledgeChangeSet.class);
@@ -295,7 +295,7 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThat(readableValues(validationResult.path("proposedOperationTypes")))
                 .containsExactly("update_concept_summary");
         assertThat(readableValues(validationResult.path("executableOperationTypes")))
-                .containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "create_concept", "revert_evidence");
+                .containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "approve_concept", "create_concept", "revert_evidence");
         assertThat(readableValues(validationResult.path("executablePatchOperationTypes")))
                 .isEmpty();
         assertThat(readableValues(validationResult.path("nonExecutableOperationTypes")))
@@ -419,6 +419,77 @@ class DomainKnowledgeChangeSetServiceTest {
                 ENVIRONMENT))
                 .isInstanceOf(ConfigurationIngestionException.class)
                 .hasMessageContaining("status transition is not allowed: rejected -> approved");
+    }
+
+    @Test
+    void appliesApprovedConceptPromotionForProjectedCatalogConcept() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        ProjectKnowledgeDerivedIndexService derivedIndexService = mock(ProjectKnowledgeDerivedIndexService.class);
+        DomainKnowledgeChangeSetService service = service(
+                repository, conceptRepository, evidenceRepository, derivedIndexService);
+        JsonNode target = objectMapper.createObjectNode()
+                .put("tenantId", TENANT)
+                .put("environment", ENVIRONMENT)
+                .put("conceptKey", "human-resources.funcionarios");
+        var payload = objectMapper.createObjectNode();
+        var provenance = payload.putObject("provenance");
+        provenance.put("claimId", "claim:human-resources:funcionarios:approval:v1");
+        provenance.put("sourceClass", "authored");
+        provenance.put("derivationActivity", "reference-domain-pilot-review");
+        provenance.putArray("sourceRefs").add("domain-catalog:human-resources.funcionarios:v1");
+        DomainKnowledgeChangeSetCreateRequest request = new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:hr:funcionarios:approve:v1",
+                "proposed",
+                "system",
+                "praxis-reference-pilot",
+                "Approve projected employee concept",
+                "Reviewed catalog concept is eligible for operational grounding.",
+                List.of(new DomainKnowledgeChangeSetOperationRequest(
+                        "op-approve-funcionarios",
+                        "approve_concept",
+                        target,
+                        "Promote the reviewed candidate through the governed lifecycle.",
+                        List.of("domain-catalog:human-resources.funcionarios:v1"),
+                        1d,
+                        payload)));
+        DomainKnowledgeChangeSet existing = persisted(request);
+        existing.setStatus("approved");
+        DomainKnowledgeConcept concept = DomainKnowledgeConcept.builder()
+                .id(UUID.randomUUID())
+                .tenantId(TENANT)
+                .environment(ENVIRONMENT)
+                .conceptKey("human-resources.funcionarios")
+                .nodeType("concept")
+                .lifecycle("candidate")
+                .curationStatus("generated")
+                .aiVisibility("allow")
+                .build();
+        concept.onInsert();
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(repository.save(any(DomainKnowledgeChangeSet.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(
+                TENANT, ENVIRONMENT, "human-resources.funcionarios"))
+                .thenReturn(Optional.of(concept));
+        when(conceptRepository.save(any(DomainKnowledgeConcept.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKey(
+                TENANT, ENVIRONMENT, "claim:human-resources:funcionarios:approval:v1"))
+                .thenReturn(List.of());
+        when(evidenceRepository.save(any(DomainKnowledgeEvidence.class))).thenAnswer(invocation -> {
+            DomainKnowledgeEvidence evidence = invocation.getArgument(0);
+            evidence.onInsert();
+            return evidence;
+        });
+
+        var response = service.apply(existing.getId(), TENANT, ENVIRONMENT);
+
+        assertThat(response.status()).isEqualTo("applied");
+        assertThat(concept.getLifecycle()).isEqualTo("active");
+        assertThat(concept.getCurationStatus()).isEqualTo("approved");
+        verify(conceptRepository).save(concept);
+        verify(derivedIndexService).evidenceActivated(
+                any(DomainKnowledgeConcept.class), any(DomainKnowledgeEvidence.class));
     }
 
     @Test

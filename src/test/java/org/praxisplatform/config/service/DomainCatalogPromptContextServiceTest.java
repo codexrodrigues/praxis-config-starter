@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
+import org.praxisplatform.config.domain.DomainCatalogReleaseChangedEvent;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
@@ -18,12 +20,130 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 @Tag("unit")
 class DomainCatalogPromptContextServiceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void buildsCompactCanonicalResourceIdentityContextForLlmOrientation() throws Exception {
+        DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
+        DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);
+        when(ingestionService.contextLatest(
+                "praxis-service",
+                "tenant-a",
+                "dev",
+                "node",
+                null,
+                "concept",
+                null,
+                30))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        null,
+                        "node",
+                        null,
+                        "concept",
+                        List.of(),
+                        List.of(new DomainCatalogItemResponse(
+                                UUID.randomUUID(),
+                                "praxis-service:human-resources.funcionarios:latest",
+                                "node",
+                                "human-resources.funcionarios",
+                                "human-resources",
+                                "concept",
+                                null,
+                                null,
+                                objectMapper.readTree("""
+                                    {
+                                      "label": "Funcionários",
+                                      "description": "Cadastro de colaboradores, seus cargos e departamentos.",
+                                      "metadata": {
+                                        "resourceKey": "human-resources.funcionarios",
+                                        "resourcePath": "/api/human-resources/funcionarios"
+                                      }
+                                    }
+                                    """)))));
+
+        String context = service.buildResourceIdentityContext("tenant-a", "dev", 30);
+
+        assertThat(context)
+                .contains("DOMAIN_RESOURCE_IDENTITY_CATALOG")
+                .contains("resourceKey=human-resources.funcionarios")
+                .contains("label=Funcionários")
+                .contains("Cadastro de colaboradores")
+                .doesNotContain("resourcePath");
+    }
+
+    @Test
+    void reusesCompactResourceIdentityProjectionWithinItsScope() throws Exception {
+        DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
+        when(ingestionService.contextLatest("praxis-service", "tenant-a", "dev", "node", null, "concept", null, 12))
+                .thenReturn(resourceIdentityContext("human-resources.funcionarios"));
+        DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);
+
+        String first = service.buildResourceIdentityContext("tenant-a", "dev", 12);
+        String second = service.buildResourceIdentityContext("tenant-a", "dev", 12);
+
+        assertThat(second).isEqualTo(first);
+        verify(ingestionService, times(1))
+                .contextLatest("praxis-service", "tenant-a", "dev", "node", null, "concept", null, 12);
+    }
+
+    @Test
+    void expiresAndRebuildsCompactResourceIdentityProjection() throws Exception {
+        AtomicLong now = new AtomicLong(1_000L);
+        DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
+        when(ingestionService.contextLatest("praxis-service", "tenant-a", "dev", "node", null, "concept", null, 12))
+                .thenReturn(resourceIdentityContext("human-resources.funcionarios"));
+        DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(
+                ingestionService, null, "praxis-service", 100L, 8, now::get);
+
+        service.buildResourceIdentityContext("tenant-a", "dev", 12);
+        now.addAndGet(101L);
+        service.buildResourceIdentityContext("tenant-a", "dev", 12);
+
+        verify(ingestionService, times(2))
+                .contextLatest("praxis-service", "tenant-a", "dev", "node", null, "concept", null, 12);
+    }
+
+    @Test
+    void invalidatesOnlyTheChangedTenantAndEnvironment() throws Exception {
+        DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
+        when(ingestionService.contextLatest(eq("praxis-service"), eq("tenant-a"), eq("dev"), eq("node"),
+                eq(null), eq("concept"), eq(null), eq(12)))
+                .thenReturn(resourceIdentityContext("human-resources.funcionarios"));
+        when(ingestionService.contextLatest(eq("praxis-service"), eq("tenant-b"), eq("dev"), eq("node"),
+                eq(null), eq("concept"), eq(null), eq(12)))
+                .thenReturn(resourceIdentityContext("sales.clientes"));
+        DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);
+
+        service.buildResourceIdentityContext("tenant-a", "dev", 12);
+        service.buildResourceIdentityContext("tenant-b", "dev", 12);
+        service.onDomainCatalogReleaseChanged(new DomainCatalogReleaseChangedEvent(
+                "tenant-a", "dev", "quickstart", "human-resources.funcionarios", "release-a", Instant.now()));
+        service.buildResourceIdentityContext("tenant-a", "dev", 12);
+        service.buildResourceIdentityContext("tenant-b", "dev", 12);
+
+        verify(ingestionService, times(2)).contextLatest(
+                "praxis-service", "tenant-a", "dev", "node", null, "concept", null, 12);
+        verify(ingestionService, times(1)).contextLatest(
+                "praxis-service", "tenant-b", "dev", "node", null, "concept", null, 12);
+    }
+
+    private DomainCatalogContextResponse resourceIdentityContext(String resourceKey) throws Exception {
+        return new DomainCatalogContextResponse(
+                "praxis.domain-catalog-context/v0.1", null, null, "node", null, "concept", List.of(),
+                List.of(new DomainCatalogItemResponse(
+                        UUID.randomUUID(), "release", "node", resourceKey, null, "concept", null, null,
+                        objectMapper.readTree("""
+                            {"label":"Resource","metadata":{"resourceKey":"%s"}}
+                            """.formatted(resourceKey)))));
+    }
 
     @Test
     void buildsPromptContextWhenDomainCatalogHintIsPresent() throws Exception {

@@ -210,6 +210,79 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     @Test
+    void serverIssuedSemanticDecisionRecoversCanonicalThreadWhenClientSessionIsMissing() {
+        UUID threadId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringTurnStreamRequest baseRequest = request();
+        AgenticAuthoringSemanticDecision decision = AgenticAuthoringSemanticDecision.from(
+                        "modify",
+                        "chart",
+                        "set_chart_type",
+                        null,
+                        List.of(),
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        threadId.toString(),
+                        "turn-client-chart-change",
+                        "Trocar para linhas",
+                        "Trocar para linhas",
+                        "Server-issued quick reply continuation.")
+                .withConstraints(objectMapper.createObjectNode()
+                        .put("source", "server-issued-quick-reply")
+                        .put("quickReplyId", "chart-change-line"));
+        AgenticAuthoringTurnStreamRequest continuationRequest = new AgenticAuthoringTurnStreamRequest(
+                "Altere o gráfico selecionado para linhas.",
+                baseRequest.targetApp(),
+                baseRequest.targetComponentId(),
+                baseRequest.currentRoute(),
+                baseRequest.currentPage(),
+                baseRequest.selectedWidgetKey(),
+                baseRequest.provider(),
+                baseRequest.model(),
+                baseRequest.apiKey(),
+                null,
+                "turn-client-chart-change",
+                baseRequest.conversationMessages(),
+                baseRequest.pendingClarification(),
+                baseRequest.attachmentSummaries(),
+                baseRequest.contextHints(),
+                baseRequest.componentCapabilities(),
+                decision);
+
+        when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), anyString()))
+                .thenReturn(AiThread.builder().threadId(threadId).build());
+        when(turnEventService.findPersistedSemanticDecisionContext(
+                        eq(threadId),
+                        eq(decision.decisionId()),
+                        eq(principalContext)))
+                .thenReturn(Optional.of(new AiTurnEventService.PersistedSemanticDecisionContext(
+                        decision,
+                        objectMapper.createArrayNode())));
+        when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class))).thenReturn(Optional.empty());
+        when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
+
+        AgenticAuthoringTurnStreamService service = service();
+        try {
+            service.start(continuationRequest, "http://localhost", principalContext);
+
+            ArgumentCaptor<AiOrchestratorRequest> threadRequest = ArgumentCaptor.forClass(AiOrchestratorRequest.class);
+            verify(threadService).resolveThread(
+                    threadRequest.capture(),
+                    eq("tenant"),
+                    eq("user"),
+                    eq("local"),
+                    eq("Altere o gráfico selecionado para linhas."));
+            org.assertj.core.api.Assertions.assertThat(threadRequest.getValue().getSessionId()).isEqualTo(threadId);
+            org.assertj.core.api.Assertions.assertThat(threadRequest.getValue().getMode()).isEqualTo("continue");
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
     void firstTurnUsesTheResolvedThreadAsCanonicalAuthoringSession() {
         UUID threadId = UUID.randomUUID();
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
@@ -994,7 +1067,7 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     @Test
-    void eventSinkTerminalReachedReconcilesPersistedTerminalEventFromAnotherInstance() throws Exception {
+    void eventSinkTerminalReachedRateLimitsPersistedReconciliationAndCachesTerminalEvent() throws Exception {
         UUID threadId = UUID.randomUUID();
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         AgenticAuthoringTurnStreamRequest request = request();
@@ -1023,7 +1096,7 @@ class AgenticAuthoringTurnStreamServiceTest {
                             .timestamp(Instant.now())
                             .payload(objectMapper.createObjectNode())
                             .build());
-                    terminalSeenByEngine.set(sink.terminalReached());
+                    terminalSeenByEngine.set(sink.terminalReached() && sink.terminalReached());
                     processed.countDown();
                     return AgenticAuthoringTurnEngine.AgenticAuthoringTurnOutcome.completed(
                             new AgenticAuthoringTurnEngine.AgenticAuthoringTurnState(
@@ -1044,7 +1117,7 @@ class AgenticAuthoringTurnStreamServiceTest {
         service.shutdown();
 
         org.assertj.core.api.Assertions.assertThat(terminalSeenByEngine.get()).isTrue();
-        verify(turnEventService, atLeastOnce()).findLastEvent(any(UUID.class));
+        verify(turnEventService, times(1)).findLastEvent(any(UUID.class));
     }
 
     @Test
@@ -1583,10 +1656,11 @@ class AgenticAuthoringTurnStreamServiceTest {
                 .type("intent.resolved")
                 .payload(objectMapper.createObjectNode())
                 .build();
-        when(turnEventService.findLastEvent(streamId)).thenReturn(Optional.of(intentResolved));
+        AgenticAuthoringTurnStreamService service = service();
+        ReflectionTestUtils.invokeMethod(service, "rememberLatestEvent", streamId, intentResolved);
 
         Boolean stillLatest = ReflectionTestUtils.invokeMethod(
-                service(),
+                service,
                 "isStillLatestEvent",
                 streamId,
                 staleLlmTail);

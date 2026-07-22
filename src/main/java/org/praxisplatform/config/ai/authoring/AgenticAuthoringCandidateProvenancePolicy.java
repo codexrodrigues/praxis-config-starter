@@ -7,6 +7,7 @@ final class AgenticAuthoringCandidateProvenancePolicy {
 
     static final String SEMANTIC_RETRIEVAL = "semantic_retrieval";
     static final String DOMAIN_CATALOG = "domain_catalog";
+    static final String DOMAIN_BINDING = "domain_binding";
     static final String LEXICAL_FALLBACK = "lexical_fallback";
     static final String BROAD_ARTIFACT_DISCOVERY = "broad_artifact_discovery";
     static final String CONTEXT_HINT = "context_hint";
@@ -23,6 +24,9 @@ final class AgenticAuthoringCandidateProvenancePolicy {
         }
         if (hasEvidence(candidates, AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)) {
             return DOMAIN_CATALOG;
+        }
+        if (hasEvidence(candidates, "domain-binding")) {
+            return DOMAIN_BINDING;
         }
         if (hasEvidence(candidates, "semantic-retrieval")) {
             return SEMANTIC_RETRIEVAL;

@@ -17,6 +17,14 @@ import org.praxisplatform.config.dto.AiProviderModel;
  * </p>
  */
 public interface AiProvider {
+    default boolean supportsAudioTranscription(AiCallConfig config) {
+        return false;
+    }
+
+    default String transcribeAudio(AiAudioTranscriptionRequest request, AiCallConfig config) {
+        throw new UnsupportedOperationException("Audio transcription is not supported by provider " + getProviderName());
+    }
+
     JsonNode generateJson(String prompt);
 
     default JsonNode generateJson(String prompt, AiJsonSchema schema) {

@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
@@ -45,6 +46,8 @@ import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.ContextRetrievalService;
+import org.praxisplatform.config.service.LiveOptionValueCandidate;
+import org.praxisplatform.config.service.LiveOptionValueRetrievalResult;
 import org.praxisplatform.config.service.SchemaFetchResult;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -160,6 +163,569 @@ class AgenticAuthoringTurnEngineTest {
         assertThat(projected.path("providerTelemetry").path("cacheReadInputTokens").asLong()).isEqualTo(40L);
         assertThat(projected.path("providerTelemetry").path("rawPromptCopied").asBoolean()).isFalse();
         assertThat(projected.toString()).doesNotContain("Crie um formulario");
+    }
+
+    @Test
+    void acceptsOnlyCanonicalInConstraintWhoseIdsComeFromExhaustiveLiveOptionGrounding() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        LiveOptionValueRetrievalResult grounding = new LiveOptionValueRetrievalResult(
+                true,
+                "praxis-live-option-values.v1",
+                "/api/human-resources/funcionarios",
+                "/api/human-resources/funcionarios/filter",
+                "departamentoIdsIn",
+                "department",
+                "/api/departamentos/options/filter",
+                "/api/departamentos/options/by-ids",
+                "Departamento:27",
+                "complete_enumeration",
+                "post_semantic_schema_ranking",
+                objectMapper.getNodeFactory().textNode("área de tecnologia"),
+                27,
+                true,
+                List.of(
+                        new LiveOptionValueCandidate(
+                                objectMapper.getNodeFactory().numberNode(16),
+                                "Cyberdyne - Inteligência Artificial",
+                                null),
+                        new LiveOptionValueCandidate(
+                                objectMapper.getNodeFactory().numberNode(17),
+                                "Cyberdyne - Engenharia",
+                                null)),
+                "",
+                "");
+        ObjectNode groundedConstraints = objectMapper.createObjectNode();
+        groundedConstraints.putArray("filters").addObject()
+                .put("concept", "área de tecnologia")
+                .put("field", "departamentoIdsIn")
+                .put("operator", "in")
+                .putArray("value")
+                .add(16)
+                .add(17);
+        ObjectNode rawTextConstraints = objectMapper.createObjectNode();
+        rawTextConstraints.putArray("filters").addObject()
+                .put("concept", "área de tecnologia")
+                .put("field", "departamentoNome")
+                .put("operator", "contains")
+                .put("value", "tecnologia");
+
+        Boolean canonicalAccepted = ReflectionTestUtils.invokeMethod(
+                engine,
+                "hasValidatedLiveOptionSelection",
+                intentWithConstraints(groundedConstraints),
+                grounding);
+        Boolean rawTextRejected = ReflectionTestUtils.invokeMethod(
+                engine,
+                "hasValidatedLiveOptionSelection",
+                intentWithConstraints(rawTextConstraints),
+                grounding);
+        LiveOptionValueRetrievalResult confirmedSelection = new LiveOptionValueRetrievalResult(
+                true,
+                "praxis-live-option-values.v1",
+                grounding.resourcePath(),
+                grounding.filterSchemaPath(),
+                grounding.canonicalFilterField(),
+                grounding.optionSourceKey(),
+                grounding.filterEndpoint(),
+                grounding.byIdsEndpoint(),
+                "Departamento:27",
+                "selected_ids_reload",
+                "canonical_by_ids_confirmation",
+                groundedConstraints.path("filters").get(0).path("value"),
+                2,
+                true,
+                grounding.candidates(),
+                "",
+                "");
+        LiveOptionValueRetrievalResult staleSelection = new LiveOptionValueRetrievalResult(
+                true,
+                confirmedSelection.schemaVersion(),
+                confirmedSelection.resourcePath(),
+                confirmedSelection.filterSchemaPath(),
+                confirmedSelection.canonicalFilterField(),
+                confirmedSelection.optionSourceKey(),
+                confirmedSelection.filterEndpoint(),
+                confirmedSelection.byIdsEndpoint(),
+                "Departamento:28",
+                confirmedSelection.retrievalMode(),
+                confirmedSelection.fieldResolution(),
+                confirmedSelection.requestedValue(),
+                confirmedSelection.totalElements(),
+                confirmedSelection.exhaustive(),
+                confirmedSelection.candidates(),
+                "",
+                "");
+        Boolean exactReloadAccepted = ReflectionTestUtils.invokeMethod(
+                engine,
+                "hasConfirmedLiveOptionSelection",
+                intentWithConstraints(groundedConstraints),
+                grounding,
+                confirmedSelection);
+        Boolean staleReloadRejected = ReflectionTestUtils.invokeMethod(
+                engine,
+                "hasConfirmedLiveOptionSelection",
+                intentWithConstraints(groundedConstraints),
+                grounding,
+                staleSelection);
+
+        assertThat(canonicalAccepted).isTrue();
+        assertThat(rawTextRejected).isFalse();
+        assertThat(exactReloadAccepted).isTrue();
+        assertThat(staleReloadRejected).isFalse();
+    }
+
+    @Test
+    void collapsesOnlyResidualTextConstraintsCoveredByTheLlmSelectedLiveValues() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        LiveOptionValueRetrievalResult grounding = new LiveOptionValueRetrievalResult(
+                true,
+                "praxis-live-option-values.v1",
+                "/api/human-resources/funcionarios",
+                "/api/human-resources/funcionarios/filter",
+                "departamentoIdsIn",
+                "department",
+                "/api/departamentos/options/filter",
+                "/api/departamentos/options/by-ids",
+                "Departamento:27",
+                "complete_enumeration",
+                "post_semantic_schema_ranking",
+                objectMapper.createArrayNode().add("engenharia").add("inteligência artificial"),
+                27,
+                true,
+                List.of(
+                        new LiveOptionValueCandidate(
+                                objectMapper.getNodeFactory().numberNode(16),
+                                "Cyberdyne - Inteligência Artificial",
+                                null),
+                        new LiveOptionValueCandidate(
+                                objectMapper.getNodeFactory().numberNode(17),
+                                "Cyberdyne - Engenharia",
+                                null)),
+                "",
+                "");
+        ObjectNode redundantConstraints = objectMapper.createObjectNode();
+        ArrayNode redundantFilters = redundantConstraints.putArray("filters");
+        redundantFilters.addObject()
+                .put("concept", "áreas organizacionais")
+                .put("field", "departamentoIdsIn")
+                .put("operator", "in")
+                .putArray("value")
+                .add(16)
+                .add(17);
+        redundantFilters.addObject()
+                .put("concept", "habilidade")
+                .put("field", "habilidade")
+                .put("operator", "eq")
+                .put("value", "inteligência artificial");
+
+        AgenticAuthoringIntentResolutionResult collapsed = ReflectionTestUtils.invokeMethod(
+                engine,
+                "collapseSemanticallyCoveredLiveOptionConstraints",
+                intentWithConstraints(redundantConstraints),
+                grounding);
+
+        assertThat(collapsed).isNotNull();
+        assertThat(collapsed.semanticDecision().constraints().path("filters")).hasSize(1);
+        assertThat(collapsed.semanticDecision().constraints().path("filters").get(0)
+                .path("field").asText()).isEqualTo("departamentoIdsIn");
+        assertThat(collapsed.warnings())
+                .contains("live-option-redundant-semantic-constraint-collapsed");
+        assertThat(redundantConstraints.path("filters")).hasSize(2);
+
+        ObjectNode independentConstraints = redundantConstraints.deepCopy();
+        ((ObjectNode) independentConstraints.path("filters").get(1))
+                .put("field", "status")
+                .put("value", "ativo");
+        AgenticAuthoringIntentResolutionResult preserved = ReflectionTestUtils.invokeMethod(
+                engine,
+                "collapseSemanticallyCoveredLiveOptionConstraints",
+                intentWithConstraints(independentConstraints),
+                grounding);
+
+        assertThat(preserved.semanticDecision().constraints().path("filters")).hasSize(2);
+        assertThat(preserved.warnings())
+                .doesNotContain("live-option-redundant-semantic-constraint-collapsed");
+    }
+
+    @Test
+    void restrictsLiveOptionRefinementToConstraintsAndPreservesEstablishedIntentLineage() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode originalConstraints = objectMapper.createObjectNode();
+        originalConstraints.putArray("filters").addObject()
+                .put("concept", "áreas organizacionais")
+                .put("field", "departamentoIdsIn")
+                .put("operator", "in")
+                .putArray("value")
+                .add("engenharia")
+                .add("inteligência artificial");
+        ObjectNode resolvedConstraints = objectMapper.createObjectNode();
+        resolvedConstraints.putArray("filters").addObject()
+                .put("concept", "departamentos")
+                .put("field", "departamentoIdsIn")
+                .put("operator", "in")
+                .putArray("value")
+                .add(25)
+                .add(21);
+        AgenticAuthoringIntentResolutionResult established = intentWithConstraints(originalConstraints);
+        AgenticAuthoringIntentResolutionResult liveModelOutput = intentWithConstraints(resolvedConstraints);
+        liveModelOutput = new AgenticAuthoringIntentResolutionResult(
+                liveModelOutput.valid(),
+                "explain",
+                "component",
+                "answer_component_catalog_question",
+                liveModelOutput.authoringProfile(),
+                liveModelOutput.targetApp(),
+                liveModelOutput.targetComponentId(),
+                liveModelOutput.target(),
+                null,
+                List.of(),
+                liveModelOutput.gate(),
+                liveModelOutput.effectivePrompt(),
+                "Expliquei o componente.",
+                liveModelOutput.assistantContent(),
+                liveModelOutput.apiCatalogAnswer(),
+                liveModelOutput.quickReplies(),
+                liveModelOutput.pendingClarification(),
+                liveModelOutput.clarificationQuestions(),
+                liveModelOutput.warnings(),
+                liveModelOutput.failureCodes(),
+                liveModelOutput.currentPageSummary(),
+                liveModelOutput.llmDiagnostics(),
+                null,
+                liveModelOutput.semanticDecision());
+
+        AgenticAuthoringIntentResolutionResult reconciled = ReflectionTestUtils.invokeMethod(
+                engine,
+                "preserveLiveOptionRefinementLineage",
+                established,
+                liveModelOutput);
+
+        assertThat(reconciled).isNotNull();
+        assertThat(reconciled.operationKind()).isEqualTo("create");
+        assertThat(reconciled.artifactKind()).isEqualTo("dashboard");
+        assertThat(reconciled.changeKind()).isEqualTo("create_chart");
+        assertThat(reconciled.semanticDecision().operationKind()).isEqualTo("create");
+        assertThat(reconciled.semanticDecision().artifactKind()).isEqualTo("dashboard");
+        assertThat(reconciled.semanticDecision().constraints()).isEqualTo(resolvedConstraints);
+        assertThat(reconciled.assistantMessage()).isEqualTo(established.assistantMessage());
+        assertThat(reconciled.warnings()).contains("live-option-refinement-scoped-to-constraints");
+    }
+
+    @Test
+    void unionsDuplicateCanonicalLiveOptionConstraintsBeforeByIdsConfirmation() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        LiveOptionValueRetrievalResult grounding = new LiveOptionValueRetrievalResult(
+                true,
+                "praxis-live-option-values.v1",
+                "/api/human-resources/funcionarios",
+                "/api/human-resources/funcionarios/filter",
+                "departamentoIdsIn",
+                "department",
+                "/api/departamentos/options/filter",
+                "/api/departamentos/options/by-ids",
+                "Departamento:27",
+                "complete_enumeration",
+                "post_semantic_schema_ranking",
+                objectMapper.createArrayNode().add("engenharia").add("inteligência artificial"),
+                27,
+                true,
+                List.of(
+                        new LiveOptionValueCandidate(
+                                objectMapper.getNodeFactory().numberNode(25),
+                                "Weyland - Engenharia",
+                                null),
+                        new LiveOptionValueCandidate(
+                                objectMapper.getNodeFactory().numberNode(16),
+                                "Cyberdyne - Inteligência Artificial",
+                                null)),
+                "",
+                "");
+        ObjectNode duplicateConstraints = objectMapper.createObjectNode();
+        ArrayNode filters = duplicateConstraints.putArray("filters");
+        filters.addObject()
+                .put("concept", "engenharia")
+                .put("field", "departamentoIdsIn")
+                .put("operator", "in")
+                .putArray("value")
+                .add(25);
+        filters.addObject()
+                .put("concept", "inteligência artificial")
+                .put("field", "departamentoIdsIn")
+                .put("operator", "in")
+                .putArray("value")
+                .add(16)
+                .add(25);
+
+        AgenticAuthoringIntentResolutionResult reconciled = ReflectionTestUtils.invokeMethod(
+                engine,
+                "collapseSemanticallyCoveredLiveOptionConstraints",
+                intentWithConstraints(duplicateConstraints),
+                grounding);
+
+        assertThat(reconciled).isNotNull();
+        assertThat(reconciled.semanticDecision().constraints().path("filters")).hasSize(1);
+        assertThat(reconciled.semanticDecision().constraints().path("filters").get(0).path("value"))
+                .isEqualTo(objectMapper.createArrayNode().add(25).add(16));
+        assertThat(reconciled.warnings()).contains("live-option-duplicate-canonical-constraint-unioned");
+    }
+
+    @Test
+    void closesFieldDiscoveryStageBeforeExposingCurrentOptionValuesToTheLlm() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("liveOptionFieldGrounding")
+                .put("canonicalFilterField", "departamentoIdsIn");
+        LiveOptionValueRetrievalResult grounding = new LiveOptionValueRetrievalResult(
+                true,
+                "praxis-live-option-values.v1",
+                "/api/human-resources/funcionarios",
+                "/api/human-resources/funcionarios/filter",
+                "departamentoIdsIn",
+                "department",
+                "/api/departamentos/options/filter",
+                "/api/departamentos/options/by-ids",
+                "Departamento:27",
+                "complete_enumeration",
+                "post_semantic_schema_ranking",
+                objectMapper.getNodeFactory().textNode("engenharia"),
+                27,
+                true,
+                List.of(new LiveOptionValueCandidate(
+                        objectMapper.getNodeFactory().numberNode(25),
+                        "Aperture Science - Engenharia",
+                        null)),
+                "",
+                "");
+
+        AgenticAuthoringTurnStreamRequest valueGroundedRequest = ReflectionTestUtils.invokeMethod(
+                engine,
+                "withLiveOptionValueGrounding",
+                requestWithContextHints("Monte uma tabela de engenharia", contextHints),
+                grounding);
+
+        assertThat(valueGroundedRequest).isNotNull();
+        assertThat(valueGroundedRequest.contextHints().has("liveOptionFieldGrounding")).isFalse();
+        assertThat(valueGroundedRequest.contextHints().path("liveOptionValueGrounding")
+                .path("canonicalFilterField").asText()).isEqualTo("departamentoIdsIn");
+    }
+
+    @Test
+    void failsClosedWhenCurrentOptionSourceValuesCannotBeRead() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.putArray("filters").addObject()
+                .put("concept", "área de tecnologia")
+                .put("field", "departamentoIdsIn")
+                .put("operator", "in")
+                .putArray("value")
+                .add("engenharia")
+                .add("inteligência artificial");
+        AgenticAuthoringToolResult failedRead = AgenticAuthoringToolResult.failure(
+                AgenticAuthoringToolRegistry.SEARCH_OPTION_SOURCE_VALUES,
+                "option-source-values-read-failed",
+                "Current option values could not be read.");
+
+        AgenticAuthoringIntentResolutionResult blocked = ReflectionTestUtils.invokeMethod(
+                engine,
+                "blockUnavailableLiveOptionMaterialization",
+                intentWithConstraints(constraints),
+                failedRead);
+
+        assertThat(blocked).isNotNull();
+        assertThat(blocked.valid()).isFalse();
+        assertThat(blocked.gate().status()).isEqualTo("blocked");
+        assertThat(blocked.failureCodes()).contains("live-option-values-unavailable");
+        assertThat(blocked.warnings())
+                .contains("live-option-value-materialization-failed-closed", "option-source-values-read-failed");
+        assertThat(blocked.assistantMessage())
+                .contains("valores atuais")
+                .contains("não foi alterada");
+    }
+
+    @Test
+    void projectsGovernedOptionSourceFieldsForLlmWithoutLocallyChoosingByUserWords() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode payload = objectMapper.createObjectNode();
+        ObjectNode properties = payload.putObject("schema").putObject("properties");
+        properties.putObject("cargoIdsIn")
+                .put("description", "Cargos ocupados pelo colaborador.")
+                .putObject("x-ui")
+                .putObject("optionSource")
+                .put("key", "jobRole");
+        ObjectNode department = properties.putObject("departamentoIdsIn");
+        department.put("description", "Departamentos e áreas organizacionais de lotação.");
+        department.putObject("x-ui")
+                .put("label", "Departamentos")
+                .putObject("optionSource")
+                .put("key", "department")
+                .put("resourcePath", "/api/human-resources/departamentos");
+        department.putObject("x-domain-governance")
+                .putObject("aiUsage")
+                .put("visibility", "allow")
+                .put("reasoningUse", "allow");
+        ObjectNode originalPredicate = objectMapper.createObjectNode()
+                .put("concept", "onde essa pessoa trabalha")
+                .put("field", "área de atuação")
+                .put("operator", "eq")
+                .put("value", "tecnologia");
+
+        ObjectNode projection = ReflectionTestUtils.invokeMethod(
+                engine,
+                "liveOptionFieldProjection",
+                payload,
+                "/api/human-resources/funcionarios",
+                originalPredicate);
+
+        assertThat(projection).isNotNull();
+        assertThat(projection.path("originalPredicate")).isEqualTo(originalPredicate);
+        assertThat(projection.path("candidates")).hasSize(1);
+        assertThat(projection.path("candidates").get(0).path("canonicalFilterField").asText())
+                .isEqualTo("departamentoIdsIn");
+        assertThat(projection.toString()).doesNotContain("cargoIdsIn");
+
+        ObjectNode preservedConstraints = objectMapper.createObjectNode();
+        preservedConstraints.putArray("filters").addObject()
+                .put("concept", "onde essa pessoa trabalha")
+                .put("field", "departamentoIdsIn")
+                .put("operator", "eq")
+                .putArray("value")
+                .add("engineering")
+                .add("artificial intelligence");
+        ObjectNode lostConstraints = objectMapper.createObjectNode();
+        lostConstraints.putArray("filters");
+        Boolean preserved = ReflectionTestUtils.invokeMethod(
+                engine,
+                "hasPreservedLiveOptionPredicate",
+                intentWithConstraints(preservedConstraints),
+                projection);
+        Boolean canonicalSchemaConfirmed = ReflectionTestUtils.invokeMethod(
+                engine,
+                "hasSchemaConfirmedCanonicalLiveOptionField",
+                intentWithConstraints(preservedConstraints),
+                projection);
+        Boolean lost = ReflectionTestUtils.invokeMethod(
+                engine,
+                "hasPreservedLiveOptionPredicate",
+                intentWithConstraints(lostConstraints),
+                projection);
+        Boolean ungroundedFieldRejected = ReflectionTestUtils.invokeMethod(
+                engine,
+                "hasSchemaConfirmedCanonicalLiveOptionField",
+                intentWithConstraints(objectMapper.createObjectNode().set(
+                        "filters",
+                        objectMapper.createArrayNode().addObject()
+                                .put("concept", "onde essa pessoa trabalha")
+                                .put("field", "área de atuação")
+                                .put("operator", "eq")
+                                .put("value", "tecnologia"))),
+                projection);
+
+        assertThat(preserved).isTrue();
+        assertThat(canonicalSchemaConfirmed).isTrue();
+        assertThat(lost).isFalse();
+        assertThat(ungroundedFieldRejected).isFalse();
+    }
+
+    @Test
+    void startsCanonicalFieldDiscoveryFromASemanticConceptWhenTheLlmHasNotNamedAField() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode constraints = objectMapper.createObjectNode();
+        ObjectNode predicate = constraints.putArray("filters").addObject();
+        predicate.put("concept", "área organizacional");
+        predicate.put("field", "");
+        predicate.put("operator", "in");
+        predicate.putArray("value").add("engenharia").add("inteligência artificial");
+
+        JsonNode selectedPredicate = ReflectionTestUtils.invokeMethod(
+                engine,
+                "firstSemanticTextConstraint",
+                constraints);
+
+        assertThat(selectedPredicate).isEqualTo(predicate);
+    }
+
+    @Test
+    void usesSingleSchemaFieldOnlyAsAReadOnlyBridgeToFinalLlmValueConfirmation() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.putArray("filters").addObject()
+                .put("concept", "área organizacional")
+                .put("field", "")
+                .put("operator", "in")
+                .putArray("value")
+                .add("engenharia")
+                .add("inteligência artificial");
+        ObjectNode fieldGrounding = objectMapper.createObjectNode();
+        fieldGrounding.putArray("candidates").addObject()
+                .put("canonicalFilterField", "departamentoIdsIn")
+                .put("label", "Departamentos")
+                .put("multiple", true);
+
+        AgenticAuthoringIntentResolutionResult provisional = ReflectionTestUtils.invokeMethod(
+                engine,
+                "withProvisionalCanonicalLiveOptionField",
+                intentWithConstraints(constraints),
+                fieldGrounding);
+
+        JsonNode filter = provisional.semanticDecision().constraints().path("filters").get(0);
+        assertThat(filter.path("field").asText()).isEqualTo("departamentoIdsIn");
+        assertThat(filter.path("value")).isEqualTo(constraints.path("filters").get(0).path("value"));
+        assertThat(provisional.warnings()).contains("live-option-field-provisional-schema-candidate");
+        assertThat(provisional.semanticDecision().constraints()).isNotSameAs(constraints);
     }
 
     @Test
@@ -7704,7 +8270,94 @@ class AgenticAuthoringTurnEngineTest {
                             .isEqualTo("severity-chart");
                     org.assertj.core.api.Assertions.assertThat(reply.path("contextHints").path("resourcePath").asText())
                             .isEqualTo("/api/human-resources/funcionarios");
+                    org.assertj.core.api.Assertions.assertThat(reply.path("semanticDecision").path("operationKind").asText())
+                            .isEqualTo("modify");
+                    org.assertj.core.api.Assertions.assertThat(reply.path("semanticDecision").path("artifactKind").asText())
+                            .isEqualTo("chart");
+                    org.assertj.core.api.Assertions.assertThat(reply.path("semanticDecision").path("changeKind").asText())
+                            .isEqualTo("set_chart_type");
+                    org.assertj.core.api.Assertions.assertThat(reply.path("semanticDecision")
+                                    .path("constraints").path("source").asText())
+                            .isEqualTo("server-issued-quick-reply");
+                    org.assertj.core.api.Assertions.assertThat(reply.path("semanticDecision")
+                                    .path("constraints").path("quickReplyId").asText())
+                            .isEqualTo("chart-change-line");
                 });
+    }
+
+    @Test
+    void exposesOnlyMaterializedComponentQuickRepliesAfterTablePreview() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        com.fasterxml.jackson.databind.node.ObjectNode tablePlan = tableOnlyUiCompositionPlan();
+        ((com.fasterxml.jackson.databind.node.ObjectNode) tablePlan.path("diagnostics"))
+                .put("auxiliaryComponentReference", "praxis-chart");
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        tablePlan,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(
+                request("Mostre as informações dos funcionários que são da área de TI."),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
+                .extracting(reply -> reply.path("id").asText())
+                .contains("table-export-selected-rows")
+                .doesNotContain("chart-change-line", "chart-change-donut", "chart-add-detail-table", "chart-add-detail-modal");
+        JsonNode tableReply = java.util.stream.StreamSupport
+                .stream(result.path("quickReplies").spliterator(), false)
+                .filter(reply -> "table-export-selected-rows".equals(reply.path("id").asText()))
+                .findFirst()
+                .orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(tableReply
+                        .path("contextHints").path("selectedComponentId").asText())
+                .isEqualTo("praxis-table");
+    }
+
+    @Test
+    void doesNotExposeComponentQuickRepliesFromAuxiliaryReferencesWithoutMaterializedWidgets() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        com.fasterxml.jackson.databind.node.ObjectNode plan = objectMapper.createObjectNode();
+        plan.putObject("diagnostics")
+                .put("chartCatalogRef", "praxis-chart")
+                .put("tableCatalogRef", "praxis-table");
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        plan,
+                        "Preview ready."));
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(
+                request("Prepare uma prévia governada."),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
+                .noneSatisfy(reply -> org.assertj.core.api.Assertions.assertThat(
+                                reply.path("contextHints").path("source").asText())
+                        .isEqualTo("component-capability-catalog"));
     }
 
     @Test
@@ -8315,6 +8968,9 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(
                 result.path("decisionDiagnostics").path("terminalPreviewApplyBlockReason").asText())
                 .isEqualTo("apply-target-missing");
+        org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
+                .contains("ainda não pode ser salva")
+                .contains("destino de aplicação");
         org.assertj.core.api.Assertions.assertThat(result.path("applyTarget").isMissingNode()).isTrue();
     }
 
@@ -9971,6 +10627,90 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void executableClarificationContinuesToResourceDiscoveryBeforeConsultativeAnswer() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringIntentResolutionResult firstIntent = clarificationRequiredIntent();
+        AgenticAuthoringIntentResolutionResult secondIntent = validIntentWithToolCandidate();
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                "GET",
+                "analytics,folha,pagamento",
+                "Analytics de folha de pagamento",
+                "Visao analitica de folha de pagamento por departamento.",
+                "listVwAnalyticsFolhaPagamento",
+                null,
+                "{\"type\":\"object\"}",
+                "[]",
+                "{}",
+                null)));
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(firstIntent, secondIntent);
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview ready."));
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                        objectMapper));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                null,
+                new AgenticAuthoringOrchestrator(new AgenticAuthoringToolLoopExecutor(
+                        registry,
+                        new AgenticAuthoringDefaultToolLoopPlanner())),
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                consultativeAnswerService);
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(
+                request("Crie dashboard de folha de pagamento"),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        verify(consultativeAnswerService, never()).answer(
+                any(AgenticAuthoringTurnStreamRequest.class), any(), any(), any(), any());
+        verify(intentResolverService, org.mockito.Mockito.times(2))
+                .resolve(any(), eq("tenant"), eq("user"), eq("local"));
+        verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
+        org.assertj.core.api.Assertions.assertThat(sink.payloads)
+                .anySatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("consultative.post-intent.skipped");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics")
+                                    .path("resourceGroundingRequired")
+                                    .asBoolean())
+                            .isTrue();
+                })
+                .anySatisfy(payload -> {
+                    JsonNode node = objectMapper.valueToTree(payload);
+                    org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
+                            .isEqualTo("tool.result");
+                    org.assertj.core.api.Assertions.assertThat(node.path("diagnostics")
+                                    .path("candidateCount")
+                                    .asInt())
+                            .isEqualTo(1);
+                });
+    }
+
+    @Test
     void diagnosticPromptWithDomainDiscoveryDoesNotPreDiscoverBeforeIntentResolution() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
@@ -10032,7 +10772,7 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void llmAuthoredPreIntentToolPlanEnrichesContextBeforeIntentResolution() throws Exception {
+    void llmAuthoredPreIntentToolPlanWithoutFullResolutionStillEnrichesIntentResolution() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
@@ -10053,6 +10793,7 @@ class AgenticAuthoringTurnEngineTest {
                 Mockito.mock(AgenticAuthoringPreIntentToolPlanningService.class);
         when(planningService.plan(any(), any())).thenAnswer(invocation -> {
             AgenticAuthoringTurnStreamRequest plannerRequest = invocation.getArgument(0);
+            ObjectNode queryConstraints = objectMapper.createObjectNode();
             return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
                     "praxis-agentic-authoring-pre-intent-tool-plan.v1",
                     "O pedido menciona pessoas da organizacao e precisa de fonte governada antes da materializacao.",
@@ -10063,7 +10804,12 @@ class AgenticAuthoringTurnEngineTest {
                                     "funcionarios colaboradores recursos humanos pessoas da empresa",
                                     plannerRequest.userPrompt(),
                                     "page",
-                                    6)))));
+                                    6))),
+                    "authoring_or_other",
+                    "",
+                    false,
+                    queryConstraints,
+                    "page"));
         });
         AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService =
                 Mockito.mock(AgenticAuthoringComponentCapabilitiesService.class);
@@ -10078,7 +10824,12 @@ class AgenticAuthoringTurnEngineTest {
                 "quero criar algo que mostre informacoes dos empregados",
                 domainDiscoveryContext());
 
-        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+        when(intentResolverService.resolve(
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"),
+                any(AgenticAuthoringPreIntentToolPlan.class)))
                 .thenReturn(validIntentWithFuncionarioCandidate());
         when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(new AgenticAuthoringPreviewResult(
@@ -10163,18 +10914,40 @@ class AgenticAuthoringTurnEngineTest {
 
         ArgumentCaptor<AgenticAuthoringIntentResolutionRequest> intentRequest =
                 ArgumentCaptor.forClass(AgenticAuthoringIntentResolutionRequest.class);
-        verify(intentResolverService).resolve(intentRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        verify(intentResolverService).resolve(
+                intentRequest.capture(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"),
+                any(AgenticAuthoringPreIntentToolPlan.class));
         JsonNode forwardedHints = intentRequest.getValue().contextHints();
         org.assertj.core.api.Assertions.assertThat(forwardedHints.path("resourceDiscovery").path("candidates").path(0)
                         .path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/funcionarios");
         org.assertj.core.api.Assertions.assertThat(forwardedHints.path("resourceDiscovery").path("retrievalQuery").asText())
                 .isEqualTo("funcionarios colaboradores recursos humanos pessoas da empresa");
+        org.assertj.core.api.Assertions.assertThat(forwardedHints.path("preIntentSemanticOrientation")
+                        .path("semanticIntentClass").asText())
+                .isEqualTo("authoring_or_other");
+        org.assertj.core.api.Assertions.assertThat(forwardedHints.path("preIntentSemanticOrientation")
+                        .path("artifactKind").asText())
+                .isEqualTo("page");
+        org.assertj.core.api.Assertions.assertThat(forwardedHints.path("preIntentSemanticOrientation")
+                        .path("requiresFullIntentResolution").asBoolean())
+                .isFalse();
+        org.assertj.core.api.Assertions.assertThat(forwardedHints.path("preIntentSemanticOrientation")
+                        .path("queryConstraints").isObject())
+                .isTrue();
         org.mockito.InOrder inOrder = Mockito.inOrder(
                 planningService,
                 intentResolverService);
         inOrder.verify(planningService).plan(any(), any());
-        inOrder.verify(intentResolverService).resolve(any(), eq("tenant"), eq("user"), eq("local"));
+        inOrder.verify(intentResolverService).resolve(
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"),
+                any(AgenticAuthoringPreIntentToolPlan.class));
         verify(componentCapabilitiesService).listCapabilities();
         verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
     }
@@ -11956,6 +12729,35 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 List.of(),
                 objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult intentWithConstraints(JsonNode constraints) {
+        AgenticAuthoringIntentResolutionResult base = validIntent();
+        return new AgenticAuthoringIntentResolutionResult(
+                base.valid(),
+                base.operationKind(),
+                base.artifactKind(),
+                base.changeKind(),
+                base.authoringProfile(),
+                base.targetApp(),
+                base.targetComponentId(),
+                base.target(),
+                base.selectedCandidate(),
+                base.candidates(),
+                base.gate(),
+                base.effectivePrompt(),
+                base.assistantMessage(),
+                base.assistantContent(),
+                base.apiCatalogAnswer(),
+                base.quickReplies(),
+                base.pendingClarification(),
+                base.clarificationQuestions(),
+                base.warnings(),
+                base.failureCodes(),
+                base.currentPageSummary(),
+                base.llmDiagnostics(),
+                base.visualizationDecision(),
+                base.semanticDecision().withConstraints(constraints));
     }
 
     private AgenticAuthoringIntentResolutionResult chartDrilldownModifyIntent() {

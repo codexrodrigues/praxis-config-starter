@@ -63,6 +63,52 @@ class SpringAiOpenAiServiceTest {
     }
 
     @Test
+    void agenticAuthoringProfileAttachesOnlyConfiguredHostedSkills() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = responseServer(completedResponse("pong"), capturedRequest);
+        OpenAiHostedSkillProperties properties = new OpenAiHostedSkillProperties();
+        OpenAiHostedSkillProperties.Reference coordinator = new OpenAiHostedSkillProperties.Reference();
+        coordinator.setId("skill-coordinator");
+        coordinator.setVersion("2");
+        OpenAiHostedSkillProperties.Reference grounding = new OpenAiHostedSkillProperties.Reference();
+        grounding.setId("skill-grounding");
+        OpenAiHostedSkillProperties.Reference artifactUnderstanding = new OpenAiHostedSkillProperties.Reference();
+        artifactUnderstanding.setId("skill-artifact-understanding");
+        artifactUnderstanding.setVersion("1");
+        OpenAiHostedSkillProperties.Reference multiTurnRefinement = new OpenAiHostedSkillProperties.Reference();
+        multiTurnRefinement.setId("skill-multi-turn-refinement");
+        multiTurnRefinement.setVersion("1");
+        properties.setAgenticAuthoring(List.of(
+                coordinator,
+                grounding,
+                artifactUnderstanding,
+                multiTurnRefinement));
+        SpringAiOpenAiService service = service(server, "gpt-5.6-luna", properties);
+        server.start();
+        try {
+            service.generateText("author", AiCallConfig.agenticAuthoringBuilder().build());
+
+            JsonNode tool = capturedRequest.get().path("tools").path(0);
+            assertEquals("shell", tool.path("type").asText());
+            assertEquals("container_auto", tool.path("environment").path("type").asText());
+            assertEquals("skill-coordinator", tool.path("environment").path("skills").path(0).path("skill_id").asText());
+            assertEquals("2", tool.path("environment").path("skills").path(0).path("version").asText());
+            assertEquals("skill-grounding", tool.path("environment").path("skills").path(1).path("skill_id").asText());
+            assertEquals("latest", tool.path("environment").path("skills").path(1).path("version").asText());
+            assertEquals("skill-artifact-understanding", tool.path("environment").path("skills").path(2).path("skill_id").asText());
+            assertEquals("1", tool.path("environment").path("skills").path(2).path("version").asText());
+            assertEquals("skill-multi-turn-refinement", tool.path("environment").path("skills").path(3).path("skill_id").asText());
+            assertEquals("1", tool.path("environment").path("skills").path(3).path("version").asText());
+
+            service.generateText("plain", AiCallConfig.builder().build());
+            assertTrue(capturedRequest.get().path("tools").isMissingNode());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
     void generateTextIgnoresUnconsumedEvolvingOutputVariants() throws Exception {
         String response = completedResponse("pong").replace(
                 "\"output\":[{",
@@ -479,7 +525,14 @@ class SpringAiOpenAiServiceTest {
     }
 
     private SpringAiOpenAiService service(HttpServer server, String model) {
-        SpringAiOpenAiService service = new SpringAiOpenAiService(objectMapper);
+        return service(server, model, new OpenAiHostedSkillProperties());
+    }
+
+    private SpringAiOpenAiService service(
+            HttpServer server,
+            String model,
+            OpenAiHostedSkillProperties hostedSkillProperties) {
+        SpringAiOpenAiService service = new SpringAiOpenAiService(objectMapper, hostedSkillProperties);
         ReflectionTestUtils.setField(service, "apiKey", "test-key");
         ReflectionTestUtils.setField(service, "baseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
         ReflectionTestUtils.setField(service, "model", model);

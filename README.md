@@ -272,13 +272,13 @@ Use a production-grade secret in deployed environments and rotate it through the
 
 ## Authoring Cache Configuration
 
-Agentic authoring keeps short-lived caches only for host-local performance. These caches must not be treated as a
+Agentic authoring keeps bounded host-local caches only for performance. These caches must not be treated as a
 source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted turn events remain canonical.
 
 | Property | Default | Notes |
 | --- | --- | --- |
 | `praxis.ai.authoring.legacy-keyword-fallback-enabled` | `false` | Compatibility switch for old deterministic keyword intent fallback. Keep disabled in canonical hosts; enable only for legacy smoke/test fixtures while migrating to semantic intent resolution. |
-| `praxis.ai.authoring.component-capabilities.cache-ttl-ms` | `60000` | TTL for component capability discovery. Use `0` to disable local caching when validating registry changes without restarting the host. |
+| `praxis.ai.authoring.component-capabilities.cache-ttl-ms` | `600000` | TTL for component capability discovery. Registry bootstrap and committed component-definition changes refresh or invalidate this cache explicitly, so normal turns reuse the governed projection without minute-by-minute reloads. Use `0` to disable local caching when validating registry changes without restarting the host. |
 | `praxis.ai.authoring.component-capabilities.registry-load-timeout-ms` | `30000` | Maximum time allowed for the focal AI Registry projection. A timeout is reported as degraded provenance and never stored for the normal cache TTL. |
 | `praxis.ai.authoring.component-capabilities.degraded-retry-ms` | `5000` | Short retry window used after registry timeout or failure. During this window the service exposes last-known-good data when available, otherwise an observable built-in fallback. |
 | `praxis.ai.authoring.component-capabilities.preload-timeout-ms` | `35000` | Authoring-turn preload budget. The effective value is aligned to at least the registry load timeout plus one second, leaving a bounded handoff margin between repository loading and turn materialization. |

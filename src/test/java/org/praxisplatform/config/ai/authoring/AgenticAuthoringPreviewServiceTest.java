@@ -53,6 +53,9 @@ class AgenticAuthoringPreviewServiceTest {
     @Mock
     private ResourceSurfaceCatalogRetrievalService resourceSurfaceCatalogRetrievalService;
 
+    @Mock
+    private AgenticAuthoringComponentEditPlanService componentEditPlanService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
@@ -1642,6 +1645,114 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewKeepsCategoricalComparisonOnGroupByUnlessComparisonOperationWasSelected() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Queria um painel pra enxergar onde a folha pesa mais, separando os departamentos e deixando os lancamentos pra eu conferir.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                payrollAnalyticsDashboardIntentWithMetric("salarioBruto", "comparison", true));
+        ObjectNode schema = objectMapper.createObjectNode();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("departamento")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Departamento");
+        properties.putObject("salarioBruto")
+                .put("type", "number")
+                .putObject("x-ui")
+                .put("label", "Salario Bruto");
+        properties.putObject("payrollProfile")
+                .put("type", "string")
+                .put("description", "Bucket de perfil de remuneracao para analises e segmentacao de politica.")
+                .putObject("x-ui")
+                .put("label", "Perfil Folha")
+                .put("helpText", "Perfil agrupado de classificacao folha e beneficios.");
+        ObjectNode filterSchema = objectMapper.createObjectNode();
+        ObjectNode filterProperties = filterSchema.putObject("properties");
+        filterProperties.putObject("departamento")
+                .put("type", "string")
+                .put("description", "Nome do departamento na linha analitica.")
+                .putObject("x-ui")
+                .put("label", "Nome do departamento")
+                .put("controlType", "input");
+        filterProperties.putObject("departamentoIdsIn")
+                .put("type", "array")
+                .put("description", "Conjunto de departamentos efetivos.")
+                .putObject("x-ui")
+                .put("label", "Departamentos")
+                .put("controlType", "inlineEntityLookup")
+                .put("multiple", true)
+                .put("endpoint", "/api/human-resources/departamentos/option-sources/department/options/filter");
+        filterProperties.putObject("cargoId")
+                .put("type", "integer")
+                .put("description", "Cargo ocupado pelo colaborador na linha analitica.")
+                .putObject("x-ui")
+                .put("label", "Cargo")
+                .put("controlType", "async-select")
+                .put("endpoint", "/api/human-resources/cargos/option-sources/jobRole/options/filter");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenAnswer(invocation -> {
+                    AiSchemaContext context = invocation.getArgument(0);
+                    return SchemaFetchResult.success(
+                            "request".equals(context.getSchemaType()) ? filterSchema : schema,
+                            "http://localhost/schemas/filtered");
+                });
+        ObjectNode capabilities = objectMapper.createObjectNode();
+        ArrayNode fields = capabilities.putObject("stats").putArray("fields");
+        fields.addObject()
+                .put("field", "departamento")
+                .put("label", "Departamento")
+                .put("groupByEligible", true)
+                .putArray("modes").add("GROUP_BY");
+        fields.addObject()
+                .put("field", "salarioBruto")
+                .put("label", "Salario Bruto")
+                .put("metricFieldEligible", true)
+                .putArray("metrics").add("SUM");
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                anyString(), any(), any(), any(), any()))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        capabilities,
+                        "http://localhost/api/human-resources/vw-analytics-folha-pagamento/capabilities"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        JsonNode chart = result.uiCompositionPlan().path("widgets").findParents("componentId").stream()
+                .filter(widget -> "praxis-chart".equals(widget.path("componentId").asText()))
+                .findFirst()
+                .orElseThrow();
+        JsonNode query = chart.path("inputs").path("config").path("dataSource").path("query");
+        assertThat(query.path("statsOperation").asText()).isEqualTo("group-by");
+        assertThat(query.path("statsPath").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
+        assertThat(query.path("statsRequest").path("field").asText()).isEqualTo("departamento");
+        assertThat(query.path("metrics").path(0).path("field").asText()).isEqualTo("salarioBruto");
+        JsonNode filter = result.uiCompositionPlan().path("widgets").findParents("componentId").stream()
+                .filter(widget -> "praxis-filter".equals(widget.path("componentId").asText()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(filter.path("inputs").path("selectedFieldIds").toString())
+                .isEqualTo("[\"departamentoIdsIn\"]");
+        verify(schemaRetrievalService, never()).fetchSchemaResult(
+                any(AiSchemaContext.class),
+                anyString(),
+                anyString(),
+                anyString(),
+                anyString());
+    }
+
+    @Test
     void previewRejectsComparisonWhenCurrentPrincipalCannotUseTheOperation() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Materialize a leitura analitica autorizada para este recurso.",
@@ -2561,6 +2672,96 @@ class AgenticAuthoringPreviewServiceTest {
                 .isEqualTo("/api/human-resources/folhas-pagamento/filter/cursor");
         assertThat(capturedContext.get().getOperation()).isEqualTo("post");
         assertThat(capturedContext.get().getSchemaType()).isEqualTo("response");
+    }
+
+    @Test
+    void previewCompilesGroundedTablePredicateIntoVisibleAdvancedFilter() throws Exception {
+        AgenticAuthoringIntentResolutionResult intent = filteredEmployeeTableIntent();
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "mostre as informacoes dos funcionarios que sao da area de tecnologia",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                null,
+                intent);
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.putObject("properties")
+                .putObject("departamentoIdsIn")
+                .put("type", "array")
+                .putObject("x-ui")
+                .put("label", "Departamentos")
+                .put("multiple", true);
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+        when(componentEditPlanService.compileGovernedPlan(
+                        eq("praxis-table"), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    JsonNode inputs = invocation.getArgument(1, JsonNode.class);
+                    JsonNode operationPlan = invocation.getArgument(2, JsonNode.class);
+                    ObjectNode proposedInputs = inputs.deepCopy();
+                    ObjectNode advancedFilters = proposedInputs.with("config")
+                            .with("behavior")
+                            .with("filtering")
+                            .with("advancedFilters");
+                    advancedFilters.put("enabled", true);
+                    advancedFilters.set(
+                            "settings",
+                            operationPlan.at("/operations/0/input/settings").deepCopy());
+                    ObjectNode compiledPatch = objectMapper.createObjectNode();
+                    compiledPatch.put("manifestVersion", "2.0.0");
+                    compiledPatch.set("proposedConfig", proposedInputs);
+                    return new AgenticAuthoringComponentEditPlanResult(
+                            true,
+                            List.of(),
+                            List.of("component-edit-plan-source:governed-materializer"),
+                            operationPlan,
+                            compiledPatch);
+                });
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService,
+                null,
+                null,
+                componentEditPlanService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        JsonNode tableInputs = result.uiCompositionPlan().path("widgets").get(0).path("inputs");
+        assertThat(tableInputs.at("/queryContext/filters/departamentoIdsIn").toString())
+                .isEqualTo("[16,17]");
+        assertThat(tableInputs.at("/config/behavior/filtering/advancedFilters/enabled").asBoolean())
+                .isTrue();
+        assertThat(tableInputs.at(
+                "/config/behavior/filtering/advancedFilters/settings/alwaysVisibleFields/0").asText())
+                .isEqualTo("departamentoIdsIn");
+        assertThat(tableInputs.at(
+                "/config/behavior/filtering/advancedFilters/settings/selectedFieldIds/0").asText())
+                .isEqualTo("departamentoIdsIn");
+        assertThat(result.uiCompositionPlan().at(
+                "/diagnostics/visibleTableQueryFilters/0/operationId").asText())
+                .isEqualTo("filter.advanced.configure");
+        assertThat(result.warnings()).contains(
+                "table-query-filter-schema-grounded",
+                "table-query-filter-visible-through-authoring-manifest");
+
+        org.mockito.ArgumentCaptor<JsonNode> operationPlan =
+                org.mockito.ArgumentCaptor.forClass(JsonNode.class);
+        org.mockito.ArgumentCaptor<JsonNode> validationContext =
+                org.mockito.ArgumentCaptor.forClass(JsonNode.class);
+        verify(componentEditPlanService).compileGovernedPlan(
+                eq("praxis-table"),
+                any(),
+                operationPlan.capture(),
+                validationContext.capture());
+        assertThat(operationPlan.getValue().at("/operations/0/operationId").asText())
+                .isEqualTo("filter.advanced.configure");
+        assertThat(validationContext.getValue().at("/filterSchemaFields/0/name").asText())
+                .isEqualTo("departamentoIdsIn");
     }
 
     @Test
@@ -5037,6 +5238,19 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     private AgenticAuthoringIntentResolutionResult payrollAnalyticsDashboardIntentWithMetric(String metricField) {
+        return payrollAnalyticsDashboardIntentWithMetric(metricField, "payroll-department-horizontal-chart");
+    }
+
+    private AgenticAuthoringIntentResolutionResult payrollAnalyticsDashboardIntentWithMetric(
+            String metricField,
+            String visualizationIntent) {
+        return payrollAnalyticsDashboardIntentWithMetric(metricField, visualizationIntent, false);
+    }
+
+    private AgenticAuthoringIntentResolutionResult payrollAnalyticsDashboardIntentWithMetric(
+            String metricField,
+            String visualizationIntent,
+            boolean requiresFilters) {
         return new AgenticAuthoringIntentResolutionResult(
                 true,
                 "create",
@@ -5069,8 +5283,8 @@ class AgenticAuthoringPreviewServiceTest {
                 null,
                 new AgenticAuthoringVisualizationDecision(
                         "praxis-agentic-authoring-visualization-decision.v1",
-                        "payroll-department-horizontal-chart",
-                        "single-chart",
+                        visualizationIntent,
+                        requiresFilters ? "dashboard" : "single-chart",
                         "praxis-chart",
                         List.of(new AgenticAuthoringVisualizationAxisDecision(
                                 "department",
@@ -5082,7 +5296,7 @@ class AgenticAuthoringPreviewServiceTest {
                                 metricField,
                                 "Salário Líquido",
                                 "llm-authored-semantic-axis")),
-                        false,
+                        requiresFilters,
                         false,
                         "llm-authored-semantic-decision"));
     }
@@ -5687,6 +5901,82 @@ class AgenticAuthoringPreviewServiceTest {
         return payrollTableIntent(effectivePrompt, List.of("payroll"));
     }
 
+    private AgenticAuthoringIntentResolutionResult filteredEmployeeTableIntent() {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios/filter/cursor",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter/cursor",
+                "POST",
+                0.96d,
+                "matched governed employee resource",
+                List.of("semantic-retrieval", "tool-search-api-resources"));
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.putArray("filters").addObject()
+                .put("field", "departamentoIdsIn")
+                .put("operator", "in")
+                .putArray("value")
+                .add(16)
+                .add(17);
+        AgenticAuthoringSemanticDecision semanticDecision = new AgenticAuthoringSemanticDecision(
+                AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                "filtered-employee-table-decision",
+                "create",
+                "table",
+                "create_artifact",
+                new AgenticAuthoringSemanticDecision.SelectedResource(
+                        candidate.resourcePath(),
+                        candidate.operation(),
+                        candidate.schemaUrl(),
+                        candidate.submitUrl(),
+                        candidate.submitMethod()),
+                null,
+                new AgenticAuthoringSemanticDecision.RetrievalEvidence(
+                        "semantic_retrieval",
+                        List.of("tool-search-api-resources"),
+                        1),
+                null,
+                false,
+                "",
+                "",
+                "",
+                "session-filtered-table",
+                "turn-filtered-table",
+                "Mostrar funcionários da área de tecnologia",
+                "Mostrar funcionários da área de tecnologia",
+                "record-list",
+                "table",
+                constraints,
+                null,
+                "",
+                "Resource and organizational predicate were resolved by governed evidence.",
+                0.96d);
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "table",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "mostre as informacoes dos funcionarios que sao da area de tecnologia",
+                "Vou montar a tabela com o recorte solicitado visível para revisão.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of("llm-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null,
+                semanticDecision);
+    }
+
     private AgenticAuthoringIntentResolutionResult payrollTableIntent(String effectivePrompt, List<String> evidence) {
         return payrollTableIntent(
                 effectivePrompt,
@@ -6026,10 +6316,10 @@ class AgenticAuthoringPreviewServiceTest {
                 "praxis-dynamic-page-builder",
                 null,
                 new AgenticAuthoringCandidate(
-                        "/api/human-resources/vw-analytics-afastamentos",
+                        "/api/human-resources/vw-analytics-afastamentos/stats/comparison",
                         "post",
-                        "/schemas/filtered?path=/api/human-resources/vw-analytics-afastamentos/filter&operation=post&schemaType=response",
-                        "/api/human-resources/vw-analytics-afastamentos/filter",
+                        "/schemas/filtered?path=/api/human-resources/vw-analytics-afastamentos/stats/comparison&operation=post&schemaType=response",
+                        "/api/human-resources/vw-analytics-afastamentos/stats/comparison",
                         "POST",
                         0.96d,
                         "semantic comparison resource",

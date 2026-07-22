@@ -1,0 +1,46 @@
+{
+  "changeSetKey": "agentic-authoring:human-resources:funcionarios:resource-binding:v0.1",
+  "status": "proposed",
+  "authorType": "system",
+  "authorId": "praxis-human-resources-reference-pilot",
+  "intent": "Bind the governed employee concept to its canonical resource root for schema and capability grounding.",
+  "reason": "Resource capabilities belong to the canonical resource root, while operation bindings retain their exact operation paths.",
+  "patch": [
+    {
+      "operationId": "bind-funcionarios-resource-root",
+      "operationType": "add_binding",
+      "target": {
+        "tenantId": "agentic-authoring-local-pre-intent",
+        "environment": "local",
+        "conceptKey": "human-resources.funcionarios"
+      },
+      "reason": "The resource binding is the governed root for aggregate capabilities and collection response schema.",
+      "evidenceRefs": [
+        "domain-catalog:praxis-service:human-resources.funcionarios:634e4b662761823d",
+        "resource-capabilities:human-resources.funcionarios"
+      ],
+      "confidence": 1.0,
+      "payload": {
+        "bindingType": "api_resource",
+        "bindingKey": "resource:human-resources.funcionarios",
+        "resourceKey": "human-resources.funcionarios",
+        "apiPath": "/api/human-resources/funcionarios",
+        "apiMethod": "GET",
+        "schemaPointer": "/schemas/filtered?path=/api/human-resources/funcionarios&operation=get&schemaType=response",
+        "provenance": {
+          "claimId": "claim:human-resources:funcionarios:resource:v0.1",
+          "sourceClass": "authored",
+          "sourceRefs": [
+            "domain-catalog:praxis-service:human-resources.funcionarios:634e4b662761823d",
+            "resource-capabilities:human-resources.funcionarios"
+          ],
+          "derivationActivity": "reference-domain-pilot-resource-binding",
+          "agent": {
+            "type": "system",
+            "id": "praxis-human-resources-reference-pilot"
+          }
+        }
+      }
+    }
+  ]
+}

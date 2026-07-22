@@ -20,6 +20,7 @@ import org.praxisplatform.config.dto.AiProviderModelsRequest;
 import org.praxisplatform.config.dto.AiProviderModelsResponse;
 import org.praxisplatform.config.dto.AiProviderTestRequest;
 import org.praxisplatform.config.dto.AiProviderTestResponse;
+import org.praxisplatform.config.dto.AiAudioTranscriptionResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -40,9 +41,16 @@ public class AiProviderManagementService {
     private static final String GLOBAL_CONFIG_COMPONENT_TYPE = "praxis-global-config-editor";
     private static final String GLOBAL_CONFIG_KEY = "praxis:global-config";
     private static final int DEFAULT_STORED_CONFIG_LOOKUP_TIMEOUT_SECONDS = 3;
+    private static final String TRANSCRIPTION_SCHEMA_VERSION = "praxis-ai-audio-transcription.v1";
 
     @Value("${praxis.ai.provider:gemini}")
     private String defaultProvider;
+
+    @Value("${praxis.ai.transcription.provider:openai}")
+    private String transcriptionProvider;
+
+    @Value("${praxis.ai.transcription.model:gpt-4o-mini-transcribe}")
+    private String transcriptionModel;
 
     @Value("${spring.ai.openai.chat.options.model:gpt-4o-mini}")
     private String openaiModel;
@@ -158,6 +166,36 @@ public class AiProviderManagementService {
         }
     }
 
+    public AiAudioTranscriptionResponse transcribeAudio(
+            AiAudioTranscriptionRequest request,
+            String tenantId,
+            String userId,
+            String environment) {
+        StoredAiConfig stored = resolveStoredConfigSafely(tenantId, userId, environment, null);
+        String provider = resolveProviderName(transcriptionProvider, null);
+        AiProvider selectedProvider = resolveProvider(provider);
+        if (selectedProvider == null) {
+            throw new IllegalStateException("Provider not available: " + provider);
+        }
+        AiCallConfig config = AiCallConfig.builder()
+                .provider(provider)
+                .apiKey(stored != null && provider.equals(normalizeProvider(stored.provider())) ? stored.apiKey() : null)
+                .model(transcriptionModel)
+                .tenantId(tenantId)
+                .environment(environment)
+                .build();
+        if (!selectedProvider.supportsAudioTranscription(config)) {
+            throw new UnsupportedOperationException("Configured provider does not support governed audio transcription: " + provider);
+        }
+        String text = selectedProvider.transcribeAudio(request, config);
+        return new AiAudioTranscriptionResponse(
+                TRANSCRIPTION_SCHEMA_VERSION,
+                text,
+                provider,
+                transcriptionModel,
+                request.language());
+    }
+
     public JsonNode generateJson(
             String prompt,
             AiJsonSchema schema,
@@ -187,6 +225,7 @@ public class AiProviderManagementService {
                 .tenantId(tenantId)
                 .environment(environment)
                 .ragReleaseId(requestConfig != null ? requestConfig.getRagReleaseId() : null)
+                .executionProfile(requestConfig != null ? requestConfig.getExecutionProfile() : null)
                 .invocationTrace(requestConfig != null ? requestConfig.getInvocationTrace() : null)
                 .build();
         if (config.getInvocationTrace() != null) {
@@ -223,6 +262,7 @@ public class AiProviderManagementService {
                 .tenantId(tenantId)
                 .environment(environment)
                 .ragReleaseId(requestConfig != null ? requestConfig.getRagReleaseId() : null)
+                .executionProfile(requestConfig != null ? requestConfig.getExecutionProfile() : null)
                 .invocationTrace(requestConfig != null ? requestConfig.getInvocationTrace() : null)
                 .build();
         if (config.getInvocationTrace() != null) {

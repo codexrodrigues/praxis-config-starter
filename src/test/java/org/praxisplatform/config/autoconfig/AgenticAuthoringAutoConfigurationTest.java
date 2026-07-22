@@ -75,7 +75,7 @@ class AgenticAuthoringAutoConfigurationTest {
                     context.getBean(AgenticAuthoringComponentCapabilitiesService.class);
 
             assertThat(ReflectionTestUtils.getField(service, "cacheTtlMs"))
-                    .isEqualTo(60_000L);
+                    .isEqualTo(600_000L);
             assertThat(ReflectionTestUtils.getField(service, "registryLoadTimeoutMs"))
                     .isEqualTo(30_000L);
             assertThat(ReflectionTestUtils.getField(service, "degradedRetryMs"))

@@ -100,6 +100,63 @@ class SchemaRetrievalServiceTest {
     }
 
     @Test
+    void reusesSuccessfulSchemaForTheSameGovernedPrincipal() throws Exception {
+        List<String> requests = new ArrayList<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/schemas/filtered", exchange -> {
+            requests.add(exchange.getRequestURI().toString());
+            writeJson(exchange, 200, "{\"properties\":{\"departmentIdsIn\":{\"type\":\"array\"}}}");
+        });
+        server.start();
+
+        SchemaRetrievalService service = new SchemaRetrievalService(new ObjectMapper());
+        ReflectionTestUtils.setField(service, "schemasBaseUrl", "http://localhost:" + server.getAddress().getPort());
+        ReflectionTestUtils.setField(service, "timeoutMs", 5_000L);
+        var context = org.praxisplatform.config.dto.AiSchemaContext.builder()
+                .path("/api/human-resources/funcionarios/filter")
+                .operation("post")
+                .schemaType("response")
+                .build();
+
+        SchemaFetchResult first = service.fetchSchemaResult(
+                context, null, "tenant-a", "user-a", "local");
+        ((com.fasterxml.jackson.databind.node.ObjectNode) first.getSchema().path("properties"))
+                .remove("departmentIdsIn");
+        SchemaFetchResult second = service.fetchSchemaResult(
+                context, null, "tenant-a", "user-a", "local");
+
+        assertTrue(first.isSuccess());
+        assertTrue(second.isSuccess());
+        assertTrue(second.getSchema().path("properties").has("departmentIdsIn"));
+        assertEquals(1, requests.size());
+    }
+
+    @Test
+    void isolatesSuccessfulSchemaCacheByGovernedPrincipal() throws Exception {
+        List<String> tenantHeaders = new ArrayList<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/schemas/filtered", exchange -> {
+            tenantHeaders.add(exchange.getRequestHeaders().getFirst("X-Tenant-ID"));
+            writeJson(exchange, 200, "{\"type\":\"object\"}");
+        });
+        server.start();
+
+        SchemaRetrievalService service = new SchemaRetrievalService(new ObjectMapper());
+        ReflectionTestUtils.setField(service, "schemasBaseUrl", "http://localhost:" + server.getAddress().getPort());
+        ReflectionTestUtils.setField(service, "timeoutMs", 5_000L);
+        var context = org.praxisplatform.config.dto.AiSchemaContext.builder()
+                .path("/api/human-resources/funcionarios/filter")
+                .operation("post")
+                .schemaType("response")
+                .build();
+
+        service.fetchSchemaResult(context, null, "tenant-a", "user-a", "local");
+        service.fetchSchemaResult(context, null, "tenant-b", "user-a", "local");
+
+        assertEquals(List.of("tenant-a", "tenant-b"), tenantHeaders);
+    }
+
+    @Test
     void fetchSchemaUsesHostAuthorizationWithoutAddingItToTheSchemaContext() throws Exception {
         List<String> authorizations = new ArrayList<>();
         List<GovernedPlatformRequest> contexts = new ArrayList<>();

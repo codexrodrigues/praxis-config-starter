@@ -179,6 +179,22 @@ apenas campos permitidos para `contextHints.groundedRuntimeComponentContext`
 capabilities, permissoes ou execucao de actions. Dados crus de linhas, valores
 completos, `sampleRows`, `rawRows`, `dataSource`, segredos e decisoes de intencao
 nao fazem parte do contexto aterrado.
+O bloco allowlisted `affordances.visualMaterialization` pode declarar
+`inlineStyle=supported|blocked|unknown`, `governedClass=supported|unknown` e refs
+de restricao seguras. Para superficies condicionais de tabela, ele tambem pode
+publicar `surfacePresetCatalog` com o ID `praxis-table.conditional-surface`, a
+versao instalada, o `themeRef`, o modo de tema observado e as listas allowlisted
+de escopos e presets. O authoring usa a referencia semantica fechada
+`surfacePresetRef={id,catalogVersion}`; nomes de classes CSS permanecem privados
+do runtime. O catalogo `0.2.0` admite `success`, `warning`, `danger` e `highlight`
+em `row` e `cell`; `muted` foi excluido porque opacidade composta nao preserva
+uma garantia deterministica de contraste. `high-contrast` e observado, mas nao
+e certificado por essa versao e portanto falha fechado no preview.
+Essa evidencia serve apenas para restringir a
+materializacao: `blocked` impede preview/apply que dependa de estilos inline e
+`unknown` tambem falha fechado como materializacao nao verificada. Nonces, headers CSP e strings de politica
+arbitrarias nunca sao copiados. A capability nao e persistida no config do
+componente e nao concede autorizacao.
 Quando esse contexto confirma uma superficie relacionada consultavel, o fluxo
 consultivo pode reconhecer a superficie e a selecao como evidencia governada,
 mas deve declarar a ausencia de uma tool backend read-only antes de listar dados
@@ -523,6 +539,15 @@ refletir o ultimo evento nao terminal conhecido, permitindo que clientes mostrem
 mensagens como "a LLM ainda esta resolvendo a intencao" sem inventar logica
 local ou depender de timers opacos no frontend.
 
+No produtor local ativo, checagens internas de terminalidade e o watchdog usam a
+projecao em memoria do ultimo evento que ja foi confirmado pelo event store. A
+reconciliacao com o tail persistido e limitada a uma janela periodica de cinco
+segundos e tambem ocorre no heartbeat. Isso evita que cada etapa semantica dispute
+uma conexao do config-store remoto, sem enfraquecer a autoridade do banco: cada
+append continua atomico, um terminal concorrente continua rejeitando qualquer
+append posterior e cancelamentos de outra instancia sao observados na
+reconciliacao periodica.
+
 Além do `heartbeat`, o backend emite progresso persistido (`status`) durante
 turnos ainda em processamento. O intervalo padrao de
 `praxis.ai.authoring.stream.processing-progress-seconds` e `8s`. Esses eventos
@@ -556,16 +581,61 @@ classificacao e planejamento estruturado em uma classe de custo/latencia separad
 de autoria. A configuracao nao altera o modelo de providers nao OpenAI nem o modelo usado nas fases
 posteriores do turno.
 
-O passe pre-intent nao cria implicitamente uma consulta sem escopo ao Domain Catalog. Contexto de
-dominio e incorporado diretamente nessa fase apenas quando o host envia um escopo `domainCatalog`
-explicito. Sem esse escopo, a orientacao semantica decide primeiro o nivel necessario e solicita
-progressivamente `discoverDomainContexts`, `discoverDomainCapabilities`, `discoverDomainConcepts`,
-`inspectDomainBindings`, `verifyDomainOperation` ou `searchApiResources`. Isso evita varrer o
-catalogo inteiro antes de saber se a pergunta exige dominio, binding ou endpoint.
+O refinamento semantico de valores atuais de option sources usa a mesma separacao de responsabilidade:
+`praxis.ai.authoring.intent-resolution.live-option.openai-model` (default `gpt-5.6-luna`) executa
+somente a classificacao estruturada dos candidatos vivos depois que recurso e campo canonicos ja foram
+resolvidos. O endpoint `byIds` continua confirmando a selecao antes da materializacao; providers nao
+OpenAI preservam o modelo solicitado pelo turno.
+
+O passe pre-intent recebe como baseline somente a projecao compacta das identidades canonicas de
+recursos do tenant/ambiente. A selecao das releases atuais continua pertencendo ao Domain Catalog,
+mas a leitura multi-release e consolidada em uma unica consulta de itens; ela nao executa uma
+consulta remota por recurso. Contexto detalhado e incorporado nessa fase apenas quando existe escopo
+de negocio real, como `resourceKey`, `contextKey`, `query` ou `nodeType`. Um envelope amplo contendo
+apenas `serviceKey`, disponibilidade ou modo do catalogo nao autoriza varredura detalhada.
+
+Essa projecao compacta e reutilizada por uma cache interna, limitada e escopada por `tenantId`,
+`environment`, `serviceKey` e limite de itens. Ela armazena somente o texto derivado da release
+canonica, nunca substitui o Domain Catalog e nao faz cache negativo. O TTL default e cinco minutos
+(`praxis.domain-catalog.prompt-context.resource-identity-cache-ttl-ms`) e o limite default e 256
+entradas (`praxis.domain-catalog.prompt-context.resource-identity-cache-max-entries`). Uma ingestao
+que altera a projecao publica evento transacional e invalida, depois do commit, apenas o
+tenant/ambiente afetado. As metricas `domain_catalog_prompt_context_cache_total` distinguem
+`hit`, `miss` e `invalidated`.
+
+O host Page Builder deve enviar esse escopo amplo como `status=deferred` e
+`retrievalPolicy=progressive-after-semantic-orientation`; nao deve carregar `domain-360` de todo o
+host ao abrir uma tela vazia. Depois da orientacao semantica, o backend solicita progressivamente
+`discoverDomainContexts`, `discoverDomainCapabilities`, `discoverDomainConcepts`,
+`inspectDomainBindings`, `verifyDomainOperation` ou `searchApiResources`. Isso preserva grounding
+governado sem transformar abertura de tela ou primeiro token em uma varredura do catalogo inteiro.
 Bindings aprovados reforcam e habilitam verificacao operacional exata, mas sua ausencia durante a
 adocao progressiva do Semantic IR nao apaga candidatos ja governados por Domain Catalog, API Metadata
 e schema. Nesse caso `searchApiResources` continua a descoberta e preserva a proveniencia efetiva;
 materializacao segue sujeita aos gates de elegibilidade, schema, capability, preview e revisao.
+
+### OpenAI hosted skills
+
+Chamadas OpenAI pertencentes ao authoring agentico carregam o perfil interno
+`AGENTIC_AUTHORING`. Quando o host configura referencias revisadas em
+`praxis.ai.openai.hosted-skills.agentic-authoring[*]`, o adapter oficial da Responses API monta um
+`shell` com ambiente `container_auto` e anexa essas referencias. Chamadas de catalogo, teste de
+conexao e geracao fora desse perfil permanecem sem hosted shell.
+
+Cada `id` pertence a conta OpenAI do host/cliente e deve ser fornecido por ambiente, por exemplo
+`PRAXIS_AI_OPENAI_SKILL_COORDINATOR_ID` e
+`PRAXIS_AI_OPENAI_SKILL_DOMAIN_GROUNDING_ID`. O conjunto configurável também contempla
+`PRAXIS_AI_OPENAI_SKILL_TABLE_AUTHORING_ID`, `PRAXIS_AI_OPENAI_SKILL_FORM_AUTHORING_ID`,
+`PRAXIS_AI_OPENAI_SKILL_DASHBOARD_AUTHORING_ID`,
+`PRAXIS_AI_OPENAI_SKILL_CURRENT_ARTIFACT_UNDERSTANDING_ID` e
+`PRAXIS_AI_OPENAI_SKILL_MULTI_TURN_REFINEMENT_ID`. Versoes devem ser fixadas nos ambientes de teste e
+producao; `latest` serve apenas para desenvolvimento controlado. IDs ausentes sao ignorados e nao
+ativam um caminho alternativo. O modelo configurado precisa suportar Skills e Hosted Shell.
+
+Skills sao instrucoes aprovadas pelo desenvolvedor, nao plugins escolhidos pelo usuario final. Elas
+nao substituem as tools Praxis de dominio, metadata, manifests, materializacao ou validacao, nao
+recebem credenciais do cliente e nao autorizam apply. A selecao final continua semantica e todos os
+gates backend de evidencia, preview, autorizacao e persistencia permanecem obrigatorios.
 
 Perguntas que enumeram os dominios, temas ou assuntos de negocio efetivamente disponiveis usam a
 classe semantica interna `governed_domain_discovery`. Ela nao e orientacao generica nem autoria de
@@ -765,6 +835,20 @@ Regra de aplicacao:
   preservar a fonte de dados do artefato atual, trocar a projecao visual na
   `semanticDecision` e registrar politica semantica auditavel, nao fallback de
   keyword.
+- Edicoes multi-turno de um componente existente nao dependem de selecao ativa
+  enviada pela UI. Quando a resolucao semantica produzir `operationKind=modify`
+  e um `target` com `widgetKey` e `componentId` reconciliaveis com
+  `currentPage`, o backend deve recuperar o manifest server-owned daquele
+  componente e compilar a operacao canonica. `uiCompositionPlan` permanece
+  reservado para criacao ou recomposicao de superficie, nao para substituir
+  uma edicao suportada pelo manifest existente.
+- Operacoes canonicas como `filter.advanced.fields.add` e
+  `filter.advanced.fields.remove` sao transicoes sobre o estado materializado:
+  devem adicionar ou remover somente os campos resolvidos e preservar os
+  demais filtros e configuracoes. O prompt nao e reinterpretado pelo compiler;
+  a operacao semantica resolvida governa a mutacao. Um plano que desabilite ao
+  mesmo tempo a transicao de `selectedFieldIds` e de `alwaysVisibleFields` e um
+  no-op contraditorio e deve falhar antes de publicar `canApply=true`.
 - `selectedCandidateUsesDomainAnchor=true` deve forcar
   `decisionDiagnostics.requiresReview=true`,
   `reviewReason=resource-selection-domain-anchor` e `canApply=false`.

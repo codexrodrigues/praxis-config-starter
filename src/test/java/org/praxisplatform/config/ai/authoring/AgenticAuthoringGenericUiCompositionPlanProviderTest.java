@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -143,7 +144,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .contains("praxis-list")
                 .contains("praxis-table")
                 .contains("/api/acme/orders")
-                .contains("\"statsEndpointInference\":\"canonical-resource-stats-group-by\"")
+                .contains("\"source\":{\"kind\":\"praxis.stats\",\"resource\":\"/api/acme/orders\",\"operation\":\"group-by\"")
                 .contains("kpi-band")
                 .doesNotContain("human-resources")
                 .doesNotContain("payroll")
@@ -238,10 +239,12 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(chartWidget.path("outputs").path("pointClick").asText()).isEqualTo("emit");
         assertThat(chartWidget.path("outputs").path("selectionChange").asText()).isEqualTo("emit");
         assertThat(chartWidget.path("outputs").path("crossFilter").asText()).isEqualTo("emit");
-        assertThat(chartWidget.path("inputs").path("config").path("interactions").path("pointClick").asBoolean()).isTrue();
-        assertThat(chartWidget.path("inputs").path("config").path("interactions").path("selection").asBoolean()).isTrue();
-        assertThat(chartWidget.path("inputs").path("config").path("interactions")
-                .path("eventActions").path("crossFilter").path("mapping").path("status").asText())
+        JsonNode chartDocument = chartWidget.path("inputs").path("chartDocument");
+        assertThat(chartDocument.path("version").asText()).isEqualTo("0.1.0");
+        assertThat(chartDocument.path("events").path("pointClick").path("action").asText()).isEqualTo("emit");
+        assertThat(chartDocument.path("events").path("selectionChange").path("action").asText()).isEqualTo("emit");
+        assertThat(chartDocument.path("events").path("crossFilter").path("action").asText()).isEqualTo("emit");
+        assertThat(chartDocument.path("events").path("crossFilter").path("mapping").path("status").asText())
                 .isEqualTo("status");
         assertThat(plan.path("bindings").toString())
                 .contains("orders-filter.requestSearch->orders-chart-status.queryContext")
@@ -345,6 +348,234 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void preservesCanonicalVisualizationAxesInsteadOfAppendingInferredDimensions() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ArrayNode fields = contextHints.putArray("schemaFields");
+        fields.addObject().put("field", "departamento").put("label", "Departamento").put("type", "string");
+        fields.addObject().put("field", "competencia").put("label", "Competencia").put("type", "date");
+        fields.addObject().put("field", "salarioBruto").put("label", "Salario Bruto").put("type", "number");
+        fields.addObject()
+                .put("field", "composicaoFolha")
+                .put("label", "Composicao da folha")
+                .put("controlType", "select");
+        fields.addObject()
+                .put("field", "payrollProfile")
+                .put("label", "Perfil da folha")
+                .put("controlType", "select");
+        AgenticAuthoringVisualizationDecision visualization = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "dashboard de remuneracao por departamento",
+                "analytical_dashboard",
+                "praxis-page-builder",
+                List.of(
+                        new AgenticAuthoringVisualizationAxisDecision(
+                                "impacto da folha por departamento",
+                                "departamento",
+                                "Departamento",
+                                "horizontal-bar",
+                                "horizontal",
+                                "sum",
+                                "salarioBruto",
+                                "Total de Salario Bruto",
+                                "llm-authored-semantic-axis"),
+                        new AgenticAuthoringVisualizationAxisDecision(
+                                "evolucao da folha por competencia",
+                                "competencia",
+                                "Competencia",
+                                "line",
+                                "temporal",
+                                "sum",
+                                "salarioBruto",
+                                "Total de Salario Bruto",
+                                "llm-authored-semantic-axis")),
+                true,
+                true,
+                "llm-authored-semantic-decision");
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Queria um painel pra enxergar onde a folha pesa mais, separando os departamentos.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent(
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        visualization),
+                "session-axes",
+                "turn-axes",
+                List.of(),
+                null,
+                List.of(),
+                contextHints);
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(request).orElseThrow();
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("key"))
+                .contains(
+                        "vw-analytics-folha-pagamento-chart-departamento",
+                        "vw-analytics-folha-pagamento-chart-competencia")
+                .doesNotContain(
+                        "vw-analytics-folha-pagamento-chart-composicaoFolha",
+                        "vw-analytics-folha-pagamento-chart-payrollProfile");
+        JsonNode departmentChart = result.uiCompositionPlan().path("widgets").findParents("key").stream()
+                .filter(widget -> "vw-analytics-folha-pagamento-chart-departamento"
+                        .equals(widget.path("key").asText()))
+                .findFirst()
+                .orElseThrow();
+        JsonNode chartDocument = departmentChart.path("inputs").path("chartDocument");
+        assertThat(chartDocument.path("title").asText())
+                .startsWith("Total de Salario Bruto por Departamento");
+        assertThat(chartDocument.path("subtitle").asText())
+                .isEqualTo("Total de Salario Bruto por Departamento");
+        assertThat(chartDocument.path("metrics").path(0).path("label").asText())
+                .isEqualTo("Total de Salario Bruto");
+        assertThat(chartDocument.path("source").path("operation").asText()).isEqualTo("group-by");
+    }
+
+    @Test
+    void composesPreservedDashboardAxisWithIncrementalAxisWithoutCanvasOverlap() {
+        ObjectNode currentPage = objectMapper.createObjectNode();
+        ObjectNode currentChart = currentPage.putArray("widgets").addObject();
+        currentChart.put("key", "vw-analytics-folha-pagamento-chart-departamento");
+        ObjectNode currentChartDefinition = currentChart.putObject("definition");
+        currentChartDefinition.put("id", "praxis-chart");
+        ObjectNode currentChartDocument = canonicalChartDocument(
+                currentChartDefinition,
+                "departamento",
+                "Departamento");
+        currentChartDocument.put("kind", "bar");
+        currentChartDocument.putArray("metrics").addObject()
+                .put("field", "salarioLiquido")
+                .put("label", "Salário líquido")
+                .put("aggregation", "sum");
+
+        AgenticAuthoringVisualizationDecision incrementalVisualization =
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "segunda leitura mensal por competencia",
+                        "analytical_dashboard",
+                        "praxis-page-builder",
+                        List.of(new AgenticAuthoringVisualizationAxisDecision(
+                                "evolucao mensal por competencia",
+                                "competencia",
+                                "Competencia",
+                                "line",
+                                "temporal",
+                                "sum",
+                                "salarioLiquido",
+                                "Total de Salario Liquido",
+                                "llm-authored-semantic-axis")),
+                        true,
+                        true,
+                        "llm-authored-semantic-decision");
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("source", "dashboard-quality-gate");
+        contextHints.put("kind", "dashboard-repair-action");
+        contextHints.putArray("warnings").add("dashboard-refinement-requested");
+        contextHints.putArray("schemaFields")
+                .add(fieldHint("departamento", "Departamento", "string"))
+                .add(fieldHint("competencia", "Competencia", "date"))
+                .add(fieldHint("salarioLiquido", "Salario Liquido", "number"));
+        AgenticAuthoringIntentResolutionResult baseIntent = intent(
+                "create",
+                "dashboard",
+                "create_artifact",
+                "/api/human-resources/vw-analytics-folha-pagamento",
+                incrementalVisualization);
+        AgenticAuthoringSemanticRefinement refinement = new AgenticAuthoringSemanticRefinement(
+                AgenticAuthoringSemanticRefinement.SCHEMA_VERSION,
+                "visual_projection",
+                List.of("resource", "source"),
+                Map.of(),
+                Map.of("axes", List.of("competencia")),
+                List.of(),
+                "Add an analytical axis while preserving the active dashboard.",
+                0.91d);
+        AgenticAuthoringSemanticDecision semanticDecision = AgenticAuthoringSemanticDecision.from(
+                baseIntent.operationKind(),
+                baseIntent.artifactKind(),
+                baseIntent.changeKind(),
+                baseIntent.selectedCandidate(),
+                List.of(baseIntent.selectedCandidate()),
+                incrementalVisualization,
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                "session-incremental-axis",
+                "turn-incremental-axis",
+                "Preserve the dashboard and add a monthly analysis.",
+                "Add a monthly analysis.",
+                "Semantic continuation of the active dashboard.",
+                refinement);
+        AgenticAuthoringIntentResolutionResult continuationIntent = new AgenticAuthoringIntentResolutionResult(
+                baseIntent.valid(),
+                baseIntent.operationKind(),
+                baseIntent.artifactKind(),
+                baseIntent.changeKind(),
+                baseIntent.authoringProfile(),
+                baseIntent.targetApp(),
+                baseIntent.targetComponentId(),
+                baseIntent.target(),
+                baseIntent.selectedCandidate(),
+                baseIntent.candidates(),
+                baseIntent.gate(),
+                baseIntent.effectivePrompt(),
+                baseIntent.assistantMessage(),
+                baseIntent.assistantContent(),
+                baseIntent.apiCatalogAnswer(),
+                baseIntent.quickReplies(),
+                baseIntent.pendingClarification(),
+                baseIntent.clarificationQuestions(),
+                baseIntent.warnings(),
+                baseIntent.failureCodes(),
+                baseIntent.currentPageSummary(),
+                baseIntent.llmDiagnostics(),
+                baseIntent.visualizationDecision(),
+                semanticDecision);
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Acrescente outra leitura mensal e preserve o restante da pagina.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                currentPage,
+                continuationIntent,
+                "session-incremental-axis",
+                "turn-incremental-axis",
+                List.of(),
+                null,
+                List.of(),
+                contextHints)).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        String departmentKey = "vw-analytics-folha-pagamento-chart-departamento";
+        String competenceKey = "vw-analytics-folha-pagamento-chart-competencia";
+        assertThat(plan.path("widgets").findValuesAsText("key"))
+                .contains(departmentKey, competenceKey);
+
+        JsonNode desktopDepartment = plan.path("canvas").path("items").path(departmentKey);
+        JsonNode desktopCompetence = plan.path("canvas").path("items").path(competenceKey);
+        assertThat(desktopDepartment.path("colSpan").asInt()).isEqualTo(6);
+        assertThat(desktopCompetence.path("colSpan").asInt()).isEqualTo(6);
+        assertThat(desktopDepartment.path("col").asInt())
+                .isNotEqualTo(desktopCompetence.path("col").asInt());
+
+        JsonNode tabletItems = plan.path("deviceLayouts").path("tablet").path("canvas").path("items");
+        assertThat(tabletItems.path(departmentKey).path("colSpan").asInt()).isEqualTo(3);
+        assertThat(tabletItems.path(competenceKey).path("colSpan").asInt()).isEqualTo(3);
+        assertThat(tabletItems.path(departmentKey).path("col").asInt())
+                .isNotEqualTo(tabletItems.path(competenceKey).path("col").asInt());
+
+        JsonNode mobileItems = plan.path("deviceLayouts").path("mobile").path("canvas").path("items");
+        assertThat(mobileItems.path(departmentKey).path("row").asInt())
+                .isNotEqualTo(mobileItems.path(competenceKey).path("row").asInt());
+    }
+
+    @Test
     void createsOperationalMonitoringDashboardWithSemanticCharts() {
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Preciso monitorar chamados e ocorrencias em atendimento, gravidade, andamento e responsavel.",
@@ -382,14 +613,14 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .contains("\"field\":\"gravidade\"")
                 .contains("\"field\":\"andamento\"")
                 .contains("\"field\":\"responsavel\"")
-                .contains("\"statsOperation\":\"group-by\"")
-                .contains("\"statsPath\":\"/api/operations/incidentes/stats/group-by\"")
-                .contains("\"statsEndpointInference\":\"canonical-resource-stats-group-by\"")
-                .contains("\"operation\":\"COUNT\"")
+                .contains("\"operation\":\"group-by\"")
+                .contains("\"resource\":\"/api/operations/incidentes\"")
+                .contains("\"aggregation\":\"count\"")
                 .contains("\"resourcePath\":\"/api/operations/incidentes\"")
-                .contains("\"provenance\":\"llm-authored-semantic-axis\"")
                 .contains("Registros por Gravidade")
                 .doesNotContain("Chamados por");
+        assertThat(plan.path("diagnostics").path("semanticAxes").toString())
+                .contains("\"provenance\":\"llm-authored-semantic-axis\"");
         JsonNode tableInputs = findWidgetInputs(plan, "praxis-table");
         assertThat(tableInputs.path("resourcePath").asText()).isEqualTo("/api/operations/incidentes");
         assertThat(tableInputs.has("title")).isFalse();
@@ -432,18 +663,13 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 "test-key",
                 dashboardIntent("/api/human-resources/funcionarios", List.of(countAxis)))).orElseThrow();
 
-        JsonNode config = findWidget(result.uiCompositionPlan(), "praxis-chart", "main")
-                .path("inputs").path("config");
-        assertThat(config.path("series").path(0).path("metric").path("field").asText())
+        JsonNode chartDocument = findWidget(result.uiCompositionPlan(), "praxis-chart", "main")
+                .path("inputs").path("chartDocument");
+        assertThat(chartDocument.path("metrics").path(0).path("field").asText())
                 .isEqualTo("total");
-        assertThat(config.path("dataSource").path("query").path("metrics").path(0).has("field"))
-                .isFalse();
-        assertThat(config.path("dataSource").path("query").path("metrics").path(0).path("alias").asText())
-                .isEqualTo("total");
-        assertThat(config.path("dataSource").path("query").path("statsRequest")
-                .path("metric").has("field")).isFalse();
-        assertThat(config.path("dataSource").path("query").path("statsRequest")
-                .path("metric").path("alias").asText()).isEqualTo("total");
+        assertThat(chartDocument.path("metrics").path(0).path("aggregation").asText()).isEqualTo("count");
+        assertThat(chartDocument.path("source").path("operation").asText()).isEqualTo("group-by");
+        assertThat(chartDocument.has("dataSource")).isFalse();
     }
 
     @Test
@@ -1080,8 +1306,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("widgets").findValuesAsText("componentId")).containsExactly("praxis-chart");
         assertThat(plan.toString())
                 .contains("\"field\":\"severidade\"")
-                .contains("\"type\":\"bar\"")
-                .contains("\"statsPath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by\"")
+                .contains("\"kind\":\"bar\"")
+                .contains("\"resource\":\"/api/risk-intelligence/vw-indicadores-incidentes\"")
+                .contains("\"operation\":\"group-by\"")
                 .doesNotContain("praxis-table")
                 .doesNotContain("praxis-filter")
                 .doesNotContain("kpi-band");
@@ -1153,13 +1380,12 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         String plan = result.uiCompositionPlan().toString();
         assertThat(plan)
                 .contains("\"resourcePath\":\"/api/risk-intelligence/vw-indicadores-incidentes\"")
-                .contains("\"schemaUrl\":\"/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor&operation=post&schemaType=response\"")
-                .contains("\"submitUrl\":\"/api/risk-intelligence/vw-indicadores-incidentes/filter/cursor\"")
-                .contains("\"statsOperation\":\"timeseries\"")
-                .contains("\"statsPath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/timeseries\"")
-                .contains("\"granularity\":\"MONTH\"")
+                .contains("\"resource\":\"/api/risk-intelligence/vw-indicadores-incidentes\"")
+                .contains("\"operation\":\"timeseries\"")
+                .contains("\"granularity\":\"month\"")
                 .contains("\"fillGaps\":false")
-                .contains("\"type\":\"time\"")
+                .contains("\"role\":\"time\"")
+                .doesNotContain("\"orientation\":\"temporal\"")
                 .doesNotContain("\"resourcePath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/timeseries\"");
     }
 
@@ -1183,9 +1409,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
 
         String widgets = result.uiCompositionPlan().path("widgets").toString();
         assertThat(widgets)
-                .contains("\"metric\":{\"field\":\"salarioLiquido\",\"aggregation\":\"sum\",\"label\":\"Total\"}")
-                .contains("\"metric\":{\"operation\":\"SUM\",\"field\":\"salarioLiquido\",\"alias\":\"salarioLiquido\"}")
-                .contains("\"metrics\":[{\"aggregation\":\"sum\",\"field\":\"salarioLiquido\",\"alias\":\"salarioLiquido\"}]");
+                .contains("\"metrics\":[{\"field\":\"salarioLiquido\",\"label\":\"Salario liquido\",\"aggregation\":\"sum\"}]")
+                .contains("\"source\":{\"kind\":\"praxis.stats\",\"resource\":\"/api/human-resources/vw-analytics-folha-pagamento\",\"operation\":\"group-by\"")
+                .doesNotContain("\"statsRequest\"");
     }
 
     @Test
@@ -1219,10 +1445,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                         "praxis-table");
         assertThat(widgets)
                 .contains("\"field\":\"departamento\"")
-                .contains("\"metric\":{\"field\":\"salarioLiquido\",\"aggregation\":\"sum\",\"label\":\"Total\"}")
-                .contains("\"statsRequest\":{\"filter\":{},\"field\":\"departamento\"")
-                .contains("\"metrics\":[{\"aggregation\":\"sum\",\"field\":\"salarioLiquido\",\"alias\":\"salarioLiquido\"}]")
-                .doesNotContain("\"statsRequest\":{\"filter\":{},\"field\":\"salarioLiquido\"");
+                .contains("\"metrics\":[{\"field\":\"salarioLiquido\",\"label\":\"Soma do salario liquido\",\"aggregation\":\"sum\"}]")
+                .contains("\"orientation\":\"horizontal\"")
+                .doesNotContain("\"statsRequest\"");
     }
 
     @Test
@@ -1340,7 +1565,8 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .contains("praxis-chart", "praxis-table");
         assertThat(plan.path("widgets").toString())
                 .contains("\"resourcePath\":\"/api/human-resources/vw-analytics-folha-pagamento\"")
-                .contains("\"statsEndpointInference\":\"canonical-resource-stats-group-by\"");
+                .contains("\"resource\":\"/api/human-resources/vw-analytics-folha-pagamento\"")
+                .contains("\"operation\":\"group-by\"");
         assertRuntimeInputsDoNotContainGovernanceEvidence(plan);
     }
 
@@ -1473,7 +1699,8 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         String plan = result.uiCompositionPlan().toString();
         assertThat(plan)
                 .contains("\"resourcePath\":\"/api/human-resources/funcionarios\"")
-                .contains("\"statsPath\":\"/api/human-resources/funcionarios/stats/group-by\"")
+                .contains("\"resource\":\"/api/human-resources/funcionarios\"")
+                .contains("\"operation\":\"group-by\"")
                 .contains("\"field\":\"departamento\"")
                 .doesNotContain("/api/human-resources/vw-analytics-folha-pagamento");
     }
@@ -1606,10 +1833,10 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         JsonNode chart = tabs.path(0).path("widgets").path(0);
         assertThat(chart.path("id").asText()).isEqualTo("praxis-chart");
         assertThat(chart.path("inputs").has("componentInstanceId")).isFalse();
-        assertThat(chart.path("inputs").path("config").toString())
+        assertThat(chart.path("inputs").path("chartDocument").toString())
                 .contains("\"field\":\"severidade\"")
-                .contains("\"statsPath\":\"/api/risk-intelligence/vw-indicadores-incidentes/stats/group-by\"")
-                .contains("\"statsEndpointInference\":\"canonical-resource-stats-group-by\"");
+                .contains("\"resource\":\"/api/risk-intelligence/vw-indicadores-incidentes\"")
+                .contains("\"operation\":\"group-by\"");
         assertThat(tabs.path(1).path("widgets").path(0).path("id").asText()).isEqualTo("praxis-table");
         assertThat(result.uiCompositionPlan().toString())
                 .contains("praxis-chart")
@@ -1743,15 +1970,43 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void configuresSelectedRowsExportOnExistingTablePage() {
+        ObjectNode page = objectMapper.createObjectNode();
+        ObjectNode table = page.putArray("widgets").addObject();
+        table.put("key", "funcionarios-table");
+        ObjectNode definition = table.putObject("definition");
+        definition.put("id", "praxis-table");
+        definition.putObject("inputs").putObject("config").put("title", "Funcionários");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Habilite seleção na tabela e exporte apenas as linhas selecionadas.",
+                "openai",
+                "gpt-5.6-luna",
+                "test-key",
+                page,
+                tableModificationIntent("configure_export"))).orElseThrow();
+
+        assertThat(result.uiCompositionPlan()).isNull();
+        assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-table-export-selected");
+        JsonNode config = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").path(0).path("definition").path("inputs").path("config");
+        assertThat(config.path("behavior").path("selection").path("enabled").asBoolean()).isTrue();
+        assertThat(config.path("behavior").path("selection").path("type").asText()).isEqualTo("multiple");
+        assertThat(config.path("behavior").path("selection").path("mode").asText()).isEqualTo("checkbox");
+        assertThat(config.path("toolbar").path("visible").asBoolean()).isTrue();
+        assertThat(config.path("export").path("enabled").asBoolean()).isTrue();
+        assertThat(config.path("export").path("formats").path(0).asText()).isEqualTo("csv");
+        assertThat(config.path("export").path("general").path("scope").asText()).isEqualTo("selected");
+    }
+
+    @Test
     void modifiesExistingChartTypeFromComponentCapabilityAction() {
         ObjectNode page = objectMapper.createObjectNode();
         ObjectNode widget = page.putArray("widgets").addObject();
         widget.put("key", "incidentes-chart-severidade");
         ObjectNode definition = widget.putObject("definition");
         definition.put("id", "praxis-chart");
-        ObjectNode config = definition.putObject("inputs").putObject("config");
-        config.put("type", "bar");
-        config.putArray("series").addObject().put("type", "bar");
+        canonicalChartDocument(definition, "severidade", "Severidade");
 
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Altere o gráfico selecionado para linhas",
@@ -1763,10 +2018,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
 
         assertThat(result.uiCompositionPlan()).isNull();
         assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-chart-modification");
-        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
-                .path("widgets").get(0).path("definition").path("inputs").path("config");
-        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
-        assertThat(chartConfig.path("series").get(0).path("type").asText()).isEqualTo("line");
+        JsonNode chartDocument = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("chartDocument");
+        assertThat(chartDocument.path("kind").asText()).isEqualTo("line");
         assertThat(result.compiledFormPatch().path("compatibility").path("publicResponseKind").asText())
                 .isEqualTo("patch");
     }
@@ -1778,9 +2032,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         widget.put("key", "runtime-generated-chart-key");
         ObjectNode definition = widget.putObject("definition");
         definition.put("id", "praxis-chart");
-        ObjectNode config = definition.putObject("inputs").putObject("config");
-        config.put("type", "bar");
-        config.putArray("series").addObject().put("type", "bar");
+        canonicalChartDocument(definition, "severidade", "Severidade");
 
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Altere o gráfico selecionado para linhas",
@@ -1790,9 +2042,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 page,
                 chartModificationIntent())).orElseThrow();
 
-        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
-                .path("widgets").get(0).path("definition").path("inputs").path("config");
-        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
+        JsonNode chartDocument = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("chartDocument");
+        assertThat(chartDocument.path("kind").asText()).isEqualTo("line");
     }
 
     @Test
@@ -1802,9 +2054,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         widget.put("key", "incidentes-chart-severidade");
         ObjectNode definition = widget.putObject("definition");
         definition.put("id", "praxis-chart");
-        ObjectNode config = definition.putObject("inputs").putObject("config");
-        config.put("type", "bar");
-        config.putArray("series").addObject().put("type", "bar");
+        canonicalChartDocument(definition, "severidade", "Severidade");
 
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Trocar para linhas",
@@ -1814,9 +2064,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 page,
                 chartModificationIntent("chart"))).orElseThrow();
 
-        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
-                .path("widgets").get(0).path("definition").path("inputs").path("config");
-        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
+        JsonNode chartDocument = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("chartDocument");
+        assertThat(chartDocument.path("kind").asText()).isEqualTo("line");
         assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-chart-modification");
     }
 
@@ -1827,9 +2077,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         widget.put("key", "incidentes-chart-severidade");
         ObjectNode definition = widget.putObject("definition");
         definition.put("id", "praxis-chart");
-        ObjectNode config = definition.putObject("inputs").putObject("config");
-        config.put("type", "bar");
-        config.putArray("series").addObject().put("type", "bar");
+        canonicalChartDocument(definition, "severidade", "Severidade");
 
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Altere o grafico selecionado para linhas, mantendo os dados atuais.",
@@ -1839,10 +2087,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 page,
                 chartModificationIntent("chart", "praxis-chart", "praxis-chart.type.set@0.1.0"))).orElseThrow();
 
-        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
-                .path("widgets").get(0).path("definition").path("inputs").path("config");
-        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
-        assertThat(chartConfig.path("series").get(0).path("type").asText()).isEqualTo("line");
+        JsonNode chartDocument = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("chartDocument");
+        assertThat(chartDocument.path("kind").asText()).isEqualTo("line");
         assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-chart-modification");
     }
 
@@ -1853,9 +2100,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         widget.put("key", "incidentes-chart-severidade");
         ObjectNode definition = widget.putObject("definition");
         definition.put("id", "praxis-chart");
-        ObjectNode config = definition.putObject("inputs").putObject("config");
-        config.put("type", "bar");
-        config.putArray("series").addObject().put("type", "bar");
+        canonicalChartDocument(definition, "severidade", "Severidade");
 
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Trocar para linhas",
@@ -1865,9 +2110,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 page,
                 chartModificationIntent("dashboard", "praxis-dynamic-page-builder"))).orElseThrow();
 
-        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
-                .path("widgets").get(0).path("definition").path("inputs").path("config");
-        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
+        JsonNode chartDocument = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("chartDocument");
+        assertThat(chartDocument.path("kind").asText()).isEqualTo("line");
     }
 
     @Test
@@ -1877,15 +2122,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         widget.put("key", "incidentes-chart-severidade");
         ObjectNode definition = widget.putObject("definition");
         definition.put("id", "praxis-chart");
-        ObjectNode inputs = definition.putObject("inputs");
-        ObjectNode config = inputs.putObject("config");
-        config.put("type", "bar");
-        ObjectNode dataSource = config.putObject("dataSource");
-        dataSource.put("resourcePath", "/api/risk-intelligence/vw-indicadores-incidentes");
-        dataSource.put("schemaUrl", "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes");
-        ObjectNode axes = config.putObject("axes");
-        axes.putObject("x").put("field", "severidade").put("label", "Severidade");
-        config.putArray("series").addObject().put("type", "bar");
+        canonicalChartDocument(definition, "severidade", "Severidade");
         ObjectNode contextHints = objectMapper.createObjectNode();
         contextHints.put("kind", "contextual-preview-action");
         contextHints.put("surfaceActionId", "surface.open");
@@ -1907,13 +2144,13 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 contextHints)).orElseThrow();
 
         JsonNode patchedPage = result.compiledFormPatch().path("patch").path("page");
-        JsonNode chartConfig = patchedPage.path("widgets").get(0)
-                .path("definition").path("inputs").path("config");
+        JsonNode chartDocument = patchedPage.path("widgets").get(0)
+                .path("definition").path("inputs").path("chartDocument");
         JsonNode link = patchedPage.path("composition").path("links").get(0);
 
         assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-chart-surface-open-modification");
-        assertThat(chartConfig.path("interactions").path("pointClick").asBoolean()).isTrue();
-        assertThat(chartConfig.path("interactions").path("selection").asBoolean()).isTrue();
+        assertThat(chartDocument.path("events").path("pointClick").path("action").asText()).isEqualTo("emit");
+        assertThat(chartDocument.path("events").path("selectionChange").path("action").asText()).isEqualTo("emit");
         assertThat(patchedPage.path("widgets").get(0).path("definition").path("outputs").path("pointClick").path("type").asText())
                 .isEqualTo("surface.open");
         assertThat(patchedPage.path("widgets").get(0).path("definition").path("outputs").path("pointClick")
@@ -1933,15 +2170,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         widget.put("key", "incidentes-chart-severidade");
         ObjectNode definition = widget.putObject("definition");
         definition.put("id", "praxis-chart");
-        ObjectNode inputs = definition.putObject("inputs");
-        ObjectNode config = inputs.putObject("config");
-        config.put("type", "bar");
-        ObjectNode dataSource = config.putObject("dataSource");
-        dataSource.put("resourcePath", "/api/risk-intelligence/vw-indicadores-incidentes");
-        dataSource.put("schemaUrl", "/schemas/filtered?path=/api/risk-intelligence/vw-indicadores-incidentes");
-        ObjectNode axes = config.putObject("axes");
-        axes.putObject("x").put("field", "severidade").put("label", "Severidade");
-        config.putArray("series").addObject().put("type", "bar");
+        canonicalChartDocument(definition, "severidade", "Severidade");
 
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Abra os registros da categoria selecionada do gráfico em um modal de detalhes.",
@@ -1972,9 +2201,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         widget.put("key", "incidentes-chart-severidade");
         ObjectNode definition = widget.putObject("definition");
         definition.put("id", "praxis-chart");
-        ObjectNode config = definition.putObject("inputs").putObject("config");
-        config.put("type", "bar");
-        config.putArray("series").addObject().put("type", "bar");
+        canonicalChartDocument(definition, "severidade", "Severidade");
         ObjectNode contextHints = objectMapper.createObjectNode();
         contextHints.set("previewPage", previewPage);
 
@@ -1992,9 +2219,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 null,
                 contextHints)).orElseThrow();
 
-        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
-                .path("widgets").get(0).path("definition").path("inputs").path("config");
-        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
+        JsonNode chartDocument = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("chartDocument");
+        assertThat(chartDocument.path("kind").asText()).isEqualTo("line");
     }
 
     @Test
@@ -2003,9 +2230,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         widget.put("key", "incidentes-chart-severidade");
         ObjectNode definition = widget.putObject("definition");
         definition.put("id", "praxis-chart");
-        ObjectNode config = definition.putObject("inputs").putObject("config");
-        config.put("type", "bar");
-        config.putArray("series").addObject().put("type", "bar");
+        canonicalChartDocument(definition, "severidade", "Severidade");
         ObjectNode contextHints = objectMapper.createObjectNode();
         contextHints.put("source", "component-capability-catalog");
         contextHints.put("kind", "contextual-preview-action");
@@ -2030,10 +2255,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 null,
                 contextHints)).orElseThrow();
 
-        JsonNode chartConfig = result.compiledFormPatch().path("patch").path("page")
-                .path("widgets").get(0).path("definition").path("inputs").path("config");
-        assertThat(chartConfig.path("type").asText()).isEqualTo("line");
-        assertThat(chartConfig.path("series").get(0).path("type").asText()).isEqualTo("line");
+        JsonNode chartDocument = result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").get(0).path("definition").path("inputs").path("chartDocument");
+        assertThat(chartDocument.path("kind").asText()).isEqualTo("line");
     }
 
     @Test
@@ -2058,42 +2282,29 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(result.valid()).isTrue();
         JsonNode plan = result.uiCompositionPlan();
         JsonNode chart = findWidget(plan, "praxis-chart", "main");
-        JsonNode config = chart.path("inputs").path("config");
-        JsonNode query = config.path("dataSource").path("query");
-        JsonNode statsRequest = query.path("statsRequest");
+        JsonNode chartDocument = chart.path("inputs").path("chartDocument");
 
-        assertThat(config.path("analyticsProjection").path("id").asText())
-                .isEqualTo("absence-department-comparison");
-        assertThat(config.path("analyticsProjection").path("governance").path("policyRefs").path(0)
-                .path("policyId").asText()).isEqualTo("absence-criticality-policy");
-        assertThat(config.path("analyticsProjection").path("governance").path("policyRefs").path(0)
-                .path("policyVersion").asText()).isEqualTo("2026-07");
-        assertThat(query.path("statsOperation").asText()).isEqualTo("comparison");
-        assertThat(query.path("statsPath").asText())
-                .isEqualTo("/api/human-resources/vw-analytics-afastamentos/stats/comparison");
-        assertThat(query.path("metrics")).hasSize(4);
-        assertThat(query.path("metrics").findValuesAsText("field"))
-                .containsExactly(
-                        "__praxisComparison_funcionarioId_current",
-                        "__praxisComparison_funcionarioId_previous",
-                        "__praxisComparison_diasAfastado_current",
-                        "__praxisComparison_diasAfastado_previous");
-        assertThat(statsRequest.has("metric")).isFalse();
-        assertThat(statsRequest.path("metrics")).hasSize(2);
-        assertThat(statsRequest.path("metrics").path(0).path("operation").asText())
-                .isEqualTo("DISTINCT_COUNT");
-        assertThat(statsRequest.path("metrics").path(0).path("alias").asText())
-                .isEqualTo("funcionarioId");
-        assertThat(statsRequest.path("metrics").path(1).path("operation").asText())
-                .isEqualTo("SUM");
-        assertThat(statsRequest.path("periodField").asText()).isEqualTo("competencia");
-        assertThat(statsRequest.path("period").path("preset").asText()).isEqualTo("LAST_30_DAYS");
-        assertThat(statsRequest.path("period").path("timezone").asText()).isEqualTo("America/Sao_Paulo");
-        assertThat(statsRequest.path("period").path("mode").asText()).isEqualTo("PREVIOUS_ALIGNED");
-        assertThat(statsRequest.path("orderBy").asText()).isEqualTo("VALUE_DESC");
-        assertThat(config.path("series")).hasSize(4);
-        assertThat(config.path("interactions").path("crossFilter").asBoolean()).isTrue();
-        assertThat(config.path("interactions").path("eventActions").path("crossFilter")
+        assertThat(chartDocument.path("version").asText()).isEqualTo("0.1.0");
+        assertThat(chartDocument.path("source").path("operation").asText()).isEqualTo("comparison");
+        assertThat(chartDocument.path("source").path("resource").asText())
+                .isEqualTo("/api/human-resources/vw-analytics-afastamentos");
+        assertThat(chartDocument.path("metrics")).hasSize(2);
+        assertThat(chartDocument.path("metrics").findValuesAsText("field"))
+                .containsExactly("funcionarioId", "diasAfastado");
+        assertThat(chartDocument.path("metrics").path(0).path("aggregation").asText())
+                .isEqualTo("distinct-count");
+        assertThat(chartDocument.path("metrics").path(1).path("aggregation").asText())
+                .isEqualTo("sum");
+        JsonNode comparisonPeriod = chartDocument.path("source").path("options").path("comparisonPeriod");
+        assertThat(comparisonPeriod.path("field").asText()).isEqualTo("competencia");
+        assertThat(comparisonPeriod.path("preset").asText()).isEqualTo("LAST_30_DAYS");
+        assertThat(comparisonPeriod.path("timezone").asText()).isEqualTo("America/Sao_Paulo");
+        assertThat(comparisonPeriod.path("mode").asText()).isEqualTo("PREVIOUS_ALIGNED");
+        assertThat(chartDocument.path("source").path("options").path("orderBy").asText())
+                .isEqualTo("value-desc");
+        assertThat(chartDocument.path("events").path("crossFilter").path("action").asText())
+                .isEqualTo("emit");
+        assertThat(chartDocument.path("events").path("crossFilter")
                 .path("mapping").path("key").asText()).isEqualTo("departamentoIdsIn");
         assertThat(plan.path("bindings").toString())
                 .contains("crossFilter->vw-analytics-afastamentos-table.queryContext")
@@ -2116,10 +2327,11 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(recordOpenAction.path("recordOpen").path("target").path("surfaceId").asText())
                 .isEqualTo("hero-profile");
         assertThat(recordOpenAction.has("globalAction")).isFalse();
-        assertThat(config.path("analyticsProjection").toString())
+        assertThat(chartDocument.toString())
                 .doesNotContain("nomeCompleto")
                 .doesNotContain("diagnostico")
-                .doesNotContain("threshold");
+                .doesNotContain("threshold")
+                .doesNotContain("analyticsProjection");
     }
 
     @Test
@@ -2390,11 +2602,15 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     private AgenticAuthoringIntentResolutionResult tableColumnAdditionIntent() {
+        return tableModificationIntent("column.add");
+    }
+
+    private AgenticAuthoringIntentResolutionResult tableModificationIntent(String changeKind) {
         return new AgenticAuthoringIntentResolutionResult(
                 true,
                 "modify",
                 "table",
-                "column.add",
+                changeKind,
                 "generic-page-change",
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
@@ -2560,6 +2776,26 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 null,
                 "Total",
                 "llm-authored-semantic-axis");
+    }
+
+    private ObjectNode canonicalChartDocument(ObjectNode definition, String field, String label) {
+        ObjectNode document = definition.with("inputs").putObject("chartDocument");
+        document.put("version", "0.1.0");
+        document.put("chartId", "test-chart");
+        document.put("kind", "bar");
+        document.putObject("source")
+                .put("kind", "praxis.stats")
+                .put("resource", "/api/risk-intelligence/vw-indicadores-incidentes")
+                .put("operation", "group-by");
+        document.putArray("dimensions").addObject()
+                .put("field", field)
+                .put("label", label)
+                .put("role", "category");
+        document.putArray("metrics").addObject()
+                .put("field", "total")
+                .put("label", "Registros")
+                .put("aggregation", "count");
+        return document;
     }
 
     private ObjectNode fieldHint(String field, String label, String type) {

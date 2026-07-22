@@ -22,7 +22,8 @@ public record GovernedPlatformRequest(
     public enum Surface {
         SCHEMA_FILTERED,
         RESOURCE_CAPABILITIES,
-        RESOURCE_SURFACE_CATALOG
+        RESOURCE_SURFACE_CATALOG,
+        OPTION_SOURCE_VALUES
     }
 
     public GovernedPlatformRequest {

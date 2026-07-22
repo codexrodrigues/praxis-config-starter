@@ -9,6 +9,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,6 +22,10 @@ import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
+import org.praxisplatform.config.service.LiveOptionValueRetrievalRequest;
+import org.praxisplatform.config.service.LiveOptionValueRetrievalResult;
+import org.praxisplatform.config.service.LiveOptionValueRetrievalService;
+import org.praxisplatform.config.service.SchemaFetchResult;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 import org.springframework.util.StringUtils;
 
@@ -40,6 +45,7 @@ public class AgenticAuthoringToolRegistry {
     static final String DISCOVER_DOMAIN_CONCEPTS = "discoverDomainConcepts";
     static final String INSPECT_DOMAIN_BINDINGS = "inspectDomainBindings";
     static final String VERIFY_DOMAIN_OPERATION = "verifyDomainOperation";
+    static final String SEARCH_OPTION_SOURCE_VALUES = "searchOptionSourceValues";
 
     private final Map<String, AgenticAuthoringToolExecutor> executors;
 
@@ -161,6 +167,34 @@ public class AgenticAuthoringToolRegistry {
             AgenticAuthoringOperationalBindingVerificationService operationalVerificationService,
             DomainCatalogIngestionService domainCatalogIngestionService,
             String domainCatalogServiceKey) {
+        this(
+                resourceDiscoveryService,
+                contextRetrievalService,
+                manifestService,
+                schemaRetrievalService,
+                objectMapper,
+                presentationAffordanceDiscoveryService,
+                projectKnowledgeService,
+                domainBindingService,
+                operationalVerificationService,
+                domainCatalogIngestionService,
+                domainCatalogServiceKey,
+                null);
+    }
+
+    public AgenticAuthoringToolRegistry(
+            AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
+            ContextRetrievalService contextRetrievalService,
+            AgenticAuthoringManifestService manifestService,
+            SchemaRetrievalService schemaRetrievalService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringPresentationAffordanceDiscoveryService presentationAffordanceDiscoveryService,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            AgenticAuthoringDomainBindingService domainBindingService,
+            AgenticAuthoringOperationalBindingVerificationService operationalVerificationService,
+            DomainCatalogIngestionService domainCatalogIngestionService,
+            String domainCatalogServiceKey,
+            LiveOptionValueRetrievalService liveOptionValueRetrievalService) {
         Map<String, AgenticAuthoringToolExecutor> registered = new LinkedHashMap<>();
         register(registered, new SearchApiResourcesToolExecutor(
                 resourceDiscoveryService, domainBindingService, operationalVerificationService));
@@ -198,7 +232,79 @@ public class AgenticAuthoringToolRegistry {
                 domainCatalogServiceKey));
         register(registered, new DomainBindingInspectionToolExecutor(domainBindingService));
         register(registered, new DomainOperationVerificationToolExecutor(operationalVerificationService));
+        register(registered, new LiveOptionSourceValueSearchToolExecutor(liveOptionValueRetrievalService));
         this.executors = Map.copyOf(registered);
+    }
+
+    private static final class LiveOptionSourceValueSearchToolExecutor implements AgenticAuthoringToolExecutor {
+
+        private static final AgenticAuthoringToolDefinition DEFINITION = new AgenticAuthoringToolDefinition(
+                SEARCH_OPTION_SOURCE_VALUES,
+                Set.of("component_authoring", "mixed", "needs_clarification", "advisory_authoring"),
+                Set.of("retrieveEvidence"),
+                "praxis-metadata-starter:x-ui.optionSource",
+                "read_only",
+                "governed_live_domain_values",
+                "safe_event_projection_only");
+
+        private final LiveOptionValueRetrievalService retrievalService;
+
+        private LiveOptionSourceValueSearchToolExecutor(LiveOptionValueRetrievalService retrievalService) {
+            this.retrievalService = retrievalService;
+        }
+
+        @Override
+        public AgenticAuthoringToolDefinition definition() {
+            return DEFINITION;
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call) {
+            return execute(call, null, null);
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(
+                AgenticAuthoringToolCall call,
+                AiPrincipalContext principalContext,
+                String requestBaseUrl) {
+            if (retrievalService == null) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(), "tool-service-unavailable", "Live option value retrieval is unavailable.");
+            }
+            if (!(call.payload() instanceof LiveOptionValueToolRequest request)) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(), "tool-payload-invalid", "searchOptionSourceValues requires its canonical request.");
+            }
+            LiveOptionValueRetrievalResult result = retrievalService.retrieve(
+                    new LiveOptionValueRetrievalRequest(
+                            request.resourcePath(),
+                            request.semanticField(),
+                            request.concept(),
+                            request.operator(),
+                            request.requestedValue(),
+                            request.dependencyFilters(),
+                            request.limit(),
+                            request.confirmSelection()),
+                    principalContext,
+                    requestBaseUrl);
+            if (!result.valid()) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(), result.errorCode(), result.errorMessage());
+            }
+            return AgenticAuthoringToolResult.success(
+                    call.name(),
+                    result,
+                    Map.of(
+                            "resourcePath", safeText(result.resourcePath()),
+                            "canonicalFilterField", safeText(result.canonicalFilterField()),
+                            "optionSourceKey", safeText(result.optionSourceKey()),
+                            "candidateCount", result.candidates().size(),
+                            "totalElements", result.totalElements(),
+                            "exhaustive", result.exhaustive(),
+                            "retrievalMode", safeText(result.retrievalMode()),
+                            "datasetVersionPresent", StringUtils.hasText(result.datasetVersion())));
+        }
     }
 
     private static final class DomainOperationVerificationToolExecutor implements AgenticAuthoringToolExecutor {
@@ -402,7 +508,10 @@ public class AgenticAuthoringToolRegistry {
                     projectionsByConcept.putIfAbsent(projection.conceptKey(), projection);
                 }
             }
-            if (projectKnowledgeService != null && projectionsByConcept.size() < limit) {
+            // The governed Domain Catalog is the canonical hierarchy for domain contexts.
+            // Vector retrieval is a fallback only when that hierarchy has no answer; filling an
+            // arbitrary result limit after a canonical hit adds latency and unrelated evidence.
+            if (projectKnowledgeService != null && projectionsByConcept.isEmpty()) {
                 List<AgenticAuthoringProjectKnowledgeProjection> curated = projectKnowledgeService.retrieve(
                         new AgenticAuthoringProjectKnowledgeQuery(
                                 principalContext.tenantId(),
@@ -411,7 +520,7 @@ public class AgenticAuthoringToolRegistry {
                                 request.resourceKey(),
                                 List.of(nodeType),
                                 nodeType,
-                                limit - projectionsByConcept.size()));
+                                limit));
                 for (AgenticAuthoringProjectKnowledgeProjection projection : curated) {
                     projectionsByConcept.putIfAbsent(projection.conceptKey(), projection);
                 }
@@ -506,6 +615,14 @@ public class AgenticAuthoringToolRegistry {
             AgenticAuthoringToolCall call,
             AiPrincipalContext principalContext,
             String phase) {
+        return execute(call, principalContext, phase, null);
+    }
+
+    AgenticAuthoringToolResult execute(
+            AgenticAuthoringToolCall call,
+            AiPrincipalContext principalContext,
+            String phase,
+            String requestBaseUrl) {
         if (call == null || call.name() == null || call.name().isBlank()) {
             return AgenticAuthoringToolResult.failure("", "tool-name-required", "Tool name is required.");
         }
@@ -535,7 +652,7 @@ public class AgenticAuthoringToolRegistry {
                     "Tool is not allowed for phase " + phase + ".");
         }
         try {
-            return executor.execute(call, principalContext);
+            return executor.execute(call, principalContext, requestBaseUrl);
         } catch (Exception ex) {
             return AgenticAuthoringToolResult.failure(
                     call.name(),
@@ -600,45 +717,62 @@ public class AgenticAuthoringToolRegistry {
         public AgenticAuthoringToolResult execute(
                 AgenticAuthoringToolCall call,
                 AiPrincipalContext principalContext) {
+            return execute(call, principalContext, null);
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(
+                AgenticAuthoringToolCall call,
+                AiPrincipalContext principalContext,
+                String requestBaseUrl) {
             if (!(call.payload() instanceof AgenticAuthoringResourceCandidatesRequest request)) {
                 return AgenticAuthoringToolResult.failure(
                         call.name(),
                         "tool-payload-invalid",
                         "searchApiResources requires AgenticAuthoringResourceCandidatesRequest payload.");
             }
-            if ("pre_intent_resource_discovery".equals(call.routeClass()) && domainBindingService != null) {
+            if (domainBindingService != null && request.resourceSearchFocus() != null) {
                 String resourceKey = request.resourceSearchFocus() == null
                         ? null
                         : request.resourceSearchFocus().primaryBusinessEntity();
-                if (resourceKey == null || resourceKey.isBlank()) {
-                    return AgenticAuthoringToolResult.failure(
-                            call.name(),
-                            "operational-grounding-resource-required",
-                            "API discovery requires a semantically resolved canonical resourceKey.");
-                }
-                List<AgenticAuthoringDomainBindingService.BindingProjection> bindings = domainBindingService.resolve(
-                        principalContext == null ? null : principalContext.tenantId(),
-                        principalContext == null ? null : principalContext.environment(),
-                        resourceKey,
-                        6);
-                // A Domain Knowledge binding strengthens and verifies an already grounded resource;
-                // it must not erase canonical API Metadata/Domain Catalog/schema evidence while a
-                // host is progressively adopting the semantic IR. Exact verification remains
-                // mandatory once a binding exists.
-                if (!bindings.isEmpty() && operationalVerificationService != null) {
-                    AgenticAuthoringOperationalBindingVerificationService.VerificationResult verification =
-                            operationalVerificationService.verify(resourceKey, null, principalContext);
-                    if (!verification.verified()) {
-                        return AgenticAuthoringToolResult.failure(
-                                call.name(),
-                                verification.failureCodes().isEmpty()
-                                        ? "operational-grounding-unverified"
-                                        : verification.failureCodes().get(0),
-                                "API discovery requires exact schema and capability verification.");
+                if (resourceKey != null && !resourceKey.isBlank()) {
+                    List<AgenticAuthoringDomainBindingService.BindingProjection> bindings = domainBindingService.resolve(
+                            principalContext == null ? null : principalContext.tenantId(),
+                            principalContext == null ? null : principalContext.environment(),
+                            resourceKey,
+                            6);
+                    // A verified exact binding is already stronger than a vector-ranked candidate.
+                    // Ambiguous or absent bindings continue through the canonical semantic retrieval path.
+                    if (!bindings.isEmpty() && operationalVerificationService != null) {
+                        AgenticAuthoringOperationalBindingVerificationService.VerificationResult verification =
+                                operationalVerificationService.verify(resourceKey, requestBaseUrl, principalContext);
+                        if (!verification.verified()) {
+                            return AgenticAuthoringToolResult.failure(
+                                    call.name(),
+                                    verification.failureCodes().isEmpty()
+                                            ? "operational-grounding-unverified"
+                                            : verification.failureCodes().get(0),
+                                    "API discovery requires exact schema and capability verification.");
+                        }
+                        AgenticAuthoringResourceCandidatesResult verifiedResult = verifiedBindingResult(
+                                request, principalContext, verification);
+                        if (verifiedResult != null) {
+                            return success(call, verifiedResult);
+                        }
                     }
                 }
+                // An unresolved resourceKey is precisely the case in which semantic API discovery
+                // must run. Exact domain binding verification is an optimization after the LLM has
+                // authored a canonical business entity, never a prerequisite for discovering it.
             }
-            AgenticAuthoringResourceCandidatesResult result = resourceDiscoveryService.search(request, principalContext);
+            AgenticAuthoringResourceCandidatesResult result =
+                    resourceDiscoveryService.search(request, principalContext, requestBaseUrl);
+            return success(call, result);
+        }
+
+        private AgenticAuthoringToolResult success(
+                AgenticAuthoringToolCall call,
+                AgenticAuthoringResourceCandidatesResult result) {
             Map<String, Object> diagnostics = new LinkedHashMap<>();
             diagnostics.put("candidateCount", result.candidates() != null ? result.candidates().size() : 0);
             diagnostics.put("artifactKind", result.artifactKind() != null ? result.artifactKind() : "");
@@ -651,6 +785,91 @@ public class AgenticAuthoringToolRegistry {
                     call.name(),
                     result,
                     diagnostics);
+        }
+
+        private AgenticAuthoringResourceCandidatesResult verifiedBindingResult(
+                AgenticAuthoringResourceCandidatesRequest request,
+                AiPrincipalContext principalContext,
+                AgenticAuthoringOperationalBindingVerificationService.VerificationResult verification) {
+            if (verification.operations() == null || verification.operations().isEmpty()) {
+                return null;
+            }
+            long distinctResources = verification.operations().stream()
+                    .map(AgenticAuthoringOperationalBindingVerificationService.OperationProjection::apiPath)
+                    .filter(path -> path != null && !path.isBlank())
+                    .distinct()
+                    .count();
+            if (distinctResources != 1) {
+                return null;
+            }
+            List<AgenticAuthoringCandidate> candidates = verification.operations().stream()
+                    .map(operation -> verifiedBindingCandidate(operation, principalContext))
+                    .toList();
+            return new AgenticAuthoringResourceCandidatesResult(
+                    true,
+                    SEARCH_API_RESOURCES,
+                    request.retrievalQuery(),
+                    request.artifactKind(),
+                    "Encontrei e verifiquei o recurso governado do domínio para esta solicitação.",
+                    null,
+                    candidates,
+                    List.of(),
+                    List.of("domain-binding-operationally-verified"),
+                    request.resourceSearchFocus(),
+                    null,
+                    Map.of(
+                            "bindingResourceKey", verification.resourceKey(),
+                            "bindingVerification", "schemas.filtered+resource.capabilities",
+                            "vectorRetrievalSkipped", true));
+        }
+
+        private AgenticAuthoringCandidate verifiedBindingCandidate(
+                AgenticAuthoringOperationalBindingVerificationService.OperationProjection operation,
+                AiPrincipalContext principalContext) {
+            String method = operation.apiMethod() == null
+                    ? ""
+                    : operation.apiMethod().toLowerCase(java.util.Locale.ROOT);
+            boolean readOperation = "get".equals(method);
+            List<String> evidence = new ArrayList<>(operation.evidence() == null
+                    ? List.of()
+                    : operation.evidence());
+            evidence.add("domain-binding");
+            evidence.add("schema-grounding-verified");
+            evidence.add("resource-capabilities-verified");
+            AgenticAuthoringEvidenceBundle bundle = AgenticAuthoringEvidenceBundle.of(
+                    "domain_binding",
+                    List.of(
+                            new AgenticAuthoringEvidenceBundle.Evidence(
+                                    "domain_knowledge_binding", "retrieved_candidate", operation.bindingKey(),
+                                    "Governed domain concept bound to the operational resource.", 1d,
+                                    List.of(operation.resourceKey()),
+                                    principalContext == null ? "" : principalContext.tenantId(),
+                                    principalContext == null ? "" : principalContext.environment(),
+                                    operation.sourceRelease()),
+                            new AgenticAuthoringEvidenceBundle.Evidence(
+                                    "/schemas/filtered", "schema_grounding", operation.schemaUrl(),
+                                    "Canonical filtered schema verified for the bound operation.", 1d,
+                                    List.of(method),
+                                    principalContext == null ? "" : principalContext.tenantId(),
+                                    principalContext == null ? "" : principalContext.environment(),
+                                    operation.sourceRelease()),
+                            new AgenticAuthoringEvidenceBundle.Evidence(
+                                    "capabilities", "operation_grounding", operation.capabilitiesUrl(),
+                                    "Principal-scoped capability verified for the bound operation.", 1d,
+                                    List.of(operation.capabilityOperationId()),
+                                    principalContext == null ? "" : principalContext.tenantId(),
+                                    principalContext == null ? "" : principalContext.environment(),
+                                    operation.sourceRelease())));
+            return new AgenticAuthoringCandidate(
+                    operation.resourcePath(),
+                    method,
+                    operation.schemaUrl(),
+                    readOperation ? null : operation.apiPath(),
+                    readOperation ? null : method.toUpperCase(java.util.Locale.ROOT),
+                    1d,
+                    "Governed domain binding verified against canonical schema and principal capabilities.",
+                    List.copyOf(evidence),
+                    bundle);
         }
     }
 
@@ -932,7 +1151,17 @@ public class AgenticAuthoringToolRegistry {
                     .operation(request.operation())
                     .schemaType(request.schemaType())
                     .build();
-            JsonNode schema = schemaRetrievalService.fetchSchema(schemaContext, request.requestBaseUrl());
+            SchemaFetchResult schemaResult = principalContext == null
+                    ? schemaRetrievalService.fetchSchemaResult(schemaContext, request.requestBaseUrl())
+                    : schemaRetrievalService.fetchSchemaResult(
+                            schemaContext,
+                            request.requestBaseUrl(),
+                            principalContext.tenantId(),
+                            principalContext.userId(),
+                            principalContext.environment());
+            JsonNode schema = schemaResult != null && schemaResult.isSuccess()
+                    ? schemaResult.getSchema()
+                    : null;
             ObjectNode payload = objectMapper.createObjectNode();
             payload.put("path", safeText(request.path()));
             payload.put("operation", safeText(request.operation()));
@@ -1699,6 +1928,17 @@ record SchemaFieldsToolRequest(
         String query,
         String requestBaseUrl,
         Integer limit) {
+}
+
+record LiveOptionValueToolRequest(
+        String resourcePath,
+        String semanticField,
+        String concept,
+        String operator,
+        JsonNode requestedValue,
+        JsonNode dependencyFilters,
+        int limit,
+        boolean confirmSelection) {
 }
 
 record RuntimeRelatedSurfaceReadToolRequest(

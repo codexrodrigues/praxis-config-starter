@@ -158,15 +158,22 @@ request = urllib.request.Request(
     },
 )
 terminal_types = {"result", "error", "cancelled"}
-try:
-    with urllib.request.urlopen(request, timeout=timeout) as response, open(raw_sse_path, "wb") as output:
-        while True:
-            line = response.readline()
-            if not line:
-                break
+terminal_received = False
+last_event_id = None
+
+def read_stream(headers):
+    global terminal_received, last_event_id
+    request = urllib.request.Request(stream_url, headers=headers)
+    with urllib.request.urlopen(request, timeout=timeout) as response, open(raw_sse_path, "ab") as output:
+        for line in response:
             output.write(line)
             output.flush()
             decoded = line.decode("utf-8", errors="replace").strip()
+            if decoded.startswith("id:"):
+                candidate = decoded[3:].strip()
+                if candidate and candidate != "null":
+                    last_event_id = candidate
+                continue
             if not decoded.startswith("data:"):
                 continue
             data = decoded[5:].strip()
@@ -176,8 +183,23 @@ try:
                 event = json.loads(data)
             except json.JSONDecodeError:
                 continue
+            event_id = event.get("eventId")
+            if event_id:
+                last_event_id = event_id
             if (event.get("type") or "").lower() in terminal_types:
-                break
+                terminal_received = True
+                return
+
+try:
+    open(raw_sse_path, "wb").close()
+    read_stream(dict(request.headers))
+    # A terminal event is persisted before stream resources are released. If the
+    # initial HTTP response reaches EOF during that narrow drain window, exercise
+    # the canonical replay contract instead of reporting a false-negative smoke.
+    if not terminal_received and last_event_id:
+        replay_headers = dict(request.headers)
+        replay_headers["Last-Event-ID"] = last_event_id
+        read_stream(replay_headers)
 except (TimeoutError, socket.timeout):
     print(f"SSE read timed out after {timeout:g}s; continuing with captured events.", file=sys.stderr)
 except Exception as exc:

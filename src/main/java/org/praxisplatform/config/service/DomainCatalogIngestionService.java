@@ -22,6 +22,7 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.domain.DomainCatalogItem;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
+import org.praxisplatform.config.domain.DomainCatalogReleaseChangedEvent;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogIngestionResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
@@ -43,6 +44,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -75,6 +77,7 @@ public class DomainCatalogIngestionService {
     private final boolean asyncRagPublicationEnabled;
     private final int ragPublicationBatchSize;
     private final ExecutorService ragPublicationExecutor;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     public DomainCatalogIngestionService(
             DomainCatalogReleaseRepository releaseRepository,
@@ -91,7 +94,8 @@ public class DomainCatalogIngestionService {
                 (DomainKnowledgeProjectionService) null,
                 true,
                 false,
-                100);
+                100,
+                event -> { });
     }
 
     DomainCatalogIngestionService(
@@ -110,7 +114,8 @@ public class DomainCatalogIngestionService {
                 (DomainKnowledgeProjectionService) null,
                 domainCatalogRagPublicationEnabled,
                 false,
-                100);
+                100,
+                event -> { });
     }
 
     DomainCatalogIngestionService(
@@ -131,7 +136,8 @@ public class DomainCatalogIngestionService {
                 (DomainKnowledgeProjectionService) null,
                 domainCatalogRagPublicationEnabled,
                 asyncRagPublicationEnabled,
-                ragPublicationBatchSize);
+                ragPublicationBatchSize,
+                event -> { });
     }
 
     @Autowired
@@ -147,7 +153,8 @@ public class DomainCatalogIngestionService {
             @Value("${praxis.domain-catalog.rag-publication.async-enabled:true}")
             boolean asyncRagPublicationEnabled,
             @Value("${praxis.domain-catalog.rag-publication.batch-size:100}")
-            int ragPublicationBatchSize) {
+            int ragPublicationBatchSize,
+            ApplicationEventPublisher applicationEventPublisher) {
         this(
                 releaseRepository,
                 itemRepository,
@@ -157,7 +164,24 @@ public class DomainCatalogIngestionService {
                 domainKnowledgeProjectionService.getIfAvailable(),
                 domainCatalogRagPublicationEnabled,
                 asyncRagPublicationEnabled,
-                ragPublicationBatchSize);
+                ragPublicationBatchSize,
+                applicationEventPublisher);
+    }
+
+    DomainCatalogIngestionService(
+            DomainCatalogReleaseRepository releaseRepository,
+            DomainCatalogItemRepository itemRepository,
+            ObjectMapper objectMapper,
+            RagVectorStoreService ragVectorStoreService,
+            DomainCatalogSchemaValidationService schemaValidationService,
+            DomainKnowledgeProjectionService domainKnowledgeProjectionService,
+            boolean domainCatalogRagPublicationEnabled,
+            boolean asyncRagPublicationEnabled,
+            int ragPublicationBatchSize,
+            ApplicationEventPublisher applicationEventPublisher) {
+        this(releaseRepository, itemRepository, objectMapper, ragVectorStoreService, schemaValidationService,
+                domainKnowledgeProjectionService, domainCatalogRagPublicationEnabled, asyncRagPublicationEnabled,
+                ragPublicationBatchSize, applicationEventPublisher, true);
     }
 
     private DomainCatalogIngestionService(
@@ -169,7 +193,9 @@ public class DomainCatalogIngestionService {
             DomainKnowledgeProjectionService domainKnowledgeProjectionService,
             boolean domainCatalogRagPublicationEnabled,
             boolean asyncRagPublicationEnabled,
-            int ragPublicationBatchSize) {
+            int ragPublicationBatchSize,
+            ApplicationEventPublisher applicationEventPublisher,
+            boolean ignored) {
         this.releaseRepository = releaseRepository;
         this.itemRepository = itemRepository;
         this.objectMapper = objectMapper;
@@ -180,6 +206,7 @@ public class DomainCatalogIngestionService {
         this.asyncRagPublicationEnabled = asyncRagPublicationEnabled;
         this.ragPublicationBatchSize = Math.max(1, ragPublicationBatchSize);
         this.ragPublicationExecutor = asyncRagPublicationEnabled ? createRagPublicationExecutor() : null;
+        this.applicationEventPublisher = applicationEventPublisher;
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
@@ -206,6 +233,7 @@ public class DomainCatalogIngestionService {
             if (!StringUtils.hasText(release.getResourceKey()) && StringUtils.hasText(resourceKey)) {
                 release.setResourceKey(resourceKey);
                 releaseRepository.save(release);
+                publishReleaseChanged(release);
                 log.info("Repaired missing resourceKey for domain catalog release {}", release.getReleaseKey());
             }
             long existingItemCount = itemRepository.countByRelease(release);
@@ -252,9 +280,20 @@ public class DomainCatalogIngestionService {
         } else {
             log.debug("Domain catalog RAG publication disabled for release {}", release.getReleaseKey());
         }
+        publishReleaseChanged(release);
 
         log.info("Ingested domain catalog release {} with {} item(s)", release.getReleaseKey(), items.size());
         return new DomainCatalogIngestionResponse(release.getId(), release.getReleaseKey(), items.size());
+    }
+
+    private void publishReleaseChanged(DomainCatalogRelease release) {
+        applicationEventPublisher.publishEvent(new DomainCatalogReleaseChangedEvent(
+                release.getTenantId(),
+                release.getEnvironment(),
+                release.getServiceKey(),
+                release.getResourceKey(),
+                release.getReleaseKey(),
+                Instant.now()));
     }
 
     @PreDestroy
@@ -308,6 +347,38 @@ public class DomainCatalogIngestionService {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
         return itemRepository.search(
                         release,
+                        normalize(itemType),
+                        normalize(contextKey),
+                        normalize(nodeType),
+                        normalize(query),
+                        PageRequest.of(0, resolvedLimit))
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    /**
+     * Preserves the latest-release selection owned by this service while collapsing a
+     * service-wide or federated lookup into one item query. A single-resource lookup keeps the
+     * narrow repository path; a multi-resource lookup no longer performs one remote round trip
+     * per release.
+     */
+    private List<DomainCatalogItemResponse> search(
+            List<DomainCatalogRelease> releases,
+            String itemType,
+            String contextKey,
+            String nodeType,
+            String query,
+            int limit) {
+        if (releases == null || releases.isEmpty()) {
+            return List.of();
+        }
+        if (releases.size() == 1) {
+            return search(releases.get(0), itemType, contextKey, nodeType, query, limit);
+        }
+        int resolvedLimit = Math.min(Math.max(limit, 1), 200);
+        return itemRepository.searchAcrossReleases(
+                        releases,
                         normalize(itemType),
                         normalize(contextKey),
                         normalize(nodeType),
@@ -386,21 +457,13 @@ public class DomainCatalogIngestionService {
             String query,
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
-        List<DomainCatalogItemResponse> responses = new ArrayList<>();
-        for (DomainCatalogRelease release : latestReleasesForScope(serviceKey, tenantId, environment, resourceKey)) {
-            int remaining = resolvedLimit - responses.size();
-            if (remaining <= 0) {
-                break;
-            }
-            responses.addAll(search(
-                    release,
-                    itemType,
-                    contextKey,
-                    nodeType,
-                    query,
-                    remaining));
-        }
-        return responses.stream().limit(resolvedLimit).toList();
+        return search(
+                latestReleasesForScope(serviceKey, tenantId, environment, resourceKey),
+                itemType,
+                contextKey,
+                nodeType,
+                query,
+                resolvedLimit);
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -429,20 +492,13 @@ public class DomainCatalogIngestionService {
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
         List<DomainCatalogRelease> releases = latestReleasesForScope(serviceKey, tenantId, environment, resourceKey);
-        List<DomainCatalogItemResponse> items = new ArrayList<>();
-        for (DomainCatalogRelease release : releases) {
-            int remaining = resolvedLimit - items.size();
-            if (remaining <= 0) {
-                break;
-            }
-            items.addAll(search(
-                    release,
-                    itemType,
-                    contextKey,
-                    nodeType,
-                    query,
-                    remaining));
-        }
+        List<DomainCatalogItemResponse> items = search(
+                releases,
+                itemType,
+                contextKey,
+                nodeType,
+                query,
+                resolvedLimit);
         boolean scopedSingleRelease = StringUtils.hasText(normalize(serviceKey)) && releases.size() == 1;
         return new DomainCatalogContextResponse(
                 "praxis.domain-catalog-context/v0.1",
@@ -518,25 +574,17 @@ public class DomainCatalogIngestionService {
             String query,
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
-        List<DomainCatalogItemResponse> responses = new ArrayList<>();
-        for (DomainCatalogRelease release : latestReleasesForScope(serviceKey, tenantId, environment, resourceKey)) {
-            int remaining = resolvedLimit - responses.size();
-            if (remaining <= 0) {
-                break;
-            }
-            List<DomainCatalogItemResponse> releaseEdges = search(
-                    release,
-                    "edge",
-                    null,
-                    null,
-                    query,
-                    200);
-            releaseEdges.stream()
-                    .filter(edge -> matchesEdge(edge, sourceNodeKey, targetNodeKey, edgeType))
-                    .limit(remaining)
-                    .forEach(responses::add);
-        }
-        return responses;
+        return search(
+                        latestReleasesForScope(serviceKey, tenantId, environment, resourceKey),
+                        "edge",
+                        null,
+                        null,
+                        query,
+                        200)
+                .stream()
+                .filter(edge -> matchesEdge(edge, sourceNodeKey, targetNodeKey, edgeType))
+                .limit(resolvedLimit)
+                .toList();
     }
 
     private List<String> retrievalGuidance(boolean federated) {

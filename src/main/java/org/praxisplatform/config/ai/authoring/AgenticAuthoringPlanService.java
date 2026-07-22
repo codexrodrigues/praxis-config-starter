@@ -69,7 +69,7 @@ public class AgenticAuthoringPlanService {
             plan = providerManagementService.generateJson(
                     minimalFormPlanPrompt(effectiveRequest),
                     AiJsonSchema.ofSchema(readMinimalFormPlanSchema()),
-                    AiCallConfig.builder()
+                    AiCallConfig.agenticAuthoringBuilder()
                             .provider(effectiveRequest.provider())
                             .model(effectiveRequest.model())
                             .apiKey(effectiveRequest.apiKey())

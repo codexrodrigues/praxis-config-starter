@@ -17,6 +17,7 @@ import java.util.LinkedHashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import org.praxisplatform.config.domain.DomainKnowledgeChangeSet;
 import org.praxisplatform.config.domain.DomainKnowledgeAlias;
@@ -488,6 +489,10 @@ public class DomainKnowledgeChangeSetService {
             applyCreateConceptOperation(changeSet, operation);
             return;
         }
+        if ("approve_concept".equals(operationType)) {
+            applyApproveConceptOperation(changeSet, operation);
+            return;
+        }
         if ("add_alias".equals(operationType)) {
             applyAliasOperation(changeSet, operation);
             return;
@@ -547,6 +552,30 @@ public class DomainKnowledgeChangeSetService {
         DomainKnowledgeConcept savedConcept = conceptRepository.save(concept);
         persistClaimEvidence(
                 changeSet, "concept", savedConcept.getId(), savedConcept, payload, operation.confidence());
+    }
+
+    private void applyApproveConceptOperation(
+            DomainKnowledgeChangeSet changeSet,
+            DomainKnowledgeChangeSetOperationRequest operation) {
+        DomainKnowledgeConcept concept = requireConcept(changeSet, text(operation.target(), "conceptKey"));
+        String lifecycle = normalize(concept.getLifecycle());
+        String curationStatus = normalize(concept.getCurationStatus());
+        if (Set.of("retired", "deprecated").contains(lifecycle)
+                || "rejected".equals(curationStatus)) {
+            throw new ConfigurationIngestionException(
+                    "Domain knowledge concept cannot be approved from lifecycle=" + lifecycle
+                            + " and curationStatus=" + curationStatus);
+        }
+        concept.setLifecycle("active");
+        concept.setCurationStatus("approved");
+        DomainKnowledgeConcept savedConcept = conceptRepository.save(concept);
+        persistClaimEvidence(
+                changeSet,
+                "concept",
+                savedConcept.getId(),
+                savedConcept,
+                operation.payload(),
+                operation.confidence());
     }
 
     private void applyAliasOperation(

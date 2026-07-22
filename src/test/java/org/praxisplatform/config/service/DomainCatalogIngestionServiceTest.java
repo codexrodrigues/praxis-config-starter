@@ -11,17 +11,20 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.DomainCatalogItem;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
+import org.praxisplatform.config.domain.DomainCatalogReleaseChangedEvent;
 import org.praxisplatform.config.dto.DomainCatalogIngestionResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.rag.RagDocumentIdentity;
 import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
+import org.springframework.beans.factory.ObjectProvider;
 import org.praxisplatform.config.repository.DomainCatalogItemRepository;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.data.domain.Pageable;
+import org.springframework.context.ApplicationEventPublisher;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -37,6 +40,39 @@ import static org.mockito.Mockito.when;
 class DomainCatalogIngestionServiceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void publishesScopedProjectionInvalidationAfterCatalogPersistence() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<DomainKnowledgeProjectionService> projectionProvider = mock(ObjectProvider.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository, itemRepository, objectMapper, ragVectorStoreService, validationService(),
+                projectionProvider, false, false, 100, eventPublisher);
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.empty());
+        when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getValue()).isInstanceOfSatisfying(
+                DomainCatalogReleaseChangedEvent.class,
+                event -> assertThat(event)
+                        .extracting(
+                                DomainCatalogReleaseChangedEvent::tenantId,
+                                DomainCatalogReleaseChangedEvent::environment,
+                                DomainCatalogReleaseChangedEvent::resourceKey,
+                                DomainCatalogReleaseChangedEvent::releaseKey)
+                        .containsExactly(
+                                "tenant-a", "dev", "human-resources.folhas-pagamento",
+                                "praxis-api-quickstart:test"));
+    }
 
     @Test
     void ingestsDomainCatalogReleaseAndMaterializesSearchableItems() throws Exception {
@@ -670,10 +706,14 @@ class DomainCatalogIngestionServiceTest {
 
         when(releaseRepository.findLatest(eq(null), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(hrLatest, financeLatest, hrOlder));
-        when(itemRepository.search(eq(hrLatest), eq("node"), eq(null), eq("field"), eq("field"), any(Pageable.class)))
-                .thenReturn(List.of(hrField));
-        when(itemRepository.search(eq(financeLatest), eq("node"), eq(null), eq("field"), eq("field"), any(Pageable.class)))
-                .thenReturn(List.of(financeField));
+        when(itemRepository.searchAcrossReleases(
+                eq(List.of(hrLatest, financeLatest)),
+                eq("node"),
+                eq(null),
+                eq("field"),
+                eq("field"),
+                any(Pageable.class)))
+                .thenReturn(List.of(hrField, financeField));
 
         var responses = service.searchLatest(
                 null,
@@ -815,10 +855,14 @@ class DomainCatalogIngestionServiceTest {
 
         when(releaseRepository.findLatest(eq(null), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(hrLatest, financeLatest));
-        when(itemRepository.search(eq(hrLatest), eq("edge"), eq(null), eq(null), eq(null), any(Pageable.class)))
-                .thenReturn(List.of(crossServiceReference));
-        when(itemRepository.search(eq(financeLatest), eq("edge"), eq(null), eq(null), eq(null), any(Pageable.class)))
-                .thenReturn(List.of(sameAsEdge));
+        when(itemRepository.searchAcrossReleases(
+                eq(List.of(hrLatest, financeLatest)),
+                eq("edge"),
+                eq(null),
+                eq(null),
+                eq(null),
+                any(Pageable.class)))
+                .thenReturn(List.of(crossServiceReference, sameAsEdge));
 
         var responses = service.relationshipsLatest(
                 null,
@@ -1095,30 +1139,14 @@ class DomainCatalogIngestionServiceTest {
 
         when(releaseRepository.findLatest(eq("praxis-service"), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of(folhaRelease, funcionariosRelease, cargosRelease));
-        when(itemRepository.search(
-                eq(folhaRelease),
+        when(itemRepository.searchAcrossReleases(
+                eq(List.of(folhaRelease, funcionariosRelease, cargosRelease)),
                 eq("node"),
                 eq(null),
                 eq(null),
                 eq("pessoas"),
                 any(Pageable.class)))
-                .thenReturn(List.of(folhaNode));
-        when(itemRepository.search(
-                eq(funcionariosRelease),
-                eq("node"),
-                eq(null),
-                eq(null),
-                eq("pessoas"),
-                any(Pageable.class)))
-                .thenReturn(List.of(funcionariosNode));
-        when(itemRepository.search(
-                eq(cargosRelease),
-                eq("node"),
-                eq(null),
-                eq(null),
-                eq("pessoas"),
-                any(Pageable.class)))
-                .thenReturn(List.of(cargosNode));
+                .thenReturn(List.of(folhaNode, funcionariosNode, cargosNode));
 
         var context = service.contextLatest(
                 "praxis-service",

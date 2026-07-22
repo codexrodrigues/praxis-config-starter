@@ -232,8 +232,16 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
             if (componentId.equals(node.path("definition").path("id").asText(""))) {
                 return true;
             }
-            for (JsonNode child : node) {
-                if (containsComponent(child, componentId)) {
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                var field = fields.next();
+                // Diagnostics describe considered and rejected candidates; they are evidence about
+                // authoring, not part of the materialized UI. Treating them as widgets makes a
+                // rejected component look present and corrupts validation and assistant copy.
+                if ("diagnostics".equals(field.getKey())) {
+                    continue;
+                }
+                if (containsComponent(field.getValue(), componentId)) {
                     return true;
                 }
             }

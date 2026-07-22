@@ -94,6 +94,13 @@ public class AgenticAuthoringResourceDiscoveryService {
     public AgenticAuthoringResourceCandidatesResult search(
             AgenticAuthoringResourceCandidatesRequest request,
             AiPrincipalContext principalContext) {
+        return search(request, principalContext, null);
+    }
+
+    AgenticAuthoringResourceCandidatesResult search(
+            AgenticAuthoringResourceCandidatesRequest request,
+            AiPrincipalContext principalContext,
+            String requestBaseUrl) {
         long startedAtNanos = System.nanoTime();
         String retrievalQuery = retrievalQuery(request);
         String artifactKind = artifactKind(request);
@@ -140,6 +147,7 @@ public class AgenticAuthoringResourceDiscoveryService {
                 artifactKind,
                 candidates,
                 principalContext,
+                requestBaseUrl,
                 diagnostics);
         candidates = analyticsCapabilityGrounding.candidates();
         diagnostics.put("analyticsCapabilityGroundingElapsedMs", elapsedMs(capabilityGroundingStartedAtNanos));
@@ -294,6 +302,7 @@ public class AgenticAuthoringResourceDiscoveryService {
             String artifactKind,
             List<AgenticAuthoringCandidate> candidates,
             AiPrincipalContext principalContext,
+            String requestBaseUrl,
             Map<String, Object> diagnostics) {
         int inputCount = candidates == null ? 0 : candidates.size();
         diagnostics.put("analyticsCapabilityGroundingRequired", requiresVerifiedStats(artifactKind));
@@ -315,7 +324,9 @@ public class AgenticAuthoringResourceDiscoveryService {
 
         diagnostics.put("analyticsCapabilityGroundingAvailable", true);
         Map<String, ResourceCapabilitiesFetchResult> fetches = new HashMap<>();
+        Map<String, List<Map<String, Object>>> fieldCatalogs = new LinkedHashMap<>();
         List<AgenticAuthoringCandidate> verified = new ArrayList<>();
+        List<Map<String, Object>> excludedDiagnostics = new ArrayList<>();
         int excludedCount = 0;
         for (AgenticAuthoringCandidate candidate : candidates) {
             if (candidate == null || candidate.resourcePath() == null || candidate.resourcePath().isBlank()) {
@@ -326,22 +337,100 @@ public class AgenticAuthoringResourceDiscoveryService {
                     candidate.resourcePath(),
                     resourcePath -> resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
                             resourcePath,
-                            null,
+                            requestBaseUrl,
                             principalContext == null ? null : principalContext.tenantId(),
                             principalContext == null ? null : principalContext.userId(),
                             principalContext == null ? null : principalContext.environment()));
             if (!hasVerifiedStatsFields(result)) {
                 excludedCount++;
+                if (excludedDiagnostics.size() < 5) {
+                    Map<String, Object> exclusion = new LinkedHashMap<>();
+                    exclusion.put("resourcePath", candidate.resourcePath());
+                    exclusion.put("status", result == null ? "missing" : result.getStatus().name().toLowerCase());
+                    exclusion.put("code", result == null || result.getCode() == null
+                            ? "RESOURCE_CAPABILITIES_RESULT_MISSING"
+                            : result.getCode());
+                    exclusion.put("httpStatus", result == null || result.getHttpStatus() == null
+                            ? -1
+                            : result.getHttpStatus());
+                    exclusion.put("capabilitiesFetched", result != null && result.isSuccess());
+                    exclusion.put("statsFieldsPresent", hasStatsFields(result));
+                    excludedDiagnostics.add(Map.copyOf(exclusion));
+                }
                 continue;
             }
+            fieldCatalogs.put(candidate.resourcePath(), analyticsFieldCatalog(result));
             verified.add(withVerifiedStatsEvidence(candidate, principalContext));
         }
         diagnostics.put("analyticsCapabilityVerifiedCandidateCount", verified.size());
         diagnostics.put("analyticsCapabilityExcludedCandidateCount", excludedCount);
+        if (!excludedDiagnostics.isEmpty()) {
+            diagnostics.put("analyticsCapabilityExclusions", List.copyOf(excludedDiagnostics));
+        }
         diagnostics.put("analyticsCapabilityFetchCount", fetches.size());
+        if (!fieldCatalogs.isEmpty()) {
+            diagnostics.put("analyticsCapabilityFieldCatalogs", Map.copyOf(fieldCatalogs));
+        }
         boolean unavailable = !fetches.isEmpty()
                 && fetches.values().stream().noneMatch(ResourceCapabilitiesFetchResult::isSuccess);
         return new AnalyticsCapabilityGrounding(List.copyOf(verified), excludedCount, unavailable);
+    }
+
+    private List<Map<String, Object>> analyticsFieldCatalog(ResourceCapabilitiesFetchResult result) {
+        JsonNode root = result == null ? null : result.getCapabilities();
+        if (root != null && root.path("data").path("stats").isObject()) {
+            root = root.path("data");
+        }
+        JsonNode fields = root == null ? null : root.path("stats").path("fields");
+        if (fields == null || !fields.isArray()) {
+            return List.of();
+        }
+        List<Map<String, Object>> catalog = new ArrayList<>();
+        for (JsonNode field : fields) {
+            String name = field.path("field").asText("").trim();
+            if (name.isBlank()) {
+                continue;
+            }
+            Map<String, Object> descriptor = new LinkedHashMap<>();
+            descriptor.put("field", name);
+            copyTextField(field, descriptor, "label");
+            copyTextField(field, descriptor, "type");
+            copyBooleanField(field, descriptor, "groupByEligible");
+            copyBooleanField(field, descriptor, "timeSeriesEligible");
+            copyBooleanField(field, descriptor, "distributionTermsEligible");
+            copyBooleanField(field, descriptor, "distributionHistogramEligible");
+            copyBooleanField(field, descriptor, "metricFieldEligible");
+            JsonNode aggregations = field.path("allowedAggregations");
+            if (aggregations.isArray() && !aggregations.isEmpty()) {
+                List<String> values = new ArrayList<>();
+                aggregations.forEach(value -> {
+                    if (value.isTextual() && !value.asText().isBlank()) {
+                        values.add(value.asText());
+                    }
+                });
+                if (!values.isEmpty()) {
+                    descriptor.put("allowedAggregations", List.copyOf(values));
+                }
+            }
+            catalog.add(Map.copyOf(descriptor));
+            if (catalog.size() >= 48) {
+                break;
+            }
+        }
+        return List.copyOf(catalog);
+    }
+
+    private void copyTextField(JsonNode source, Map<String, Object> target, String field) {
+        String value = source.path(field).asText("").trim();
+        if (!value.isBlank()) {
+            target.put(field, value);
+        }
+    }
+
+    private void copyBooleanField(JsonNode source, Map<String, Object> target, String field) {
+        if (source.has(field) && source.path(field).isBoolean()) {
+            target.put(field, source.path(field).asBoolean());
+        }
     }
 
     private boolean requiresVerifiedStats(String artifactKind) {
@@ -373,6 +462,18 @@ public class AgenticAuthoringResourceDiscoveryService {
             }
         }
         return false;
+    }
+
+    private boolean hasStatsFields(ResourceCapabilitiesFetchResult result) {
+        if (result == null || !result.isSuccess()) {
+            return false;
+        }
+        JsonNode root = result.getCapabilities();
+        if (root != null && root.path("data").path("stats").isObject()) {
+            root = root.path("data");
+        }
+        JsonNode fields = root == null ? null : root.path("stats").path("fields");
+        return fields != null && fields.isArray() && !fields.isEmpty();
     }
 
     private AgenticAuthoringCandidate withVerifiedStatsEvidence(

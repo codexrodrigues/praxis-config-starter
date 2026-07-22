@@ -1,10 +1,28 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "praxis.ai-authoring.presentation-affordance-catalog",
   "componentId": "praxis-table",
   "defaultTargetKind": "column",
   "sourceRef": "@praxisui/core:ColumnDefinition",
   "affordances": [
+    {
+      "id": "table.conditional-surface.row",
+      "targetKind": "row",
+      "category": "surface-preset",
+      "description": "Versioned semantic row surfaces materialized privately by the table runtime.",
+      "options": ["success", "warning", "danger", "highlight"],
+      "appliesToTypes": ["unknown"],
+      "unknownCompatible": true
+    },
+    {
+      "id": "table.conditional-surface.cell",
+      "targetKind": "column",
+      "category": "surface-preset",
+      "description": "Versioned semantic cell surfaces materialized privately by the table runtime.",
+      "options": ["success", "warning", "danger", "highlight"],
+      "appliesToTypes": ["string", "number", "date", "boolean", "currency", "percentage", "custom", "unknown"],
+      "unknownCompatible": true
+    },
     {
       "id": "column.align",
       "targetKind": "column",

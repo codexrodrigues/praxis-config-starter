@@ -293,6 +293,7 @@ public class AgenticAuthoringIntentResolverService {
                 ? new AgenticAuthoringComponentCapabilitiesService().listCapabilities()
                 : componentCapabilities();
         List<AgenticAuthoringCandidate> llmCandidateOptions = candidatesForLlmIntent(prompt, candidates);
+        List<String> preIntentGovernedEvidenceTrace = new ArrayList<>();
         AgenticAuthoringLlmIntentResolution llmIntent = preIntentSemanticOrientationResolution(
                 shouldResolveLlmIntent,
                 llmResolutionRequest,
@@ -304,7 +305,8 @@ public class AgenticAuthoringIntentResolverService {
                     effectivePrompt,
                     target,
                     llmCandidateOptions,
-                    semanticOrientation);
+                    semanticOrientation,
+                    preIntentGovernedEvidenceTrace);
         }
         if (llmIntent == null) {
             llmIntent = resolveLlmIntent(
@@ -333,6 +335,12 @@ public class AgenticAuthoringIntentResolverService {
                 llmCandidateOptions,
                 componentCapabilities,
                 llmIntent);
+        if (llmDiagnostics instanceof ObjectNode diagnosticsObject
+                && !preIntentGovernedEvidenceTrace.isEmpty()) {
+            diagnosticsObject.put(
+                    "preIntentGovernedEvidenceOutcome",
+                    preIntentGovernedEvidenceTrace.get(preIntentGovernedEvidenceTrace.size() - 1));
+        }
         boolean llmTreatsPendingAsContinuation = turn.answeredPendingClarification()
                 && (isLlmFollowUpKind(llmIntent, "clarification_answer")
                 || isLlmFollowUpKind(llmIntent, "refinement"));
@@ -1244,9 +1252,18 @@ public class AgenticAuthoringIntentResolverService {
         List<AgenticAuthoringQuickReply> quickReplies = llmAuthoredQuickRepliesUsed
                 ? llmAuthoredQuickReplies
                 : fallbackQuickReplies;
+        quickReplies = withSemanticResourceDiscoveryToolContext(
+                quickReplies,
+                gate,
+                llmIntent,
+                artifactKind);
         boolean platformGuidanceQuickRepliesMaterialized = false;
-        if (quickReplies.isEmpty() && llmPlatformGuidance) {
-            quickReplies = platformCapabilityQuickReplies(effectivePrompt);
+        boolean concreteDashboardGuidance = llmPlatformGuidance
+                && semanticOrientation != null
+                && "dashboard".equals(semanticOrientation.artifactKind());
+        if (llmPlatformGuidance
+                && (quickReplies.isEmpty() || concreteDashboardGuidance && !llmAuthoredQuickRepliesUsed)) {
+            quickReplies = platformCapabilityQuickReplies(effectivePrompt, semanticOrientation);
             platformGuidanceQuickRepliesMaterialized = true;
         }
         boolean contextHintSelectionApplied = contextHintCandidate != null
@@ -2638,22 +2655,53 @@ public class AgenticAuthoringIntentResolverService {
             String effectivePrompt,
             AgenticAuthoringTarget target,
             List<AgenticAuthoringCandidate> candidates,
-            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
-        if (!shouldResolveLlmIntent
-                || semanticOrientation != null && semanticOrientation.requiresFullIntentResolution()
-                || request == null
-                || request.pendingClarification() != null
-                || request.activeSemanticDecision() != null
-                || !hasMaterializableResourceDiscoveryContext(request)
-                || target != null && !valueOrDefault(target.widgetKey(), "").isBlank()) {
+            AgenticAuthoringPreIntentToolPlan semanticOrientation,
+            List<String> trace) {
+        if (!shouldResolveLlmIntent) {
+            trace.add("skipped:llm-resolution-disabled");
+            return null;
+        }
+        if (requiresAdditionalIntentResolution(semanticOrientation)) {
+            trace.add("skipped:additional-intent-resolution-required");
+            return null;
+        }
+        if (request == null) {
+            trace.add("skipped:request-missing");
+            return null;
+        }
+        if (request.pendingClarification() != null) {
+            trace.add("skipped:pending-clarification");
+            return null;
+        }
+        if (request.activeSemanticDecision() != null) {
+            trace.add("skipped:active-semantic-decision");
+            return null;
+        }
+        if (!hasMaterializableResourceDiscoveryContext(request)) {
+            trace.add("skipped:materializable-resource-context-missing");
+            return null;
+        }
+        if (target != null && !valueOrDefault(target.widgetKey(), "").isBlank()) {
+            trace.add("skipped:selected-widget-target");
             return null;
         }
         String prompt = normalize(effectivePrompt);
         String artifactKind = materializableResourceDiscoveryArtifactKind(request, "unknown");
-        if (!List.of("page", "table", "form").contains(artifactKind)
-                || !hasBusinessDataAuthoringSignal(request, prompt)
-                || candidates == null
-                || candidates.isEmpty()) {
+        boolean genericDashboardOrientedByPreIntent = "dashboard".equals(artifactKind)
+                && semanticOrientation != null
+                && !semanticOrientation.requiresFullIntentResolution();
+        if (!(List.of("page", "table", "form").contains(artifactKind)
+                        || genericDashboardOrientedByPreIntent)
+                ) {
+            trace.add("skipped:artifact-not-eligible:" + artifactKind);
+            return null;
+        }
+        if (!hasBusinessDataAuthoringSignal(request, prompt)) {
+            trace.add("skipped:business-data-authoring-signal-missing");
+            return null;
+        }
+        if (candidates == null || candidates.isEmpty()) {
+            trace.add("skipped:candidates-empty");
             return null;
         }
         AgenticAuthoringCandidate focusedCandidate =
@@ -2691,9 +2739,11 @@ public class AgenticAuthoringIntentResolverService {
                     artifactKind,
                     candidates);
             if (focusedCandidate == null) {
+                trace.add("skipped:governed-focused-candidate-not-safe");
                 return null;
             }
         }
+        trace.add("accepted:pre-intent-governed-evidence");
         return new AgenticAuthoringLlmIntentResolution(
                 true,
                 "create",
@@ -2710,7 +2760,23 @@ public class AgenticAuthoringIntentResolverService {
                         "llm-pre-intent-resource-discovery-used"),
                 null,
                 null,
-                false);
+                false,
+                "component_authoring",
+                semanticOrientation == null ? null : semanticOrientation.queryConstraints(),
+                List.of());
+    }
+
+    private boolean requiresAdditionalIntentResolution(
+            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
+        if (semanticOrientation == null || !semanticOrientation.requiresFullIntentResolution()) {
+            return false;
+        }
+        JsonNode constraints = semanticOrientation.queryConstraints();
+        return !"authoring_or_other".equals(semanticOrientation.semanticIntentClass())
+                || constraints == null
+                || !constraints.path("filters").isArray()
+                || constraints.path("filters").isEmpty()
+                || !List.of("page", "table").contains(semanticOrientation.artifactKind());
     }
 
     private AgenticAuthoringLlmIntentResolution preIntentSemanticOrientationResolution(
@@ -2844,7 +2910,7 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringIntentResolutionRequest request,
             String artifactKind,
             List<AgenticAuthoringCandidate> candidates) {
-        if (!List.of("form", "table").contains(artifactKind)
+        if (!List.of("form", "table", "dashboard").contains(artifactKind)
                 || request == null
                 || candidates == null
                 || candidates.isEmpty()
@@ -2855,7 +2921,8 @@ public class AgenticAuthoringIntentResolverService {
                 .filter(Objects::nonNull)
                 .filter(candidate -> hasResourceDiscoveryCandidate(request, candidate))
                 .filter(candidate -> hasEvidence(candidate, "tool-search-api-resources"))
-                .filter(candidate -> hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE))
+                .filter(candidate -> hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE)
+                        || hasVerifiedOperationalBindingEvidence(candidate))
                 .filter(candidate -> !isDerivedProjectionCandidate(candidate))
                 .filter(candidate -> isCanonicalArtifactEndpointCandidate(artifactKind, candidate))
                 .filter(this::hasTrustedSelectionEvidence)
@@ -2864,21 +2931,29 @@ public class AgenticAuthoringIntentResolverService {
         return eligible.size() == 1 ? eligible.get(0) : null;
     }
 
+    private boolean hasVerifiedOperationalBindingEvidence(AgenticAuthoringCandidate candidate) {
+        return hasEvidence(candidate, "schema-grounding-verified")
+                && hasEvidence(candidate, "resource-capabilities-verified");
+    }
+
     private boolean isCanonicalArtifactEndpointCandidate(
             String artifactKind,
             AgenticAuthoringCandidate candidate) {
         if ("form".equals(artifactKind)) {
             return isCreateEndpointCandidate(candidate);
         }
-        if (!"table".equals(artifactKind) || candidate == null) {
+        if (!("table".equals(artifactKind) || "dashboard".equals(artifactKind)) || candidate == null) {
             return false;
         }
         String operation = valueOrDefault(candidate.operation(), candidate.submitMethod());
         String submitMethod = valueOrDefault(candidate.submitMethod(), operation);
         String submitUrl = normalizePath(candidate.submitUrl());
-        return "post".equalsIgnoreCase(operation)
+        boolean canonicalFilteredCollection = "post".equalsIgnoreCase(operation)
                 && "post".equalsIgnoreCase(submitMethod)
                 && (submitUrl.endsWith("/filter") || submitUrl.endsWith("/filter/cursor"));
+        return canonicalFilteredCollection
+                && (!"dashboard".equals(artifactKind)
+                        || hasEvidence(candidate, "stats-capabilities-verified"));
     }
 
     private AgenticAuthoringCandidate strongLlmAuthoredOperationalResourceDiscoveryLead(
@@ -8285,6 +8360,12 @@ public class AgenticAuthoringIntentResolverService {
             String artifactKind,
             String changeKind,
             AgenticAuthoringTarget target) {
+        if (target == null
+                && "modify".equals(operationKind)
+                && "dashboard".equals(artifactKind)
+                && Set.of("add_component", "add_dashboard_component", "add_widget").contains(changeKind)) {
+            return "add_dashboard_widget";
+        }
         if (target != null || !"create".equals(operationKind) || !isCreatableArtifactKind(artifactKind)) {
             return changeKind;
         }
@@ -8660,7 +8741,7 @@ public class AgenticAuthoringIntentResolverService {
             return dashboardExplorationQuickReplies(effectivePrompt, selectedCandidate);
         }
         if ("component".equals(artifactKind) && isConsultativePlatformCapabilityQuestion(prompt)) {
-            return platformCapabilityQuickReplies(effectivePrompt);
+            return platformCapabilityQuickReplies(effectivePrompt, null);
         }
         if (!"explore".equals(operationKind) && !"clarification_required".equals(gate.status())) {
             return List.of();
@@ -8692,7 +8773,7 @@ public class AgenticAuthoringIntentResolverService {
         }
         if ("api_catalog".equals(artifactKind)) {
             if (isConsultativePlatformCapabilityQuestion(prompt)) {
-                return platformCapabilityQuickReplies(effectivePrompt);
+                return platformCapabilityQuickReplies(effectivePrompt, null);
             }
             if (isLiteralApiCatalogResourceListPrompt(prompt) && candidates != null && !candidates.isEmpty()) {
                 return candidateResourceQuickReplies(effectivePrompt, candidates);
@@ -8746,6 +8827,84 @@ public class AgenticAuthoringIntentResolverService {
                 .map(reply -> enrichLlmQuickReply(reply, selectedCandidateHints))
                 .limit(4)
                 .toList();
+    }
+
+    /**
+     * Preserves the LLM-authored resource search as executable grounding for the same turn.
+     *
+     * <p>The semantic resolver can correctly identify an authoring request while requiring the
+     * resource-discovery tool to locate its canonical backend source. In that state an LLM-authored
+     * quick reply previously replaced the deterministic discovery reply and discarded the existing
+     * {@code resourceSearchQuery}. The turn engine then searched with the entire user sentence,
+     * mixing the business entity with presentation and filter constraints. This method only binds
+     * the already-resolved semantic search to the existing tool context contract; it does not route
+     * intent or infer a resource from keywords.</p>
+     */
+    private List<AgenticAuthoringQuickReply> withSemanticResourceDiscoveryToolContext(
+            List<AgenticAuthoringQuickReply> quickReplies,
+            AgenticAuthoringGateResult gate,
+            AgenticAuthoringLlmIntentResolution llmIntent,
+            String artifactKind) {
+        if (quickReplies == null
+                || quickReplies.isEmpty()
+                || gate == null
+                || !gate.messages().contains("resource-candidate-required")) {
+            return quickReplies == null ? List.of() : quickReplies;
+        }
+        boolean alreadyBound = quickReplies.stream()
+                .filter(Objects::nonNull)
+                .map(AgenticAuthoringQuickReply::contextHints)
+                .filter(Objects::nonNull)
+                .anyMatch(hints -> AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES.equals(
+                        hints.path("tool").asText("")));
+        if (alreadyBound) {
+            return quickReplies;
+        }
+        String semanticQuery = llmIntent == null
+                ? ""
+                : valueOrDefault(llmIntent.resourceSearchQuery(), "").trim();
+        if (semanticQuery.isBlank()) {
+            semanticQuery = quickReplies.stream()
+                    .filter(Objects::nonNull)
+                    .filter(reply -> "suggestion".equals(valueOrDefault(reply.kind(), "")))
+                    .map(AgenticAuthoringQuickReply::prompt)
+                    .filter(Objects::nonNull)
+                    .map(String::trim)
+                    .filter(prompt -> !prompt.isBlank())
+                    .findFirst()
+                    .orElse("");
+        }
+        if (semanticQuery.isBlank()) {
+            return quickReplies;
+        }
+
+        List<AgenticAuthoringQuickReply> bound = new ArrayList<>(quickReplies.size());
+        boolean toolBound = false;
+        for (AgenticAuthoringQuickReply reply : quickReplies) {
+            if (!toolBound
+                    && reply != null
+                    && "suggestion".equals(valueOrDefault(reply.kind(), ""))) {
+                ObjectNode contextHints = reply.contextHints() != null && reply.contextHints().isObject()
+                        ? reply.contextHints().deepCopy()
+                        : objectMapper.createObjectNode();
+                contextHints.put("tool", AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES);
+                contextHints.put("artifactKind", valueOrDefault(artifactKind, "unknown"));
+                contextHints.put("retrievalQuery", semanticQuery);
+                bound.add(new AgenticAuthoringQuickReply(
+                        reply.id(),
+                        reply.kind(),
+                        reply.label(),
+                        reply.prompt(),
+                        reply.description(),
+                        reply.icon(),
+                        reply.tone(),
+                        contextHints));
+                toolBound = true;
+            } else {
+                bound.add(reply);
+            }
+        }
+        return List.copyOf(bound);
     }
 
     private boolean isUsableLlmQuickReply(AgenticAuthoringQuickReply reply) {
@@ -9100,7 +9259,9 @@ public class AgenticAuthoringIntentResolverService {
                         null));
     }
 
-    private List<AgenticAuthoringQuickReply> platformCapabilityQuickReplies(String effectivePrompt) {
+    private List<AgenticAuthoringQuickReply> platformCapabilityQuickReplies(
+            String effectivePrompt,
+            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
         String normalized = normalize(effectivePrompt);
         if (containsAny(normalized,
                 "exportar", "selecionada", "selecionadas", "linhas selecionadas", "botao", "botão", "tabela")) {
@@ -9142,43 +9303,104 @@ public class AgenticAuthoringIntentResolverService {
                                     "Retorna os pontos de dados e ação que precisam ser governados.",
                                     "Clique para revisar os pré-requisitos.")));
         }
+        if (semanticOrientation != null && "dashboard".equals(semanticOrientation.artifactKind())) {
+            return platformDashboardContinuationQuickReplies(effectivePrompt);
+        }
         return List.of(
                 new AgenticAuthoringQuickReply(
                         "platform-create-admin-dashboard",
                         "suggestion",
                         "Painel administrativo",
-                        "Me ajude a criar um painel administrativo: primeiro recomende dados, componentes e recortes antes da pre-visualizacao.",
+                        AgenticAuthoringConversationPrompt.appendConfirmation(
+                                effectivePrompt,
+                                "continuar este objetivo criando um painel administrativo governado com os dados e componentes adequados"),
                         "Explora fontes, metricas, graficos, filtros e detalhes antes de materializar.",
                         "dashboard_customize",
                         "analytics",
-                        quickReplyPresentation(
+                        conversationQuickReplyPresentation(
                                 "Boa para administrar e acompanhar processos com indicadores e detalhes.",
                                 "Retorna uma recomendacao de composicao governada antes da criacao.",
-                                "Clique para pedir uma recomendacao de painel.")),
+                                "Clique para pedir uma recomendacao de painel.",
+                                "Continuar")),
                 new AgenticAuthoringQuickReply(
                         "platform-create-form",
                         "suggestion",
                         "Formulario governado",
-                        "Quero criar um formulario. Me ajude a escolher o processo, campos e acao governada antes de salvar.",
+                        AgenticAuthoringConversationPrompt.appendConfirmation(
+                                effectivePrompt,
+                                "continuar este objetivo com um formulario; escolha o processo, os campos e a acao governada antes de salvar"),
                         "Explica como transformar uma intencao em formulario sem inventar regra de negocio.",
                         "dynamic_form",
                         "resource",
-                        quickReplyPresentation(
+                        conversationQuickReplyPresentation(
                                 "Boa para cadastros, solicitacoes e edicoes guiadas.",
                                 "Retorna perguntas e opcoes para groundar campos e acao de salvar.",
-                                "Clique para iniciar a conversa de formulario.")),
+                                "Clique para iniciar a conversa de formulario.",
+                                "Continuar")),
                 new AgenticAuthoringQuickReply(
                         "platform-explore-components",
                         "suggestion",
                         "Ver possibilidades",
-                        "Quais componentes governados fazem sentido para o dominio atual e para que serve cada um?",
+                        AgenticAuthoringConversationPrompt.appendConfirmation(
+                                effectivePrompt,
+                                "mostrar quais componentes governados fazem sentido para este objetivo e para que serve cada um"),
                         "Mostra opcoes como tabela, grafico, formulario, abas e fluxos quando estiverem disponiveis.",
                         "widgets",
                         "neutral",
-                        quickReplyPresentation(
+                        conversationQuickReplyPresentation(
                                 "Boa para entender o que pode ser criado antes de escolher uma tela.",
                                 "Retorna uma explicacao em linguagem simples sobre componentes e limites.",
-                                "Clique para pedir o guia de componentes.")));
+                                "Clique para pedir o guia de componentes.",
+                                "Explorar")));
+    }
+
+    private List<AgenticAuthoringQuickReply> platformDashboardContinuationQuickReplies(String effectivePrompt) {
+        return List.of(
+                new AgenticAuthoringQuickReply(
+                        "platform-create-requested-dashboard",
+                        "suggestion",
+                        "Criar este dashboard",
+                        AgenticAuthoringConversationPrompt.appendConfirmation(
+                                effectivePrompt,
+                                "criar uma primeira versao governada deste dashboard usando os dados confirmados do dominio"),
+                        "Monta uma primeira versao para revisar antes de salvar.",
+                        "auto_awesome",
+                        "analytics",
+                        conversationQuickReplyPresentation(
+                                "Quando o objetivo do dashboard ja esta claro.",
+                                "Retorna uma previa governada para revisao.",
+                                "Clique para materializar a primeira versao.",
+                                "Criar")),
+                new AgenticAuthoringQuickReply(
+                        "platform-refine-dashboard-metrics",
+                        "suggestion",
+                        "Escolher indicadores",
+                        AgenticAuthoringConversationPrompt.appendConfirmation(
+                                effectivePrompt,
+                                "antes de criar, recomendar indicadores, recortes e visualizacoes aderentes a este dashboard"),
+                        "Ajuda a definir o que acompanhar antes da prévia.",
+                        "query_stats",
+                        "neutral",
+                        conversationQuickReplyPresentation(
+                                "Quando voce quer revisar metricas e recortes primeiro.",
+                                "Retorna sugestoes aderentes aos dados confirmados.",
+                                "Clique para refinar o dashboard.",
+                                "Refinar")),
+                new AgenticAuthoringQuickReply(
+                        "platform-review-dashboard-data",
+                        "suggestion",
+                        "Revisar dados disponíveis",
+                        AgenticAuthoringConversationPrompt.appendConfirmation(
+                                effectivePrompt,
+                                "mostrar quais dados governados estao disponiveis para este dashboard antes de materializar"),
+                        "Confirma fontes e campos disponíveis para o objetivo.",
+                        "dataset",
+                        "resource",
+                        conversationQuickReplyPresentation(
+                                "Quando voce quer confirmar a cobertura dos dados.",
+                                "Retorna fontes e campos governados relevantes.",
+                                "Clique para revisar os dados disponiveis.",
+                                "Revisar")));
     }
 
     private ObjectNode dashboardContextHints(
@@ -9418,6 +9640,18 @@ public class AgenticAuthoringIntentResolverService {
         presentation.put("bestFor", bestFor);
         presentation.put("returns", returns);
         presentation.put("nextStep", nextStep);
+        return contextHints;
+    }
+
+    private ObjectNode conversationQuickReplyPresentation(
+            String bestFor,
+            String returns,
+            String nextStep,
+            String ctaLabel) {
+        ObjectNode contextHints = quickReplyPresentation(bestFor, returns, nextStep);
+        ObjectNode presentation = (ObjectNode) contextHints.path("presentation");
+        presentation.put("kind", "quick-action");
+        presentation.put("ctaLabel", ctaLabel);
         return contextHints;
     }
 

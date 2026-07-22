@@ -10,6 +10,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.AiSchemaContext;
 import org.springframework.beans.factory.ObjectProvider;
@@ -28,8 +31,13 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class SchemaRetrievalService {
 
+    private static final long SUCCESS_CACHE_TTL_MS = 60_000L;
+    private static final int SUCCESS_CACHE_MAX_ENTRIES = 256;
+
     private final ObjectMapper objectMapper;
     private final GovernedPlatformRequestAuthorizationProvider authorizationProvider;
+    private final Map<SchemaCacheKey, SchemaCacheEntry> successCache = new ConcurrentHashMap<>();
+    private volatile HttpClient httpClient;
 
     @Value("${praxis.ai.schemas.base-url:}")
     private String schemasBaseUrl;
@@ -93,10 +101,18 @@ public class SchemaRetrievalService {
         }
 
         String url = buildUrl(baseUrl, context);
+        SchemaCacheKey cacheKey = new SchemaCacheKey(
+                url,
+                normalizeScope(tenantId),
+                normalizeScope(userId),
+                normalizeScope(environment));
+        SchemaFetchResult cached = cached(cacheKey);
+        if (cached != null) {
+            Metrics.counter("ai_schema_fetch_cache_total", "status", "hit").increment();
+            return cached;
+        }
+        Metrics.counter("ai_schema_fetch_cache_total", "status", "miss").increment();
         try {
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofMillis(Math.max(1000, timeoutMs)))
-                    .build();
             URI targetUri = URI.create(url);
             HttpRequest.Builder request = HttpRequest.newBuilder()
                     .uri(targetUri)
@@ -115,7 +131,7 @@ public class SchemaRetrievalService {
                             tenantId,
                             userId,
                             environment));
-            HttpResponse<String> response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClient().send(request.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 400) {
                 return failure(
                         classifyStatus(response.statusCode()),
@@ -144,7 +160,9 @@ public class SchemaRetrievalService {
                         "Resolved payload was null or missing.");
             }
             Metrics.counter("ai_schema_fetch_total", "status", "success").increment();
-            return SchemaFetchResult.success(schema, url);
+            SchemaFetchResult result = SchemaFetchResult.success(schema, url);
+            cache(cacheKey, result);
+            return result;
         } catch (java.io.IOException e) {
             return failure(
                     SchemaFetchResult.Status.TRANSPORT_ERROR,
@@ -168,6 +186,68 @@ public class SchemaRetrievalService {
                     "SCHEMA_TRANSPORT_ERROR",
                     e.getMessage());
         }
+    }
+
+    private HttpClient httpClient() {
+        HttpClient resolved = httpClient;
+        if (resolved != null) {
+            return resolved;
+        }
+        synchronized (this) {
+            if (httpClient == null) {
+                httpClient = HttpClient.newBuilder()
+                        .connectTimeout(Duration.ofMillis(Math.max(1000, timeoutMs)))
+                        .build();
+            }
+            return httpClient;
+        }
+    }
+
+    private SchemaFetchResult cached(SchemaCacheKey key) {
+        SchemaCacheEntry entry = successCache.get(key);
+        if (entry == null) {
+            return null;
+        }
+        if (entry.expiresAtEpochMs() <= System.currentTimeMillis()) {
+            successCache.remove(key, entry);
+            return null;
+        }
+        return defensiveCopy(entry.result());
+    }
+
+    private void cache(SchemaCacheKey key, SchemaFetchResult result) {
+        if (key == null || result == null || !result.isSuccess()) {
+            return;
+        }
+        evictExpiredOrOldestIfRequired();
+        successCache.put(
+                key,
+                new SchemaCacheEntry(
+                        defensiveCopy(result),
+                        System.currentTimeMillis() + SUCCESS_CACHE_TTL_MS));
+    }
+
+    private void evictExpiredOrOldestIfRequired() {
+        long now = System.currentTimeMillis();
+        successCache.entrySet().removeIf(entry -> entry.getValue().expiresAtEpochMs() <= now);
+        if (successCache.size() < SUCCESS_CACHE_MAX_ENTRIES) {
+            return;
+        }
+        Iterator<Map.Entry<SchemaCacheKey, SchemaCacheEntry>> iterator = successCache.entrySet().iterator();
+        if (iterator.hasNext()) {
+            successCache.remove(iterator.next().getKey());
+        }
+    }
+
+    private SchemaFetchResult defensiveCopy(SchemaFetchResult result) {
+        if (result == null || !result.isSuccess()) {
+            return result;
+        }
+        return SchemaFetchResult.success(result.getSchema().deepCopy(), result.getEndpointUrl());
+    }
+
+    private String normalizeScope(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private String resolveBaseUrl(String requestBaseUrl) {
@@ -258,4 +338,8 @@ public class SchemaRetrievalService {
         }
         return normalized.substring(0, 240) + "...";
     }
+
+    private record SchemaCacheKey(String url, String tenantId, String userId, String environment) {}
+
+    private record SchemaCacheEntry(SchemaFetchResult result, long expiresAtEpochMs) {}
 }

@@ -33,7 +33,7 @@ class AgenticAuthoringOperationalBindingVerificationServiceTest {
         AgenticAuthoringDomainBindingService.BindingProjection binding =
                 new AgenticAuthoringDomainBindingService.BindingProjection(
                         "hr:employee-management",
-                        "resource",
+                        "api_resource",
                         "resource:human-resources.funcionarios",
                         "human-resources.funcionarios",
                         "/api/funcionarios",
@@ -42,8 +42,20 @@ class AgenticAuthoringOperationalBindingVerificationServiceTest {
                         1.0,
                         "hr-v1",
                         List.of("domain-knowledge:evidence-status:active"));
+        AgenticAuthoringDomainBindingService.BindingProjection resourceBinding =
+                new AgenticAuthoringDomainBindingService.BindingProjection(
+                        "hr:employee-management",
+                        "api_resource",
+                        "resource:human-resources.funcionarios",
+                        "human-resources.funcionarios",
+                        "/api/human-resources/funcionarios",
+                        "GET",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=get&schemaType=response",
+                        1.0,
+                        "hr-v1",
+                        List.of("domain-knowledge:evidence-status:active"));
         when(bindingService.resolve("tenant", "dev", "human-resources.funcionarios", 12))
-                .thenReturn(List.of(binding));
+                .thenReturn(List.of(binding, resourceBinding));
         when(schemaService.fetchSchemaResult(
                 any(), eq("http://localhost"), eq("tenant"), eq("user"), eq("dev")))
                 .thenReturn(SchemaFetchResult.success(
@@ -83,7 +95,7 @@ class AgenticAuthoringOperationalBindingVerificationServiceTest {
     void blocksWhenPrincipalCapabilityDeniesTheBoundOperation() throws Exception {
         AgenticAuthoringDomainBindingService.BindingProjection binding =
                 new AgenticAuthoringDomainBindingService.BindingProjection(
-                        "hr:employee-management", "resource", "employee-resource",
+                        "hr:employee-management", "api_resource", "employee-resource",
                         "human-resources.funcionarios", "/api/funcionarios", "POST", null,
                         1.0, "hr-v1", List.of("active-evidence"));
         when(bindingService.resolve("tenant", "dev", "human-resources.funcionarios", 12))
@@ -105,5 +117,62 @@ class AgenticAuthoringOperationalBindingVerificationServiceTest {
 
         assertThat(result.verified()).isFalse();
         assertThat(result.failureCodes()).contains("operational-binding-operation-unavailable");
+    }
+
+    @Test
+    void verifiesExplicitPostFilterOperationWithoutConfusingItWithCreate() throws Exception {
+        AgenticAuthoringDomainBindingService.BindingProjection binding =
+                new AgenticAuthoringDomainBindingService.BindingProjection(
+                        "hr:employee-management",
+                        "api_operation",
+                        "cursor",
+                        "human-resources.funcionarios",
+                        "/api/human-resources/funcionarios/filter/cursor",
+                        "POST",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                        1.0,
+                        "hr-v1",
+                        List.of("domain-knowledge:evidence-status:active"));
+        AgenticAuthoringDomainBindingService.BindingProjection resourceBinding =
+                new AgenticAuthoringDomainBindingService.BindingProjection(
+                        "hr:employee-management",
+                        "api_resource",
+                        "resource:human-resources.funcionarios",
+                        "human-resources.funcionarios",
+                        "/api/human-resources/funcionarios",
+                        "GET",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios&operation=get&schemaType=response",
+                        1.0,
+                        "hr-v1",
+                        List.of("domain-knowledge:evidence-status:active"));
+        when(bindingService.resolve("tenant", "dev", "human-resources.funcionarios", 12))
+                .thenReturn(List.of(binding, resourceBinding));
+        when(schemaService.fetchSchemaResult(any(), any(), any(), any(), any()))
+                .thenReturn(SchemaFetchResult.success(
+                        new ObjectMapper().readTree("{\"type\":\"array\"}"), "schema-url"));
+        when(capabilitiesService.fetchCapabilitiesResult(any(), any(), any(), any(), any()))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        new ObjectMapper().readTree("""
+                                {
+                                  "operations": {
+                                    "create": {"supported":true,"availability":{"allowed":false}},
+                                    "cursor": {"supported":true,"availability":{"allowed":true}}
+                                  }
+                                }
+                                """),
+                        "capabilities-url"));
+
+        AgenticAuthoringOperationalBindingVerificationService.VerificationResult result = service.verify(
+                "human-resources.funcionarios",
+                "http://localhost",
+                new AiPrincipalContext("tenant", "user", "dev", true));
+
+        assertThat(result.verified()).isTrue();
+        assertThat(result.operations()).singleElement().satisfies(operation -> {
+            assertThat(operation.apiMethod()).isEqualTo("post");
+            assertThat(operation.capabilityOperationId()).isEqualTo("cursor");
+            assertThat(operation.resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+            assertThat(operation.apiPath()).endsWith("/filter/cursor");
+        });
     }
 }

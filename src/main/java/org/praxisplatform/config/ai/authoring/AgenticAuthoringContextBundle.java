@@ -38,7 +38,7 @@ final class AgenticAuthoringContextBundle {
         bundle.put("schemaVersion", "praxis-agentic-authoring-context-bundle.v1");
         bundle.set("runtimeContext", runtimeContext(objectMapper, request, currentPageSummary, target));
         bundle.set("userIntent", userIntent(objectMapper, request, effectivePrompt));
-        bundle.set("retrievalContext", retrievalContext(objectMapper, candidateOptions));
+        bundle.set("retrievalContext", retrievalContext(objectMapper, request, candidateOptions));
         bundle.set("governedDomainContext", governedDomainContext(objectMapper, request, governedDomainContext));
         bundle.set("componentContext", componentContext(objectMapper, request, effectivePrompt, target, componentCapabilities));
         bundle.set("conversationContext", conversationContext(objectMapper, request));
@@ -76,9 +76,22 @@ final class AgenticAuthoringContextBundle {
 
     private static ObjectNode retrievalContext(
             ObjectMapper objectMapper,
+            AgenticAuthoringIntentResolutionRequest request,
             List<AgenticAuthoringCandidate> candidateOptions) {
         ObjectNode retrieval = objectMapper.createObjectNode();
         retrieval.set("candidateResources", objectMapper.valueToTree(candidateOptions == null ? List.of() : candidateOptions));
+        JsonNode liveOptionFieldGrounding = request == null || request.contextHints() == null
+                ? null
+                : request.contextHints().path("liveOptionFieldGrounding");
+        if (liveOptionFieldGrounding != null && liveOptionFieldGrounding.isObject()) {
+            retrieval.set("liveOptionFieldGrounding", liveOptionFieldGrounding.deepCopy());
+        }
+        JsonNode liveOptionValueGrounding = request == null || request.contextHints() == null
+                ? null
+                : request.contextHints().path("liveOptionValueGrounding");
+        if (liveOptionValueGrounding != null && liveOptionValueGrounding.isObject()) {
+            retrieval.set("liveOptionValueGrounding", liveOptionValueGrounding.deepCopy());
+        }
         retrieval.put("selectionRule", "Select or suggest only resourcePath values present in candidateResources.");
         retrieval.put("emptyStateRule", "When candidateResources is empty or insufficient, use toolCatalog.searchApiResources before asking the user to type endpoints manually.");
         return retrieval;
@@ -372,23 +385,6 @@ final class AgenticAuthoringContextBundle {
             item.put("purpose", componentPurpose(catalog));
             item.put("bestFor", componentBestFor(catalog));
             item.put("authoringBoundary", componentAuthoringBoundary(catalog));
-            ArrayNode changeKinds = item.putArray("changeKinds");
-            ArrayNode terms = item.putArray("semanticTerms");
-            Set<String> seenChangeKinds = new LinkedHashSet<>();
-            Set<String> seenTerms = new LinkedHashSet<>();
-            if (catalog.capabilities() != null) {
-                for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : catalog.capabilities()) {
-                    if (capability == null) {
-                        continue;
-                    }
-                    addLimited(changeKinds, seenChangeKinds, capability.changeKind(), 16);
-                    if (capability.triggerTerms() != null) {
-                        for (String term : capability.triggerTerms()) {
-                            addLimited(terms, seenTerms, term, 20);
-                        }
-                    }
-                }
-            }
         }
         return components;
     }
@@ -404,27 +400,10 @@ final class AgenticAuthoringContextBundle {
             guide.set("authoringScopePolicy", authoringScopePolicy);
             guide.put("outOfScopeUse", "When the semantic user intent is a loose instruction, assistant meta request, greeting, or unrelated ask that does not request an authorable UI/business decision, answer as an informational chat reply using the policy outOfScopeResponseType and do not create a component preview or edit plan.");
         }
-        guide.set("componentFamilies", componentFamilies(objectMapper, componentCapabilities));
+        guide.put("componentFamilyCount", componentCapabilities == null || componentCapabilities.catalogs() == null
+                ? 0
+                : componentCapabilities.catalogs().size());
         return guide;
-    }
-
-    private static ArrayNode componentFamilies(
-            ObjectMapper objectMapper,
-            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
-        ArrayNode families = objectMapper.createArrayNode();
-        if (componentCapabilities == null || componentCapabilities.catalogs() == null) {
-            return families;
-        }
-        for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog : componentCapabilities.catalogs()) {
-            if (catalog == null || !StringUtils.hasText(catalog.componentId())) {
-                continue;
-            }
-            ObjectNode family = families.addObject();
-            family.put("componentId", catalog.componentId());
-            family.put("purpose", componentPurpose(catalog));
-            family.put("bestFor", componentBestFor(catalog));
-        }
-        return families;
     }
 
     private static String componentPurpose(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog) {
@@ -562,6 +541,12 @@ final class AgenticAuthoringContextBundle {
         searchSchemaFields.put("endpoint", "praxis-config-starter:/schemas/filtered");
         searchSchemaFields.put("purpose", "Retrieve governed schema evidence for fields and operations without applying patches.");
         searchSchemaFields.put("result", "Read-only schema evidence with sourceRef.");
+        ObjectNode searchOptionSourceValues = tools.putObject("searchOptionSourceValues");
+        searchOptionSourceValues.put("method", "INTERNAL_TOOL");
+        searchOptionSourceValues.put("endpoint", "praxis-metadata-starter:x-ui.optionSource");
+        searchOptionSourceValues.put("purpose", "Read current governed option values after semantic resource and filter scope have been resolved.");
+        searchOptionSourceValues.put("result", "Versioned candidate ids and labels from the canonical filterEndpoint, with exhaustive/coverage diagnostics.");
+        searchOptionSourceValues.put("whenToUse", "Use after intent resolution when a requested business category must be reconciled with dynamic master-data values.");
         ObjectNode presentationAffordanceDiscovery = tools.putObject("presentationAffordanceDiscovery");
         presentationAffordanceDiscovery.put("method", "INTERNAL_TOOL");
         presentationAffordanceDiscovery.put("endpoint", "praxis-config-starter:ai-authoring/presentation-affordances");
@@ -584,6 +569,8 @@ final class AgenticAuthoringContextBundle {
         rules.add("Use the backend tool catalog as the menu of available retrieval operations; do not invent resources, endpoints, schemas, fields, or component capabilities.");
         rules.add("Use component capability examples to infer likely configuration choices before asking the user for low-level technical details.");
         rules.add("When more backend data is needed, return actionable quickReplies with contextHints.tool instead of a generic clarification.");
+        rules.add("When retrievalContext.liveOptionFieldGrounding is present, choose the canonicalFilterField whose governed business meaning matches the predicate concept. Preserve the original semantic text value, whether a single concept or a list of concepts, for the subsequent live-value lookup. Do not choose by keyword or invent a field; clarify if the governed candidates remain ambiguous.");
+        rules.add("When retrievalContext.liveOptionValueGrounding is present, reason semantically over its current candidates. If membership is sufficiently clear, rewrite the predicate to canonicalFilterField with operator=in and an array containing only candidate ids. If membership is materially ambiguous, ask a business-friendly clarification and do not materialize the original text as a contains filter.");
         rules.add("assistantMessage must read like a natural chat reply in the user's language. Avoid diagnostics, API terms, and terse labels such as 'alimentar tela'.");
         return rules;
     }

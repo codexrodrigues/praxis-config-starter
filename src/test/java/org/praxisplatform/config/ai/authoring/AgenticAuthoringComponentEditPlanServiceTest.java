@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import org.junit.jupiter.api.Tag;
@@ -154,6 +156,109 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 ArgumentCaptor.forClass(AgenticAuthoringManifestEditPlanRequest.class);
         verify(manifestService).compilePatch(eq("praxis-chart"), compileRequest.capture());
         assertThat(compileRequest.getValue().config()).isEqualTo(config);
+        assertThat(compileRequest.getValue().validationContext()).isEqualTo(validationContext);
+        assertThat(compileRequest.getValue().plan()).isEqualTo(plan);
+    }
+
+    @Test
+    void compilesAlreadyAuthoredVisibleTableFilterWithoutAnotherProviderCall() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "configSchemaId": "TableConfig",
+                  "manifestVersion": "2.0.0",
+                  "runtimeInputs": [{ "name": "config", "type": "TableConfig" }],
+                  "operations": [{
+                    "operationId": "filter.advanced.configure",
+                    "affectedPaths": ["behavior.filtering.advancedFilters.settings"],
+                    "inputSchema": { "type": "object" }
+                  }]
+                }
+                """);
+        JsonNode widgetInputs = objectMapper.readTree("""
+                {
+                  "resourcePath": "/api/human-resources/funcionarios",
+                  "tableId": "funcionarios-table",
+                  "queryContext": { "filters": { "departamentoIdsIn": [16, 17] } },
+                  "config": { "title": "Funcionários", "columns": [] }
+                }
+                """);
+        JsonNode plan = objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-component-edit-plan.v1",
+                  "componentId": "praxis-table",
+                  "operations": [{
+                    "operationId": "filter.advanced.configure",
+                    "input": {
+                      "enabled": true,
+                      "settings": {
+                        "mode": "filter",
+                        "alwaysVisibleFields": ["departamentoIdsIn"],
+                        "selectedFieldIds": ["departamentoIdsIn"]
+                      }
+                    }
+                  }]
+                }
+                """);
+        JsonNode validationContext = objectMapper.readTree("""
+                { "filterSchemaFields": [{ "name": "departamentoIdsIn" }] }
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(new AgenticAuthoringManifestCompileResult(
+                        true,
+                        java.util.List.of(),
+                        java.util.List.of(),
+                        objectMapper.readTree("""
+                                {
+                                  "manifestVersion": "2.0.0",
+                                  "proposedConfig": {
+                                    "title": "Funcionários",
+                                    "columns": [],
+                                    "behavior": {
+                                      "filtering": {
+                                        "enabled": true,
+                                        "advancedFilters": {
+                                          "enabled": true,
+                                          "settings": {
+                                            "mode": "filter",
+                                            "alwaysVisibleFields": ["departamentoIdsIn"],
+                                            "selectedFieldIds": ["departamentoIdsIn"]
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                                """)));
+        AgenticAuthoringComponentEditPlanService service =
+                new AgenticAuthoringComponentEditPlanService(
+                        providerManagementService,
+                        manifestService,
+                        objectMapper);
+
+        AgenticAuthoringComponentEditPlanResult result = service.compileGovernedPlan(
+                "praxis-table",
+                widgetInputs,
+                plan,
+                validationContext);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.providerInvocations()).isEmpty();
+        assertThat(result.warnings()).contains(
+                "component-edit-plan-source:governed-materializer",
+                "component-edit-plan-config-input-bound:config");
+        assertThat(result.compiledPatch().at("/proposedConfig/queryContext/filters/departamentoIdsIn").toString())
+                .isEqualTo("[16,17]");
+        assertThat(result.compiledPatch().at(
+                "/proposedConfig/config/behavior/filtering/advancedFilters/settings/alwaysVisibleFields/0").asText())
+                .isEqualTo("departamentoIdsIn");
+        verify(providerManagementService, never()).generateJson(any(), any(), any(), any(), any(), any());
+
+        ArgumentCaptor<AgenticAuthoringManifestEditPlanRequest> compileRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringManifestEditPlanRequest.class);
+        verify(manifestService).compilePatch(eq("praxis-table"), compileRequest.capture());
+        assertThat(compileRequest.getValue().config()).isEqualTo(widgetInputs.path("config"));
         assertThat(compileRequest.getValue().validationContext()).isEqualTo(validationContext);
         assertThat(compileRequest.getValue().plan()).isEqualTo(plan);
     }
@@ -364,10 +469,10 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         assertStrictObjects(schema);
         assertThat(schema.at("/properties/schemaVersion/type").asText()).isEqualTo("string");
         assertThat(schema.at("/properties/componentId/type").asText()).isEqualTo("string");
-        assertThat(schema.at("/properties/operations/items/anyOf")).hasSize(1);
-        assertThat(schema.at("/properties/operations/items/anyOf/0/properties/operationId/const").asText())
+        assertThat(schema.at("/properties/operations/items/anyOf").isMissingNode()).isTrue();
+        assertThat(schema.at("/properties/operations/items/properties/operationId/const").asText())
                 .isEqualTo("column.add");
-        assertThat(schema.at("/properties/operations/items/anyOf/0/properties/input/properties/type/type"))
+        assertThat(schema.at("/properties/operations/items/properties/input/properties/type/type"))
                 .extracting(JsonNode::toString)
                 .asString()
                 .contains("string", "null");
@@ -381,6 +486,411 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         assertThat(canonicalOperation.has("confirmed")).isFalse();
         assertThat(canonicalOperation.path("input").has("type")).isFalse();
         assertThat(canonicalOperation.at("/input/field").asText()).isEqualTo("email");
+    }
+
+    @Test
+    void adaptsFreeFormJsonLogicAndPresenceUnionsForStrictStructuredOutputs() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "manifestVersion": "2.0.0",
+                  "operations": [{
+                    "operationId": "row.styleRule.add",
+                    "inputSchema": {
+                      "type": "object",
+                      "required": ["id", "condition"],
+                      "properties": {
+                        "id": { "type": "string" },
+                        "condition": { "type": "object", "description": "AST Json Logic" },
+                        "style": { "type": "object" },
+                        "effects": { "type": "array" },
+                        "typedEffects": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "background": {
+                                "type": "object",
+                                "properties": { "color": { "type": "string" } }
+                              },
+                              "repeat": {
+                                "oneOf": [
+                                  { "enum": ["once", "loop"] },
+                                  { "type": "number" }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "anyOf": [
+                        { "required": ["style"] },
+                        { "required": ["effects"] }
+                      ]
+                    }
+                  }]
+                }
+                """);
+        JsonNode providerPlan = objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-component-edit-plan.v1",
+                  "componentId": "praxis-table",
+                  "operations": [{
+                    "operationId": "row.styleRule.add",
+                    "input": {
+                      "id": "salario-alto-vermelho",
+                      "condition": "{\\\">\\\":[{\\\"var\\\":\\\"salario\\\"},30000]}",
+                      "style": null,
+                      "effects": "[{\\\"background\\\":{\\\"color\\\":\\\"#FDECEC\\\"}}]",
+                      "typedEffects": [{
+                        "background": { "color": "#FDECEC" },
+                        "repeat": null
+                      }]
+                    },
+                    "target": null,
+                    "confirmed": null
+                  }]
+                }
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
+                .thenReturn(providerPlan);
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(new AgenticAuthoringManifestCompileResult(
+                        true,
+                        java.util.List.of(),
+                        java.util.List.of(),
+                        objectMapper.readTree("""
+                                {"manifestVersion":"2.0.0","proposedConfig":{"rowConditionalStyles":[]}}
+                                """)));
+        AgenticAuthoringComponentEditPlanService service =
+                new AgenticAuthoringComponentEditPlanService(providerManagementService, manifestService, objectMapper);
+
+        AgenticAuthoringComponentEditPlanResult result = service.generateAndCompile(
+                new AgenticAuthoringPlanRequest(
+                        "Destaque de vermelho as linhas com salário acima de 30 mil",
+                        "openai",
+                        "gpt-5.6-terra",
+                        "secret",
+                        semanticIntent("row.styleRule.add")),
+                "praxis-table",
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result.valid()).isTrue();
+        ArgumentCaptor<AiJsonSchema> providerSchema = ArgumentCaptor.forClass(AiJsonSchema.class);
+        verify(providerManagementService).generateJson(
+                any(), providerSchema.capture(), any(), eq("tenant"), eq("user"), eq("local"));
+        JsonNode schema = objectMapper.readTree(providerSchema.getValue().jsonSchema());
+        JsonNode input = schema.at("/properties/operations/items/properties/input");
+        assertStrictObjects(schema);
+        assertThat(input.has("anyOf")).isFalse();
+        assertThat(input.at("/properties/condition/type").asText()).isEqualTo("string");
+        assertThat(input.at("/properties/condition/description").asText())
+                .contains("compact JSON text");
+        assertThat(input.at("/properties/effects/type"))
+                .extracting(JsonNode::toString)
+                .asString()
+                .contains("string", "null");
+        assertThat(input.at("/properties/effects/description").asText())
+                .contains("Canonical array", "compact JSON text");
+        assertThat(input.at("/properties/typedEffects/items/properties/repeat/anyOf")).hasSize(2);
+        assertThat(schema.toString()).doesNotContain("\"oneOf\"");
+
+        ArgumentCaptor<AgenticAuthoringManifestEditPlanRequest> compileRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringManifestEditPlanRequest.class);
+        verify(manifestService).compilePatch(eq("praxis-table"), compileRequest.capture());
+        JsonNode canonicalInput = compileRequest.getValue().plan().at("/operations/0/input");
+        assertThat(canonicalInput.at("/condition/>/0/var").asText()).isEqualTo("salario");
+        assertThat(canonicalInput.at("/condition/>/1").asInt()).isEqualTo(30000);
+        assertThat(canonicalInput.at("/effects/0/background/color").asText()).isEqualTo("#FDECEC");
+        assertThat(canonicalInput.has("style")).isFalse();
+    }
+
+    @Test
+    void repairsAPlanOnceFromCanonicalManifestValidationDiagnostics() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "manifestVersion": "2.0.0",
+                  "operations": [{
+                    "operationId": "row.styleRule.add",
+                    "inputSchema": {
+                      "type": "object",
+                      "required": ["id", "condition", "cssClass"],
+                      "properties": {
+                        "id": { "type": "string" },
+                        "condition": { "type": "object", "description": "AST Json Logic" },
+                        "cssClass": { "type": "string" }
+                      }
+                    }
+                  }]
+                }
+                """);
+        ObjectNode rejectedProviderPlan = objectMapper.createObjectNode();
+        rejectedProviderPlan.put("schemaVersion", "praxis-component-edit-plan.v1");
+        rejectedProviderPlan.put("componentId", "praxis-table");
+        ObjectNode rejectedInput = rejectedProviderPlan.putArray("operations")
+                .addObject()
+                .put("operationId", "row.styleRule.add")
+                .putObject("input");
+        rejectedInput.put("id", "salario-alto");
+        var conditionArguments = objectMapper.createArrayNode();
+        conditionArguments.addObject().put("var", "salario");
+        conditionArguments.add(30000);
+        ObjectNode rejectedCondition = objectMapper.createObjectNode();
+        rejectedCondition.set("> ", conditionArguments);
+        rejectedInput.put("condition", rejectedCondition.toString());
+        rejectedInput.put("cssClass", "salario-alto");
+        ObjectNode repairedProviderPlan = rejectedProviderPlan.deepCopy();
+        ObjectNode repairedCondition = objectMapper.createObjectNode();
+        repairedCondition.set(">", conditionArguments);
+        ((ObjectNode) repairedProviderPlan.at("/operations/0/input"))
+                .put("condition", repairedCondition.toString());
+        JsonNode compiledPatch = objectMapper.readTree("""
+                {
+                  "manifestVersion": "2.0.0",
+                  "proposedConfig": {
+                    "rowConditionalStyles": [{
+                      "id": "salario-alto",
+                      "condition": { ">": [{ "var": "salario" }, 30000] },
+                      "cssClass": "salario-alto"
+                    }]
+                  }
+                }
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(rejectedProviderPlan, repairedProviderPlan);
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(
+                        new AgenticAuthoringManifestCompileResult(
+                                false,
+                                java.util.List.of("validator computed-expression-valid failed for row.styleRule.add: RULE_OPERATOR_UNKNOWN"),
+                                java.util.List.of(),
+                                objectMapper.createObjectNode()),
+                        new AgenticAuthoringManifestCompileResult(
+                                true,
+                                java.util.List.of(),
+                                java.util.List.of(),
+                                compiledPatch));
+        AgenticAuthoringComponentEditPlanService service =
+                new AgenticAuthoringComponentEditPlanService(
+                        providerManagementService,
+                        manifestService,
+                        objectMapper,
+                        9);
+
+        AgenticAuthoringComponentEditPlanResult result = service.generateAndCompile(
+                new AgenticAuthoringPlanRequest(
+                        "Destaque salários acima de 30 mil",
+                        "openai",
+                        "gpt-5.6-terra",
+                        "secret",
+                        semanticIntent("row.styleRule.add")),
+                "praxis-table",
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.providerInvocations())
+                .extracting(invocation -> invocation.attempt())
+                .containsExactly(1, 2);
+        assertThat(result.plan().at("/operations/0/input/condition/>/1").asInt()).isEqualTo(30000);
+        assertThat(result.warnings()).contains("component-edit-plan-provider:semantic-manifest-repair");
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(providerManagementService, times(2)).generateJson(
+                prompts.capture(), any(), any(), eq("tenant"), eq("user"), eq("local"));
+        assertThat(prompts.getAllValues().get(1))
+                .contains(
+                        "The first plan was rejected by the canonical manifest validators",
+                        "RULE_OPERATOR_UNKNOWN",
+                        "component-authoring-repair-json");
+    }
+
+    @Test
+    void scopesCanonicalTableRelabelToColumnHeaderOperation() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "manifestVersion": "2.0.0",
+                  "operations": [
+                    {
+                      "operationId": "column.header.set",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["header"],
+                        "properties": { "header": { "type": "string" } }
+                      }
+                    },
+                    {
+                      "operationId": "column.type.set",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["type"],
+                        "properties": { "type": {} }
+                      }
+                    }
+                  ]
+                }
+                """);
+        JsonNode plan = objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-component-edit-plan.v1",
+                  "componentId": "praxis-table",
+                  "operations": [{
+                    "operationId": "column.header.set",
+                    "input": { "header": "Status" },
+                    "target": { "field": "ativo" },
+                    "confirmed": null
+                  }]
+                }
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local"))).thenReturn(plan);
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(new AgenticAuthoringManifestCompileResult(
+                        true, java.util.List.of(), java.util.List.of(), objectMapper.createObjectNode()));
+        AgenticAuthoringComponentEditPlanService service = new AgenticAuthoringComponentEditPlanService(
+                providerManagementService, manifestService, objectMapper, 9);
+
+        AgenticAuthoringComponentEditPlanResult result = service.generateAndCompile(
+                new AgenticAuthoringPlanRequest(
+                        "Troque apenas o rótulo Ativo para Status",
+                        "openai",
+                        "gpt-5.6-terra",
+                        "secret",
+                        semanticIntent("rename_or_relabel")),
+                "praxis-table",
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result.valid()).isTrue();
+        ArgumentCaptor<AiJsonSchema> schema = ArgumentCaptor.forClass(AiJsonSchema.class);
+        verify(providerManagementService).generateJson(
+                any(), schema.capture(), any(), eq("tenant"), eq("user"), eq("local"));
+        assertThat(schema.getValue().jsonSchema())
+                .contains("column.header.set")
+                .doesNotContain("column.type.set");
+    }
+
+    @Test
+    void mapsAbstractFieldLabelDecisionToTableColumnHeaderOperation() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "manifestVersion": "2.0.0",
+                  "operations": [{
+                    "operationId": "column.header.set",
+                    "inputSchema": {
+                      "type": "object",
+                      "required": ["header"],
+                      "properties": { "header": { "type": "string" } }
+                    }
+                  }]
+                }
+                """);
+        JsonNode plan = objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-component-edit-plan.v1",
+                  "componentId": "praxis-table",
+                  "operations": [{
+                    "operationId": "column.header.set",
+                    "input": { "header": "Status" },
+                    "target": { "field": "ativo" },
+                    "confirmed": null
+                  }]
+                }
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local"))).thenReturn(plan);
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(new AgenticAuthoringManifestCompileResult(
+                        true, java.util.List.of(), java.util.List.of(), objectMapper.createObjectNode()));
+        AgenticAuthoringComponentEditPlanService service = new AgenticAuthoringComponentEditPlanService(
+                providerManagementService, manifestService, objectMapper, 9);
+
+        assertThat(service.generateAndCompile(
+                new AgenticAuthoringPlanRequest(
+                        "Altere o rótulo do campo", "openai", "gpt-5.6-terra", "secret",
+                        semanticIntent("field.label.set")),
+                "praxis-table", objectMapper.createObjectNode(), objectMapper.createObjectNode(),
+                "tenant", "user", "local").valid()).isTrue();
+
+        ArgumentCaptor<AiJsonSchema> schema = ArgumentCaptor.forClass(AiJsonSchema.class);
+        verify(providerManagementService).generateJson(
+                any(), schema.capture(), any(), eq("tenant"), eq("user"), eq("local"));
+        assertThat(schema.getValue().jsonSchema()).contains("column.header.set");
+    }
+
+    @Test
+    void scopesCanonicalOperationIdWithoutCaseDrift() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "manifestVersion": "2.0.0",
+                  "operations": [
+                    {
+                      "operationId": "column.conditionalRenderer.add",
+                      "inputSchema": {
+                        "type": "object",
+                        "required": ["id"],
+                        "properties": { "id": { "type": "string" } }
+                      }
+                    },
+                    {
+                      "operationId": "column.type.set",
+                      "inputSchema": { "type": "object", "properties": { "type": {} } }
+                    }
+                  ]
+                }
+                """);
+        JsonNode plan = objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-component-edit-plan.v1",
+                  "componentId": "praxis-table",
+                  "operations": [{
+                    "operationId": "column.conditionalRenderer.add",
+                    "input": { "id": "inactive-status" },
+                    "target": { "field": "ativo" },
+                    "confirmed": null
+                  }]
+                }
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local"))).thenReturn(plan);
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(new AgenticAuthoringManifestCompileResult(
+                        true, java.util.List.of(), java.util.List.of(), objectMapper.createObjectNode()));
+        AgenticAuthoringComponentEditPlanService service = new AgenticAuthoringComponentEditPlanService(
+                providerManagementService, manifestService, objectMapper, 9);
+
+        assertThat(service.generateAndCompile(
+                new AgenticAuthoringPlanRequest(
+                        "Use vermelho para inativos", "openai", "gpt-5.6-terra", "secret",
+                        semanticIntent("column.conditionalrenderer.add")),
+                "praxis-table", objectMapper.createObjectNode(), objectMapper.createObjectNode(),
+                "tenant", "user", "local").valid()).isTrue();
+
+        ArgumentCaptor<AiJsonSchema> schema = ArgumentCaptor.forClass(AiJsonSchema.class);
+        verify(providerManagementService).generateJson(
+                any(), schema.capture(), any(), eq("tenant"), eq("user"), eq("local"));
+        assertThat(schema.getValue().jsonSchema())
+                .contains("column.conditionalRenderer.add")
+                .doesNotContain("column.type.set");
     }
 
     private AgenticAuthoringIntentResolutionResult semanticIntent(String changeKind) {

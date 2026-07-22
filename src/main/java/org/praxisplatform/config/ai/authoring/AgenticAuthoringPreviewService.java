@@ -450,15 +450,7 @@ public class AgenticAuthoringPreviewService {
             String userId,
             String environment,
             String schemaBaseUrl) {
-        JsonNode contextHints = request == null ? null : request.contextHints();
-        JsonNode manifestRef = contextHints == null
-                ? MissingNode.getInstance()
-                : contextHints.path("authoringManifestRef");
-        if (!manifestRef.isObject()) {
-            return Optional.empty();
-        }
-
-        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        AgenticAuthoringIntentResolutionResult intent = request == null ? null : request.intentResolution();
         if (intent == null || !intent.valid()) {
             return Optional.empty();
         }
@@ -467,6 +459,19 @@ public class AgenticAuthoringPreviewService {
                 ? value(semanticDecision.operationKind())
                 : value(intent.operationKind());
         if (!"modify".equals(operationKind)) {
+            return Optional.empty();
+        }
+        boolean contextDerivedFromSemanticTarget = request.contextHints() == null
+                || !request.contextHints().path("authoringManifestRef").isObject();
+        if (contextDerivedFromSemanticTarget && componentEditPlanService == null) {
+            return Optional.empty();
+        }
+        request = withSemanticTargetComponentAuthoringContext(request);
+        JsonNode contextHints = request.contextHints();
+        JsonNode manifestRef = contextHints == null
+                ? MissingNode.getInstance()
+                : contextHints.path("authoringManifestRef");
+        if (!manifestRef.isObject()) {
             return Optional.empty();
         }
         request = withSchemaFieldContext(
@@ -505,6 +510,10 @@ public class AgenticAuthoringPreviewService {
         if (contextHints.path("schemaFieldContext").isObject()) {
             validationContext.set("schemaFieldContext", contextHints.path("schemaFieldContext").deepCopy());
         }
+        JsonNode hostMaterialization = selectedHostMaterialization(contextHints, selectedWidgetKey, componentId);
+        if (hostMaterialization.isObject()) {
+            validationContext.set("hostMaterialization", hostMaterialization.deepCopy());
+        }
         AgenticAuthoringComponentEditPlanResult result = componentEditPlanService.generateAndCompile(
                 request,
                 componentId,
@@ -541,6 +550,9 @@ public class AgenticAuthoringPreviewService {
         List<String> warnings = new ArrayList<>(
                 result.warnings() == null ? List.of() : result.warnings());
         warnings.add("compiled-from-component-authoring-manifest");
+        if (contextDerivedFromSemanticTarget) {
+            warnings.add("component-edit-context-derived-from-semantic-target");
+        }
         if (validationContext.path("schemaFields").isArray()
                 && !validationContext.path("schemaFields").isEmpty()) {
             warnings.add("component-edit-plan-schema-fields-grounded");
@@ -563,6 +575,74 @@ public class AgenticAuthoringPreviewService {
                 result.providerInvocations()));
     }
 
+    private JsonNode selectedHostMaterialization(
+            JsonNode contextHints,
+            String selectedWidgetKey,
+            String componentId) {
+        JsonNode components = contextHints == null
+                ? MissingNode.getInstance()
+                : contextHints.path("groundedRuntimeComponentContext").path("components");
+        if (!components.isArray()) {
+            return MissingNode.getInstance();
+        }
+        for (JsonNode component : components) {
+            JsonNode identity = component.path("identity");
+            boolean componentMatches = componentId.equals(identity.path("componentId").asText(""));
+            boolean widgetMatches = selectedWidgetKey.isBlank()
+                    || selectedWidgetKey.equals(identity.path("widgetKey").asText(""));
+            JsonNode materialization = component.path("affordances").path("visualMaterialization");
+            if (componentMatches && widgetMatches && materialization.isObject()) {
+                return materialization;
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    /**
+     * Restores the canonical component-edit context when the user continues from an already
+     * materialized preview without keeping a widget explicitly selected in the client. The
+     * semantic resolver has already selected the target widget and component; this method only
+     * reconciles that decision with the current page before the server-owned manifest is loaded.
+     */
+    private AgenticAuthoringPlanRequest withSemanticTargetComponentAuthoringContext(
+            AgenticAuthoringPlanRequest request) {
+        if (request == null) {
+            return null;
+        }
+        JsonNode existingHints = request.contextHints();
+        if (existingHints != null && existingHints.path("authoringManifestRef").isObject()) {
+            return request;
+        }
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        AgenticAuthoringTarget target = intent == null ? null : intent.target();
+        String widgetKey = target == null ? "" : value(target.widgetKey()).trim();
+        String componentId = target == null ? "" : value(target.componentId()).trim();
+        if (widgetKey.isBlank() || componentId.isBlank()) {
+            return request;
+        }
+        JsonNode widget = selectedComponentWidget(request.currentPage(), widgetKey);
+        if (widget.isMissingNode()
+                || !componentId.equals(widget.path("definition").path("id").asText("").trim())) {
+            return request;
+        }
+
+        ObjectNode contextHints = existingHints != null && existingHints.isObject()
+                ? existingHints.deepCopy()
+                : objectMapper.createObjectNode();
+        contextHints.put("selectedWidgetKey", widgetKey);
+        contextHints.put("selectedComponentId", componentId);
+        contextHints.putObject("authoringManifestRef")
+                .put("componentId", componentId)
+                .put("source", "server-resolved-semantic-target");
+        if (!contextHints.path("validationContext").isObject()) {
+            contextHints.putObject("validationContext");
+        }
+        if (!contextHints.path("contextDiagnostics").isArray()) {
+            contextHints.putArray("contextDiagnostics");
+        }
+        return copyWithContextHints(request, contextHints);
+    }
+
     /**
      * Preserves the natural-language understanding produced by semantic intent resolution for a
      * manifest-backed edit. The compiled plan remains the source of truth for materialization; this
@@ -577,8 +657,13 @@ public class AgenticAuthoringPreviewService {
             message = value(request.userPrompt());
         }
         if (!message.isBlank()) {
+            String normalizedMessage = normalize(message);
+            String preservationSuffix = normalizedMessage.contains("demais configuracoes")
+                    && normalizedMessage.contains("preserv")
+                    ? ""
+                    : " As demais configurações atuais serão preservadas.";
             return AgenticAuthoringPresentationText.assistantReply(
-                    message + " As demais configurações atuais serão preservadas.");
+                    message + preservationSuffix);
         }
         return deterministicPreviewAssistantMessage(request, intent, null, true, List.of());
     }
@@ -784,6 +869,19 @@ public class AgenticAuthoringPreviewService {
                     warnings,
                     schemaBaseUrl,
                     schemaFetchCache);
+            VisibleTableQueryFilterMaterialization visibleTableFilters =
+                    materializeVisibleTableQueryFilters(
+                            request,
+                            uiCompositionPlan,
+                            warnings,
+                            schemaBaseUrl,
+                            schemaFetchCache);
+            uiCompositionPlan = visibleTableFilters.uiCompositionPlan();
+            if (!visibleTableFilters.failureCodes().isEmpty()) {
+                addAllOnce(failureCodes, visibleTableFilters.failureCodes());
+                technicallyValid = false;
+                semanticallyValid = false;
+            }
             if (warnings.contains("table-query-filter-schema-grounding-incomplete")) {
                 addAllOnce(failureCodes, List.of("table-query-filter-schema-grounding-incomplete"));
                 technicallyValid = false;
@@ -1246,38 +1344,7 @@ public class AgenticAuthoringPreviewService {
                 || endsWithStatsOperation(candidate.submitUrl(), "comparison"))) {
             return "comparison";
         }
-        Set<String> semanticTokens = new LinkedHashSet<>();
-        AgenticAuthoringSemanticDecision semanticDecision = semanticDecision(intent);
-        AgenticAuthoringVisualizationDecision visualization = semanticDecision != null
-                && semanticDecision.visualizationDecision() != null
-                        ? semanticDecision.visualizationDecision()
-                        : intent.visualizationDecision();
-        if (visualization != null) {
-            addTokens(semanticTokens, visualization.intent());
-            addTokens(semanticTokens, visualization.layoutKind());
-        }
-        if (semanticDecision != null) {
-            addTokens(semanticTokens, semanticDecision.visualIntent());
-            addTokens(semanticTokens, semanticDecision.artifactIntent());
-        }
-        JsonNode focus = request.contextHints() == null
-                ? MissingNode.getInstance()
-                : request.contextHints().path("resourceDiscovery").path("resourceSearchFocus");
-        addTokens(semanticTokens, focus.path("desiredSurface").asText(""));
-        JsonNode supportingConcepts = focus.path("supportingConcepts");
-        if (supportingConcepts.isArray()) {
-            for (JsonNode concept : supportingConcepts) {
-                addTokens(semanticTokens, concept.asText(""));
-            }
-        }
-        return semanticTokens.stream().anyMatch(Set.of(
-                "comparison",
-                "comparative",
-                "comparacao",
-                "comparativo",
-                "comparativa")::contains)
-                        ? "comparison"
-                        : "";
+        return "";
     }
 
     private boolean endsWithStatsOperation(String path, String operation) {
@@ -1639,8 +1706,14 @@ public class AgenticAuthoringPreviewService {
         }
         if ("modify".equals(value(intent.operationKind()))
                 && "table".equals(value(intent.artifactKind()))
-                && ("column.add".equals(value(intent.changeKind()))
-                || "add_column".equals(value(intent.changeKind())))) {
+                && Set.of(
+                        "column.add",
+                        "add_column",
+                        "column.filterable.set",
+                        "filter.advanced.configure",
+                        "filter.advanced.fields.add",
+                        "filter.advanced.fields.remove")
+                .contains(value(intent.changeKind()))) {
             return true;
         }
         if (intent.visualizationDecision() != null) {
@@ -1945,6 +2018,138 @@ public class AgenticAuthoringPreviewService {
             }
         }
         return copy;
+    }
+
+    private VisibleTableQueryFilterMaterialization materializeVisibleTableQueryFilters(
+            AgenticAuthoringPlanRequest request,
+            JsonNode uiCompositionPlan,
+            List<String> warnings,
+            String schemaBaseUrl,
+            PreviewSchemaFetchCache schemaFetchCache) {
+        if (componentEditPlanService == null
+                || !(uiCompositionPlan instanceof ObjectNode plan)
+                || !containsComponent(plan, "praxis-table")) {
+            return VisibleTableQueryFilterMaterialization.success(uiCompositionPlan);
+        }
+        Map<String, SchemaFieldDescriptor> filterFields = filterSchemaFields(
+                request,
+                schemaBaseUrl,
+                schemaFetchCache).orElse(Map.of());
+        if (filterFields.isEmpty()) {
+            return VisibleTableQueryFilterMaterialization.success(uiCompositionPlan);
+        }
+
+        ObjectNode materializedPlan = plan.deepCopy();
+        List<String> failureCodes = new ArrayList<>();
+        boolean materialized = false;
+        for (JsonNode widget : materializedPlan.path("widgets")) {
+            if (!(widget instanceof ObjectNode widgetObject)
+                    || !"praxis-table".equals(widget.path("componentId").asText(""))) {
+                continue;
+            }
+            ObjectNode inputs = widgetObject.path("inputs") instanceof ObjectNode existingInputs
+                    ? existingInputs
+                    : null;
+            ObjectNode queryFilters = inputs != null
+                    && inputs.path("queryContext").path("filters") instanceof ObjectNode existingFilters
+                    ? existingFilters
+                    : null;
+            if (inputs == null || queryFilters == null || queryFilters.isEmpty()) {
+                continue;
+            }
+            List<String> visibleFields = new ArrayList<>();
+            queryFilters.fieldNames().forEachRemaining(field -> {
+                if (filterFields.values().stream().anyMatch(candidate -> candidate.name().equals(field))) {
+                    visibleFields.add(field);
+                }
+            });
+            if (visibleFields.size() != queryFilters.size()) {
+                failureCodes.add("table-query-filter-visible-field-grounding-incomplete");
+                continue;
+            }
+
+            ObjectNode operationPlan = visibleAdvancedFilterOperationPlan(visibleFields);
+            ObjectNode validationContext = visibleAdvancedFilterValidationContext(filterFields);
+            AgenticAuthoringComponentEditPlanResult compilation =
+                    componentEditPlanService.compileGovernedPlan(
+                            "praxis-table",
+                            inputs,
+                            operationPlan,
+                            validationContext);
+            if (!compilation.valid()
+                    || !compilation.compiledPatch().path("proposedConfig").isObject()) {
+                failureCodes.add("table-query-filter-visible-manifest-compilation-failed");
+                addAllOnce(warnings, compilation.warnings());
+                continue;
+            }
+            widgetObject.set("inputs", compilation.compiledPatch().path("proposedConfig").deepCopy());
+            materialized = true;
+            appendVisibleTableFilterDiagnostics(
+                    materializedPlan,
+                    widgetObject.path("key").asText(""),
+                    visibleFields,
+                    compilation.compiledPatch().path("manifestVersion").asText(""));
+        }
+        if (materialized) {
+            addWarningOnce(warnings, "table-query-filter-visible-through-authoring-manifest");
+        }
+        return new VisibleTableQueryFilterMaterialization(
+                materializedPlan,
+                List.copyOf(new LinkedHashSet<>(failureCodes)));
+    }
+
+    private ObjectNode visibleAdvancedFilterOperationPlan(List<String> visibleFields) {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("schemaVersion", AgenticAuthoringComponentEditPlanService.PLAN_SCHEMA_VERSION);
+        plan.put("componentId", "praxis-table");
+        ObjectNode operation = plan.putArray("operations").addObject();
+        operation.put("operationId", "filter.advanced.configure");
+        ObjectNode input = operation.putObject("input");
+        input.put("enabled", true);
+        input.put("queryBuilder", true);
+        input.put("savePresets", false);
+        ObjectNode settings = input.putObject("settings");
+        settings.put("mode", "filter");
+        settings.put("showAdvanced", true);
+        ArrayNode alwaysVisibleFields = settings.putArray("alwaysVisibleFields");
+        ArrayNode selectedFieldIds = settings.putArray("selectedFieldIds");
+        visibleFields.forEach(field -> {
+            alwaysVisibleFields.add(field);
+            selectedFieldIds.add(field);
+        });
+        return plan;
+    }
+
+    private ObjectNode visibleAdvancedFilterValidationContext(
+            Map<String, SchemaFieldDescriptor> filterFields) {
+        ObjectNode context = objectMapper.createObjectNode();
+        ArrayNode fields = context.putArray("filterSchemaFields");
+        filterFields.values().forEach(field -> fields.addObject()
+                .put("name", field.name())
+                .put("label", firstNonBlank(field.label(), field.name()))
+                .put("type", field.type())
+                .put("format", field.format()));
+        return context;
+    }
+
+    private void appendVisibleTableFilterDiagnostics(
+            ObjectNode plan,
+            String widgetKey,
+            List<String> visibleFields,
+            String manifestVersion) {
+        ObjectNode diagnostics = plan.path("diagnostics") instanceof ObjectNode existing
+                ? existing
+                : plan.putObject("diagnostics");
+        ArrayNode projections = diagnostics.path("visibleTableQueryFilters") instanceof ArrayNode existing
+                ? existing
+                : diagnostics.putArray("visibleTableQueryFilters");
+        ObjectNode projection = projections.addObject();
+        projection.put("source", "semantic-decision.constraints+praxis-table-authoring-manifest");
+        projection.put("operationId", "filter.advanced.configure");
+        projection.put("widgetKey", widgetKey);
+        projection.put("manifestVersion", manifestVersion);
+        ArrayNode fields = projection.putArray("fields");
+        visibleFields.forEach(fields::add);
     }
 
     private JsonNode verifyStatsCapabilities(
@@ -3481,15 +3686,22 @@ public class AgenticAuthoringPreviewService {
                 if (!(axis instanceof ObjectNode axisObject)) {
                     continue;
                 }
+                String semanticallySelectedField = axisObject.path("field").asText("");
+                boolean exactSemanticSchemaField = schemaFields.containsKey(normalize(semanticallySelectedField));
                 Optional<SchemaFieldDescriptor> schemaField = resolveSchemaField(axisObject, schemaFields);
                 schemaField = governedStatsAxisField(widget, schemaField, schemaFields, statsRequestFields, warnings);
                 if (schemaField.isPresent() && isSafeGenericGroupByChartField(schemaField.get(), widget)) {
-                    Optional<SchemaFieldDescriptor> promptAlignedSchemaField = promptAlignedSafeGroupingField(
-                            schemaFields,
-                            widget,
-                            assignedChartFields,
-                            promptAxisTokens,
-                            schemaField.get());
+                    // An exact schema field selected by the semantic decision is already grounded.
+                    // Prompt token scoring is only a repair mechanism for unresolved/approximate fields;
+                    // allowing it here would replace a canonical LLM decision with lexical coincidence.
+                    Optional<SchemaFieldDescriptor> promptAlignedSchemaField = exactSemanticSchemaField
+                            ? Optional.empty()
+                            : promptAlignedSafeGroupingField(
+                                    schemaFields,
+                                    widget,
+                                    assignedChartFields,
+                                    promptAxisTokens,
+                                    schemaField.get());
                     SchemaFieldDescriptor selectedField = promptAlignedSchemaField.orElse(schemaField.get());
                     String requestedField = axisObject.path("field").asText("");
                     String previousAxisLabel = axisObject.path("label").asText("");
@@ -4490,6 +4702,9 @@ public class AgenticAuthoringPreviewService {
         requestedTokens.addAll(requestedField.labelTokens());
         requestedTokens.addAll(requestedField.descriptionTokens());
         int score = semanticMatchScore(requestedTokens, candidate);
+        if (isCanonicalFilterProjection(requestedField.name(), candidate.name())) {
+            score += 100;
+        }
         if (score <= 0) {
             return 0;
         }
@@ -4503,6 +4718,21 @@ public class AgenticAuthoringPreviewService {
             score += 1;
         }
         return score;
+    }
+
+    private boolean isCanonicalFilterProjection(String analyticalField, String filterField) {
+        String analytical = normalize(analyticalField).replaceAll("[^a-z0-9]", "");
+        String candidate = normalize(filterField).replaceAll("[^a-z0-9]", "");
+        if (analytical.isBlank() || candidate.isBlank() || analytical.equals(candidate)) {
+            return false;
+        }
+        for (String suffix : List.of("idsin", "idin", "ids", "id", "between", "range", "in")) {
+            if (candidate.endsWith(suffix)
+                    && candidate.substring(0, candidate.length() - suffix.length()).equals(analytical)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void alignKpiFields(
@@ -6221,6 +6451,15 @@ public class AgenticAuthoringPreviewService {
                     environment);
             fetches.put(key, result);
             return result;
+        }
+    }
+
+    private record VisibleTableQueryFilterMaterialization(
+            JsonNode uiCompositionPlan,
+            List<String> failureCodes) {
+
+        private static VisibleTableQueryFilterMaterialization success(JsonNode uiCompositionPlan) {
+            return new VisibleTableQueryFilterMaterialization(uiCompositionPlan, List.of());
         }
     }
 

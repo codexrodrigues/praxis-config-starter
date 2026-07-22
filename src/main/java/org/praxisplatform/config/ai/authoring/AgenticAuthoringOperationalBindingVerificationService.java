@@ -45,6 +45,12 @@ public class AgenticAuthoringOperationalBindingVerificationService {
         }
         List<OperationProjection> verified = new ArrayList<>();
         List<String> failures = new ArrayList<>();
+        String capabilitiesResourcePath = bindings.stream()
+                .filter(binding -> "api_resource".equals(binding.bindingType()))
+                .map(AgenticAuthoringDomainBindingService.BindingProjection::apiPath)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .orElse(null);
         for (AgenticAuthoringDomainBindingService.BindingProjection binding : bindings) {
             if (!StringUtils.hasText(binding.apiPath()) || !StringUtils.hasText(binding.apiMethod())) {
                 failures.add("operational-binding-operation-incomplete");
@@ -65,8 +71,15 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                 failures.add("operational-binding-schema-" + schemaStatus(schema));
                 continue;
             }
+            String capabilityPath = "api_operation".equals(binding.bindingType())
+                    ? capabilitiesResourcePath
+                    : binding.apiPath();
+            if (!StringUtils.hasText(capabilityPath)) {
+                failures.add("operational-binding-capabilities-resource-binding-required");
+                continue;
+            }
             ResourceCapabilitiesFetchResult capabilities = capabilitiesRetrievalService.fetchCapabilitiesResult(
-                    binding.apiPath(),
+                    capabilityPath,
                     requestBaseUrl,
                     principalContext.tenantId(),
                     principalContext.userId(),
@@ -75,7 +88,8 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                 failures.add("operational-binding-capabilities-" + capabilitiesStatus(capabilities));
                 continue;
             }
-            CapabilityDecision capabilityDecision = operationAvailable(capabilities.getCapabilities(), method);
+            CapabilityDecision capabilityDecision = operationAvailable(
+                    capabilities.getCapabilities(), binding, method);
             if (!capabilityDecision.verified()) {
                 failures.add(capabilityDecision.failureCode());
                 continue;
@@ -84,6 +98,7 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                     binding.conceptKey(),
                     binding.bindingKey(),
                     binding.resourceKey(),
+                    capabilitiesResourcePath,
                     binding.apiPath(),
                     method,
                     schemaType(method),
@@ -98,7 +113,10 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                 : new VerificationResult(true, resourceKey, List.copyOf(verified), List.copyOf(failures));
     }
 
-    private CapabilityDecision operationAvailable(JsonNode capabilities, String method) {
+    private CapabilityDecision operationAvailable(
+            JsonNode capabilities,
+            AgenticAuthoringDomainBindingService.BindingProjection binding,
+            String method) {
         JsonNode root = capabilities != null && capabilities.path("data").isObject()
                 ? capabilities.path("data")
                 : capabilities;
@@ -106,7 +124,7 @@ public class AgenticAuthoringOperationalBindingVerificationService {
         if (operations == null || !operations.isObject()) {
             return CapabilityDecision.blocked("operational-binding-capabilities-operations-missing");
         }
-        for (String operationId : canonicalOperationIds(method)) {
+        for (String operationId : canonicalOperationIds(binding, method)) {
             JsonNode operation = operations.path(operationId);
             if (!operation.isObject() || !operation.path("supported").asBoolean(false)) {
                 continue;
@@ -122,7 +140,14 @@ public class AgenticAuthoringOperationalBindingVerificationService {
         return CapabilityDecision.blocked("operational-binding-operation-unsupported");
     }
 
-    private List<String> canonicalOperationIds(String method) {
+    private List<String> canonicalOperationIds(
+            AgenticAuthoringDomainBindingService.BindingProjection binding,
+            String method) {
+        if (binding != null
+                && "api_operation".equals(binding.bindingType())
+                && StringUtils.hasText(binding.bindingKey())) {
+            return List.of(binding.bindingKey().trim());
+        }
         return switch (method) {
             case "get" -> List.of("list", "read", "get");
             case "post" -> List.of("create");
@@ -159,6 +184,7 @@ public class AgenticAuthoringOperationalBindingVerificationService {
             String conceptKey,
             String bindingKey,
             String resourceKey,
+            String resourcePath,
             String apiPath,
             String apiMethod,
             String schemaType,

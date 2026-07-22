@@ -291,6 +291,182 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldValidateTableComputedExpressionsWithTheCanonicalJsonLogicEngine() throws Exception {
+        JsonNode operation = operationWithValidators(
+                "row.styleRule.add",
+                false,
+                "computed-expression-valid");
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-table",
+                operation,
+                plan("{}", """
+                        {
+                          "id": "salario-alto",
+                          "condition": { "> ": [{ "var": "salario" }, 30000] },
+                          "effects": []
+                        }
+                        """),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .singleElement()
+                .asString()
+                .contains(
+                        "validator computed-expression-valid failed for row.styleRule.add",
+                        "RULE_OPERATOR_UNKNOWN",
+                        "operator > ");
+
+        failures.clear();
+        registry.executeOperationValidators(
+                "praxis-table",
+                operation,
+                plan("{}", """
+                        {
+                          "id": "salario-alto",
+                          "condition": { ">": [{ "var": "salario" }, 30000] },
+                          "effects": []
+                        }
+                        """),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+    }
+
+    @Test
+    void shouldValidateExplicitConditionalSurfaceContrastAndDeferAutomaticForeground() throws Exception {
+        JsonNode operation = operationWithValidators(
+                "row.styleRule.add",
+                false,
+                "conditional-surface-accessible");
+        List<String> failures = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-table",
+                operation,
+                plan("{}", """
+                        {
+                          "id": "salary-highlight",
+                          "condition": { ">": [{ "var": "salary" }, 30000] },
+                          "style": { "backgroundColor": "#FFF3E0" }
+                        }
+                        """),
+                objectMapper.readTree("{}"),
+                failures,
+                warnings);
+
+        assertThat(failures).anySatisfy(failure -> assertThat(failure)
+                .contains("host-visual-materialization-unverified"));
+
+        failures.clear();
+        warnings.clear();
+        registry.executeOperationValidators(
+                "praxis-table",
+                operation,
+                plan("{}", """
+                        {
+                          "id": "salary-highlight",
+                          "condition": { ">": [{ "var": "salary" }, 30000] },
+                          "style": { "backgroundColor": "#FFF3E0" }
+                        }
+                        """),
+                objectMapper.readTree("""
+                        {
+                          "validationContext": {
+                            "hostMaterialization": { "inlineStyle": "blocked" }
+                          }
+                        }
+                        """),
+                failures,
+                warnings);
+
+        assertThat(failures).anySatisfy(failure -> assertThat(failure)
+                .contains("host-visual-materialization-unsupported"));
+
+        failures.clear();
+        warnings.clear();
+        registry.executeOperationValidators(
+                "praxis-table",
+                operation,
+                plan("{}", """
+                        {
+                          "id": "salary-highlight",
+                          "condition": { ">": [{ "var": "salary" }, 30000] },
+                          "surfacePresetRef": { "id": "warning", "catalogVersion": "0.2.0" }
+                        }
+                        """),
+                objectMapper.readTree("""
+                        {
+                          "validationContext": {
+                            "hostMaterialization": {
+                              "inlineStyle": "blocked",
+                              "governedClass": "supported",
+                              "surfacePresetCatalog": {
+                                "catalogId": "praxis-table.conditional-surface",
+                                "catalogVersion": "0.2.0",
+                                "themeMode": "dark",
+                                "supportedScopes": ["row", "cell"],
+                                "supportedPresetIds": ["success", "warning", "danger", "highlight"]
+                              }
+                            }
+                          }
+                        }
+                        """),
+                failures,
+                warnings);
+
+        assertThat(failures).isEmpty();
+
+        failures.clear();
+        warnings.clear();
+        registry.executeOperationValidators(
+                "praxis-table",
+                operation,
+                plan("{}", """
+                        {
+                          "id": "salary-highlight",
+                          "condition": { ">": [{ "var": "salary" }, 30000] },
+                          "style": { "backgroundColor": "#FFF3E0", "color": "#FFFFFF" }
+                        }
+                        """),
+                objectMapper.readTree("""
+                        { "validationContext": { "hostMaterialization": { "inlineStyle": "supported" } } }
+                        """),
+                failures,
+                warnings);
+
+        assertThat(failures).singleElement().asString()
+                .contains("conditional-surface-accessible failed", "minimum is 4.5:1");
+
+        failures.clear();
+        registry.executeOperationValidators(
+                "praxis-table",
+                operation,
+                plan("{}", """
+                        {
+                          "id": "salary-highlight",
+                          "condition": { ">": [{ "var": "salary" }, 30000] },
+                          "style": { "background": "linear-gradient(#fff, #000)" }
+                        }
+                        """),
+                objectMapper.readTree("""
+                        { "validationContext": { "hostMaterialization": { "inlineStyle": "supported" } } }
+                        """),
+                failures,
+                warnings);
+
+        assertThat(failures).isEmpty();
+        assertThat(warnings).anySatisfy(warning -> assertThat(warning)
+                .contains("conditional-surface-accessible unresolved", "runtime preview"));
+    }
+
+    @Test
     void shouldFailWhenValidatorHasNoBackendImplementation() throws Exception {
         List<String> failures = new ArrayList<>();
         List<String> warnings = new ArrayList<>();

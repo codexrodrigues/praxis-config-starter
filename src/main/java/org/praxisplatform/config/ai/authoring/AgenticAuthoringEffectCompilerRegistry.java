@@ -10,6 +10,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -38,6 +39,15 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             ArrayNode patchOperations,
             List<String> failures,
             List<String> warnings) {
+        if (compileIncrementalTableAdvancedFilterFields(
+                componentId,
+                operation,
+                planOperation,
+                proposedConfig,
+                patchOperations,
+                failures)) {
+            return;
+        }
         for (JsonNode effect : operation.path("effects")) {
             String effectKind = text(effect, "kind");
             AgenticAuthoringResolvedTarget resolved = null;
@@ -78,6 +88,117 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 patchOperations.add(compiled);
             }
         }
+    }
+
+    /**
+     * Materializes the existing incremental table-filter operations as a state transition over the
+     * canonical advanced-filter settings. The manifest input intentionally describes only the
+     * requested delta ({@code fields}, {@code selected}, {@code alwaysVisible}); copying that input
+     * directly into {@code advancedFilters} would expose non-runtime keys and lose the accumulated
+     * visible fields from previous turns.
+     */
+    private boolean compileIncrementalTableAdvancedFilterFields(
+            String componentId,
+            JsonNode operation,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            ArrayNode patchOperations,
+            List<String> failures) {
+        String operationId = text(operation, "operationId");
+        boolean add = "filter.advanced.fields.add".equals(operationId);
+        boolean remove = "filter.advanced.fields.remove".equals(operationId);
+        if (!"praxis-table".equals(componentId) || (!add && !remove)) {
+            return false;
+        }
+
+        JsonNode input = planOperation.path("input");
+        LinkedHashSet<String> requestedFields = new LinkedHashSet<>();
+        if (input.path("fields").isArray()) {
+            input.path("fields").forEach(field -> {
+                String value = field.asText("").trim();
+                if (!value.isBlank()) {
+                    requestedFields.add(value);
+                }
+            });
+        }
+        if (requestedFields.isEmpty()) {
+            failures.add(operationId + " requires at least one field");
+            return true;
+        }
+
+        boolean updateSelected = !input.has("selected") || input.path("selected").asBoolean(true);
+        boolean updateAlwaysVisible = !input.has("alwaysVisible")
+                || input.path("alwaysVisible").asBoolean(true);
+        if (!updateSelected && !updateAlwaysVisible) {
+            failures.add(operationId + " must change selected or always-visible filter state");
+            return true;
+        }
+
+        ObjectNode filtering = objectAt(proposedConfig, "behavior.filtering", true);
+        filtering.put("enabled", true);
+        ObjectNode advancedFilters = objectAt(proposedConfig, "behavior.filtering.advancedFilters", true);
+        advancedFilters.put("enabled", true);
+        ObjectNode settings = objectAt(
+                proposedConfig,
+                "behavior.filtering.advancedFilters.settings",
+                true);
+        if (!settings.has("mode")) {
+            settings.put("mode", "filter");
+        }
+
+        if (updateAlwaysVisible) {
+            settings.set(
+                    "alwaysVisibleFields",
+                    updatedAdvancedFilterFields(
+                            settings.path("alwaysVisibleFields"),
+                            requestedFields,
+                            add));
+        }
+        if (updateSelected) {
+            settings.set(
+                    "selectedFieldIds",
+                    updatedAdvancedFilterFields(
+                            settings.path("selectedFieldIds"),
+                            requestedFields,
+                            add));
+        }
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", operationId);
+        compiled.put("op", "merge-object");
+        compiled.put("effectKind", "merge-object");
+        compiled.put("path", "behavior.filtering.advancedFilters");
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", input);
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        compiled.set("value", advancedFilters.deepCopy());
+        patchOperations.add(compiled);
+        return true;
+    }
+
+    private ArrayNode updatedAdvancedFilterFields(
+            JsonNode current,
+            Set<String> requestedFields,
+            boolean add) {
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        if (current != null && current.isArray()) {
+            current.forEach(field -> {
+                String value = field.asText("").trim();
+                if (!value.isBlank()) {
+                    values.add(value);
+                }
+            });
+        }
+        if (add) {
+            values.addAll(requestedFields);
+        } else {
+            values.removeAll(requestedFields);
+        }
+        ArrayNode result = objectMapper.createArrayNode();
+        values.forEach(result::add);
+        return result;
     }
 
     private boolean domainHandlerCreatesTarget(String handler) {

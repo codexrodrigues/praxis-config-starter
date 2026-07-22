@@ -21,6 +21,182 @@ class AgenticAuthoringEffectCompilerRegistryTest {
                     new AgenticAuthoringTargetResolverRegistry());
 
     @Test
+    void shouldCompileIncrementalAdvancedFilterFieldsWithoutLeakingDeltaKeys() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "behavior": {
+                    "filtering": {
+                      "enabled": true,
+                      "advancedFilters": {
+                        "enabled": true,
+                        "queryBuilder": true,
+                        "settings": {
+                          "mode": "filter",
+                          "showAdvanced": true,
+                          "alwaysVisibleFields": ["departamentoNome"],
+                          "selectedFieldIds": ["departamentoNome"]
+                        }
+                      }
+                    }
+                  }
+                }
+                """);
+        JsonNode operation = objectMapper.readTree("""
+                {
+                  "operationId": "filter.advanced.fields.add",
+                  "effects": [
+                    { "kind": "set-value", "path": "behavior.filtering.enabled", "value": true },
+                    { "kind": "merge-object", "path": "behavior.filtering.advancedFilters" }
+                  ],
+                  "affectedPaths": [
+                    "behavior.filtering.enabled",
+                    "behavior.filtering.advancedFilters.enabled",
+                    "behavior.filtering.advancedFilters.settings"
+                  ],
+                  "submissionImpact": "config-only"
+                }
+                """);
+        JsonNode planOperation = objectMapper.readTree("""
+                {
+                  "operationId": "filter.advanced.fields.add",
+                  "input": {
+                    "fields": ["estadoCivil"],
+                    "selected": true,
+                    "alwaysVisible": true
+                  }
+                }
+                """);
+        ArrayNode compiledEffects = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                planOperation,
+                proposedConfig,
+                compiledEffects,
+                failures,
+                new ArrayList<>());
+
+        JsonNode advancedFilters = proposedConfig.at("/behavior/filtering/advancedFilters");
+        assertThat(failures).isEmpty();
+        assertThat(compiledEffects).hasSize(1);
+        assertThat(advancedFilters.path("fields").isMissingNode()).isTrue();
+        assertThat(advancedFilters.path("selected").isMissingNode()).isTrue();
+        assertThat(advancedFilters.path("alwaysVisible").isMissingNode()).isTrue();
+        assertThat(advancedFilters.at("/settings/alwaysVisibleFields").toString())
+                .isEqualTo("[\"departamentoNome\",\"estadoCivil\"]");
+        assertThat(advancedFilters.at("/settings/selectedFieldIds").toString())
+                .isEqualTo("[\"departamentoNome\",\"estadoCivil\"]");
+        assertThat(compiledEffects.get(0).path("path").asText())
+                .isEqualTo("behavior.filtering.advancedFilters");
+    }
+
+    @Test
+    void shouldCompileIncrementalAdvancedFilterRemovalAsPreservingStateTransition() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "behavior": {
+                    "filtering": {
+                      "advancedFilters": {
+                        "enabled": true,
+                        "settings": {
+                          "alwaysVisibleFields": ["departamentoNome", "estadoCivil"],
+                          "selectedFieldIds": ["departamentoNome", "estadoCivil"]
+                        }
+                      }
+                    }
+                  }
+                }
+                """);
+        JsonNode operation = objectMapper.readTree("""
+                {
+                  "operationId": "filter.advanced.fields.remove",
+                  "effects": [{ "kind": "merge-object", "path": "behavior.filtering.advancedFilters" }],
+                  "affectedPaths": ["behavior.filtering.advancedFilters.settings"],
+                  "submissionImpact": "config-only"
+                }
+                """);
+        JsonNode planOperation = objectMapper.readTree("""
+                {
+                  "operationId": "filter.advanced.fields.remove",
+                  "input": { "fields": ["estadoCivil"], "selected": true, "alwaysVisible": true }
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                planOperation,
+                proposedConfig,
+                objectMapper.createArrayNode(),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(proposedConfig.at(
+                "/behavior/filtering/advancedFilters/settings/alwaysVisibleFields").toString())
+                .isEqualTo("[\"departamentoNome\"]");
+        assertThat(proposedConfig.at(
+                "/behavior/filtering/advancedFilters/settings/selectedFieldIds").toString())
+                .isEqualTo("[\"departamentoNome\"]");
+    }
+
+    @Test
+    void shouldRejectIncrementalAdvancedFilterOperationThatCannotChangeVisibleState() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "behavior": {
+                    "filtering": {
+                      "advancedFilters": {
+                        "enabled": true,
+                        "settings": {
+                          "alwaysVisibleFields": ["departamentoNome"],
+                          "selectedFieldIds": ["departamentoNome"]
+                        }
+                      }
+                    }
+                  }
+                }
+                """);
+        JsonNode operation = objectMapper.readTree("""
+                {
+                  "operationId": "filter.advanced.fields.add",
+                  "effects": [{ "kind": "merge-object", "path": "behavior.filtering.advancedFilters" }]
+                }
+                """);
+        JsonNode planOperation = objectMapper.readTree("""
+                {
+                  "operationId": "filter.advanced.fields.add",
+                  "input": {
+                    "fields": ["estadoCivil"],
+                    "selected": false,
+                    "alwaysVisible": false
+                  }
+                }
+                """);
+        ArrayNode compiledEffects = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                planOperation,
+                proposedConfig,
+                compiledEffects,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).containsExactly(
+                "filter.advanced.fields.add must change selected or always-visible filter state");
+        assertThat(compiledEffects).isEmpty();
+        assertThat(proposedConfig.at(
+                "/behavior/filtering/advancedFilters/settings/selectedFieldIds").toString())
+                .isEqualTo("[\"departamentoNome\"]");
+    }
+
+    @Test
     void shouldCompileMergeByKeyIntoPatchOperationAndProposedConfig() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {

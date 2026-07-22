@@ -56,6 +56,7 @@ import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
 import org.praxisplatform.config.service.GovernedPlatformRequestAuthorizationProvider;
+import org.praxisplatform.config.service.LiveOptionValueRetrievalService;
 import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
 import org.praxisplatform.config.service.ResourceSurfaceCatalogRetrievalService;
 import org.praxisplatform.config.service.SchemaRetrievalService;
@@ -113,13 +114,16 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectMapper objectMapper,
             ObjectProvider<DomainCatalogPromptContextService> domainCatalogPromptContextService,
             @Value("${praxis.ai.authoring.intent-resolution.fast-timeout-seconds:12}") int fastIntentTimeoutSeconds,
-            @Value("${praxis.ai.authoring.intent-resolution.full-timeout-seconds:30}") int fullIntentTimeoutSeconds) {
+            @Value("${praxis.ai.authoring.intent-resolution.full-timeout-seconds:30}") int fullIntentTimeoutSeconds,
+            @Value("${praxis.ai.authoring.intent-resolution.live-option.openai-model:gpt-5.6-luna}")
+                    String liveOptionRefinementOpenAiModel) {
         return new AgenticAuthoringLlmIntentResolverService(
                 providerManagementService,
                 objectMapper,
                 domainCatalogPromptContextService.getIfAvailable(),
                 fastIntentTimeoutSeconds,
-                fullIntentTimeoutSeconds);
+                fullIntentTimeoutSeconds,
+                liveOptionRefinementOpenAiModel);
     }
 
     @Bean
@@ -351,6 +355,20 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    @ConditionalOnBean(SchemaRetrievalService.class)
+    public LiveOptionValueRetrievalService liveOptionValueRetrievalService(
+            ObjectMapper objectMapper,
+            SchemaRetrievalService schemaRetrievalService,
+            ObjectProvider<GovernedPlatformRequestAuthorizationProvider> authorizationProviders) {
+        return new LiveOptionValueRetrievalService(
+                objectMapper,
+                schemaRetrievalService,
+                authorizationProviders.getIfAvailable(
+                        GovernedPlatformRequestAuthorizationProvider::none));
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public AgenticAuthoringToolRegistry agenticAuthoringToolRegistry(
             AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
             ObjectProvider<ContextRetrievalService> contextRetrievalService,
@@ -361,6 +379,7 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectProvider<org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainBindingService> domainBindingService,
             ObjectProvider<org.praxisplatform.config.ai.authoring.AgenticAuthoringOperationalBindingVerificationService> operationalVerificationService,
             ObjectProvider<DomainCatalogIngestionService> domainCatalogIngestionService,
+            ObjectProvider<LiveOptionValueRetrievalService> liveOptionValueRetrievalService,
             @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey,
             ObjectMapper objectMapper) {
         return new AgenticAuthoringToolRegistry(
@@ -374,7 +393,8 @@ public class AgenticAuthoringAutoConfiguration {
                 domainBindingService.getIfAvailable(),
                 operationalVerificationService.getIfAvailable(),
                 domainCatalogIngestionService.getIfAvailable(),
-                domainCatalogServiceKey);
+                domainCatalogServiceKey,
+                liveOptionValueRetrievalService.getIfAvailable());
     }
 
     @Bean

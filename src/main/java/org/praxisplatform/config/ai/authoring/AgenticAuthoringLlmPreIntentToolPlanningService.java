@@ -33,7 +33,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private static final int MAX_PLANNER_CONTEXT_ARRAY_ITEMS = 8;
     private static final int MAX_PLANNER_PAGE_WIDGETS = 12;
     private static final int MAX_PLANNER_TEXT_LENGTH = 700;
-    private static final int MAX_PLANNER_USER_PROMPT_LENGTH = 1100;
+    private static final int MAX_PLANNER_USER_PROMPT_LENGTH = 850;
     private static final int DEFAULT_PLANNING_BUDGET_SECONDS = 12;
     private static final int DEFAULT_PROVIDER_ATTEMPTS = 2;
     private static final long DEFAULT_PROVIDER_RETRY_DELAY_MS = 250L;
@@ -169,7 +169,11 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         if (hasResourceDiscoveryContext(request)) {
             return AgenticAuthoringPreIntentToolPlanningResult.skipped("resource-discovery-context-present");
         }
+        long promptStartedAt = System.nanoTime();
         String prompt = prompt(request, principalContext);
+        log.debug(
+                "[AgenticAuthoringPreIntentToolPlanning] Prompt context prepared; latencyMs={}",
+                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - promptStartedAt));
         AiJsonSchema jsonSchema = AiJsonSchema.ofSchema(schema());
         String tenantId = principalContext == null ? null : principalContext.tenantId();
         String userId = principalContext == null ? null : principalContext.userId();
@@ -197,9 +201,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                         tenantId,
                         userId,
                         environment);
-                if (result == null
-                        || !result.isObject()
-                        || !result.path("shouldRetrieveGovernedResources").isBoolean()) {
+                if (!isValidStructuredPlan(result)) {
                     trace.failed("invalid_response");
                     recordInvocation(trace, providerInvocations);
                     traceRecorded = true;
@@ -265,6 +267,23 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         }
         return AgenticAuthoringPreIntentToolPlanningResult.skipped(
                 result.skipReason(), providerInvocations);
+    }
+
+    private boolean isValidStructuredPlan(JsonNode result) {
+        if (result == null
+                || !result.isObject()
+                || !result.path("shouldRetrieveGovernedResources").isBoolean()) {
+            return false;
+        }
+        if (!result.path("shouldRetrieveGovernedResources").asBoolean(false)
+                || !"praxis-agentic-authoring-pre-intent-tool-plan.v2".equals(text(result, "schemaVersion"))
+                || !"authoring_or_other".equals(text(result, "semanticIntentClass"))
+                || !result.path("requiresFullIntentResolution").asBoolean(false)) {
+            return true;
+        }
+        return StringUtils.hasText(text(
+                result.path("resourceSearchFocus"),
+                "primaryBusinessEntity"));
     }
 
     private void recordInvocation(
@@ -378,11 +397,24 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         AgenticAuthoringResourceSearchFocus resourceSearchFocus =
                 resourceSearchFocus(result.path("resourceSearchFocus"));
         resourceSearchFocus = reconcileDomainDiscoveryResourceFocus(request, resourceSearchFocus);
-        boolean requiresFullIntentResolution = result.path("requiresFullIntentResolution").asBoolean(false)
-                || "authoring_or_other".equals(semanticIntentClass)
-                && resourceSearchFocus != null
-                && resourceSearchFocus.supportingConcepts() != null
-                && !resourceSearchFocus.supportingConcepts().isEmpty();
+        // Once the LLM has semantically classified an executable authoring request and resolved
+        // its canonical business entity, the single pre-intent read must retrieve an executable
+        // API resource. Spending that call on the concept already named by the orientation forces
+        // a second full-model pass and discards the stronger operational binding evidence.
+        if ("authoring_or_other".equals(semanticIntentClass)
+                && (result.path("requiresFullIntentResolution").asBoolean(false)
+                        || resourceSearchFocus != null
+                                && StringUtils.hasText(resourceSearchFocus.primaryBusinessEntity()))) {
+            groundingProfile = "api_resource";
+        }
+        // Supporting concepts enrich governed resource retrieval; they are not, by themselves,
+        // executable predicates or presentation constraints. Promoting them to a mandatory second
+        // provider pass made generic authoring (for example an employee dashboard) resolve the same
+        // intent twice even after a single strong operational resource had been grounded. The LLM
+        // remains responsible for declaring full resolution when the user actually requests a
+        // predicate, grouping, aggregation, ordering or layout constraint.
+        boolean requiresFullIntentResolution =
+                result.path("requiresFullIntentResolution").asBoolean(false);
         retrievalQuery = focusedRetrievalQuery(retrievalQuery, resourceSearchFocus);
         String artifactKind = text(result, "artifactKind");
         if (!List.of("page", "dashboard", "chart", "table", "form", "api_catalog").contains(artifactKind)) {
@@ -499,8 +531,10 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private String prompt(
             AgenticAuthoringTurnStreamRequest request,
             AiPrincipalContext principalContext) {
-        String governedDomainContext = governedDomainContext(request, principalContext);
-        ObjectNode context = planningContext(request, governedDomainContext);
+        // Only the compact canonical resource identity index is baseline context. Detailed
+        // concepts, fields, bindings, endpoints and live values remain progressively retrieved
+        // after semantic orientation.
+        ObjectNode context = planningContext(request, governedDomainContext(request, principalContext));
         String responseLocale = request.contextHints() == null
                 ? ""
                 : text(request.contextHints(), "responseLocale");
@@ -519,6 +553,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 authorableComponents, governedDomainContext, runtimeContext and the components already on the page.
                 Be friendly and concrete. Do not claim a change was made and do not ask for technical endpoints.
                 Keep this class for generic platform guidance.
+                Feasibility questions stay platform_guidance even with an artifact or subject; they do not authorize
+                creation. Preserve artifactKind. Example: "É possível criar um dashboard sobre informações salariais
+                dos funcionários?" is platform_guidance, artifactKind=dashboard.
 
                 Set semanticIntentClass=governed_domain_discovery when the user asks which actual business domains,
                 themes, administrative subjects or governed business capabilities are available in the current host,
@@ -540,8 +577,15 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Encode every user-authored data predicate in queryConstraints.filters. Do not encode resource paths,
                 endpoints, component identifiers or retrieval metadata as data filters. Use an empty filters array when
                 the user did not request a data subset.
+                Preserve a semantic category, such as an organizational area, as text or a text list on this first pass.
+                After resource and field grounding, live option resolution replaces it with current canonical IDs.
+                Never invent an option value or use textual contains.
                 Set requiresFullIntentResolution=true when concrete authoring includes a predicate, subset, field value,
                 grouping, ordering, aggregation or layout constraint. Resource discovery alone never resolves these.
+                Artifact kind and defaults are not constraints. A generic governed dashboard request
+                must keep the flag false. A dashboard about a specific measured business subject must set it true so the
+                governed resolver authors relevant axes and metrics instead of generic schema-order field inference.
+                Otherwise set it true only for a user-explicit choice that a later resolver must preserve.
                 For that class, leave assistantMessage empty and decide whether to run searchApiResources before
                 authoring. Select groundingProfile progressively: domain_context for macro business orientation,
                 domain_capability when a governed context is known but the business capability is not, domain_concept
@@ -557,17 +601,25 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Return false only for visual/local/editorial work, existing resourceDiscovery, or no data grounding need.
                 When retrieval is true, author only retrievalQuery and resourceSearchFocus; do not choose resourcePath,
                 endpoints, configuration or patches.
-                Model resourceSearchFocus in two separate semantic layers. primaryBusinessEntity is the canonical
-                business subject explicitly requested by the user; it must not become the name of a view, projection,
-                visualization, profile, or dashboard merely because that presentation is available. desiredSurface
-                describes presentation and interaction only. A collection-oriented dashboard that filters or groups
-                many records and keeps a detail table remains grounded in the primary business entity, even when its
-                presentation includes charts, metrics, or a 360-degree overview. Select a profile projection only when
-                the user semantically requests an individual or single-record profile. Select another analytical
-                projection only when that projection's business subject, such as payroll, is itself requested.
+                Model resourceSearchFocus in two semantic layers. primaryBusinessEntity is the canonical business
+                subject explicitly requested, never a view or UI artifact; desiredSurface is presentation only. A
+                collection-oriented dashboard with filters, charts and a detail table stays on that subject. Use an
+                individual or single-record profile only when requested. Select another analytical projection only when
+                its subject, such as payroll, is itself requested. Decide by what is being measured or explained:
+                payroll is primaryBusinessEntity for employee salary or compensation; employee headcount, status, role
+                or department stays on employees. For KPI/chart dashboards, prefer the governed analytical projection
+                of the measured subject over contributing operational/history records. After confirmation, select the
+                canonical payroll analytical resource. A related category constraining displayed records belongs in
+                supportingConcepts/queryConstraints, never as primaryBusinessEntity because it ranks higher.
                 When domainDiscovery contains the semantically matching business subject, use its canonical resourceKey
                 exactly as primaryBusinessEntity. Titles, aliases and fields explain that resource; they do not replace
                 the canonical key or authorize a different related projection.
+                When governedDomainContext contains DOMAIN_RESOURCE_IDENTITY_CATALOG, semantically select the matching
+                business subject from that compact catalog and return its resourceKey exactly. This is semantic selection
+                by the LLM, not keyword routing. If shouldRetrieveGovernedResources=true for authoring that requires a
+                business resource, primaryBusinessEntity must never be null or blank. If no canonical identity is
+                available, return a concise semantic business-entity phrase in the user's language; do not move the
+                displayed entity into supportingConcepts and do not use a UI artifact as the entity.
                 Use artifactKind dashboard when the requested outcome depends on multiple coordinated analytical
                 regions such as filters, KPIs, multiple charts and a detail/list/table surface. Use artifactKind page
                 for general layout or content composition where analytics are not the dominant requested outcome.
@@ -618,7 +670,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 fullContext.path("componentContext").path("platformGuide").deepCopy());
         componentContext.set(
                 "authorableComponents",
-                fullContext.path("componentContext").path("authorableComponents").deepCopy());
+                compactAuthorableComponents(
+                        fullContext.path("componentContext").path("authorableComponents")));
         JsonNode authoringScopePolicy = fullContext.path("componentContext").path("authoringScopePolicy");
         if (!authoringScopePolicy.isMissingNode()) {
             componentContext.set("authoringScopePolicy", authoringScopePolicy.deepCopy());
@@ -632,6 +685,24 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         return context;
     }
 
+    private ArrayNode compactAuthorableComponents(JsonNode source) {
+        ArrayNode compact = objectMapper.createArrayNode();
+        if (source == null || !source.isArray()) {
+            return compact;
+        }
+        for (JsonNode component : source) {
+            if (component == null || !component.isObject()) {
+                continue;
+            }
+            ObjectNode projection = compact.addObject();
+            copyText(projection, "componentId", component, "componentId");
+            copyText(projection, "purpose", component, "purpose");
+            copyText(projection, "bestFor", component, "bestFor");
+            copyText(projection, "authoringBoundary", component, "authoringBoundary");
+        }
+        return compact;
+    }
+
     private String governedDomainContext(
             AgenticAuthoringTurnStreamRequest request,
             AiPrincipalContext principalContext) {
@@ -640,15 +711,26 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 || principalContext == null
                 || !StringUtils.hasText(principalContext.tenantId())
                 || !StringUtils.hasText(principalContext.environment())
-                || !hasExplicitDomainCatalogScope(request.contextHints())) {
+                || hasExplicitDomainCatalogOptOut(request.contextHints())) {
             return "";
         }
         try {
-            return domainCatalogPromptContextService.buildPromptContext(
-                    request.userPrompt(),
-                    preIntentDomainCatalogContextHints(request.contextHints()),
+            String identities = domainCatalogPromptContextService.buildResourceIdentityContext(
                     principalContext.tenantId(),
-                    principalContext.environment());
+                    principalContext.environment(),
+                    30);
+            if (!hasExplicitDomainCatalogScope(request.contextHints())) {
+                return identities;
+            }
+            String detailed = domainCatalogPromptContextService.buildPromptContext(
+                        request.userPrompt(),
+                        preIntentDomainCatalogContextHints(request.contextHints()),
+                        principalContext.tenantId(),
+                        principalContext.environment());
+            if (!StringUtils.hasText(identities)) {
+                return detailed;
+            }
+            return StringUtils.hasText(detailed) ? identities + "\n\n" + detailed : identities;
         } catch (RuntimeException ex) {
             log.debug(
                     "[AgenticAuthoringPreIntentToolPlanning] Governed domain context unavailable; tenant={} environment={} failure={}",
@@ -666,10 +748,45 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     }
 
     private boolean hasExplicitDomainCatalogScope(JsonNode contextHints) {
+        if (contextHints == null || !contextHints.isObject()) {
+            return false;
+        }
+        JsonNode domainCatalog = contextHints.path("domainCatalog");
+        return hasAnyText(
+                        domainCatalog,
+                        "resourceKey",
+                        "contextKey",
+                        "query",
+                        "q",
+                        "nodeType",
+                        "itemType",
+                        "type")
+                || hasAnyText(
+                        contextHints,
+                        "domainResourceKey",
+                        "domainContextKey",
+                        "domainCatalogQuery",
+                        "retrievalQuery",
+                        "domainNodeType");
+    }
+
+    private boolean hasAnyText(JsonNode source, String... fields) {
+        if (source == null || !source.isObject() || fields == null) {
+            return false;
+        }
+        for (String field : fields) {
+            if (hasText(source, field)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasExplicitDomainCatalogOptOut(JsonNode contextHints) {
         return contextHints != null
-                && contextHints.isObject()
-                && (contextHints.path("domainCatalog").isObject()
-                || hasText(contextHints, "domainCatalogServiceKey"));
+                && contextHints.path("domainCatalog").isObject()
+                && contextHints.path("domainCatalog").has("enabled")
+                && !contextHints.path("domainCatalog").path("enabled").asBoolean(true);
     }
 
     private String compactUserPrompt(String value) {
@@ -903,12 +1020,12 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 .add("authoring_or_other");
         semanticIntentClass.put(
                 "description",
-                "Semantic routing decision authored by the model. Use governed_domain_discovery for questions asking which business subjects, themes, or domains can be used for possible tables, dashboards, forms, or pages; mentioning those future artifacts does not make the request concrete authoring.");
+                "Semantic routing decision authored by the model. Use platform_guidance for feasibility or capability questions even when a concrete artifact or domain subject is named; use governed_domain_discovery for questions asking which business subjects, themes, or domains can be used for possible tables, dashboards, forms, or pages. Neither form is concrete authoring without an explicit creation or modification request.");
         properties.putObject("assistantMessage").put("type", "string");
         properties.putObject("shouldRetrieveGovernedResources").put("type", "boolean");
         properties.putObject("requiresFullIntentResolution")
                 .put("type", "boolean")
-                .put("description", "True when resource discovery cannot preserve every requested constraint.");
+                .put("description", "True only for a user-explicit predicate, subset, field value, grouping, ordering, aggregation or layout constraint. Artifact kind and governed defaults are not constraints.");
         ObjectNode queryConstraints = properties.putObject("queryConstraints");
         queryConstraints.put("type", "object");
         ObjectNode queryConstraintProperties = queryConstraints.putObject("properties");
@@ -928,6 +1045,15 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         queryValueAlternatives.addObject().put("type", "number");
         queryValueAlternatives.addObject().put("type", "boolean");
         queryValueAlternatives.addObject().put("type", "null");
+        ObjectNode queryValueArray = queryValueAlternatives.addObject();
+        queryValueArray.put("type", "array");
+        queryValueArray.put("minItems", 1);
+        queryValueArray.put("maxItems", 100);
+        ObjectNode queryValueArrayItems = queryValueArray.putObject("items");
+        ArrayNode queryValueArrayItemTypes = queryValueArrayItems.putArray("anyOf");
+        queryValueArrayItemTypes.addObject().put("type", "string");
+        queryValueArrayItemTypes.addObject().put("type", "number");
+        queryValueArrayItemTypes.addObject().put("type", "boolean");
         queryFilter.putArray("required").add("concept").add("field").add("operator").add("value");
         queryFilter.put("additionalProperties", false);
         queryConstraints.putArray("required").add("filters");

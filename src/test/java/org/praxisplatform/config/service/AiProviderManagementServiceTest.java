@@ -116,6 +116,27 @@ class AiProviderManagementServiceTest {
     }
 
     @Test
+    void generateJsonPreservesInternalExecutionProfile() {
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        when(openai.generateJson(any(), any(), any()))
+                .thenReturn(new ObjectMapper().createObjectNode());
+
+        service.generateJson(
+                "prompt",
+                AiJsonSchema.ofSchema("{}"),
+                AiCallConfig.agenticAuthoringBuilder()
+                        .provider("openai")
+                        .model("gpt-5.6-luna")
+                        .build(),
+                "tenant",
+                "user",
+                "local");
+
+        verify(openai).generateJson(any(), any(), configCaptor.capture());
+        assertEquals(AiExecutionProfile.AGENTIC_AUTHORING, configCaptor.getValue().getExecutionProfile());
+    }
+
+    @Test
     void generateJsonDoesNotBlockOnStoredConfigLookupBeyondCallBudget() {
         ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
         when(openai.generateJson(any(), any(), any()))

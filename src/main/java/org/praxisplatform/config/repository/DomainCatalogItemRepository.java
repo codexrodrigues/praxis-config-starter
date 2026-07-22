@@ -35,4 +35,29 @@ public interface DomainCatalogItemRepository extends JpaRepository<DomainCatalog
             @Param("nodeType") String nodeType,
             @Param("query") String query,
             Pageable pageable);
+
+    /**
+     * Searches a set of already-resolved latest releases in one database round trip. The
+     * ingestion service owns which releases are current; this query only avoids issuing the
+     * same item lookup once per resource release when a service or federation is projected.
+     */
+    @Query("""
+        select i from DomainCatalogItem i
+        where i.release in :releases
+          and (:itemType is null or :itemType = '' or i.itemType = :itemType)
+          and (:contextKey is null or :contextKey = '' or i.contextKey = :contextKey)
+          and (:nodeType is null or :nodeType = '' or i.nodeType = :nodeType)
+          and (:query is null or :query = '' or lower(i.searchableText) like lower(concat('%', :query, '%')))
+        order by coalesce(i.release.generatedAt, i.release.createdAt) desc,
+                 i.release.createdAt desc,
+                 i.itemType asc,
+                 i.itemKey asc
+    """)
+    List<DomainCatalogItem> searchAcrossReleases(
+            @Param("releases") List<DomainCatalogRelease> releases,
+            @Param("itemType") String itemType,
+            @Param("contextKey") String contextKey,
+            @Param("nodeType") String nodeType,
+            @Param("query") String query,
+            Pageable pageable);
 }

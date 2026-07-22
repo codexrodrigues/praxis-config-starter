@@ -411,7 +411,7 @@
         "requiredColumnFields": ["nomeCompleto", "departamentoNome"],
         "uniqueColumnFields": true,
         "requiredInputValues": {
-          "/queryContext/filters/departamentoNome": "TI"
+          "/queryContext/filters/departamentoIdsIn": [16, 17]
         }
       }
     },

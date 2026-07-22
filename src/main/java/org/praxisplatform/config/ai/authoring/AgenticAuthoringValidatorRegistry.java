@@ -12,9 +12,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.praxisplatform.rules.jsonlogic.PraxisJsonLogicEngine;
+import org.praxisplatform.rules.jsonlogic.model.JsonLogicValidationOptions;
 import org.springframework.scheduling.support.CronExpression;
 
 public final class AgenticAuthoringValidatorRegistry {
+
+    private static final PraxisJsonLogicEngine JSON_LOGIC_ENGINE = new PraxisJsonLogicEngine();
+    private static final JsonLogicValidationOptions TABLE_JSON_LOGIC_VALIDATION_OPTIONS =
+            new JsonLogicValidationOptions(
+                    List.of("row", "computed"),
+                    "row",
+                    true,
+                    "2026-04-03T12:00:00.000Z",
+                    "America/Sao_Paulo",
+                    true);
 
     private static final Set<String> IMPLEMENTED_VALIDATORS = Set.of(
             "target-column-exists",
@@ -151,6 +163,7 @@ public final class AgenticAuthoringValidatorRegistry {
             "no-index-as-identity",
             "format-preset-supported",
             "conditional-style-valid",
+            "conditional-surface-accessible",
             "control-type-unique",
             "runtime-component-resolves",
             "field-metadata-compatible",
@@ -613,6 +626,10 @@ public final class AgenticAuthoringValidatorRegistry {
                 }
                 case "json-logic-valid", "logic-valid", "conditional-style-valid" ->
                         validateJsonLogicLikeInput(operationId, planOperation.path("input"), failures);
+                case "computed-expression-valid" ->
+                        validateCanonicalTableJsonLogicInput(operationId, planOperation.path("input"), failures);
+                case "conditional-surface-accessible" ->
+                        validateConditionalSurfaceAccessibility(operationId, planOperation.path("input"), config, failures, warnings);
                 case "computed-value-envelope-valid" -> {
                     // The closed input schema enforces expression/literal envelope shape; JsonLogic content is validated above.
                 }
@@ -1786,6 +1803,186 @@ public final class AgenticAuthoringValidatorRegistry {
         } else if (!(condition.isObject() || condition.isArray() || condition.isTextual())) {
             failures.add("validator json-logic-valid failed for " + operationId + ": expression has unsupported type");
         }
+    }
+
+    private void validateCanonicalTableJsonLogicInput(
+            String operationId,
+            JsonNode input,
+            List<String> failures) {
+        JsonNode expression = firstPresent(input, "condition", "expression", "logic");
+        if (expression.isMissingNode()) {
+            return;
+        }
+        var validation = JSON_LOGIC_ENGINE.validateResult(
+                expression,
+                TABLE_JSON_LOGIC_VALIDATION_OPTIONS);
+        validation.issues().forEach(issue -> failures.add(
+                "validator computed-expression-valid failed for " + operationId
+                        + ": " + issue.code()
+                        + " at " + issue.path()
+                        + (issue.operator() == null || issue.operator().isBlank()
+                                ? ""
+                                : " (operator " + issue.operator() + ")")
+                        + ": " + issue.message()));
+    }
+
+    private void validateConditionalSurfaceAccessibility(
+            String operationId,
+            JsonNode input,
+            JsonNode config,
+            List<String> failures,
+            List<String> warnings) {
+        List<JsonNode> candidates = new ArrayList<>();
+        if (input.path("style").isObject()) {
+            candidates.add(input.path("style"));
+        }
+        input.path("effects").forEach(effect -> {
+            if (effect.isObject()) {
+                candidates.add(effect);
+            }
+        });
+        JsonNode presetRef = input.path("surfacePresetRef");
+        if (presetRef.isObject()) {
+            validateConditionalSurfacePresetRef(operationId, presetRef, config, candidates, failures);
+        }
+        for (JsonNode candidate : candidates) {
+            String background = conditionalBackground(candidate);
+            String foreground = conditionalForeground(candidate);
+            if (background.isBlank()) {
+                continue;
+            }
+            int[] backgroundRgb = parseOpaqueHexColor(background);
+            if (backgroundRgb == null) {
+                warnings.add("validator conditional-surface-accessible unresolved for " + operationId
+                        + ": effective background requires runtime preview (" + background + ")");
+                continue;
+            }
+            if (foreground.isBlank()) {
+                continue;
+            }
+            int[] foregroundRgb = parseOpaqueHexColor(foreground);
+            if (foregroundRgb == null) {
+                warnings.add("validator conditional-surface-accessible unresolved for " + operationId
+                        + ": explicit foreground requires runtime preview (" + foreground + ")");
+                continue;
+            }
+            double ratio = contrastRatio(foregroundRgb, backgroundRgb);
+            if (ratio < 4.5d) {
+                failures.add("validator conditional-surface-accessible failed for " + operationId
+                        + ": explicit foreground " + foreground + " has contrast "
+                        + String.format(java.util.Locale.ROOT, "%.2f", ratio)
+                        + ":1 against " + background + "; minimum is 4.5:1");
+            }
+        }
+        if (!candidates.isEmpty()) {
+            String inlineStyleStatus = config.path("validationContext")
+                    .path("hostMaterialization")
+                    .path("inlineStyle")
+                    .asText("unknown");
+            if ("blocked".equals(inlineStyleStatus)) {
+                failures.add("validator conditional-surface-accessible failed for " + operationId
+                        + ": host-visual-materialization-unsupported (inline styles blocked by runtime policy)");
+            } else if (!"supported".equals(inlineStyleStatus)) {
+                failures.add("validator conditional-surface-accessible failed for " + operationId
+                        + ": host-visual-materialization-unverified (inline style capability is unknown)");
+            }
+        }
+    }
+
+    private void validateConditionalSurfacePresetRef(
+            String operationId,
+            JsonNode presetRef,
+            JsonNode config,
+            List<JsonNode> inlineCandidates,
+            List<String> failures) {
+        String presetId = presetRef.path("id").asText("");
+        String catalogVersion = presetRef.path("catalogVersion").asText("");
+        if (!Set.of("success", "warning", "danger", "highlight").contains(presetId)
+                || !"0.2.0".equals(catalogVersion)) {
+            failures.add("validator conditional-surface-accessible failed for " + operationId
+                    + ": semantic-preset-not-found");
+            return;
+        }
+        if (!inlineCandidates.isEmpty()) {
+            failures.add("validator conditional-surface-accessible failed for " + operationId
+                    + ": semantic-preset-inline-surface-conflict");
+            return;
+        }
+        JsonNode hostMaterialization = config.path("validationContext").path("hostMaterialization");
+        JsonNode catalog = hostMaterialization.path("surfacePresetCatalog");
+        String requiredScope = operationId.startsWith("column.") ? "cell" : "row";
+        if (!"supported".equals(hostMaterialization.path("governedClass").asText(""))
+                || !"praxis-table.conditional-surface".equals(catalog.path("catalogId").asText(""))
+                || !catalogVersion.equals(catalog.path("catalogVersion").asText(""))
+                || !Set.of("light", "dark").contains(catalog.path("themeMode").asText(""))
+                || !arrayContainsText(catalog.path("supportedScopes"), requiredScope)
+                || !arrayContainsText(catalog.path("supportedPresetIds"), presetId)) {
+            failures.add("validator conditional-surface-accessible failed for " + operationId
+                    + ": semantic-preset-installation-unverified");
+        }
+    }
+
+    private String conditionalBackground(JsonNode candidate) {
+        if (candidate.has("background") && candidate.path("background").isObject()) {
+            JsonNode background = candidate.path("background");
+            if (!background.path("gradient").asText("").isBlank()
+                    || background.path("alpha").asDouble(0d) != 0d) {
+                return !background.path("gradient").asText("").isBlank()
+                        ? background.path("gradient").asText("")
+                        : "alpha(" + background.path("color").asText("") + ")";
+            }
+            return background.path("color").asText("");
+        }
+        return firstText(candidate, "background-color", "backgroundColor", "background");
+    }
+
+    private String conditionalForeground(JsonNode candidate) {
+        if (candidate.path("estilo").isObject()) {
+            return candidate.path("estilo").path("color").asText("");
+        }
+        return candidate.path("color").asText("");
+    }
+
+    private String firstText(JsonNode node, String... fields) {
+        for (String field : fields) {
+            String value = node.path(field).asText("").trim();
+            if (!value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private int[] parseOpaqueHexColor(String value) {
+        if (value == null || !value.matches("^#[0-9a-fA-F]{6}$")) {
+            return null;
+        }
+        return new int[] {
+                Integer.parseInt(value.substring(1, 3), 16),
+                Integer.parseInt(value.substring(3, 5), 16),
+                Integer.parseInt(value.substring(5, 7), 16)
+        };
+    }
+
+    private double contrastRatio(int[] foreground, int[] background) {
+        double foregroundLuminance = relativeLuminance(foreground);
+        double backgroundLuminance = relativeLuminance(background);
+        double lighter = Math.max(foregroundLuminance, backgroundLuminance);
+        double darker = Math.min(foregroundLuminance, backgroundLuminance);
+        return (lighter + 0.05d) / (darker + 0.05d);
+    }
+
+    private double relativeLuminance(int[] color) {
+        double red = linearize(color[0] / 255d);
+        double green = linearize(color[1] / 255d);
+        double blue = linearize(color[2] / 255d);
+        return 0.2126d * red + 0.7152d * green + 0.0722d * blue;
+    }
+
+    private double linearize(double channel) {
+        return channel <= 0.04045d
+                ? channel / 12.92d
+                : Math.pow((channel + 0.055d) / 1.055d, 2.4d);
     }
 
     private void validateDynamicControlTypeUnique(

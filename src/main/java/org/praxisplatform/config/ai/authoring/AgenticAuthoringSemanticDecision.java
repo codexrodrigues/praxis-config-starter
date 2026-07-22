@@ -505,6 +505,9 @@ public record AgenticAuthoringSemanticDecision(
     private static boolean weakLexicalEvidence(
             AgenticAuthoringEvidenceBundle retrievedEvidence,
             AgenticAuthoringCandidate selectedCandidate) {
+        if (strongVerifiedSemanticEvidence(retrievedEvidence, selectedCandidate)) {
+            return false;
+        }
         if (selectedCandidateHasEvidence(selectedCandidate, "lexical-fallback")
                 || selectedCandidateHasEvidence(selectedCandidate, "weak-evidence")) {
             return true;
@@ -517,6 +520,18 @@ public record AgenticAuthoringSemanticDecision(
         }
         return retrievedEvidence.evidence().stream()
                 .anyMatch(evidence -> "weak_lexical_match".equals(safe(evidence.kind())));
+    }
+
+    private static boolean strongVerifiedSemanticEvidence(
+            AgenticAuthoringEvidenceBundle retrievedEvidence,
+            AgenticAuthoringCandidate selectedCandidate) {
+        boolean semanticRetrieval = selectedCandidateHasEvidence(selectedCandidate, "semantic-retrieval")
+                || retrievedEvidence != null
+                && "semantic_retrieval".equals(safe(retrievedEvidence.retrievalSource()));
+        return semanticRetrieval
+                && selectedCandidateHasEvidence(selectedCandidate, "llm-resource-focus")
+                && selectedCandidateHasEvidence(selectedCandidate, "schema-available")
+                && selectedCandidateHasEvidence(selectedCandidate, "stats-capabilities-verified");
     }
 
     private static double weakEvidenceConfidence(AgenticAuthoringEvidenceBundle retrievedEvidence) {

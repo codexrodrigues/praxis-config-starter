@@ -25,6 +25,7 @@ public class DomainKnowledgeChangeSetValidator {
     private static final Set<String> INITIAL_STATUSES = Set.of(STATUS_DRAFT, STATUS_PROPOSED);
     private static final Set<String> PROPOSED_OPERATION_TYPES = Set.of(
             "create_concept",
+            "approve_concept",
             "update_concept_summary",
             "set_concept_visibility",
             "add_alias",
@@ -35,6 +36,7 @@ public class DomainKnowledgeChangeSetValidator {
     );
     private static final Set<String> EXECUTABLE_OPERATION_TYPES = Set.of(
             "create_concept",
+            "approve_concept",
             "add_alias",
             "add_binding",
             "add_relationship",
@@ -278,6 +280,10 @@ public class DomainKnowledgeChangeSetValidator {
                     "semantic_owner_required", "create_concept operations require payload.semanticOwner", issues);
             requireEnum(payload.path("aiVisibility").asText(null), AI_VISIBILITIES,
                     pointer + "/aiVisibility", "unsupported_ai_visibility", issues);
+            validateClaimProvenance(
+                    authorType, payload.path("provenance"), pointer + "/provenance", claimIds, issues);
+        } else if ("approve_concept".equals(operationType)) {
+            requireTargetConceptKey(target, pointer, operationType, issues);
             validateClaimProvenance(
                     authorType, payload.path("provenance"), pointer + "/provenance", claimIds, issues);
         } else if ("add_alias".equals(operationType)) {

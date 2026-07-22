@@ -141,6 +141,80 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
     }
 
     @Test
+    void derivesComponentEditContextFromResolvedSemanticTargetWhenWidgetIsNotPinned() throws Exception {
+        JsonNode plan = objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-component-edit-plan.v1",
+                  "componentId": "praxis-table",
+                  "operations": [{
+                    "operationId": "filter.advanced.fields.add",
+                    "input": {
+                      "fields": ["estadoCivil"],
+                      "selected": true,
+                      "alwaysVisible": false
+                    }
+                  }]
+                }
+                """);
+        JsonNode compiled = objectMapper.readTree("""
+                {
+                  "manifestVersion": "2.0.0",
+                  "proposedConfig": {
+                    "resourcePath": "/api/human-resources/funcionarios",
+                    "tableId": "funcionarios-table",
+                    "config": {
+                      "title": "Funcionários",
+                      "behavior": {
+                        "filtering": {
+                          "enabled": true,
+                          "advancedFilters": {
+                            "enabled": true,
+                            "settings": {
+                              "alwaysVisibleFields": ["departamentoNome"],
+                              "selectedFieldIds": ["departamentoNome", "estadoCivil"]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                """);
+        when(componentEditPlanService.generateAndCompile(
+                any(), eq("praxis-table"), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringComponentEditPlanResult(
+                        true,
+                        List.of(),
+                        List.of("component-edit-plan-config-input-bound:config"),
+                        plan,
+                        compiled));
+
+        AgenticAuthoringPreviewResult result = previewService().preview(
+                tableFilterContinuationRequestWithoutPinnedContext(),
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.failureCodes())
+                .doesNotContain("intent-resolution-artifact-requires-ui-composition-plan");
+        assertThat(result.warnings()).contains(
+                "compiled-from-component-authoring-manifest",
+                "component-edit-context-derived-from-semantic-target");
+        JsonNode inputs = result.compiledFormPatch().at("/patch/page/widgets/0/definition/inputs");
+        assertThat(inputs.at(
+                "/config/behavior/filtering/advancedFilters/settings/alwaysVisibleFields/0").asText())
+                .isEqualTo("departamentoNome");
+        assertThat(inputs.at(
+                "/config/behavior/filtering/advancedFilters/settings/selectedFieldIds/1").asText())
+                .isEqualTo("estadoCivil");
+        assertThat(result.assistantMessage())
+                .containsOnlyOnce("demais configurações de filtro serão preservadas")
+                .doesNotContain("demais configurações atuais serão preservadas");
+        verify(planService, never()).generateMinimalFormPlan(any(), any(), any(), any());
+    }
+
+    @Test
     void failsClosedWhenContextResolverReportedAnError() throws Exception {
         AgenticAuthoringPreviewResult result = previewService().preview(
                 request(contextHints(true), "chartOne", "praxis-chart"),
@@ -317,5 +391,81 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
                 null,
                 List.of(),
                 contextHints);
+    }
+
+    private AgenticAuthoringPlanRequest tableFilterContinuationRequestWithoutPinnedContext() throws Exception {
+        JsonNode currentPage = objectMapper.readTree("""
+                {
+                  "version": "1.0.0",
+                  "widgets": [{
+                    "key": "funcionarios-table",
+                    "definition": {
+                      "id": "praxis-table",
+                      "inputs": {
+                        "resourcePath": "/api/human-resources/funcionarios",
+                        "tableId": "funcionarios-table",
+                        "config": {
+                          "title": "Funcionários",
+                          "behavior": {
+                            "filtering": {
+                              "advancedFilters": {
+                                "enabled": true,
+                                "settings": {
+                                  "alwaysVisibleFields": ["departamentoNome"],
+                                  "selectedFieldIds": ["departamentoNome"]
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }]
+                }
+                """);
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "table",
+                "filter.advanced.fields.add",
+                "semantic-manifest",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget(
+                        "funcionarios-table",
+                        "praxis-table",
+                        "/api/human-resources/funcionarios",
+                        "",
+                        "",
+                        "get"),
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("component-edit", "eligible", List.of()),
+                null,
+                "Vou adicionar Estado Civil aos filtros avançados. "
+                        + "As demais configurações de filtro serão preservadas.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null);
+        return new AgenticAuthoringPlanRequest(
+                "Agora adicione Estado Civil aos filtros avançados e mantenha Departamento visível.",
+                "openai",
+                "gpt-5.6-terra",
+                "secret",
+                currentPage,
+                intent,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                null);
     }
 }

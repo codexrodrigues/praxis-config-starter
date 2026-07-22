@@ -450,12 +450,15 @@ coordinates, `materializationKey` and `sourceHash`. It must not expose raw
 prompts, assistant drafts, authored conditions, parameters or materialized
 payload bodies.
 
-Domain Knowledge change sets support governed semantic creation, additive evidence and evidence
-reversal. `create_concept`, `add_alias`, `add_binding` and `add_relationship` materialize only
+Domain Knowledge change sets support governed semantic creation, review of projected concepts,
+additive evidence and evidence reversal. `create_concept`, `approve_concept`, `add_alias`,
+`add_binding` and `add_relationship` materialize only
 after validation and explicit approval. Their payloads carry claim-level provenance with a stable
 claim id, `authored|extracted|inferred` source class, source refs, derivation activity and agent.
 An LLM proposal cannot self-declare an authored claim: it must use `inferred` and identify its
 model and template hash. Apply owns the final `active` lifecycle and `approved` curation state.
+`approve_concept` is limited to an existing concept in the same tenant/environment and promotes a
+reviewed `draft`/`candidate` concept; it refuses `rejected`, `deprecated` or `retired` concepts.
 Every applied semantic claim creates a canonical evidence row keyed by its unique `claimId`, so
 provenance remains queryable even for aliases without a payload column. Concept claim evidence
 also feeds the governed Project Knowledge derived index; alias, binding and relationship evidence
@@ -472,7 +475,7 @@ URIs, patch hashes, prompts or chat history.
 
 Validation publishes operation capability diagnostics so reviewers can distinguish operation
 types proposed by the semantic model from operation types executable in the backend. This cut
-executes `create_concept`, `add_alias`, `add_binding`, `add_relationship`, `add_evidence` and
+executes `create_concept`, `approve_concept`, `add_alias`, `add_binding`, `add_relationship`, `add_evidence` and
 `revert_evidence`. `update_concept_summary` and `set_concept_visibility` remain proposed but
 non-executable. Destructive and generic replacement operations remain rejected.
 

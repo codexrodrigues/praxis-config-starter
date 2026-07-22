@@ -29,5 +29,11 @@ public class AiCallConfig {
     private String environment;
     private String ragReleaseId;
     @JsonIgnore
+    private AiExecutionProfile executionProfile;
+    @JsonIgnore
     private AiProviderInvocationTrace invocationTrace;
+
+    public static AiCallConfigBuilder agenticAuthoringBuilder() {
+        return builder().executionProfile(AiExecutionProfile.AGENTIC_AUTHORING);
+    }
 }

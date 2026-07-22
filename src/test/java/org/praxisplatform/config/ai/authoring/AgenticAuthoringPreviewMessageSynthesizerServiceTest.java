@@ -984,7 +984,10 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                         "POST",
                         0.94d,
                         "Fast semantic intent resolution selected a governed resource candidate",
-                        List.of("tool-search-api-resources", "schema-available")),
+                        List.of(
+                                "tool-search-api-resources",
+                                "schema-grounding-verified",
+                                "resource-capabilities-verified")),
                 List.of(),
                 new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
                 "visualizar contratos de fornecedores",

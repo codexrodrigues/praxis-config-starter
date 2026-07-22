@@ -186,7 +186,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                         directAnswerPrompt(
                                 request,
                                 evidenceBundle(request, "domain_api", componentCapabilities, projection)),
-                        AiCallConfig.builder()
+                        AiCallConfig.agenticAuthoringBuilder()
                                 .provider(request.provider())
                                 .model(request.model())
                                 .apiKey(request.apiKey())
@@ -228,7 +228,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                 }
                 String generated = providerManagementService.generateText(
                         directAnswerPrompt(request, evidenceBundle(request, "auto", componentCapabilities, null)),
-                        AiCallConfig.builder()
+                        AiCallConfig.agenticAuthoringBuilder()
                                 .provider(request.provider())
                                 .model(request.model())
                                 .apiKey(request.apiKey())
@@ -255,7 +255,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                                 directAnswerPrompt(
                                         request,
                                         evidenceBundle(request, category, componentCapabilities, projection)),
-                                AiCallConfig.builder()
+                                AiCallConfig.agenticAuthoringBuilder()
                                         .provider(request.provider())
                                         .model(request.model())
                                         .apiKey(request.apiKey())
@@ -287,7 +287,7 @@ public class AgenticAuthoringConsultativeAnswerService {
             }
             String generated = providerManagementService.generateText(
                     answerPrompt(request, evidenceBundle(request, "auto", componentCapabilities, null)),
-                    AiCallConfig.builder()
+                    AiCallConfig.agenticAuthoringBuilder()
                             .provider(request.provider())
                             .model(request.model())
                             .apiKey(request.apiKey())
@@ -317,7 +317,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                             answerPrompt(
                                     request,
                                     evidenceBundle(request, category, componentCapabilities, projection)),
-                            AiCallConfig.builder()
+                            AiCallConfig.agenticAuthoringBuilder()
                                     .provider(request.provider())
                                     .model(request.model())
                                     .apiKey(request.apiKey())
@@ -419,7 +419,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                     User request: %s
                     Governed domain entries: %s
                     """.formatted(request.userPrompt(), entries.toString()),
-                    AiCallConfig.builder()
+                    AiCallConfig.agenticAuthoringBuilder()
                             .provider(request.provider())
                             .model(request.model())
                             .apiKey(request.apiKey())
@@ -2407,7 +2407,7 @@ public class AgenticAuthoringConsultativeAnswerService {
         try {
             String generated = providerManagementService.generateText(
                     runtimeRelatedSurfaceIntentPrompt(request, runtimeContext),
-                    AiCallConfig.builder()
+                    AiCallConfig.agenticAuthoringBuilder()
                             .provider(request.provider())
                             .model(request.model())
                             .apiKey(request.apiKey())
@@ -2898,7 +2898,7 @@ public class AgenticAuthoringConsultativeAnswerService {
         try {
             String generated = providerManagementService.generateText(
                     runtimeRelatedSurfaceTargetResolutionPrompt(request, runtimeContext, resolution, initialIntent),
-                    AiCallConfig.builder()
+                    AiCallConfig.agenticAuthoringBuilder()
                             .temperature(0.0d)
                             .maxTokens(160)
                             .build(),

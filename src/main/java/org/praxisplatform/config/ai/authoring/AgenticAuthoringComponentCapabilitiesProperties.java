@@ -7,7 +7,7 @@ public class AgenticAuthoringComponentCapabilitiesProperties {
 
     private static final long PRELOAD_TIMEOUT_MARGIN_MS = 1_000L;
 
-    private long cacheTtlMs = 60_000L;
+    private long cacheTtlMs = 600_000L;
     private long registryLoadTimeoutMs = 30_000L;
     private long degradedRetryMs = 5_000L;
     private long preloadTimeoutMs = 35_000L;

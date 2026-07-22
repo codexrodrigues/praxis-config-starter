@@ -514,7 +514,7 @@ class AgenticAuthoringLlmIntentMatrixShadowIntegrationTest {
 
     private SpringAiOpenAiService createOpenAiProvider() {
         String apiKey = requireEnv("PRAXIS_AI_OPENAI_API_KEY");
-        SpringAiOpenAiService service = new SpringAiOpenAiService(objectMapper);
+        SpringAiOpenAiService service = new SpringAiOpenAiService(objectMapper, new org.praxisplatform.config.service.OpenAiHostedSkillProperties());
         ReflectionTestUtils.setField(service, "apiKey", apiKey);
         ReflectionTestUtils.setField(service, "baseUrl", envOrDefault("PRAXIS_AI_OPENAI_BASE_URL", "https://api.openai.com"));
         ReflectionTestUtils.setField(service, "model", envOrDefault("PRAXIS_AI_OPENAI_MODEL", "gpt-4o-mini"));

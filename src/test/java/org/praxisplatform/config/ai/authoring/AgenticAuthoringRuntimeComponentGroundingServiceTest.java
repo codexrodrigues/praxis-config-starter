@@ -72,7 +72,21 @@ class AgenticAuthoringRuntimeComponentGroundingServiceTest {
                           },
                           "affordances": {
                             "activeSurfaceRefs": ["missionTeam"],
-                            "activeActionRefs": ["table.selection", "dynamicPage.surface.open"]
+                            "activeActionRefs": ["table.selection", "dynamicPage.surface.open"],
+                            "visualMaterialization": {
+                              "inlineStyle": "blocked",
+                              "governedClass": "supported",
+                              "constraintRefs": ["csp.strict-style-src", "forged-policy"],
+                              "surfacePresetCatalog": {
+                                "catalogId": "praxis-table.conditional-surface",
+                                "catalogVersion": "0.2.0",
+                                "themeRef": "material-system",
+                                "themeMode": "dark",
+                                "supportedScopes": ["row", "cell", "toolbar"],
+                                "supportedPresetIds": ["warning", "danger", "forged"]
+                              },
+                              "nonce": "must-not-survive"
+                            }
                           },
                           "claims": [
                             {"kind": "surface", "ref": "missionTeam", "observed": true},
@@ -116,6 +130,9 @@ class AgenticAuthoringRuntimeComponentGroundingServiceTest {
                 .isEqualTo("runtime-surface:missionSummary:praxis-table:missionSummary:/api/missions");
         org.assertj.core.api.Assertions.assertThat(context.path("allowedOperations").toString())
                 .contains("table.selection", "dynamicPage.surface.open");
+        org.assertj.core.api.Assertions.assertThat(component.path("affordances").path("visualMaterialization").toString())
+                .contains("blocked", "supported", "csp.strict-style-src", "0.2.0", "warning", "danger")
+                .doesNotContain("forged-policy", "toolbar", "forged", "nonce", "must-not-survive");
         org.assertj.core.api.Assertions.assertThat(context.toString())
                 .doesNotContain("sampleRows")
                 .doesNotContain("rawRows")

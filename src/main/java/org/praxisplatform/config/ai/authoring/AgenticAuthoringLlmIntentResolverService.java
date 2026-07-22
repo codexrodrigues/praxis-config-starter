@@ -40,12 +40,15 @@ public class AgenticAuthoringLlmIntentResolverService {
     private static final int MAX_INTENT_RESOLUTION_TOKENS = 4096;
     private static final int DEFAULT_FAST_INTENT_TIMEOUT_SECONDS = 12;
     private static final int DEFAULT_FULL_INTENT_TIMEOUT_SECONDS = 30;
+    private static final int MAX_LIVE_OPTION_REFINEMENT_TIMEOUT_SECONDS = 24;
+    private static final String DEFAULT_LIVE_OPTION_REFINEMENT_OPENAI_MODEL = "gpt-5.6-luna";
 
     private final AiProviderManagementService providerManagementService;
     private final ObjectMapper objectMapper;
     private final DomainCatalogPromptContextService domainCatalogPromptContextService;
     private final int fastIntentTimeoutSeconds;
     private final int fullIntentTimeoutSeconds;
+    private final String liveOptionRefinementOpenAiModel;
 
     public AgenticAuthoringLlmIntentResolverService(
             AiProviderManagementService providerManagementService,
@@ -62,7 +65,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 objectMapper,
                 domainCatalogPromptContextService,
                 DEFAULT_FAST_INTENT_TIMEOUT_SECONDS,
-                DEFAULT_FULL_INTENT_TIMEOUT_SECONDS);
+                DEFAULT_FULL_INTENT_TIMEOUT_SECONDS,
+                DEFAULT_LIVE_OPTION_REFINEMENT_OPENAI_MODEL);
     }
 
     public AgenticAuthoringLlmIntentResolverService(
@@ -71,6 +75,22 @@ public class AgenticAuthoringLlmIntentResolverService {
             DomainCatalogPromptContextService domainCatalogPromptContextService,
             int fastIntentTimeoutSeconds,
             int fullIntentTimeoutSeconds) {
+        this(
+                providerManagementService,
+                objectMapper,
+                domainCatalogPromptContextService,
+                fastIntentTimeoutSeconds,
+                fullIntentTimeoutSeconds,
+                DEFAULT_LIVE_OPTION_REFINEMENT_OPENAI_MODEL);
+    }
+
+    public AgenticAuthoringLlmIntentResolverService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            DomainCatalogPromptContextService domainCatalogPromptContextService,
+            int fastIntentTimeoutSeconds,
+            int fullIntentTimeoutSeconds,
+            String liveOptionRefinementOpenAiModel) {
         this.providerManagementService = Objects.requireNonNull(providerManagementService, "providerManagementService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.domainCatalogPromptContextService = domainCatalogPromptContextService;
@@ -80,6 +100,9 @@ public class AgenticAuthoringLlmIntentResolverService {
         this.fullIntentTimeoutSeconds = positiveOrDefault(
                 fullIntentTimeoutSeconds,
                 DEFAULT_FULL_INTENT_TIMEOUT_SECONDS);
+        this.liveOptionRefinementOpenAiModel = StringUtils.hasText(liveOptionRefinementOpenAiModel)
+                ? liveOptionRefinementOpenAiModel.trim()
+                : DEFAULT_LIVE_OPTION_REFINEMENT_OPENAI_MODEL;
     }
 
     public Optional<AgenticAuthoringLlmIntentResolution> resolve(
@@ -98,11 +121,17 @@ public class AgenticAuthoringLlmIntentResolverService {
         List<AgenticAuthoringCandidate> usableCandidates =
                 candidateOptions == null ? List.of() : candidateOptions;
         List<AiProviderInvocationTelemetry> providerInvocations = new ArrayList<>();
-        String governedDomainContext = governedDomainContext(
-                request,
-                effectivePrompt,
-                tenantId,
-                environment);
+        boolean liveOptionRefinement = hasLiveOptionRefinementContext(request);
+        // Resource, field and current candidates are already governed before this terminal
+        // classifier runs. Rebuilding the broader domain/RAG prompt here is both redundant and
+        // expensive, and the focused live-option prompt deliberately does not consume it.
+        String governedDomainContext = liveOptionRefinement
+                ? ""
+                : governedDomainContext(
+                        request,
+                        effectivePrompt,
+                        tenantId,
+                        environment);
         try {
             Optional<AgenticAuthoringLlmIntentResolution> platformGuidanceConfirmation =
                     compactPlatformGuidanceConfirmation(
@@ -170,10 +199,74 @@ public class AgenticAuthoringLlmIntentResolverService {
                     userId,
                     environment,
                     providerInvocations);
-            return toResolution(result).map(value -> withProviderInvocations(value, providerInvocations));
+            Optional<AgenticAuthoringLlmIntentResolution> fullResolution = toResolution(result);
+            if (fullResolution.isPresent() && incompleteResolvedVisualization(fullResolution.get())) {
+                JsonNode repairedResult = invokeJson(
+                        "intent_full_visualization_repair",
+                        fullVisualizationRepairPrompt(promptInput.prompt()),
+                        AiJsonSchema.ofSchema(schema()),
+                        AiCallConfig.builder()
+                                .provider(request.provider())
+                                .model(request.model())
+                                .apiKey(request.apiKey())
+                                .temperature(0.0d)
+                                .maxTokens(MAX_INTENT_RESOLUTION_TOKENS)
+                                .timeoutSeconds(fullIntentTimeoutSeconds)
+                                .build(),
+                        tenantId,
+                        userId,
+                        environment,
+                        providerInvocations);
+                Optional<AgenticAuthoringLlmIntentResolution> repaired = toResolution(repairedResult);
+                if (repaired.isPresent() && !incompleteResolvedVisualization(repaired.get())) {
+                    fullResolution = repaired.map(value -> withWarning(
+                            value,
+                            "llm-full-visualization-repair-used"));
+                }
+            }
+            return fullResolution.map(value -> withProviderInvocations(value, providerInvocations));
         } catch (RuntimeException ex) {
             return Optional.of(withProviderInvocations(failedResolution(ex, request), providerInvocations));
         }
+    }
+
+    private boolean incompleteResolvedVisualization(AgenticAuthoringLlmIntentResolution resolution) {
+        if (resolution == null
+                || !resolution.resolved()
+                || !"create".equals(valueOrDefault(resolution.operationKind(), ""))
+                || !List.of("chart", "dashboard").contains(valueOrDefault(resolution.artifactKind(), ""))) {
+            return false;
+        }
+        AgenticAuthoringVisualizationDecision decision = resolution.visualizationDecision();
+        return decision == null
+                || !StringUtils.hasText(decision.primaryComponent())
+                || decision.axes() == null
+                || decision.axes().isEmpty();
+    }
+
+    private String fullVisualizationRepairPrompt(String originalPrompt) {
+        return originalPrompt + """
+
+                The previous full resolution declared a chart or dashboard but omitted a complete visualizationDecision.
+                Repair only that semantic omission. Return a complete intent object, not a patch. Preserve the selected
+                governed resource, user objective and constraints. visualizationDecision must use a governed primary
+                component and include at least one business-relevant grouping/time axis with metric semantics. When the
+                selected candidate publishes analyticsFields, copy field and allowed aggregation names exactly from that
+                governed catalog; do not replace them with conceptual aliases. Only when analyticsFields is absent may a
+                conceptual field supported by other domain/resource evidence be proposed for later validation. If no supported analytical axis
+                can be proposed, set resolved=false rather than returning a resolved analytical artifact with empty axes.
+                """;
+    }
+
+    private String liveOptionRefinementModel(
+            AgenticAuthoringIntentResolutionRequest request,
+            boolean liveOptionRefinement) {
+        if (!liveOptionRefinement
+                || request == null
+                || !"openai".equalsIgnoreCase(valueOrDefault(request.provider(), ""))) {
+            return request == null ? null : request.model();
+        }
+        return liveOptionRefinementOpenAiModel;
     }
 
     private JsonNode invokeJson(
@@ -328,25 +421,44 @@ public class AgenticAuthoringLlmIntentResolverService {
         if (!shouldTryFastIntentResolution(request, effectivePrompt, target, fastCandidates, componentCapabilities)) {
             return Optional.empty();
         }
+        boolean liveOptionRefinement = hasLiveOptionRefinementContext(request);
+        boolean focusedResourceAuthoring = shouldUseFocusedResourceAuthoringPrompt(
+                request,
+                fastCandidates);
         try {
             JsonNode result = invokeJson(
                     "intent_fast",
-                    fastIntentPrompt(
-                            request,
-                            effectivePrompt,
-                            currentPageSummary,
-                            target,
-                            fastCandidates,
-                            componentCapabilities,
-                            governedDomainContext),
+                    liveOptionRefinement
+                            ? liveOptionRefinementPrompt(request, effectivePrompt, fastCandidates)
+                            : focusedResourceAuthoring
+                                    ? focusedResourceAuthoringPrompt(
+                                            request,
+                                            effectivePrompt,
+                                            currentPageSummary,
+                                            fastCandidates,
+                                            componentCapabilities)
+                            : fastIntentPrompt(
+                                    request,
+                                    effectivePrompt,
+                                    currentPageSummary,
+                                    target,
+                                    fastCandidates,
+                                    componentCapabilities,
+                                    governedDomainContext),
                     AiJsonSchema.ofSchema(schema()),
                     AiCallConfig.builder()
                             .provider(request.provider())
-                            .model(request.model())
+                            .model(liveOptionRefinementModel(request, liveOptionRefinement))
                             .apiKey(request.apiKey())
                             .temperature(0.0d)
                             .maxTokens(MAX_FAST_INTENT_RESOLUTION_TOKENS)
-                            .timeoutSeconds(fastIntentTimeoutSeconds)
+                            .timeoutSeconds(liveOptionRefinement || focusedResourceAuthoring
+                                    ? Math.max(
+                                            fastIntentTimeoutSeconds,
+                                            Math.min(
+                                                    fullIntentTimeoutSeconds,
+                                                    MAX_LIVE_OPTION_REFINEMENT_TIMEOUT_SECONDS))
+                                    : fastIntentTimeoutSeconds)
                             .build(),
                     tenantId,
                     userId,
@@ -354,6 +466,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                     providerInvocations);
             Optional<AgenticAuthoringLlmIntentResolution> resolution =
                     toResolution(result).map(value -> withFastCandidateResourceWhenUnambiguous(value, fastCandidates));
+            if ((liveOptionRefinement || focusedResourceAuthoring)
+                    && resolution.isPresent()
+                    && !resolution.get().resolved()) {
+                return resolution.map(this::withFastIntentWarning);
+            }
             if (resolution.isPresent() && fastIntentResolutionComplete(
                     resolution.get(),
                     target,
@@ -414,6 +531,180 @@ public class AgenticAuthoringLlmIntentResolverService {
                     safeProviderFailureSummary(rootCause(ex)));
         }
         return Optional.empty();
+    }
+
+    private boolean shouldUseFocusedResourceAuthoringPrompt(
+            AgenticAuthoringIntentResolutionRequest request,
+            List<AgenticAuthoringCandidate> candidateOptions) {
+        if (request == null
+                || request.activeSemanticDecision() != null
+                || request.contextHints() == null
+                || candidateOptions == null
+                || candidateOptions.isEmpty()) {
+            return false;
+        }
+        JsonNode resourceDiscovery = request.contextHints().path("resourceDiscovery");
+        JsonNode semanticOrientation = request.contextHints().path("preIntentSemanticOrientation");
+        JsonNode filters = semanticOrientation.path("queryConstraints").path("filters");
+        return resourceDiscovery.isObject()
+                && "table".equals(resourceDiscovery.path("artifactKind").asText(""))
+                && semanticOrientation.isObject()
+                && "authoring_or_other".equals(semanticOrientation.path("semanticIntentClass").asText(""))
+                && semanticOrientation.path("requiresFullIntentResolution").asBoolean(false)
+                && filters.isArray()
+                && !filters.isEmpty();
+    }
+
+    private String focusedResourceAuthoringPrompt(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            JsonNode currentPageSummary,
+            List<AgenticAuthoringCandidate> candidateOptions,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        ObjectNode context = objectMapper.createObjectNode();
+        context.put("schemaVersion", "praxis-agentic-authoring-focused-resource-context.v1");
+        context.put("userPrompt", valueOrDefault(effectivePrompt, request.userPrompt()));
+        JsonNode orientation = request.contextHints().path("preIntentSemanticOrientation");
+        context.set("semanticOrientation", orientation.deepCopy());
+        JsonNode resourceDiscovery = request.contextHints().path("resourceDiscovery");
+        ObjectNode discovery = context.putObject("resourceDiscovery");
+        discovery.put("artifactKind", resourceDiscovery.path("artifactKind").asText("table"));
+        if (resourceDiscovery.path("resourceSearchFocus").isObject()) {
+            discovery.set("resourceSearchFocus", resourceDiscovery.path("resourceSearchFocus").deepCopy());
+        }
+        ArrayNode resources = discovery.putArray("candidates");
+        for (AgenticAuthoringCandidate candidate : candidateOptions) {
+            if (candidate == null || !StringUtils.hasText(candidate.resourcePath())) {
+                continue;
+            }
+            ObjectNode item = resources.addObject();
+            item.put("resourcePath", candidate.resourcePath());
+            item.put("operation", valueOrDefault(candidate.operation(), ""));
+            item.put("filterPath", valueOrDefault(candidate.submitUrl(), ""));
+            item.put("filterOperation", valueOrDefault(candidate.submitMethod(), ""));
+            item.put("reason", boundedText(candidate.reason(), 320));
+            ArrayNode evidence = item.putArray("evidence");
+            for (String value : candidate.evidence() == null ? List.<String>of() : candidate.evidence()) {
+                if (StringUtils.hasText(value)) {
+                    evidence.add(value);
+                }
+            }
+        }
+        ArrayNode components = context.putArray("authorableComponents");
+        if (componentCapabilities != null && componentCapabilities.catalogs() != null) {
+            componentCapabilities.catalogs().stream()
+                    .filter(Objects::nonNull)
+                    .map(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
+                    .filter(StringUtils::hasText)
+                    .filter("praxis-table"::equals)
+                    .forEach(components::add);
+        }
+        if (currentPageSummary != null && currentPageSummary.isObject()) {
+            ObjectNode page = context.putObject("currentPage");
+            page.put("componentCount", currentPageSummary.path("componentCount").asInt(0));
+            page.put("isEmpty", currentPageSummary.path("componentCount").asInt(0) == 0);
+        }
+        context.put("responseLocale", nullableText(request.contextHints(), "responseLocale"));
+        return """
+                You are resolving one focused, LLM-planned Praxis table-authoring request.
+                Return only one JSON object matching the supplied schema.
+
+                semanticOrientation is prior AI-authored semantic evidence, not a keyword heuristic. Preserve every
+                predicate in semanticOrientation.queryConstraints and preserve concept, operator and value independently.
+                Do not drop a predicate after selecting the resource. Textual business categories remain semantic values
+                at this stage; later governed field and live option-value tools will resolve canonical fields and current IDs.
+
+                Select selectedResourcePath only from resourceDiscovery.candidates. Select the resource whose records the
+                table must display. If a related category or master-data concept constrains those records, keep it as a
+                filter and do not replace the displayed entity with the category resource. Prefer the governed read/filter
+                operation for visualization, never an unrelated create/POST operation.
+
+                For the resolved request use operationKind "create", artifactKind "table", changeKind "create_artifact",
+                semanticIntentClass "component_authoring", requiresGovernedAuthoring=false and followUpKind "none".
+                Set visualizationDecision to a single table using primaryComponent "praxis-table", no axes, and
+                includeFilters=true. Do not invent fields, labels, option IDs, components or resources. If the governed
+                candidates do not establish the displayed entity unambiguously, return resolved=false with a natural,
+                business-friendly clarification and structured quick replies.
+
+                Answer in responseLocale when present; otherwise use the user's language.
+                Focused context JSON: %s
+                """.formatted(context.toString());
+    }
+
+    private String liveOptionRefinementPrompt(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            List<AgenticAuthoringCandidate> candidateOptions) {
+        ObjectNode context = objectMapper.createObjectNode();
+        context.put("schemaVersion", "praxis-agentic-authoring-live-option-refinement-context.v1");
+        context.put("userPrompt", valueOrDefault(effectivePrompt, request.userPrompt()));
+        context.set("activeSemanticDecision", request.activeSemanticDecision() == null
+                ? objectMapper.nullNode()
+                : objectMapper.valueToTree(request.activeSemanticDecision()));
+        ArrayNode resources = context.putArray("candidateResources");
+        for (AgenticAuthoringCandidate candidate : candidateOptions == null
+                ? List.<AgenticAuthoringCandidate>of()
+                : candidateOptions) {
+            if (candidate == null || !StringUtils.hasText(candidate.resourcePath())) {
+                continue;
+            }
+            ObjectNode item = resources.addObject();
+            item.put("resourcePath", candidate.resourcePath());
+            item.put("operation", valueOrDefault(candidate.operation(), ""));
+            item.put("reason", boundedText(candidate.reason(), 320));
+        }
+        JsonNode valueGrounding = request.contextHints() == null
+                ? null
+                : request.contextHints().path("liveOptionValueGrounding");
+        if (valueGrounding != null && valueGrounding.isObject()) {
+            context.set("liveOptionValueGrounding", valueGrounding.deepCopy());
+        } else {
+            JsonNode fieldGrounding = request.contextHints() == null
+                    ? null
+                    : request.contextHints().path("liveOptionFieldGrounding");
+            if (fieldGrounding != null && fieldGrounding.isObject()) {
+                context.set("liveOptionFieldGrounding", fieldGrounding.deepCopy());
+            }
+        }
+        context.put("responseLocale", request.contextHints() == null
+                ? ""
+                : nullableText(request.contextHints(), "responseLocale"));
+        return """
+                You are performing one focused semantic refinement of an existing governed Praxis authoring decision.
+                Return only one JSON object matching the supplied schema.
+
+                The activeSemanticDecision is canonical lineage. Preserve its operation, artifact, selected resource,
+                visualization decision and every unrelated predicate that already carries governed field evidence.
+                selectedResourcePath must remain one of candidateResources. Never invent a resource, field, label or
+                option ID. An ungrounded predicate may be consolidated into the canonical live-option predicate only
+                when its semantic value is represented by current candidates of that same option source; otherwise ask
+                a clarification instead of preserving an invented field.
+
+                When liveOptionFieldGrounding is present, reason from the business meaning of originalPredicate and the
+                governed candidate descriptions, never from keyword overlap. If exactly one field is semantically
+                appropriate, replace only that predicate field with canonicalFilterField and preserve its semantic text
+                value, which may be one string or a list of strings. If materially ambiguous, return resolved=false with
+                a natural clarification and do not materialize. This stage confirms a local table filter field; it does
+                not select option values yet and it is not shared-rule authoring. Keep requiresGovernedAuthoring=false.
+
+                When liveOptionValueGrounding is present, reason semantically over all current candidates for the already
+                selected canonical field; the field-selection stage is already complete and must not be reopened. Reason
+                over every requested business category and semantic text predicate in the active decision and user prompt,
+                not only the first predicate. If the field is multi-valued, select the union of every current candidate
+                that clearly instantiates any requested category. Several matching values across organizations are
+                expected and are not, by themselves, ambiguity. When an additional ungrounded text predicate is
+                represented by candidates of this same canonical option source, include those candidate IDs in the union
+                and remove the duplicate predicate instead of inventing or preserving another field. Preserve an
+                independent predicate only when it already has governed field evidence; otherwise clarify. If membership
+                is sufficiently clear, replace the canonical predicate with canonicalFilterField, operator "in", and an
+                array containing only candidate IDs. Do not emit labels or textual contains filters, and do not ask for
+                confirmation merely because more than one candidate clearly matches. If membership itself is materially
+                ambiguous, return resolved=false with a business-friendly clarification and structured quick replies.
+                Preserve every other governed part of the active decision.
+
+                Answer in responseLocale when present; otherwise use the user's language.
+                Context JSON: %s
+                """.formatted(context.toString());
     }
 
     private boolean shouldRepairFastVisualization(
@@ -845,13 +1136,22 @@ public class AgenticAuthoringLlmIntentResolverService {
 
                 Decide from the user's meaning, never from keywords, regexes or capability order.
                 The selected target, active decision and conversation are governed evidence, not permission.
+                The current userPrompt is authoritative for the objective of this turn. A prior objective that ended
+                in an error is historical evidence only: do not continue its changeKind when the current request
+                describes a different semantic operation. Resume the prior objective only for an explicit retry action
+                or when the current request unambiguously refers to that same change. Otherwise set
+                followUpKind="new_instruction" and resolve the current request independently while preserving only
+                unrelated, successfully materialized component state.
                 Set matchesSelectedComponentScope=true only when the new request semantically edits the selected
                 component. A request for a new artifact, a different component, a reusable business rule, general
                 guidance or an unrelated task must set it to false so the complete resolver can evaluate it.
                 When it matches, choose changeKind only by comparing the semantic effects and constraints of the
                 governed capabilities. Adding a new schema-backed item is different from formatting, moving,
                 renaming, hiding or changing an existing item. Preserve the current component unless the user asks
-                for a different artifact. Use requiresGovernedAuthoring=true for reusable business decisions and
+                for a different artifact. A row-dependent visual outcome governed by a condition must select the
+                capability that adds or changes a conditional renderer; a base renderer capability applies one
+                presentation uniformly and is not semantically equivalent.
+                Use requiresGovernedAuthoring=true for reusable business decisions and
                 false for local component presentation/configuration. Do not invent a resource, capability or field.
                 Keep assistantMessage short and natural in the user's language. If the scope does not match, use
                 changeKind="unknown", operationKind="unknown", artifactKind="unknown" and an empty message.
@@ -998,8 +1298,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                 || forceFullIntentResolution(request)) {
             return false;
         }
+        boolean liveOptionRefinement = hasLiveOptionRefinementContext(request);
         boolean targetedComponentEdit = hasTargetedComponentCapabilities(target, componentCapabilities);
         if (!targetedComponentEdit
+                && !liveOptionRefinement
                 && (request.activeSemanticDecision() != null
                 || hasConversationHistoryBeyondCurrentPrompt(request, effectivePrompt))) {
             return false;
@@ -1021,6 +1323,14 @@ public class AgenticAuthoringLlmIntentResolverService {
                             || hasEvidence(candidate, "domain-catalog-context"));
         }
         return true;
+    }
+
+    private boolean hasLiveOptionRefinementContext(AgenticAuthoringIntentResolutionRequest request) {
+        if (request == null || request.contextHints() == null) {
+            return false;
+        }
+        return request.contextHints().path("liveOptionFieldGrounding").isObject()
+                || request.contextHints().path("liveOptionValueGrounding").isObject();
     }
 
     private boolean isEmpty(List<?> items) {
@@ -1306,6 +1616,18 @@ public class AgenticAuthoringLlmIntentResolverService {
                         resourceDiscovery.path("resourceSearchFocus").deepCopy());
             }
         }
+        JsonNode liveOptionFieldGrounding = request.contextHints() == null
+                ? null
+                : request.contextHints().path("liveOptionFieldGrounding");
+        if (liveOptionFieldGrounding != null && liveOptionFieldGrounding.isObject()) {
+            context.set("liveOptionFieldGrounding", liveOptionFieldGrounding.deepCopy());
+        }
+        JsonNode liveOptionValueGrounding = request.contextHints() == null
+                ? null
+                : request.contextHints().path("liveOptionValueGrounding");
+        if (liveOptionValueGrounding != null && liveOptionValueGrounding.isObject()) {
+            context.set("liveOptionValueGrounding", liveOptionValueGrounding.deepCopy());
+        }
         if (target != null) {
             ObjectNode targetNode = context.putObject("target");
             targetNode.put("widgetKey", valueOrDefault(target.widgetKey(), ""));
@@ -1341,6 +1663,9 @@ public class AgenticAuthoringLlmIntentResolverService {
             }
         }
         ArrayNode resources = context.putArray("candidateResources");
+        JsonNode discoveredCandidates = resourceDiscovery == null
+                ? objectMapper.createArrayNode()
+                : resourceDiscovery.path("candidates");
         for (AgenticAuthoringCandidate candidate : candidateOptions == null ? List.<AgenticAuthoringCandidate>of() : candidateOptions) {
             ObjectNode item = resources.addObject();
             item.put("resourcePath", valueOrDefault(candidate.resourcePath(), ""));
@@ -1351,6 +1676,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                 if (StringUtils.hasText(value)) {
                     evidence.add(value);
                 }
+            }
+            JsonNode analyticsFields = analyticsFieldsForCandidate(discoveredCandidates, candidate.resourcePath());
+            if (analyticsFields.isArray() && !analyticsFields.isEmpty()) {
+                item.set("analyticsFields", analyticsFields.deepCopy());
             }
             AgenticAuthoringEvidenceBundle evidenceBundle = candidate.evidenceBundle();
             if (evidenceBundle != null) {
@@ -1421,8 +1750,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Treat activeSemanticDecision and recentConversation as prior governed lineage for the current refinement, not as permission to ignore the new user request.
                 Select selectedResourcePath only from candidateResources.
                 When exactly one candidateResource is supplied and it matches the requested source, copy its resourcePath into selectedResourcePath.
+                When the requested output displays records of one business entity constrained by a related category or
+                master-data dimension, select the displayed record entity as selectedResourcePath. Keep the related
+                category as a filter concept; never select the category resource merely because it ranks slightly higher.
                 Select visualizationDecision.primaryComponent only from authorableComponents.
-                For an edit to an existing selected component, choose changeKind from its governed capability candidates. Compare their semantic examples before deciding; candidate order is grounding only. Do not use an operation that only changes a property of an existing target when the requested outcome introduces a new schema-backed item.
+                For an edit to an existing selected component, choose changeKind from its governed capability candidates. Compare their semantic examples before deciding; candidate order is grounding only. Do not use an operation that only changes a property of an existing target when the requested outcome introduces a new schema-backed item. A row-dependent visual outcome governed by a condition must use a conditional-renderer capability; a base renderer applies uniformly and is not semantically equivalent.
                 For a single requested chart, use artifactKind "chart", operationKind "create", layoutKind "single_chart", primaryComponent "praxis-chart", includeSummary=false, includeDetailTable=false, includeFilters=false, includeKpis=false, and excludedComponentIds for rejected components.
                 For an analytical composition whose meaning depends on multiple coordinated analytical regions, such as filters, KPIs, multiple charts and a detail/list/table surface, use artifactKind "dashboard" rather than a generic page.
                 Preserve the explicitly requested analytical regions in visualizationDecision; do not downgrade a coordinated dashboard to page or accordion merely because a page can host those regions.
@@ -1434,11 +1766,28 @@ public class AgenticAuthoringLlmIntentResolverService {
                 For a requested page organized as accordion/acordeon/expansion panels, use artifactKind "page", operationKind "create", layoutKind "accordion_layout" or "single_column_expansion_page", primaryComponent "praxis-expansion", and no chart axes unless the user asks for a chart.
                 For a requested page organized as tabs/abas, use artifactKind "page", operationKind "create", layoutKind "tabs_layout", primaryComponent "praxis-tabs", and no chart axes unless the user asks for a chart.
                 For chart axes, use the grouping/time field in axes[].field and numeric measures in metricField/metricAggregation.
-                Field names may be proposed from the user's wording and candidate evidence; canonical schema validation runs after this step and may correct or reject them.
+                When a candidate publishes analyticsFields, choose grouping/time and metric fields exclusively from that
+                governed catalog, copy their field names exactly, and use only published allowedAggregations. Do not
+                translate canonical identifiers into conceptual aliases. Only when analyticsFields is absent may field
+                names be proposed from the user's wording and other candidate evidence; canonical schema validation runs
+                after this step and may correct or reject them.
                 Set requiresGovernedAuthoring=true for reusable governed business decisions, policies, compliance/access/eligibility/approval/privacy/enforcement rules, backend validations, option-source eligibility, approval gates, or shared rules that must go through shared-rule authoring.
                 When requiresGovernedAuthoring=true, do not classify the turn as a materializable dashboard, chart, table, form or page preview. Use operationKind "create" or "modify", artifactKind "unknown", changeKind "route_shared_rule_authoring", and leave visualizationDecision null.
                 Keep requiresGovernedAuthoring=false only for local visual formatting, masks, badges, labels, component configuration, layout, filters, columns, and consultative catalog questions.
                 For component authoring that requests a data subset, preserve every requested predicate in queryConstraints.filters.
+                When liveOptionFieldGrounding is present, it is a governed projection of canonical option-source filter
+                fields for the already selected resource. Resolve the predicate's business concept against the meaning,
+                label and description of those candidates. When one candidate is semantically appropriate, copy its
+                canonicalFilterField exactly into the predicate while preserving the original semantic text value,
+                whether a single concept or a list of concepts, for the subsequent live-value lookup. Do not choose from
+                word overlap or invent a field. If candidates are
+                materially ambiguous, ask a natural clarification before any value lookup or materialization.
+                When liveOptionValueGrounding is present, it is a post-intent enumeration of current governed master-data
+                values for exactly one canonical filter field. Reason semantically over all candidates. If the intended
+                membership is sufficiently clear, set that predicate field to canonicalFilterField, operator to "in",
+                and value to an array containing only ids present in candidates. Never send labels or the original semantic
+                category as a textual contains filter. If membership is materially ambiguous, return a natural clarification
+                with structured quick replies and do not claim that the filter was materialized.
                 Author field with the best semantic business-field name supported by governed evidence. When the canonical
                 schema name is not yet available, propose a concise conceptual field name instead of null; post-intent
                 schema grounding must validate, canonicalize or reject it before materialization. Preserve concept,
@@ -1456,6 +1805,19 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Compact context:
                 %s
                 """.formatted(context.toPrettyString());
+    }
+
+    private JsonNode analyticsFieldsForCandidate(JsonNode discoveredCandidates, String resourcePath) {
+        if (discoveredCandidates == null || !discoveredCandidates.isArray() || !StringUtils.hasText(resourcePath)) {
+            return objectMapper.createArrayNode();
+        }
+        for (JsonNode candidate : discoveredCandidates) {
+            if (resourcePath.equals(candidate.path("resourcePath").asText(""))
+                    && candidate.path("analyticsFields").isArray()) {
+                return candidate.path("analyticsFields");
+            }
+        }
+        return objectMapper.createArrayNode();
     }
 
     private boolean hasTargetedComponentCapabilities(
@@ -2124,6 +2486,15 @@ public class AgenticAuthoringLlmIntentResolverService {
         valueAlternatives.addObject().put("type", "number");
         valueAlternatives.addObject().put("type", "boolean");
         valueAlternatives.addObject().put("type", "null");
+        ObjectNode valueArray = valueAlternatives.addObject();
+        valueArray.put("type", "array");
+        valueArray.put("minItems", 1);
+        valueArray.put("maxItems", 100);
+        ObjectNode valueArrayItems = valueArray.putObject("items");
+        ArrayNode valueArrayItemTypes = valueArrayItems.putArray("anyOf");
+        valueArrayItemTypes.addObject().put("type", "string");
+        valueArrayItemTypes.addObject().put("type", "number");
+        valueArrayItemTypes.addObject().put("type", "boolean");
         filter.putArray("required").add("concept").add("field").add("operator").add("value");
         filter.put("additionalProperties", false);
         constraints.putArray("required").add("filters");

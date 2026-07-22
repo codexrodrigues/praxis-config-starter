@@ -24,6 +24,7 @@ import org.praxisplatform.config.service.AiProviderCallException;
 import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 @Tag("unit")
@@ -163,6 +164,91 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(result.providerInvocations())
                 .extracting(AiProviderInvocationTelemetry::phase)
                 .containsExactly("intent_fast", "intent_fast_visualization_repair");
+    }
+
+    @Test
+    void repairsIncompleteFullDashboardVisualizationOnce() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(), any(AiJsonSchema.class), any(AiCallConfig.class),
+                eq("tenant"), eq("user"), eq("local"))).thenReturn(
+                dashboardResolution("[]"),
+                dashboardResolution("""
+                        [{
+                          "concept":"competência da folha",
+                          "field":"competencia",
+                          "label":"Competência",
+                          "chartType":"line",
+                          "orientation":"temporal",
+                          "metricField":"salarioLiquido",
+                          "metricAggregation":"sum",
+                          "metricLabel":"Salário líquido",
+                          "provenance":"governed payroll evidence"
+                        }]
+                        """));
+        ObjectNode hints = objectMapper.createObjectNode();
+        hints.putObject("preIntentSemanticOrientation").put("requiresFullIntentResolution", true);
+        hints.putObject("semanticReconciliation").put("forceFullIntentResolution", true);
+        hints.putObject("resourceDiscovery").put("artifactKind", "dashboard");
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService, objectMapper)
+                .resolve(
+                        new AgenticAuthoringIntentResolutionRequest(
+                                "Crie o dashboard salarial.", "page-builder", "praxis-dynamic-page-builder",
+                                "/page-builder-ia", objectMapper.createObjectNode(), null, "openai", "gpt-5.6-terra",
+                                "test-key", "session-full-repair", "turn-full-repair", List.of(), null, List.of(), hints),
+                        "Crie o dashboard salarial.", objectMapper.createObjectNode(), null,
+                        List.of(new AgenticAuthoringCandidate(
+                                "/api/human-resources/vw-analytics-folha-pagamento", "post", "/schemas/filtered/payroll",
+                                "/api/human-resources/vw-analytics-folha-pagamento/filter", "post", 0.93d,
+                                "semantic payroll analytics", List.of("semantic-retrieval", "stats-capabilities-verified"))),
+                        componentCapabilities(), "tenant", "user", "local")
+                .orElseThrow();
+
+        assertThat(promptCaptor.getAllValues()).hasSize(2);
+        assertThat(promptCaptor.getAllValues().get(1))
+                .contains("previous full resolution")
+                .contains("resolved analytical artifact with empty axes");
+        assertThat(result.visualizationDecision().axes()).hasSize(1);
+        assertThat(result.warnings()).contains("llm-full-visualization-repair-used");
+        assertThat(result.providerInvocations()).extracting(AiProviderInvocationTelemetry::phase)
+                .containsExactly("intent_full", "intent_full_visualization_repair");
+    }
+
+    private JsonNode dashboardResolution(String axes) throws Exception {
+        return objectMapper.readTree("""
+                {
+                  "resolved":true,
+                  "semanticIntentClass":"component_authoring",
+                  "operationKind":"create",
+                  "artifactKind":"dashboard",
+                  "changeKind":"create_artifact",
+                  "selectedResourcePath":"/api/human-resources/vw-analytics-folha-pagamento",
+                  "resourceSearchQuery":null,
+                  "followUpKind":"none",
+                  "requiresGovernedAuthoring":false,
+                  "assistantMessage":"Vou preparar o dashboard.",
+                  "visualizationDecision":{
+                    "schemaVersion":"praxis-visualization-decision.v1",
+                    "intent":"dashboard salarial",
+                    "layoutKind":"dashboard",
+                    "primaryComponent":"praxis-chart",
+                    "axes":%s,
+                    "includeSummary":true,
+                    "includeDetailTable":true,
+                    "excludedComponentIds":[],
+                    "includeFilters":true,
+                    "includeKpis":true,
+                    "provenance":"governed evidence"
+                  },
+                  "consultativeRetrievalPlan":null,
+                  "quickReplies":[],
+                  "clarificationQuestions":[],
+                  "warnings":[],
+                  "queryConstraints":{"filters":[]}
+                }
+                """.formatted(axes));
     }
 
     @Test
@@ -341,6 +427,371 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 eq("local"));
     }
 
+    @Test
+    void usesFocusedIntentPassForLlmPlannedFilteredTable() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                configCaptor.capture(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "semanticIntentClass": "component_authoring",
+                  "operationKind": "create",
+                  "artifactKind": "table",
+                  "changeKind": "create_artifact",
+                  "selectedResourcePath": "/api/human-resources/funcionarios",
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
+                  "assistantMessage": "Vou preparar a tabela de funcionários com o recorte solicitado.",
+                  "visualizationDecision": {
+                    "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
+                    "intent": "employee-department-table",
+                    "layoutKind": "single_table",
+                    "primaryComponent": "praxis-table",
+                    "primaryComponentId": "praxis-table",
+                    "axes": [],
+                    "includeSummary": false,
+                    "includeDetailTable": true,
+                    "excludedComponentIds": [],
+                    "includeFilters": true,
+                    "includeKpis": false,
+                    "provenance": "llm-planned-focused-resource"
+                  },
+                  "queryConstraints": {
+                    "filters": [{
+                      "concept": "área de tecnologia",
+                      "field": "departamento",
+                      "operator": "in",
+                      "value": "tecnologia"
+                    }]
+                  },
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode resourceDiscovery = contextHints.putObject("resourceDiscovery");
+        resourceDiscovery.put("artifactKind", "table");
+        ObjectNode discoveredCandidate = resourceDiscovery.putArray("candidates").addObject();
+        discoveredCandidate.put("resourcePath", "/api/human-resources/funcionarios");
+        discoveredCandidate.put("operation", "post");
+        discoveredCandidate.put("submitUrl", "/api/human-resources/funcionarios/filter");
+        discoveredCandidate.put("submitMethod", "post");
+        discoveredCandidate.put("reason", "Fonte governada que exibe os registros de funcionários.");
+        discoveredCandidate.putArray("evidence")
+                .add("tool-search-api-resources")
+                .add("semantic-retrieval");
+        ObjectNode orientation = contextHints.putObject("preIntentSemanticOrientation");
+        orientation.put("schemaVersion", "praxis-agentic-authoring-pre-intent-orientation-context.v1");
+        orientation.put("semanticIntentClass", "authoring_or_other");
+        orientation.put("artifactKind", "table");
+        orientation.put("requiresFullIntentResolution", true);
+        orientation.put("source", "llm_pre_intent_tool_plan");
+        orientation.set("queryConstraints", objectMapper.readTree("""
+                {"filters":[{"concept":"área de tecnologia","field":"departamento",
+                "operator":"in","value":"tecnologia"}]}
+                """));
+
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "monta pra mim uma tabela só com o pessoal da área de tecnologia",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-5-mini",
+                "test-key",
+                "session-focused-table",
+                "turn-focused-table",
+                List.of(),
+                null,
+                List.of(),
+                contextHints);
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        request,
+                        request.userPrompt(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(new AgenticAuthoringCandidate(
+                                "/api/human-resources/funcionarios",
+                                "post",
+                                "",
+                                "/api/human-resources/funcionarios/filter",
+                                "post",
+                                0.98d,
+                                "Fonte governada que exibe os registros de funcionários.",
+                                List.of("tool-search-api-resources", "semantic-retrieval"))),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("praxis-agentic-authoring-focused-resource-context.v1")
+                .contains("one focused, LLM-planned Praxis table-authoring request")
+                .contains("\"queryConstraints\"")
+                .contains("área de tecnologia")
+                .contains("/api/human-resources/funcionarios")
+                .contains("later governed field and live option-value tools")
+                .doesNotContain("praxis-agentic-authoring-fast-intent-context.v1");
+        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(1800);
+        assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(24);
+        assertThat(result.resolved()).isTrue();
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.selectedResourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.queryConstraints().path("filters").get(0).path("value").asText())
+                .isEqualTo("tecnologia");
+        assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
+    void usesCompactIntentPassForGovernedLiveOptionFieldRefinement() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                configCaptor.capture(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "semanticIntentClass": "component_authoring",
+                  "operationKind": "create",
+                  "artifactKind": "table",
+                  "changeKind": "create_artifact",
+                  "selectedResourcePath": "/api/human-resources/funcionarios",
+                  "resourceSearchQuery": null,
+                  "followUpKind": "refinement",
+                  "requiresGovernedAuthoring": false,
+                  "assistantMessage": "Vou preparar a tabela com o filtro governado.",
+                  "visualizationDecision": {
+                    "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
+                    "intent": "employee-department-table",
+                    "layoutKind": "single_table",
+                    "primaryComponent": "praxis-table",
+                    "axes": [],
+                    "includeSummary": false,
+                    "includeDetailTable": true,
+                    "excludedComponentIds": [],
+                    "includeFilters": true,
+                    "includeKpis": false,
+                    "provenance": "governed-live-option-field"
+                  },
+                  "queryConstraints": {
+                    "filters": [{
+                      "concept": "departamentos de atuação",
+                      "field": "departamentoIdsIn",
+                      "operator": "in",
+                      "value": ["engenharia", "inteligência artificial"]
+                    }]
+                  },
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+        AgenticAuthoringSemanticDecision activeDecision = new AgenticAuthoringSemanticDecision(
+                AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                "decision-employee-table",
+                "create",
+                "table",
+                "create_artifact",
+                new AgenticAuthoringSemanticDecision.SelectedResource(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "",
+                        "/api/human-resources/funcionarios/filter",
+                        "post"),
+                null,
+                new AgenticAuthoringSemanticDecision.RetrievalEvidence(
+                        "semantic_retrieval",
+                        List.of("tool-search-api-resources"),
+                        1),
+                false,
+                "",
+                "",
+                "");
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode grounding = contextHints.putObject("liveOptionFieldGrounding");
+        grounding.put("schemaVersion", "praxis-live-option-field-grounding.v1");
+        grounding.put("resourcePath", "/api/human-resources/funcionarios");
+        grounding.set("originalPredicate", objectMapper.readTree("""
+                {"concept":"departamentos de atuação","field":"departamento","operator":"in",
+                 "value":["engenharia","inteligência artificial"]}
+                """));
+        grounding.set("candidates", objectMapper.readTree("""
+                [{"canonicalFilterField":"departamentoIdsIn","label":"Departamentos",
+                  "description":"Conjunto de departamentos organizacionais.","optionSourceKey":"department",
+                  "optionResourcePath":"/api/human-resources/departamentos","multiple":true}]
+                """));
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "preciso de uma tabela com os funcionários dos departamentos de engenharia e inteligência artificial",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-5-mini",
+                "test-key",
+                "session-live-option",
+                "turn-live-option",
+                List.of(),
+                null,
+                List.of(),
+                contextHints,
+                activeDecision);
+
+        DomainCatalogPromptContextService liveOptionDomainContextService =
+                Mockito.mock(DomainCatalogPromptContextService.class);
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper,
+                        liveOptionDomainContextService)
+                .resolve(
+                        request,
+                        request.userPrompt(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(new AgenticAuthoringCandidate(
+                                "/api/human-resources/funcionarios",
+                                "post",
+                                "",
+                                "/api/human-resources/funcionarios/filter",
+                                "post",
+                                0.98d,
+                                "Fonte governada de funcionários.",
+                                List.of("tool-search-api-resources"))),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("praxis-agentic-authoring-live-option-refinement-context.v1")
+                .contains("focused semantic refinement")
+                .contains("\"activeSemanticDecision\"")
+                .contains("\"liveOptionFieldGrounding\"")
+                .contains("\"canonicalFilterField\":\"departamentoIdsIn\"");
+        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(1800);
+        assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(24);
+        assertThat(configCaptor.getValue().getModel()).isEqualTo("gpt-5.6-luna");
+        assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
+        assertThat(result.queryConstraints().path("filters").get(0).path("field").asText())
+                .isEqualTo("departamentoIdsIn");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        Mockito.verifyNoInteractions(liveOptionDomainContextService);
+    }
+
+    @Test
+    void exposesOnlyTheTerminalValueGroundingStageAfterTheCanonicalFieldIsKnown() {
+        AgenticAuthoringSemanticDecision activeDecision = new AgenticAuthoringSemanticDecision(
+                AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                "decision-employee-table",
+                "create",
+                "table",
+                "create_artifact",
+                new AgenticAuthoringSemanticDecision.SelectedResource(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "",
+                        "/api/human-resources/funcionarios/filter",
+                        "post"),
+                null,
+                null,
+                false,
+                "",
+                "",
+                "");
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("liveOptionFieldGrounding")
+                .put("canonicalFilterField", "departamentoIdsIn");
+        ObjectNode valueGrounding = contextHints.putObject("liveOptionValueGrounding");
+        valueGrounding.put("canonicalFilterField", "departamentoIdsIn");
+        valueGrounding.put("exhaustive", true);
+        valueGrounding.putArray("candidates")
+                .addObject()
+                .put("id", 25)
+                .put("label", "Aperture Science - Engenharia");
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "monte uma tabela do pessoal de engenharia",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-5-mini",
+                "test-key",
+                "session-live-values",
+                "turn-live-values",
+                List.of(),
+                null,
+                List.of(),
+                contextHints,
+                activeDecision);
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "",
+                "/api/human-resources/funcionarios/filter",
+                "post",
+                0.98d,
+                "Fonte governada de funcionários.",
+                List.of("tool-search-api-resources"));
+        AgenticAuthoringLlmIntentResolverService service =
+                new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper);
+
+        String prompt = ReflectionTestUtils.invokeMethod(
+                service,
+                "liveOptionRefinementPrompt",
+                request,
+                request.userPrompt(),
+                List.of(candidate));
+
+        assertThat(prompt)
+                .contains("\"liveOptionValueGrounding\"")
+                .contains("Several matching values across")
+                .contains("organizations are")
+                .contains("expected and are not, by themselves, ambiguity")
+                .contains("every requested business category and semantic text predicate")
+                .contains("remove the duplicate predicate")
+                .contains("already has governed field evidence")
+                .doesNotContain("\"liveOptionFieldGrounding\"");
+    }
+
     private void assertStrictSchemaCompatible(JsonNode schema, String path) {
         if (schema == null || !schema.isObject()) {
             return;
@@ -491,6 +942,9 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("Introduzir uma nova coluna schema-backed")
                 .contains("set_column_order apenas reposicionam")
                 .contains("never from keywords, regexes or capability order")
+                .contains("current userPrompt is authoritative")
+                .contains("row-dependent visual outcome governed by a condition")
+                .contains("followUpKind=\"new_instruction\"")
                 .doesNotContain("praxis-agentic-authoring-fast-intent-context.v1");
         assertThat(promptCaptor.getValue().length()).isLessThan(12_000);
         assertThat(schemaCaptor.getValue().jsonSchema())
@@ -1799,7 +2253,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                         List.of(),
                         null,
                         List.of(),
-                        objectMapper.createObjectNode()),
+                        analyticsFieldContext()),
                 "Crie apenas um grafico horizontal de folha de pagamento por departamento somando salario liquido. Use a fonte Analytics Folha Pagamento.",
                 objectMapper.createObjectNode(),
                 null,
@@ -1836,6 +2290,9 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(compactContext.path("candidateResources")).hasSize(1);
         assertThat(compactContext.path("candidateResources").get(0).path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(compactContext.path("candidateResources").get(0).path("analyticsFields").toString())
+                .contains("departamento", "salarioLiquido", "allowedAggregations")
+                .doesNotContain("internalQuery");
         assertThat(result.selectedResourcePath())
                 .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
         assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
@@ -1846,6 +2303,26 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 eq("tenant"),
                 eq("user"),
                 eq("local"));
+    }
+
+    private ObjectNode analyticsFieldContext() {
+        ObjectNode context = objectMapper.createObjectNode();
+        ObjectNode candidate = context.putObject("resourceDiscovery")
+                .putArray("candidates")
+                .addObject();
+        candidate.put("resourcePath", "/api/human-resources/vw-analytics-folha-pagamento");
+        candidate.putArray("analyticsFields")
+                .addObject()
+                .put("field", "departamento")
+                .put("groupByEligible", true);
+        candidate.withArray("analyticsFields")
+                .addObject()
+                .put("field", "salarioLiquido")
+                .put("metricFieldEligible", true)
+                .putArray("allowedAggregations")
+                .add("sum")
+                .add("avg");
+        return context;
     }
 
     @Test

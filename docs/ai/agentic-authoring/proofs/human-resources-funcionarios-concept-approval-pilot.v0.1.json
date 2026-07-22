@@ -1,0 +1,38 @@
+{
+  "changeSetKey": "agentic-authoring:human-resources:funcionarios:concept-approval:v0.1",
+  "status": "proposed",
+  "authorType": "system",
+  "authorId": "praxis-human-resources-reference-pilot",
+  "intent": "Approve the reviewed employee concept projected from the governed Domain Catalog.",
+  "reason": "The catalog projection remains a candidate until an explicit governed review makes it eligible for operational AI grounding.",
+  "patch": [
+    {
+      "operationId": "approve-funcionarios-concept",
+      "operationType": "approve_concept",
+      "target": {
+        "tenantId": "agentic-authoring-local-pre-intent",
+        "environment": "local",
+        "conceptKey": "human-resources.funcionarios"
+      },
+      "reason": "The employee concept and its active catalog evidence were reviewed for the local reference pilot.",
+      "evidenceRefs": [
+        "domain-catalog:praxis-service:human-resources.funcionarios:634e4b662761823d"
+      ],
+      "confidence": 1.0,
+      "payload": {
+        "provenance": {
+          "claimId": "claim:human-resources:funcionarios:concept-approval:v0.1",
+          "sourceClass": "authored",
+          "sourceRefs": [
+            "domain-catalog:praxis-service:human-resources.funcionarios:634e4b662761823d"
+          ],
+          "derivationActivity": "reference-domain-pilot-concept-review",
+          "agent": {
+            "type": "system",
+            "id": "praxis-human-resources-reference-pilot"
+          }
+        }
+      }
+    }
+  ]
+}

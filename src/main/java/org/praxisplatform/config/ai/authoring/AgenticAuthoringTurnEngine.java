@@ -24,6 +24,8 @@ import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.ContextRetrievalService;
+import org.praxisplatform.config.service.LiveOptionValueCandidate;
+import org.praxisplatform.config.service.LiveOptionValueRetrievalResult;
 import org.praxisplatform.config.service.SchemaFetchResult;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 import org.springframework.util.StringUtils;
@@ -288,7 +290,7 @@ public class AgenticAuthoringTurnEngine {
                         !compactPlatformGuidanceOpportunity);
             }
             PreIntentToolPlanExecution preIntentExecution =
-                    maybeRunPreIntentToolPlan(request, principalContext, eventSink);
+                    maybeRunPreIntentToolPlan(request, principalContext, eventSink, schemaBaseUrl);
             if (preIntentExecution.semanticOrientation() != null) {
                 request = withPreIntentSemanticOrientationContext(
                         request, preIntentExecution.semanticOrientation());
@@ -447,6 +449,136 @@ public class AgenticAuthoringTurnEngine {
                         intentGroundingDiagnostics(intentResolution, route)));
                 emitIntentResolutionProgress(eventSink, intentResolution);
             }
+            LiveOptionFieldGroundingExecution liveOptionFieldGrounding = maybeRunLiveOptionFieldGrounding(
+                    request,
+                    principalContext,
+                    eventSink,
+                    intentResolution,
+                    route,
+                    schemaBaseUrl);
+            if (liveOptionFieldGrounding.projection() != null) {
+                AgenticAuthoringTurnStreamRequest fieldGroundedRequest = withLiveOptionFieldGrounding(
+                        request,
+                        liveOptionFieldGrounding.projection());
+                fieldGroundedRequest = withActiveSemanticDecision(
+                        fieldGroundedRequest,
+                        intentResolution.semanticDecision());
+                emitStatus(
+                        eventSink,
+                        "intent.resolve.live-field",
+                        "Estou relacionando o conceito solicitado aos campos governados do domínio.");
+                AgenticAuthoringIntentResolutionResult fieldRefinedResolution;
+                if (hasSchemaConfirmedCanonicalLiveOptionField(
+                        intentResolution,
+                        liveOptionFieldGrounding.projection())) {
+                    fieldRefinedResolution = withIntentResolutionWarning(
+                            intentResolution,
+                            "live-option-field-confirmed-by-canonical-schema");
+                } else if (hasSingleCanonicalLiveOptionFieldCandidate(
+                        liveOptionFieldGrounding.projection())) {
+                    // This is a read-only bridge to the live-value stage, not the final semantic
+                    // decision. The next LLM pass must still return this exact field with current
+                    // candidate IDs and the byIds tool must confirm them before materialization.
+                    fieldRefinedResolution = withProvisionalCanonicalLiveOptionField(
+                            intentResolution,
+                            liveOptionFieldGrounding.projection());
+                } else {
+                    fieldRefinedResolution = intentResolverService.resolve(
+                            toIntentRequest(fieldGroundedRequest),
+                            principalContext.tenantId(),
+                            principalContext.userId(),
+                            principalContext.environment());
+                    turnProviderInvocations.addAll(providerInvocations(fieldRefinedResolution));
+                }
+                if (!hasPreservedLiveOptionPredicate(
+                                fieldRefinedResolution,
+                                liveOptionFieldGrounding.projection())
+                        && !requiresLiveOptionClarification(fieldRefinedResolution)) {
+                    fieldRefinedResolution = blockUngroundedLiveOptionMaterialization(fieldRefinedResolution);
+                }
+                request = fieldGroundedRequest;
+                intentResolution = fieldRefinedResolution;
+                route = routeClassifier.classify(request, intentResolution, state);
+                state = state.withRouteClass(route.routeClass());
+                emitIntentResolved(eventSink, intentResolution, route, request);
+                emitIntentResolutionProgress(eventSink, intentResolution);
+            }
+            LiveOptionGroundingExecution liveOptionGrounding = maybeRunLiveOptionValueGrounding(
+                    request,
+                    principalContext,
+                    eventSink,
+                    intentResolution,
+                    route,
+                    schemaBaseUrl);
+            if (liveOptionGrounding.toolResult() != null
+                    && (liveOptionGrounding.result() == null || !liveOptionGrounding.result().valid())) {
+                intentResolution = blockUnavailableLiveOptionMaterialization(
+                        intentResolution,
+                        liveOptionGrounding.toolResult());
+                route = routeClassifier.classify(request, intentResolution, state);
+                state = state.withRouteClass(route.routeClass());
+                emitIntentResolved(eventSink, intentResolution, route, request);
+                emitIntentResolutionProgress(eventSink, intentResolution);
+            } else if (liveOptionGrounding.result() != null && liveOptionGrounding.result().valid()) {
+                AgenticAuthoringTurnStreamRequest liveGroundedRequest = withLiveOptionValueGrounding(
+                        request,
+                        liveOptionGrounding.result());
+                liveGroundedRequest = withActiveSemanticDecision(
+                        liveGroundedRequest,
+                        intentResolution.semanticDecision());
+                emitStatus(
+                        eventSink,
+                        "intent.resolve.live-values",
+                        "Estou relacionando a solicitação aos valores atuais do domínio antes de montar o filtro.");
+                eventSink.append("thought.step", safeToolProjection(
+                        "intent.resolve.live-values",
+                        "Consultei os valores atuais do campo governado e estou validando a seleção semântica.",
+                        Map.of(
+                                "tool", AgenticAuthoringToolRegistry.SEARCH_OPTION_SOURCE_VALUES,
+                                "canonicalFilterField", liveOptionGrounding.result().canonicalFilterField(),
+                                "candidateCount", liveOptionGrounding.result().candidates().size(),
+                                "exhaustive", liveOptionGrounding.result().exhaustive())));
+                AgenticAuthoringIntentResolutionResult liveRefinedResolution = intentResolverService.resolve(
+                        toIntentRequest(liveGroundedRequest),
+                        principalContext.tenantId(),
+                        principalContext.userId(),
+                        principalContext.environment());
+                turnProviderInvocations.addAll(providerInvocations(liveRefinedResolution));
+                liveRefinedResolution = preserveLiveOptionRefinementLineage(
+                        intentResolution,
+                        liveRefinedResolution);
+                liveRefinedResolution = collapseSemanticallyCoveredLiveOptionConstraints(
+                        liveRefinedResolution,
+                        liveOptionGrounding.result());
+                boolean locallyValidatedSelection = hasValidatedLiveOptionSelection(
+                        liveRefinedResolution,
+                        liveOptionGrounding.result());
+                LiveOptionGroundingExecution selectionConfirmation = locallyValidatedSelection
+                        ? maybeConfirmLiveOptionSelection(
+                                liveGroundedRequest,
+                                principalContext,
+                                eventSink,
+                                liveRefinedResolution,
+                                route,
+                                schemaBaseUrl,
+                                liveOptionGrounding.result())
+                        : LiveOptionGroundingExecution.none();
+                if (locallyValidatedSelection
+                        && !hasConfirmedLiveOptionSelection(
+                                liveRefinedResolution,
+                                liveOptionGrounding.result(),
+                                selectionConfirmation.result())) {
+                    liveRefinedResolution = blockUngroundedLiveOptionMaterialization(liveRefinedResolution);
+                } else if (!locallyValidatedSelection && !requiresLiveOptionClarification(liveRefinedResolution)) {
+                    liveRefinedResolution = blockUngroundedLiveOptionMaterialization(liveRefinedResolution);
+                }
+                request = liveGroundedRequest;
+                intentResolution = liveRefinedResolution;
+                route = routeClassifier.classify(request, intentResolution, state);
+                state = state.withRouteClass(route.routeClass());
+                emitIntentResolved(eventSink, intentResolution, route, request);
+                emitIntentResolutionProgress(eventSink, intentResolution);
+            }
             AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery =
                     maybeRunBusinessCatalogResourceDiscoveryTool(
                             request,
@@ -565,7 +697,11 @@ public class AgenticAuthoringTurnEngine {
                     && terminalPreviewApplyBlockReason.isBlank()
                     && !requiresDecisionReview(decisionDiagnostics)
                     && (toolLoopResult == null || toolLoopResult.completed());
-            assistantMessage = ensureReviewablePreviewMessage(assistantMessage, request, canApply);
+            assistantMessage = ensureReviewablePreviewMessage(
+                    assistantMessage,
+                    request,
+                    canApply,
+                    terminalPreviewApplyBlockReason);
             Map<String, Object> resultPayload = new LinkedHashMap<>();
             resultPayload.put("intentResolution", terminalIntentResolution);
             resultPayload.put("preview", preview != null ? preview : objectMapper.createObjectNode());
@@ -844,6 +980,18 @@ public class AgenticAuthoringTurnEngine {
         if (resolvedPlatformGuidance != null) {
             return resolvedPlatformGuidance;
         }
+        if (requiresExecutableResourceGrounding(intentResolution, route, request)) {
+            eventSink.append("thought.step", thoughtStepPayload(
+                    "consultative.post-intent.skipped",
+                    "A intencao de criacao ja foi entendida; vou buscar a fonte governada antes de responder.",
+                    "Executable semantic intent requires governed resource grounding before a consultative terminal answer.",
+                    Map.of(
+                            "serviceAvailable", consultativeAnswerService != null,
+                            "routeClass", safeText(route.routeClass()),
+                            "operationKind", safeText(intentResolution.operationKind()),
+                            "resourceGroundingRequired", true)));
+            return null;
+        }
         if (consultativeAnswerService == null) {
             log.info("[AgenticAuthoring] Post-intent consultative answer unavailable; service bean was not injected.");
             eventSink.append("thought.step", thoughtStepPayload(
@@ -923,6 +1071,29 @@ public class AgenticAuthoringTurnEngine {
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private boolean requiresExecutableResourceGrounding(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringTurnRoute route,
+            AgenticAuthoringTurnStreamRequest request) {
+        if (intentResolution == null
+                || route == null
+                || !"needs_clarification".equals(route.routeClass())
+                || intentResolution.selectedCandidate() != null) {
+            return false;
+        }
+        String operationKind = safeText(intentResolution.operationKind());
+        if (!("create".equals(operationKind)
+                || "modify".equals(operationKind)
+                || "edit".equals(operationKind)
+                || "compose".equals(operationKind))) {
+            return false;
+        }
+        JsonNode candidates = request == null || request.contextHints() == null
+                ? objectMapper.missingNode()
+                : request.contextHints().path("resourceDiscovery").path("candidates");
+        return !candidates.isArray() || candidates.isEmpty();
     }
 
     private AgenticAuthoringIntentResolutionResult reconcileGovernedDomainConsultativeDecision(
@@ -2293,7 +2464,8 @@ public class AgenticAuthoringTurnEngine {
     private PreIntentToolPlanExecution maybeRunPreIntentToolPlan(
             AgenticAuthoringTurnStreamRequest request,
             AiPrincipalContext principalContext,
-            AgenticAuthoringTurnEventSink eventSink) {
+            AgenticAuthoringTurnEventSink eventSink,
+            String schemaBaseUrl) {
         if (eventSink.terminalReached()) {
             return PreIntentToolPlanExecution.empty();
         }
@@ -2309,6 +2481,10 @@ public class AgenticAuthoringTurnEngine {
             emitPreIntentToolPlanSkipped(eventSink, "resource-discovery-context-present", "");
             return PreIntentToolPlanExecution.empty();
         }
+        emitStatus(
+                eventSink,
+                "intent.orientation",
+                "Estou entendendo semanticamente o pedido para decidir qual contexto governado consultar.");
         AgenticAuthoringPreIntentToolPlanningResult planningResult =
                 preIntentToolPlanningService.plan(request, principalContext);
         if (planningResult == null || !planningResult.planned()) {
@@ -2369,7 +2545,8 @@ public class AgenticAuthoringTurnEngine {
                             "tool", safeText(toolCall.name()),
                             "routeClass", safeText(toolCall.routeClass()),
                             "maxCallsPerTurn", MAX_TOOL_CALLS_PER_TURN)));
-            AgenticAuthoringToolResult result = toolRegistry.execute(toolCall, principalContext, "retrieveEvidence");
+            AgenticAuthoringToolResult result = toolRegistry.execute(
+                    toolCall, principalContext, "retrieveEvidence", schemaBaseUrl);
             eventSink.append("thought.step", safeToolProjection(
                     result.valid() ? "tool.result" : "tool.error",
                     result.valid()
@@ -2401,14 +2578,21 @@ public class AgenticAuthoringTurnEngine {
         }
         return new PreIntentToolPlanExecution(
                 resourceDiscovery,
-                plan.requiresFullIntentResolution()
-                                || "governed_domain_discovery".equals(plan.semanticIntentClass())
-                        ? plan
-                        : null,
+                shouldPreservePreIntentSemanticOrientation(plan) ? plan : null,
                 List.copyOf(domainKnowledge),
                 List.copyOf(domainBindings),
                 List.copyOf(verifiedOperations),
                 planningResult.providerInvocations());
+    }
+
+    private boolean shouldPreservePreIntentSemanticOrientation(AgenticAuthoringPreIntentToolPlan plan) {
+        if (plan == null) {
+            return false;
+        }
+        String artifactKind = safeText(plan.artifactKind());
+        return plan.requiresFullIntentResolution()
+                || "governed_domain_discovery".equals(plan.semanticIntentClass())
+                || (!artifactKind.isBlank() && !"unknown".equals(artifactKind));
     }
 
     private AgenticAuthoringTurnStreamRequest withProgressiveDomainKnowledgeContext(
@@ -2436,8 +2620,48 @@ public class AgenticAuthoringTurnEngine {
         ObjectNode context = contextHints.putObject("preIntentSemanticOrientation");
         context.put("schemaVersion", "praxis-agentic-authoring-pre-intent-orientation-context.v1");
         context.put("semanticIntentClass", safeText(orientation.semanticIntentClass()));
+        context.put("artifactKind", safeText(orientation.artifactKind()));
+        context.put("requiresFullIntentResolution", orientation.requiresFullIntentResolution());
         context.put("source", "llm_pre_intent_tool_plan");
+        if (orientation.queryConstraints() != null && !orientation.queryConstraints().isNull()) {
+            context.set("queryConstraints", orientation.queryConstraints().deepCopy());
+        }
+        AgenticAuthoringResourceSearchFocus resourceSearchFocus = resourceSearchFocus(orientation);
+        if (resourceSearchFocus != null && !resourceSearchFocus.isEmpty()) {
+            context.set("resourceSearchFocus", resourceSearchFocusNode(resourceSearchFocus));
+        }
         return copyWithContextHints(request, contextHints);
+    }
+
+    private AgenticAuthoringResourceSearchFocus resourceSearchFocus(
+            AgenticAuthoringPreIntentToolPlan orientation) {
+        if (orientation == null || orientation.toolCalls() == null) {
+            return null;
+        }
+        for (AgenticAuthoringToolCall toolCall : orientation.toolCalls()) {
+            if (toolCall == null) {
+                continue;
+            }
+            if (toolCall.payload() instanceof AgenticAuthoringResourceCandidatesRequest candidatesRequest
+                    && candidatesRequest.resourceSearchFocus() != null) {
+                return candidatesRequest.resourceSearchFocus();
+            }
+            String resourceKey = switch (toolCall.payload()) {
+                case DomainKnowledgeToolRequest domainRequest -> domainRequest.resourceKey();
+                case DomainBindingToolRequest bindingRequest -> bindingRequest.resourceKey();
+                case DomainOperationVerificationToolRequest verificationRequest -> verificationRequest.resourceKey();
+                default -> "";
+            };
+            if (StringUtils.hasText(resourceKey)) {
+                return new AgenticAuthoringResourceSearchFocus(
+                        resourceKey,
+                        List.of(),
+                        safeText(orientation.artifactKind()),
+                        "",
+                        "LLM-resolved canonical resource scope from the pre-intent tool plan.");
+            }
+        }
+        return null;
     }
 
     private AgenticAuthoringTurnStreamRequest withProgressiveDomainBindingContext(
@@ -2753,6 +2977,95 @@ public class AgenticAuthoringTurnEngine {
                 null);
     }
 
+    private AgenticAuthoringIntentResolutionResult blockUngroundedLiveOptionMaterialization(
+            AgenticAuthoringIntentResolutionResult resolution) {
+        LinkedHashSet<String> warnings = new LinkedHashSet<>(
+                resolution == null || resolution.warnings() == null ? List.of() : resolution.warnings());
+        warnings.add("live-option-value-selection-unresolved");
+        warnings.add("live-option-value-materialization-failed-closed");
+        LinkedHashSet<String> failureCodes = new LinkedHashSet<>(
+                resolution == null || resolution.failureCodes() == null ? List.of() : resolution.failureCodes());
+        failureCodes.add("live-option-value-confirmation-required");
+        List<String> questions = resolution != null
+                && resolution.clarificationQuestions() != null
+                && !resolution.clarificationQuestions().isEmpty()
+                ? resolution.clarificationQuestions()
+                : List.of("Quais dos valores encontrados você deseja incluir nesse filtro?");
+        AgenticAuthoringGateResult gate = new AgenticAuthoringGateResult(
+                "live-option-value-grounding@0.1.0",
+                "clarification_required",
+                List.copyOf(failureCodes));
+        return new AgenticAuthoringIntentResolutionResult(
+                false,
+                resolution == null ? "unknown" : resolution.operationKind(),
+                resolution == null ? "unknown" : resolution.artifactKind(),
+                resolution == null ? "live_option_value_confirmation" : resolution.changeKind(),
+                "live-option-value-confirmation-required",
+                resolution == null ? "" : resolution.targetApp(),
+                resolution == null ? "" : resolution.targetComponentId(),
+                resolution == null ? null : resolution.target(),
+                resolution == null ? null : resolution.selectedCandidate(),
+                resolution == null ? List.of() : resolution.candidates(),
+                gate,
+                resolution == null ? "" : resolution.effectivePrompt(),
+                "Encontrei valores atuais relacionados ao pedido, mas preciso confirmar quais deles devem entrar no filtro.",
+                null,
+                null,
+                resolution == null ? List.of() : resolution.quickReplies(),
+                resolution == null ? null : resolution.pendingClarification(),
+                questions,
+                List.copyOf(warnings),
+                List.copyOf(failureCodes),
+                resolution == null ? objectMapper.createObjectNode() : resolution.currentPageSummary(),
+                resolution == null ? objectMapper.createObjectNode() : resolution.llmDiagnostics(),
+                resolution == null ? null : resolution.visualizationDecision(),
+                resolution == null ? null : resolution.semanticDecision());
+    }
+
+    private AgenticAuthoringIntentResolutionResult blockUnavailableLiveOptionMaterialization(
+            AgenticAuthoringIntentResolutionResult resolution,
+            AgenticAuthoringToolResult toolResult) {
+        LinkedHashSet<String> warnings = new LinkedHashSet<>(
+                resolution == null || resolution.warnings() == null ? List.of() : resolution.warnings());
+        warnings.add("live-option-values-unavailable");
+        warnings.add("live-option-value-materialization-failed-closed");
+        if (toolResult != null && StringUtils.hasText(toolResult.errorCode())) {
+            warnings.add(toolResult.errorCode());
+        }
+        LinkedHashSet<String> failureCodes = new LinkedHashSet<>(
+                resolution == null || resolution.failureCodes() == null ? List.of() : resolution.failureCodes());
+        failureCodes.add("live-option-values-unavailable");
+        AgenticAuthoringGateResult gate = new AgenticAuthoringGateResult(
+                "live-option-value-grounding@0.1.0",
+                "blocked",
+                List.copyOf(failureCodes));
+        return new AgenticAuthoringIntentResolutionResult(
+                false,
+                resolution == null ? "unknown" : resolution.operationKind(),
+                resolution == null ? "unknown" : resolution.artifactKind(),
+                resolution == null ? "live_option_value_grounding" : resolution.changeKind(),
+                "live-option-values-unavailable",
+                resolution == null ? "" : resolution.targetApp(),
+                resolution == null ? "" : resolution.targetComponentId(),
+                resolution == null ? null : resolution.target(),
+                resolution == null ? null : resolution.selectedCandidate(),
+                resolution == null ? List.of() : resolution.candidates(),
+                gate,
+                resolution == null ? "" : resolution.effectivePrompt(),
+                "Não consegui consultar com segurança os valores atuais desse campo. A tabela não foi alterada para evitar aplicar um filtro incorreto.",
+                null,
+                null,
+                resolution == null ? List.of() : resolution.quickReplies(),
+                resolution == null ? null : resolution.pendingClarification(),
+                List.of("Tente novamente quando os dados do domínio estiverem disponíveis."),
+                List.copyOf(warnings),
+                List.copyOf(failureCodes),
+                resolution == null ? objectMapper.createObjectNode() : resolution.currentPageSummary(),
+                resolution == null ? objectMapper.createObjectNode() : resolution.llmDiagnostics(),
+                resolution == null ? null : resolution.visualizationDecision(),
+                resolution == null ? null : resolution.semanticDecision());
+    }
+
     private void emitPreIntentToolPlanSkipped(
             AgenticAuthoringTurnEventSink eventSink,
             String reason,
@@ -2792,7 +3105,8 @@ public class AgenticAuthoringTurnEngine {
                         resourceDiscoveryQuery(intentResolution, request),
                         request.userPrompt(),
                         safeText(intentResolution.artifactKind()),
-                        6));
+                        6,
+                        preIntentResourceSearchFocus(request)));
         eventSink.append("thought.step", safeToolProjection(
                 "tool.start",
                 "Estou consultando recursos do backend para conferir a decisao.",
@@ -2808,6 +3122,744 @@ public class AgenticAuthoringTurnEngine {
                         : "Nao consegui concluir a consulta de recursos do backend.",
                 safeToolDiagnostics(result)));
         return result;
+    }
+
+    private LiveOptionGroundingExecution maybeRunLiveOptionValueGrounding(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringTurnRoute route,
+            String requestBaseUrl) {
+        if (eventSink.terminalReached()
+                || route == null
+                || !route.allowsPreview()
+                || intentResolution == null
+                || !intentResolution.valid()
+                || intentResolution.semanticDecision() == null
+                || intentResolution.semanticDecision().selectedResource() == null
+                || request == null
+                || request.contextHints() != null
+                        && request.contextHints().path("liveOptionValueGrounding").isObject()) {
+            return LiveOptionGroundingExecution.none();
+        }
+        JsonNode filter = firstSemanticTextConstraint(intentResolution.semanticDecision().constraints());
+        if (filter == null) {
+            return LiveOptionGroundingExecution.none();
+        }
+        String resourcePath = intentResolution.semanticDecision().selectedResource().resourcePath();
+        if (!StringUtils.hasText(resourcePath)) {
+            return LiveOptionGroundingExecution.none();
+        }
+        AgenticAuthoringToolCall toolCall = new AgenticAuthoringToolCall(
+                AgenticAuthoringToolRegistry.SEARCH_OPTION_SOURCE_VALUES,
+                route.routeClass(),
+                new LiveOptionValueToolRequest(
+                        resourcePath,
+                        filter.path("field").asText(""),
+                        filter.path("concept").asText(""),
+                        filter.path("operator").asText(""),
+                        filter.path("value").deepCopy(),
+                        objectMapper.createObjectNode(),
+                        100,
+                        false));
+        eventSink.append("thought.step", safeToolProjection(
+                "tool.start",
+                "Estou consultando os valores atuais do campo governado antes de materializar o filtro.",
+                Map.of(
+                        "tool", toolCall.name(),
+                        "routeClass", safeText(route.routeClass()),
+                        "semanticField", filter.path("field").asText(""))));
+        AgenticAuthoringToolResult toolResult = toolRegistry.execute(
+                toolCall,
+                principalContext,
+                "retrieveEvidence",
+                requestBaseUrl);
+        eventSink.append("thought.step", safeToolProjection(
+                toolResult.valid() ? "tool.result" : "tool.error",
+                toolResult.valid()
+                        ? "Os valores atuais foram recuperados e serão reconciliados semanticamente."
+                        : "Os valores atuais não puderam ser recuperados com segurança.",
+                safeToolDiagnostics(toolResult)));
+        return toolResult.valid() && toolResult.payload() instanceof LiveOptionValueRetrievalResult result
+                ? new LiveOptionGroundingExecution(toolResult, result)
+                : new LiveOptionGroundingExecution(toolResult, null);
+    }
+
+    private LiveOptionFieldGroundingExecution maybeRunLiveOptionFieldGrounding(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringTurnRoute route,
+            String requestBaseUrl) {
+        if (eventSink.terminalReached()
+                || route == null
+                || !route.allowsPreview()
+                || intentResolution == null
+                || !intentResolution.valid()
+                || intentResolution.semanticDecision() == null
+                || intentResolution.semanticDecision().selectedResource() == null
+                || request == null
+                || request.contextHints() != null
+                        && request.contextHints().path("liveOptionFieldGrounding").isObject()) {
+            return LiveOptionFieldGroundingExecution.none();
+        }
+        JsonNode filter = firstSemanticTextConstraint(intentResolution.semanticDecision().constraints());
+        if (filter == null) {
+            return LiveOptionFieldGroundingExecution.none();
+        }
+        String resourcePath = intentResolution.semanticDecision().selectedResource().resourcePath();
+        if (!StringUtils.hasText(resourcePath)) {
+            return LiveOptionFieldGroundingExecution.none();
+        }
+        String filterPath = resourcePath.endsWith("/filter") ? resourcePath : resourcePath + "/filter";
+        AgenticAuthoringToolCall toolCall = new AgenticAuthoringToolCall(
+                AgenticAuthoringToolRegistry.SEARCH_SCHEMA_FIELDS,
+                route.routeClass(),
+                new SchemaFieldsToolRequest(
+                        filterPath,
+                        "post",
+                        "request",
+                        filter.path("concept").asText(filter.path("field").asText("")),
+                        requestBaseUrl,
+                        50));
+        eventSink.append("thought.step", safeToolProjection(
+                "tool.start",
+                "Estou consultando os campos governados do recurso antes de buscar valores atuais.",
+                Map.of(
+                        "tool", toolCall.name(),
+                        "resourcePath", resourcePath)));
+        AgenticAuthoringToolResult toolResult = toolRegistry.execute(
+                toolCall,
+                principalContext,
+                "retrieveEvidence",
+                requestBaseUrl);
+        ObjectNode projection = toolResult.valid()
+                ? liveOptionFieldProjection(toolResult.payload(), resourcePath, filter)
+                : null;
+        eventSink.append("thought.step", safeToolProjection(
+                projection != null ? "tool.result" : toolResult.valid() ? "tool.result" : "tool.error",
+                projection != null
+                        ? "Os campos de seleção governados foram recuperados para decisão semântica."
+                        : toolResult.valid()
+                                ? "O recurso não publicou campos de seleção governados aplicáveis."
+                                : "Os campos governados não puderam ser consultados.",
+                projection != null
+                        ? Map.of(
+                                "tool", toolCall.name(),
+                                "candidateCount", projection.path("candidates").size())
+                        : safeToolDiagnostics(toolResult)));
+        return new LiveOptionFieldGroundingExecution(toolResult, projection);
+    }
+
+    private ObjectNode liveOptionFieldProjection(
+            Object payload,
+            String resourcePath,
+            JsonNode originalPredicate) {
+        JsonNode schema = payload instanceof JsonNode node ? node.path("schema") : null;
+        if (schema == null || !schema.path("properties").isObject()) {
+            return null;
+        }
+        ObjectNode projection = objectMapper.createObjectNode();
+        projection.put("schemaVersion", "praxis-live-option-field-grounding.v1");
+        projection.put("resourcePath", resourcePath);
+        projection.set("originalPredicate", originalPredicate.deepCopy());
+        ArrayNode candidates = projection.putArray("candidates");
+        schema.path("properties").fields().forEachRemaining(entry -> {
+            JsonNode property = entry.getValue();
+            JsonNode optionSource = property.path("x-ui").path("optionSource");
+            JsonNode aiUsage = property.path("x-domain-governance").path("aiUsage");
+            if (!optionSource.isObject()
+                    || !"allow".equals(aiUsage.path("visibility").asText(""))
+                    || !List.of("allow", "review_required").contains(aiUsage.path("reasoningUse").asText(""))) {
+                return;
+            }
+            ObjectNode candidate = candidates.addObject();
+            candidate.put("canonicalFilterField", entry.getKey());
+            candidate.put("label", property.path("x-ui").path("label").asText(""));
+            candidate.put("description", property.path("description").asText(""));
+            candidate.put("optionSourceKey", optionSource.path("key").asText(""));
+            candidate.put("optionResourcePath", optionSource.path("resourcePath").asText(""));
+            candidate.put("multiple", property.path("x-ui").path("multiple").asBoolean(
+                    property.path("type").asText("").equals("array")));
+        });
+        return candidates.isEmpty() ? null : projection;
+    }
+
+    private AgenticAuthoringTurnStreamRequest withLiveOptionFieldGrounding(
+            AgenticAuthoringTurnStreamRequest request,
+            JsonNode projection) {
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        contextHints.set("liveOptionFieldGrounding", projection.deepCopy());
+        return copyWithContextHints(request, contextHints);
+    }
+
+    private JsonNode firstSemanticTextConstraint(JsonNode constraints) {
+        if (constraints == null || !constraints.path("filters").isArray()) {
+            return null;
+        }
+        for (JsonNode filter : constraints.path("filters")) {
+            if (filter.isObject()
+                    && (StringUtils.hasText(filter.path("field").asText(""))
+                            || StringUtils.hasText(filter.path("concept").asText("")))
+                    && isSemanticTextValue(filter.path("value"))) {
+                return filter;
+            }
+        }
+        return null;
+    }
+
+    private boolean isSemanticTextValue(JsonNode value) {
+        if (value == null || value.isNull()) {
+            return false;
+        }
+        if (value.isTextual()) {
+            return StringUtils.hasText(value.asText(""));
+        }
+        if (!value.isArray() || value.isEmpty()) {
+            return false;
+        }
+        for (JsonNode item : value) {
+            if (!item.isTextual() || !StringUtils.hasText(item.asText(""))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private LiveOptionGroundingExecution maybeConfirmLiveOptionSelection(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringIntentResolutionResult resolution,
+            AgenticAuthoringTurnRoute route,
+            String requestBaseUrl,
+            LiveOptionValueRetrievalResult grounding) {
+        JsonNode selection = selectedLiveOptionConstraint(resolution, grounding);
+        if (selection == null) {
+            return LiveOptionGroundingExecution.none();
+        }
+        AgenticAuthoringToolCall toolCall = new AgenticAuthoringToolCall(
+                AgenticAuthoringToolRegistry.SEARCH_OPTION_SOURCE_VALUES,
+                route.routeClass(),
+                new LiveOptionValueToolRequest(
+                        grounding.resourcePath(),
+                        grounding.canonicalFilterField(),
+                        selection.path("concept").asText(""),
+                        "in",
+                        selection.path("value").deepCopy(),
+                        objectMapper.createObjectNode(),
+                        Math.max(1, selection.path("value").size()),
+                        true));
+        eventSink.append("thought.step", safeToolProjection(
+                "tool.start",
+                "Estou confirmando os valores selecionados no escopo atual antes de montar o filtro.",
+                Map.of(
+                        "tool", toolCall.name(),
+                        "canonicalFilterField", grounding.canonicalFilterField(),
+                        "selectionCount", selection.path("value").size())));
+        AgenticAuthoringToolResult toolResult = toolRegistry.execute(
+                toolCall,
+                principalContext,
+                "retrieveEvidence",
+                requestBaseUrl);
+        eventSink.append("thought.step", safeToolProjection(
+                toolResult.valid() ? "tool.result" : "tool.error",
+                toolResult.valid()
+                        ? "A seleção foi recarregada pela superfície canônica de valores atuais."
+                        : "A seleção não pôde ser confirmada no escopo atual.",
+                safeToolDiagnostics(toolResult)));
+        return toolResult.valid() && toolResult.payload() instanceof LiveOptionValueRetrievalResult result
+                ? new LiveOptionGroundingExecution(toolResult, result)
+                : new LiveOptionGroundingExecution(toolResult, null);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withLiveOptionValueGrounding(
+            AgenticAuthoringTurnStreamRequest request,
+            LiveOptionValueRetrievalResult result) {
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        // Field discovery has already produced the canonical predicate at this point. Keeping both
+        // grounding stages active makes the model reconsider a decision that is already closed and
+        // can turn a clear multi-value selection into an unnecessary clarification.
+        contextHints.remove("liveOptionFieldGrounding");
+        contextHints.set("liveOptionValueGrounding", objectMapper.valueToTree(result));
+        return copyWithContextHints(request, contextHints);
+    }
+
+    private boolean hasValidatedLiveOptionSelection(
+            AgenticAuthoringIntentResolutionResult resolution,
+            LiveOptionValueRetrievalResult grounding) {
+        if (resolution == null
+                || !resolution.valid()
+                || resolution.semanticDecision() == null
+                || grounding == null
+                || !grounding.valid()
+                || !grounding.exhaustive()) {
+            return false;
+        }
+        JsonNode filters = resolution.semanticDecision().constraints() == null
+                ? null
+                : resolution.semanticDecision().constraints().path("filters");
+        if (filters == null || !filters.isArray()) {
+            return false;
+        }
+        for (JsonNode filter : filters) {
+            if (!grounding.canonicalFilterField().equals(filter.path("field").asText(""))
+                    || !"in".equals(filter.path("operator").asText(""))
+                    || !filter.path("value").isArray()
+                    || filter.path("value").isEmpty()) {
+                continue;
+            }
+            for (JsonNode selectedId : filter.path("value")) {
+                boolean known = grounding.candidates().stream()
+                        .map(LiveOptionValueCandidate::id)
+                        .anyMatch(candidateId -> candidateId != null && candidateId.equals(selectedId));
+                if (!known) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private AgenticAuthoringIntentResolutionResult collapseSemanticallyCoveredLiveOptionConstraints(
+            AgenticAuthoringIntentResolutionResult resolution,
+            LiveOptionValueRetrievalResult grounding) {
+        // This is post-resolution grounding confirmation, not primary intent routing. The LLM has
+        // already selected the canonical option-source field and exact live IDs. Text normalization
+        // is used only to remove a duplicate projection whose value is covered by those selected,
+        // backend-owned candidate labels; independent predicates remain for schema validation.
+        if (resolution == null
+                || grounding == null
+                || resolution.semanticDecision() == null
+                || resolution.semanticDecision().constraints() == null) {
+            return resolution;
+        }
+        JsonNode originalFilters = resolution.semanticDecision().constraints().path("filters");
+        if (!originalFilters.isArray()) {
+            return resolution;
+        }
+        ArrayNode canonicalSelection = objectMapper.createArrayNode();
+        int canonicalConstraintCount = 0;
+        for (JsonNode filter : originalFilters) {
+            if (!grounding.canonicalFilterField().equals(filter.path("field").asText(""))
+                    || !"in".equals(filter.path("operator").asText(""))
+                    || !filter.path("value").isArray()
+                    || filter.path("value").isEmpty()) {
+                continue;
+            }
+            canonicalConstraintCount++;
+            for (JsonNode selectedId : filter.path("value")) {
+                boolean duplicate = false;
+                for (JsonNode existingId : canonicalSelection) {
+                    if (existingId.equals(selectedId)) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (!duplicate) {
+                    canonicalSelection.add(selectedId.deepCopy());
+                }
+            }
+        }
+        if (canonicalSelection.isEmpty()) {
+            return resolution;
+        }
+        List<String> selectedCandidateLabels = selectedLiveOptionCandidateLabels(
+                canonicalSelection,
+                grounding);
+        ObjectNode constraints = resolution.semanticDecision().constraints().deepCopy();
+        JsonNode filters = constraints.path("filters");
+        if (!filters.isArray() || filters.size() < 2) {
+            return resolution;
+        }
+        ArrayNode reconciledFilters = objectMapper.createArrayNode();
+        int collapsedTextConstraints = 0;
+        int collapsedCanonicalConstraints = 0;
+        boolean canonicalSelectionAdded = false;
+        for (JsonNode filter : filters) {
+            boolean canonicalConstraint = grounding.canonicalFilterField().equals(filter.path("field").asText(""))
+                    && "in".equals(filter.path("operator").asText(""))
+                    && filter.path("value").isArray()
+                    && !filter.path("value").isEmpty();
+            if (canonicalConstraint) {
+                if (!canonicalSelectionAdded) {
+                    ObjectNode consolidated = filter.deepCopy();
+                    consolidated.set("value", canonicalSelection.deepCopy());
+                    reconciledFilters.add(consolidated);
+                    canonicalSelectionAdded = true;
+                } else {
+                    collapsedCanonicalConstraints++;
+                }
+                continue;
+            }
+            if (!selectedCandidateLabels.isEmpty()
+                    && isSemanticTextValue(filter.path("value"))
+                    && isTextConstraintCoveredBySelectedLiveOptionLabels(
+                            filter.path("value"),
+                            selectedCandidateLabels)) {
+                collapsedTextConstraints++;
+                continue;
+            }
+            reconciledFilters.add(filter.deepCopy());
+        }
+        if (collapsedTextConstraints == 0 && collapsedCanonicalConstraints == 0) {
+            return resolution;
+        }
+        constraints.set("filters", reconciledFilters);
+        LinkedHashSet<String> warnings = new LinkedHashSet<>(
+                resolution.warnings() == null ? List.of() : resolution.warnings());
+        if (collapsedTextConstraints > 0) {
+            warnings.add("live-option-redundant-semantic-constraint-collapsed");
+        }
+        if (canonicalConstraintCount > 1 && collapsedCanonicalConstraints > 0) {
+            warnings.add("live-option-duplicate-canonical-constraint-unioned");
+        }
+        AgenticAuthoringSemanticDecision reconciledDecision =
+                resolution.semanticDecision().withConstraints(constraints);
+        return new AgenticAuthoringIntentResolutionResult(
+                resolution.valid(),
+                resolution.operationKind(),
+                resolution.artifactKind(),
+                resolution.changeKind(),
+                resolution.authoringProfile(),
+                resolution.targetApp(),
+                resolution.targetComponentId(),
+                resolution.target(),
+                resolution.selectedCandidate(),
+                resolution.candidates(),
+                resolution.gate(),
+                resolution.effectivePrompt(),
+                resolution.assistantMessage(),
+                resolution.assistantContent(),
+                resolution.apiCatalogAnswer(),
+                resolution.quickReplies(),
+                resolution.pendingClarification(),
+                resolution.clarificationQuestions(),
+                List.copyOf(warnings),
+                resolution.failureCodes(),
+                resolution.currentPageSummary(),
+                resolution.llmDiagnostics(),
+                resolution.visualizationDecision(),
+                reconciledDecision);
+    }
+
+    private AgenticAuthoringIntentResolutionResult preserveLiveOptionRefinementLineage(
+            AgenticAuthoringIntentResolutionResult established,
+            AgenticAuthoringIntentResolutionResult refinement) {
+        if (established == null
+                || refinement == null
+                || !refinement.valid()
+                || established.semanticDecision() == null
+                || refinement.semanticDecision() == null
+                || refinement.semanticDecision().constraints() == null) {
+            return refinement;
+        }
+        // The live-option pass is a constrained semantic classifier. It may choose current option
+        // IDs, but it cannot reopen the already governed operation, artifact, resource or visual
+        // decision. Backend reconciliation enforces this boundary instead of trusting prompt
+        // compliance from any provider/model.
+        AgenticAuthoringSemanticDecision reconciledDecision = established.semanticDecision()
+                .withConstraints(refinement.semanticDecision().constraints().deepCopy());
+        LinkedHashSet<String> warnings = new LinkedHashSet<>(
+                established.warnings() == null ? List.of() : established.warnings());
+        if (refinement.warnings() != null) {
+            warnings.addAll(refinement.warnings());
+        }
+        warnings.add("live-option-refinement-scoped-to-constraints");
+        return new AgenticAuthoringIntentResolutionResult(
+                established.valid(),
+                established.operationKind(),
+                established.artifactKind(),
+                established.changeKind(),
+                established.authoringProfile(),
+                established.targetApp(),
+                established.targetComponentId(),
+                established.target(),
+                established.selectedCandidate(),
+                established.candidates(),
+                established.gate(),
+                established.effectivePrompt(),
+                established.assistantMessage(),
+                established.assistantContent(),
+                established.apiCatalogAnswer(),
+                refinement.quickReplies(),
+                refinement.pendingClarification(),
+                refinement.clarificationQuestions(),
+                List.copyOf(warnings),
+                refinement.failureCodes(),
+                established.currentPageSummary(),
+                refinement.llmDiagnostics(),
+                established.visualizationDecision(),
+                reconciledDecision);
+    }
+
+    private List<String> selectedLiveOptionCandidateLabels(
+            JsonNode selectedIds,
+            LiveOptionValueRetrievalResult grounding) {
+        if (selectedIds == null
+                || !selectedIds.isArray()
+                || selectedIds.isEmpty()
+                || grounding == null
+                || grounding.candidates() == null) {
+            return List.of();
+        }
+        List<String> labels = new ArrayList<>();
+        for (JsonNode selectedId : selectedIds) {
+            LiveOptionValueCandidate selectedCandidate = grounding.candidates().stream()
+                    .filter(candidate -> candidate.id() != null && candidate.id().equals(selectedId))
+                    .findFirst()
+                    .orElse(null);
+            if (selectedCandidate == null || !StringUtils.hasText(selectedCandidate.label())) {
+                return List.of();
+            }
+            labels.add(normalizeGroundingText(selectedCandidate.label()));
+        }
+        return labels;
+    }
+
+    private boolean isTextConstraintCoveredBySelectedLiveOptionLabels(
+            JsonNode value,
+            List<String> selectedCandidateLabels) {
+        List<String> semanticValues = new ArrayList<>();
+        if (value.isTextual()) {
+            semanticValues.add(value.asText(""));
+        } else if (value.isArray()) {
+            value.forEach(item -> semanticValues.add(item.asText("")));
+        }
+        return !semanticValues.isEmpty() && semanticValues.stream().allMatch(semanticValue -> {
+            String normalizedValue = normalizeGroundingText(semanticValue);
+            return StringUtils.hasText(normalizedValue)
+                    && selectedCandidateLabels.stream().anyMatch(label ->
+                            (" " + label + " ").contains(" " + normalizedValue + " "));
+        });
+    }
+
+    private String normalizeGroundingText(String value) {
+        return normalizeText(value)
+                .replaceAll("[^\\p{L}\\p{N}]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private boolean hasPreservedLiveOptionPredicate(
+            AgenticAuthoringIntentResolutionResult resolution,
+            JsonNode fieldGrounding) {
+        if (resolution == null
+                || !resolution.valid()
+                || resolution.semanticDecision() == null
+                || resolution.semanticDecision().constraints() == null
+                || fieldGrounding == null) {
+            return false;
+        }
+        JsonNode original = fieldGrounding.path("originalPredicate");
+        String originalField = original.path("field").asText("");
+        Set<String> canonicalFields = new LinkedHashSet<>();
+        fieldGrounding.path("candidates").forEach(candidate -> {
+            String field = candidate.path("canonicalFilterField").asText("");
+            if (StringUtils.hasText(field)) {
+                canonicalFields.add(field);
+            }
+        });
+        JsonNode filters = resolution.semanticDecision().constraints().path("filters");
+        if (!filters.isArray()) {
+            return false;
+        }
+        for (JsonNode filter : filters) {
+            String field = filter.path("field").asText("");
+            if ((field.equals(originalField) || canonicalFields.contains(field))
+                    && isSemanticTextValue(filter.path("value"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasSchemaConfirmedCanonicalLiveOptionField(
+            AgenticAuthoringIntentResolutionResult resolution,
+            JsonNode fieldGrounding) {
+        if (resolution == null
+                || !resolution.valid()
+                || resolution.semanticDecision() == null
+                || resolution.semanticDecision().constraints() == null
+                || fieldGrounding == null
+                || !fieldGrounding.path("candidates").isArray()) {
+            return false;
+        }
+        JsonNode predicate = firstSemanticTextConstraint(resolution.semanticDecision().constraints());
+        if (predicate == null) {
+            return false;
+        }
+        String authoredField = predicate.path("field").asText("");
+        long exactCanonicalMatches = 0;
+        for (JsonNode candidate : fieldGrounding.path("candidates")) {
+            if (authoredField.equals(candidate.path("canonicalFilterField").asText(""))) {
+                exactCanonicalMatches++;
+            }
+        }
+        return exactCanonicalMatches == 1;
+    }
+
+    private boolean hasSingleCanonicalLiveOptionFieldCandidate(JsonNode fieldGrounding) {
+        return fieldGrounding != null
+                && fieldGrounding.path("candidates").isArray()
+                && fieldGrounding.path("candidates").size() == 1
+                && StringUtils.hasText(fieldGrounding.path("candidates").get(0)
+                        .path("canonicalFilterField").asText(""));
+    }
+
+    private AgenticAuthoringIntentResolutionResult withProvisionalCanonicalLiveOptionField(
+            AgenticAuthoringIntentResolutionResult resolution,
+            JsonNode fieldGrounding) {
+        if (resolution == null
+                || resolution.semanticDecision() == null
+                || resolution.semanticDecision().constraints() == null
+                || !hasSingleCanonicalLiveOptionFieldCandidate(fieldGrounding)) {
+            return resolution;
+        }
+        String canonicalField = fieldGrounding.path("candidates").get(0)
+                .path("canonicalFilterField").asText("");
+        ObjectNode constraints = resolution.semanticDecision().constraints().deepCopy();
+        JsonNode filters = constraints.path("filters");
+        boolean replaced = false;
+        if (filters.isArray()) {
+            for (JsonNode filter : filters) {
+                if (!replaced && filter.isObject() && isSemanticTextValue(filter.path("value"))) {
+                    ((ObjectNode) filter).put("field", canonicalField);
+                    replaced = true;
+                }
+            }
+        }
+        if (!replaced) {
+            return resolution;
+        }
+        LinkedHashSet<String> warnings = new LinkedHashSet<>(
+                resolution.warnings() == null ? List.of() : resolution.warnings());
+        warnings.add("live-option-field-provisional-schema-candidate");
+        AgenticAuthoringSemanticDecision provisionalDecision =
+                resolution.semanticDecision().withConstraints(constraints);
+        return new AgenticAuthoringIntentResolutionResult(
+                resolution.valid(),
+                resolution.operationKind(),
+                resolution.artifactKind(),
+                resolution.changeKind(),
+                resolution.authoringProfile(),
+                resolution.targetApp(),
+                resolution.targetComponentId(),
+                resolution.target(),
+                resolution.selectedCandidate(),
+                resolution.candidates(),
+                resolution.gate(),
+                resolution.effectivePrompt(),
+                resolution.assistantMessage(),
+                resolution.assistantContent(),
+                resolution.apiCatalogAnswer(),
+                resolution.quickReplies(),
+                resolution.pendingClarification(),
+                resolution.clarificationQuestions(),
+                List.copyOf(warnings),
+                resolution.failureCodes(),
+                resolution.currentPageSummary(),
+                resolution.llmDiagnostics(),
+                resolution.visualizationDecision(),
+                provisionalDecision);
+    }
+
+    private boolean hasConfirmedLiveOptionSelection(
+            AgenticAuthoringIntentResolutionResult resolution,
+            LiveOptionValueRetrievalResult grounding,
+            LiveOptionValueRetrievalResult confirmation) {
+        JsonNode selection = selectedLiveOptionConstraint(resolution, grounding);
+        if (selection == null
+                || confirmation == null
+                || !confirmation.valid()
+                || !"selected_ids_reload".equals(confirmation.retrievalMode())
+                || !grounding.canonicalFilterField().equals(confirmation.canonicalFilterField())
+                || confirmation.candidates().size() != selection.path("value").size()) {
+            return false;
+        }
+        if (StringUtils.hasText(grounding.datasetVersion())
+                && !grounding.datasetVersion().equals(confirmation.datasetVersion())) {
+            return false;
+        }
+        for (int index = 0; index < selection.path("value").size(); index++) {
+            JsonNode selectedId = selection.path("value").get(index);
+            JsonNode confirmedId = confirmation.candidates().get(index).id();
+            if (selectedId == null || confirmedId == null || !selectedId.equals(confirmedId)) {
+                return false;
+            }
+            for (int duplicateIndex = index + 1;
+                    duplicateIndex < selection.path("value").size();
+                    duplicateIndex++) {
+                if (selectedId.equals(selection.path("value").get(duplicateIndex))) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private JsonNode selectedLiveOptionConstraint(
+            AgenticAuthoringIntentResolutionResult resolution,
+            LiveOptionValueRetrievalResult grounding) {
+        if (resolution == null
+                || resolution.semanticDecision() == null
+                || grounding == null
+                || resolution.semanticDecision().constraints() == null) {
+            return null;
+        }
+        JsonNode filters = resolution.semanticDecision().constraints().path("filters");
+        if (!filters.isArray()) {
+            return null;
+        }
+        for (JsonNode filter : filters) {
+            if (grounding.canonicalFilterField().equals(filter.path("field").asText(""))
+                    && "in".equals(filter.path("operator").asText(""))
+                    && filter.path("value").isArray()
+                    && !filter.path("value").isEmpty()) {
+                return filter;
+            }
+        }
+        return null;
+    }
+
+    private boolean requiresLiveOptionClarification(AgenticAuthoringIntentResolutionResult resolution) {
+        return resolution != null
+                && (resolution.pendingClarification() != null
+                        || resolution.clarificationQuestions() != null
+                                && !resolution.clarificationQuestions().isEmpty());
+    }
+
+    private AgenticAuthoringResourceSearchFocus preIntentResourceSearchFocus(
+            AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || request.contextHints() == null) {
+            return null;
+        }
+        JsonNode focus = request.contextHints()
+                .path("preIntentSemanticOrientation")
+                .path("resourceSearchFocus");
+        if (!focus.isObject()) {
+            return null;
+        }
+        List<String> supportingConcepts = new ArrayList<>();
+        focus.path("supportingConcepts").forEach(item -> {
+            if (item.isTextual() && StringUtils.hasText(item.asText())) {
+                supportingConcepts.add(item.asText().trim());
+            }
+        });
+        AgenticAuthoringResourceSearchFocus resolved = new AgenticAuthoringResourceSearchFocus(
+                focus.path("primaryBusinessEntity").asText(""),
+                supportingConcepts,
+                focus.path("desiredSurface").asText(""),
+                focus.path("uncertainty").asText(""),
+                focus.path("rationale").asText(""));
+        return resolved.isEmpty() ? null : resolved;
     }
 
     private AgenticAuthoringResourceCandidatesResult maybeRunBusinessCatalogResourceDiscoveryTool(
@@ -3313,13 +4365,13 @@ public class AgenticAuthoringTurnEngine {
         if (capabilities == null || capabilities.catalogs() == null || capabilities.catalogs().isEmpty()) {
             return List.of();
         }
-        boolean hasChart = previewContainsComponent(preview, "praxis-chart");
-        boolean hasTable = previewContainsComponent(preview, "praxis-table");
+        JsonNode previewPage = previewMaterializedPage(preview);
         String chartWidgetKey = previewComponentWidgetKey(preview, "praxis-chart");
         String tableWidgetKey = previewComponentWidgetKey(preview, "praxis-table");
-        JsonNode previewPage = previewMaterializedPage(preview);
         JsonNode chartWidgetSnapshot = previewComponentWidget(previewPage, "praxis-chart", chartWidgetKey);
         JsonNode tableWidgetSnapshot = previewComponentWidget(previewPage, "praxis-table", tableWidgetKey);
+        boolean hasChart = chartWidgetSnapshot != null;
+        boolean hasTable = tableWidgetSnapshot != null;
         AgenticAuthoringCandidate selectedCandidate = intentResolution == null
                 ? null
                 : intentResolution.selectedCandidate();
@@ -3336,7 +4388,9 @@ public class AgenticAuthoringTurnEngine {
                     chartWidgetKey,
                     selectedCandidate,
                     previewPage,
-                    chartWidgetSnapshot));
+                    chartWidgetSnapshot,
+                    request,
+                    intentResolution == null ? null : intentResolution.semanticDecision()));
             replies.add(contextualQuickReply(
                     "chart-change-donut",
                     "Ver como donut",
@@ -3348,7 +4402,9 @@ public class AgenticAuthoringTurnEngine {
                     chartWidgetKey,
                     selectedCandidate,
                     previewPage,
-                    chartWidgetSnapshot));
+                    chartWidgetSnapshot,
+                    request,
+                    intentResolution == null ? null : intentResolution.semanticDecision()));
         }
         if (hasChart && supportsCapability(capabilities, "praxis-chart", "enable_chart_drilldown")) {
             replies.add(contextualQuickReply(
@@ -3362,7 +4418,9 @@ public class AgenticAuthoringTurnEngine {
                     chartWidgetKey,
                     selectedCandidate,
                     previewPage,
-                    chartWidgetSnapshot));
+                    chartWidgetSnapshot,
+                    request,
+                    intentResolution == null ? null : intentResolution.semanticDecision()));
             ObjectNode surfaceHints = objectMapper.createObjectNode();
             surfaceHints.put("surfacePresentation", "modal");
             surfaceHints.put("surfaceActionId", "surface.open");
@@ -3379,7 +4437,9 @@ public class AgenticAuthoringTurnEngine {
                     selectedCandidate,
                     previewPage,
                     chartWidgetSnapshot,
-                    surfaceHints));
+                    surfaceHints,
+                    request,
+                    intentResolution == null ? null : intentResolution.semanticDecision()));
         }
         if (hasTable && supportsCapability(capabilities, "praxis-table", "configure_export")) {
             replies.add(contextualQuickReply(
@@ -3393,7 +4453,9 @@ public class AgenticAuthoringTurnEngine {
                     tableWidgetKey,
                     selectedCandidate,
                     previewPage,
-                    tableWidgetSnapshot));
+                    tableWidgetSnapshot,
+                    request,
+                    intentResolution == null ? null : intentResolution.semanticDecision()));
         }
         return replies.size() <= 5 ? replies : List.copyOf(replies.subList(0, 5));
     }
@@ -3419,7 +4481,9 @@ public class AgenticAuthoringTurnEngine {
             String widgetKey,
             AgenticAuthoringCandidate selectedCandidate,
             JsonNode previewPage,
-            JsonNode targetWidgetSnapshot) {
+            JsonNode targetWidgetSnapshot,
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringSemanticDecision activeDecision) {
         return contextualQuickReply(
                 id,
                 label,
@@ -3432,7 +4496,9 @@ public class AgenticAuthoringTurnEngine {
                 selectedCandidate,
                 previewPage,
                 targetWidgetSnapshot,
-                null);
+                null,
+                request,
+                activeDecision);
     }
 
     private AgenticAuthoringQuickReply contextualQuickReply(
@@ -3447,7 +4513,9 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringCandidate selectedCandidate,
             JsonNode previewPage,
             JsonNode targetWidgetSnapshot,
-            JsonNode extraContextHints) {
+            JsonNode extraContextHints,
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringSemanticDecision activeDecision) {
         ObjectNode hints = objectMapper.createObjectNode();
         hints.put("source", "component-capability-catalog");
         hints.put("kind", "contextual-preview-action");
@@ -3489,7 +4557,59 @@ public class AgenticAuthoringTurnEngine {
                 "Ação sugerida a partir das capacidades confirmadas do componente.",
                 icon,
                 "suggestion",
-                hints);
+                hints,
+                contextualQuickReplySemanticDecision(
+                        request,
+                        activeDecision,
+                        id,
+                        prompt,
+                        changeKind,
+                        capabilityId,
+                        componentId,
+                        widgetKey,
+                        selectedCandidate),
+                null);
+    }
+
+    private JsonNode contextualQuickReplySemanticDecision(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringSemanticDecision activeDecision,
+            String quickReplyId,
+            String prompt,
+            String changeKind,
+            String capabilityId,
+            String componentId,
+            String widgetKey,
+            AgenticAuthoringCandidate selectedCandidate) {
+        ObjectNode constraints = activeDecision != null
+                        && activeDecision.constraints() != null
+                        && activeDecision.constraints().isObject()
+                ? activeDecision.constraints().deepCopy()
+                : objectMapper.createObjectNode();
+        constraints.put("source", "server-issued-quick-reply");
+        constraints.put("quickReplyId", quickReplyId);
+        constraints.put("continuationOf", "contextual_preview_action");
+        putText(constraints, "capabilityId", capabilityId);
+        putText(constraints, "targetComponentId", componentId);
+        putText(constraints, "targetWidgetKey", widgetKey);
+        AgenticAuthoringSemanticDecision decision = AgenticAuthoringSemanticDecision.from(
+                        "modify",
+                        contextualArtifactKind(componentId),
+                        changeKind,
+                        selectedCandidate,
+                        selectedCandidate == null ? List.of() : List.of(selectedCandidate),
+                        activeDecision == null ? null : activeDecision.visualizationDecision(),
+                        List.of(),
+                        null,
+                        null,
+                        activeDecision,
+                        request == null ? "" : request.sessionId(),
+                        (request == null ? "" : request.clientTurnId()) + ":" + quickReplyId,
+                        prompt,
+                        prompt,
+                        "The user may select this governed component capability after preview materialization.")
+                .withConstraints(constraints);
+        return objectMapper.valueToTree(decision);
     }
 
     private String contextualArtifactKind(String componentId) {
@@ -3512,6 +4632,10 @@ public class AgenticAuthoringTurnEngine {
         JsonNode page = preview.compiledFormPatch().path("patch").path("page");
         if (page.isObject() && page.path("widgets").isArray() && !page.path("widgets").isEmpty()) {
             return page;
+        }
+        JsonNode plan = preview.uiCompositionPlan();
+        if (plan != null && plan.isObject() && plan.path("widgets").isArray() && !plan.path("widgets").isEmpty()) {
+            return plan;
         }
         return null;
     }
@@ -3568,11 +4692,6 @@ public class AgenticAuthoringTurnEngine {
                 .filter(catalog -> componentId.equals(catalog.componentId()))
                 .flatMap(catalog -> catalog.capabilities() == null ? java.util.stream.Stream.empty() : catalog.capabilities().stream())
                 .anyMatch(capability -> changeKind.equals(capability.changeKind()));
-    }
-
-    private boolean previewContainsComponent(AgenticAuthoringPreviewResult preview, String componentId) {
-        return containsText(preview.uiCompositionPlan(), componentId)
-                || containsText(preview.compiledFormPatch(), componentId);
     }
 
     private String previewComponentWidgetKey(AgenticAuthoringPreviewResult preview, String componentId) {
@@ -3846,6 +4965,32 @@ public class AgenticAuthoringTurnEngine {
                 request.runtimeComponentObservationTrustBoundary());
     }
 
+    private AgenticAuthoringTurnStreamRequest withActiveSemanticDecision(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringSemanticDecision activeSemanticDecision) {
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                request.contextHints(),
+                request.componentCapabilities(),
+                activeSemanticDecision,
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
+    }
+
     private AgenticAuthoringTurnStreamRequest withoutAgenticApplyTargetContext(
             AgenticAuthoringTurnStreamRequest request) {
         if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
@@ -4078,7 +5223,8 @@ public class AgenticAuthoringTurnEngine {
         diagnostics.put("semanticPolicyApplied", telemetry.path("semanticPolicyApplied").asBoolean(false));
         boolean selectedCandidateUsesLexicalFallback =
                 telemetry.path("selectedCandidateUsesLexicalFallback").asBoolean(false)
-                        && !Boolean.TRUE.equals(diagnostics.get("semanticDecisionReviewGroundedByPreview"));
+                        && !Boolean.TRUE.equals(diagnostics.get("semanticDecisionReviewGroundedByPreview"))
+                        && !strongVerifiedSemanticDecisionEvidence(semanticDecision, selectedCandidate);
         diagnostics.put("selectedCandidateUsesLexicalFallback", selectedCandidateUsesLexicalFallback);
         boolean selectedCandidateUsesBroadArtifactDiscovery =
                 telemetry.path("selectedCandidateUsesBroadArtifactDiscovery").asBoolean(false)
@@ -4113,6 +5259,28 @@ public class AgenticAuthoringTurnEngine {
             diagnostics.put("reviewReason", reviewReason);
         }
         return diagnostics;
+    }
+
+    private boolean strongVerifiedSemanticDecisionEvidence(
+            AgenticAuthoringSemanticDecision semanticDecision,
+            AgenticAuthoringCandidate selectedCandidate) {
+        if (semanticDecision == null
+                || semanticDecision.reviewRequired()
+                || semanticDecision.selectedResource() == null
+                || selectedCandidate == null
+                || !safeText(semanticDecision.selectedResource().resourcePath())
+                        .equals(safeText(selectedCandidate.resourcePath()))) {
+            return false;
+        }
+        AgenticAuthoringSemanticDecision.RetrievalEvidence evidence = semanticDecision.retrievalEvidence();
+        if (evidence == null
+                || !AgenticAuthoringCandidateProvenancePolicy.SEMANTIC_RETRIEVAL.equals(evidence.retrievalSource())
+                || evidence.evidence() == null) {
+            return false;
+        }
+        return evidence.evidence().contains("llm-resource-focus")
+                && evidence.evidence().contains("schema-available")
+                && evidence.evidence().contains("stats-capabilities-verified");
     }
 
     private List<AiProviderInvocationTelemetry> providerInvocations(
@@ -4545,7 +5713,12 @@ public class AgenticAuthoringTurnEngine {
         }
         ArrayNode candidates = resourceDiscovery.putArray("candidates");
         for (AgenticAuthoringCandidate candidate : discovery.candidates()) {
-            candidates.add(candidateContext(candidate));
+            ObjectNode candidateNode = (ObjectNode) candidateContext(candidate);
+            JsonNode fieldCatalog = analyticsFieldCatalog(discovery, candidate.resourcePath());
+            if (fieldCatalog.isArray() && !fieldCatalog.isEmpty()) {
+                candidateNode.set("analyticsFields", fieldCatalog);
+            }
+            candidates.add(candidateNode);
         }
         if (discovery.consultativeProjection() != null && discovery.consultativeProjection().hasResources()) {
             resourceDiscovery.set(
@@ -4573,6 +5746,18 @@ public class AgenticAuthoringTurnEngine {
                 request.diagnostics(),
                 request.runtimeComponentObservations(),
                 request.runtimeComponentObservationTrustBoundary());
+    }
+
+    private JsonNode analyticsFieldCatalog(
+            AgenticAuthoringResourceCandidatesResult discovery,
+            String resourcePath) {
+        if (discovery == null || discovery.diagnostics() == null || !StringUtils.hasText(resourcePath)) {
+            return objectMapper.createArrayNode();
+        }
+        Object catalogs = discovery.diagnostics().get("analyticsCapabilityFieldCatalogs");
+        JsonNode node = objectMapper.valueToTree(catalogs);
+        JsonNode catalog = node.path(resourcePath);
+        return catalog.isArray() ? catalog : objectMapper.createArrayNode();
     }
 
     private ObjectNode resourceSearchFocusNode(AgenticAuthoringResourceSearchFocus focus) {
@@ -5565,8 +6750,26 @@ public class AgenticAuthoringTurnEngine {
             String value,
             AgenticAuthoringTurnStreamRequest request,
             boolean canApply) {
+        return ensureReviewablePreviewMessage(value, request, canApply, "");
+    }
+
+    static String ensureReviewablePreviewMessage(
+            String value,
+            AgenticAuthoringTurnStreamRequest request,
+            boolean canApply,
+            String applyBlockReason) {
         String message = value == null ? "" : value.trim();
         if (!canApply) {
+            if ("apply-target-missing".equals(applyBlockReason)) {
+                String responseLocale = request == null || request.contextHints() == null
+                        ? ""
+                        : request.contextHints().path("responseLocale").asText("");
+                String clarification = !responseLocale.isBlank()
+                                && !responseLocale.toLowerCase(java.util.Locale.ROOT).startsWith("pt")
+                        ? "The preview is ready for review, but it cannot be saved in this turn until the application target is identified."
+                        : "A prévia está pronta para revisão, mas ainda não pode ser salva neste turno porque o destino de aplicação não foi identificado.";
+                return message.isBlank() ? clarification : message + "\n\n" + clarification;
+            }
             return message;
         }
         String normalized = java.text.Normalizer.normalize(message, java.text.Normalizer.Form.NFD)
@@ -5659,6 +6862,24 @@ public class AgenticAuthoringTurnEngine {
 
         private static PreIntentToolPlanExecution empty() {
             return new PreIntentToolPlanExecution(null, null, List.of(), List.of(), List.of(), List.of());
+        }
+    }
+
+    private record LiveOptionGroundingExecution(
+            AgenticAuthoringToolResult toolResult,
+            LiveOptionValueRetrievalResult result) {
+
+        private static LiveOptionGroundingExecution none() {
+            return new LiveOptionGroundingExecution(null, null);
+        }
+    }
+
+    private record LiveOptionFieldGroundingExecution(
+            AgenticAuthoringToolResult toolResult,
+            ObjectNode projection) {
+
+        private static LiveOptionFieldGroundingExecution none() {
+            return new LiveOptionFieldGroundingExecution(null, null);
         }
     }
 
