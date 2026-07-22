@@ -2,7 +2,7 @@ package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -72,14 +72,37 @@ final class AgenticAuthoringComponentOperationCompatibilityGraph {
                     .toList();
             if (creators.size() == 1) expanded.add(creators.get(0));
         }
-        List<Node> ordered = new ArrayList<>(expanded);
-        ordered.sort(Comparator.comparingInt((Node node) -> orderBeforeCount(node, expanded)).reversed()
-                .thenComparing(Node::operationId));
+        List<Node> ordered = orderedByDependencies(expanded);
+        if (ordered.size() != expanded.size()) return Resolution.reject("component-operation-compatibility-cycle");
         return Resolution.accept(ordered.stream().map(Node::operationId).toList());
     }
 
-    private int orderBeforeCount(Node candidate, Set<Node> all) {
-        return (int) all.stream().filter(other -> candidate.creates(other) && other.requiresExistingTarget()).count();
+    private List<Node> orderedByDependencies(Set<Node> nodesToOrder) {
+        Map<Node, Integer> indegrees = new LinkedHashMap<>();
+        Map<Node, Set<Node>> outgoing = new LinkedHashMap<>();
+        for (Node node : nodesToOrder) {
+            indegrees.put(node, 0);
+            outgoing.put(node, new LinkedHashSet<>());
+        }
+        for (Node creator : nodesToOrder) for (Node consumer : nodesToOrder) {
+            if (creator != consumer && creator.creates(consumer) && consumer.requiresExistingTarget()
+                    && outgoing.get(creator).add(consumer)) {
+                indegrees.compute(consumer, (ignored, count) -> count + 1);
+            }
+        }
+        ArrayDeque<Node> ready = new ArrayDeque<>();
+        indegrees.entrySet().stream().filter(entry -> entry.getValue() == 0)
+                .map(Map.Entry::getKey).sorted(java.util.Comparator.comparing(Node::operationId)).forEach(ready::add);
+        List<Node> ordered = new ArrayList<>();
+        while (!ready.isEmpty()) {
+            Node current = ready.remove();
+            ordered.add(current);
+            outgoing.get(current).stream().sorted(java.util.Comparator.comparing(Node::operationId)).forEach(next -> {
+                int remaining = indegrees.compute(next, (ignored, count) -> count - 1);
+                if (remaining == 0) ready.add(next);
+            });
+        }
+        return ordered;
     }
 
     private List<String> conflicts(List<Node> selected) {
@@ -97,7 +120,8 @@ final class AgenticAuthoringComponentOperationCompatibilityGraph {
     private static boolean definitivelyConflicts(Node left, Node right) {
         return (left.removes(right) && right.mutates(right))
                 || (right.removes(left) && left.mutates(left))
-                || (left.effectKinds.contains("set-value") && right.effectKinds.contains("set-value") && overlaps(left.affectedPaths, right.affectedPaths));
+                || ((left.effectKinds.contains("set-value") || right.effectKinds.contains("set-value"))
+                        && overlaps(left.affectedPaths, right.affectedPaths));
     }
 
     private static boolean independentlyComposable(Node left, Node right) {

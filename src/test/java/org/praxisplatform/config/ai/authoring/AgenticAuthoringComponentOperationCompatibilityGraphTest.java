@@ -43,6 +43,24 @@ class AgenticAuthoringComponentOperationCompatibilityGraphTest {
     }
 
     @Test
+    void rejectsSetValueAtParentTogetherWithChildMutation() throws Exception {
+        var result = graph("1", operations(set("replace", "appearance"), op("child", "global", "merge-object", "appearance.density", "")))
+                .resolve(List.of("replace", "child"));
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.reason()).contains("compatibility-conflict");
+    }
+
+    @Test
+    void rejectsCyclicCreateBeforeDependencies() throws Exception {
+        var result = graph("1", operations(
+                op("first", "column", "append-unique", "columns[]", "target-exists"),
+                op("second", "column", "append-unique", "columns[]", "target-exists")))
+                .resolve(List.of("first", "second"));
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.reason()).isEqualTo("component-operation-compatibility-cycle");
+    }
+
+    @Test
     void regeneratesWhenManifestVersionChanges() throws Exception {
         var service = new AgenticAuthoringComponentOperationCompatibilityGraphService();
         assertThat(service.resolve("praxis-table", manifest("1", operations(set("a"))), List.of("a")).accepted()).isTrue();
@@ -58,6 +76,14 @@ class AgenticAuthoringComponentOperationCompatibilityGraphTest {
     @Test
     void removedOperationDisappearsWithoutAParallelCatalog() throws Exception {
         var result = graph("2", operations(set("remaining"))).resolve(List.of("removed"));
+        assertThat(result.accepted()).isFalse();
+    }
+
+    @Test
+    void evictsAStaleGraphWhenTheManifestContentChangesWithoutVersionChange() throws Exception {
+        var service = new AgenticAuthoringComponentOperationCompatibilityGraphService();
+        assertThat(service.resolve("praxis-table", manifest("1", operations(set("removed"))), List.of("removed")).accepted()).isTrue();
+        var result = service.resolve("praxis-table", manifest("1", operations(set("remaining"))), List.of("removed"));
         assertThat(result.accepted()).isFalse();
     }
 
