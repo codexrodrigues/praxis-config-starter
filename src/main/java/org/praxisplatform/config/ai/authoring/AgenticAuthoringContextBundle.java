@@ -200,7 +200,10 @@ final class AgenticAuthoringContextBundle {
                 }
                 int count = 0;
                 List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> selectedCapabilities =
-                        promptRelevantCapabilities(effectivePrompt, catalog.capabilities());
+                        retrievedOperationCandidates(objectMapper, request, catalog.componentId());
+                if (selectedCapabilities.isEmpty()) {
+                    selectedCapabilities = promptRelevantCapabilities(effectivePrompt, catalog.capabilities());
+                }
                 for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : selectedCapabilities) {
                     if (capability == null || count >= MAX_COMPACT_CAPABILITIES_PER_COMPONENT) {
                         continue;
@@ -219,6 +222,29 @@ final class AgenticAuthoringContextBundle {
             }
         }
         return compact;
+    }
+
+    private static List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> retrievedOperationCandidates(
+            ObjectMapper objectMapper, AgenticAuthoringIntentResolutionRequest request, String componentId) {
+        JsonNode candidates = request == null || request.contextHints() == null
+                ? null : request.contextHints().path("authoringEvidence").path("operationCandidates");
+        JsonNode evidenceComponentId = request == null || request.contextHints() == null
+                ? null : request.contextHints().path("authoringEvidence").path("componentId");
+        if (candidates == null || !candidates.isArray() || !componentId.equals(evidenceComponentId.asText())) {
+            return List.of();
+        }
+        List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> projected = new ArrayList<>();
+        for (JsonNode candidate : candidates) {
+            if (!candidate.isObject() || !StringUtils.hasText(candidate.path("id").asText())) {
+                continue;
+            }
+            projected.add(objectMapper.convertValue(
+                    candidate, AgenticAuthoringComponentCapabilitiesResult.ComponentCapability.class));
+            if (projected.size() >= 12) {
+                break;
+            }
+        }
+        return List.copyOf(projected);
     }
 
     static List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> promptRelevantCapabilities(

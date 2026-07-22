@@ -289,6 +289,7 @@ public class AgenticAuthoringTurnEngine {
                         componentCapabilitiesFuture,
                         !compactPlatformGuidanceOpportunity);
             }
+            request = withPreIntentAuthoringEvidenceContext(request, principalContext, state, eventSink);
             PreIntentToolPlanExecution preIntentExecution =
                     maybeRunPreIntentToolPlan(request, principalContext, eventSink, schemaBaseUrl);
             if (preIntentExecution.semanticOrientation() != null) {
@@ -4025,6 +4026,71 @@ public class AgenticAuthoringTurnEngine {
         return copyWithContextHints(request, contextHints);
     }
 
+    private AgenticAuthoringTurnStreamRequest withPreIntentAuthoringEvidenceContext(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnState state,
+            AgenticAuthoringTurnEventSink eventSink) {
+        if (request == null || toolRegistry == null || eventSink.terminalReached() || hasAuthoringEvidenceContext(request)) {
+            return request;
+        }
+        String componentId = firstNonBlank(
+                contextHintText(request.contextHints(), "selectedComponentId"),
+                state == null || state.structuralTarget() == null ? null : state.structuralTarget().componentId(),
+                request.targetComponentId());
+        componentId = firstNonBlank(
+                componentId,
+                activeDecisionComponentId(state == null ? null : state.activeSemanticDecision()));
+        if (isContainerAuthoringComponent(componentId)) {
+            return request;
+        }
+        String retrievalQuery = authoringEvidenceQuery(request, null);
+        AgenticAuthoringToolCall toolCall = new AgenticAuthoringToolCall(
+                AgenticAuthoringToolRegistry.GET_COMPONENT_AUTHORING_CONTEXT,
+                "component_authoring",
+                new CorpusToolRequest(
+                        retrievalQuery, componentId, "authoring_manifest", null,
+                        principalContext == null ? null : principalContext.tenantId(),
+                        principalContext == null ? null : principalContext.environment(),
+                        contextHintText(request.contextHints(), "releaseId"), 12));
+        eventSink.append("thought.step", safeToolProjection(
+                "authoringEvidence.retrieve",
+                "Estou recuperando operações governadas do componente selecionado antes de resolver a intenção.",
+                Map.of("tool", toolCall.name(), "componentId", componentId, "phase", "retrieveEvidence", "limit", 12)));
+        AgenticAuthoringToolResult result = toolRegistry.execute(toolCall, principalContext, "retrieveEvidence");
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy() : objectMapper.createObjectNode();
+        List<ContextRetrievalService.ComponentCorpusEvidence> evidence = result.valid()
+                ? componentCorpusEvidence(result, 12) : List.of();
+        ObjectNode evidenceContext = authoringEvidenceContext(toolCall.name(), retrievalQuery, componentId, evidence);
+        evidenceContext.put("attempted", true);
+        evidenceContext.put("retrievalStatus", result.valid() ? "resolved" : "unavailable");
+        if (!result.valid()) {
+            evidenceContext.put("fallbackMode", "component-capability-textual-ranking");
+            evidenceContext.put("diagnostic", safeText(result.errorCode()));
+        } else {
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> candidates =
+                    AgenticAuthoringAuthoringEvidenceCapabilities.select(
+                            objectMapper, componentId, evidence, componentCapabilities(request), 12);
+            evidenceContext.set("operationCandidates", objectMapper.valueToTree(candidates));
+        }
+        contextHints.set("authoringEvidence", evidenceContext);
+        eventSink.append("thought.step", safeToolProjection(
+                result.valid() ? "authoringEvidence.result" : "authoringEvidence.error",
+                result.valid() ? "As operações governadas foram recuperadas antes da resolução." : "A recuperação semântica não está disponível; o ranking textual permanecerá apenas como contingência observável.",
+                safeToolDiagnostics(result)));
+        return copyWithContextHints(request, contextHints);
+    }
+
+    private String activeDecisionComponentId(AgenticAuthoringSemanticDecision decision) {
+        if (decision == null || decision.constraints() == null || !decision.constraints().isObject()) {
+            return null;
+        }
+        return firstNonBlank(
+                contextHintText(decision.constraints(), "selectedComponentId"),
+                contextHintText(decision.constraints(), "targetComponentId"));
+    }
+
     private AgenticAuthoringTurnStreamRequest withComponentSelectionContext(
             AgenticAuthoringTurnStreamRequest request,
             AgenticAuthoringIntentResolutionResult intentResolution,
@@ -4072,8 +4138,8 @@ public class AgenticAuthoringTurnEngine {
         return request != null
                 && request.contextHints() != null
                 && request.contextHints().path("authoringEvidence").isObject()
-                && request.contextHints().path("authoringEvidence").path("evidence").isArray()
-                && !request.contextHints().path("authoringEvidence").path("evidence").isEmpty();
+                && (request.contextHints().path("authoringEvidence").path("attempted").asBoolean(false)
+                || request.contextHints().path("authoringEvidence").path("evidence").isArray());
     }
 
     private boolean resolvedByPreIntentGovernedEvidence(AgenticAuthoringIntentResolutionResult intentResolution) {
@@ -4141,13 +4207,18 @@ public class AgenticAuthoringTurnEngine {
     @SuppressWarnings("unchecked")
     private List<ContextRetrievalService.ComponentCorpusEvidence> componentCorpusEvidence(
             AgenticAuthoringToolResult result) {
+        return componentCorpusEvidence(result, 6);
+    }
+
+    private List<ContextRetrievalService.ComponentCorpusEvidence> componentCorpusEvidence(
+            AgenticAuthoringToolResult result, int limit) {
         if (result == null || !(result.payload() instanceof List<?> payload)) {
             return List.of();
         }
         return payload.stream()
                 .filter(ContextRetrievalService.ComponentCorpusEvidence.class::isInstance)
                 .map(item -> (ContextRetrievalService.ComponentCorpusEvidence) item)
-                .limit(6)
+                .limit(limit)
                 .toList();
     }
 
@@ -4163,7 +4234,7 @@ public class AgenticAuthoringTurnEngine {
         context.put("retrievalQuery", safeText(retrievalQuery));
         context.put("componentId", safeText(componentId));
         ArrayNode entries = context.putArray("evidence");
-        evidence.stream().limit(6).forEach(item -> {
+        evidence.stream().limit(12).forEach(item -> {
             ObjectNode entry = entries.addObject();
             entry.put("documentId", safeText(item.documentId()));
             entry.put("sourceId", safeText(item.sourceId()));

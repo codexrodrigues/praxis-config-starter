@@ -9462,15 +9462,15 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void injectsGranularAuthoringEvidenceIntoPreviewContextBeforePlanning() throws Exception {
+    void sendsAuthoringEvidenceToTheFirstIntentResolutionBeforeAnyOperationDecision() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ContextRetrievalService contextRetrievalService = Mockito.mock(ContextRetrievalService.class);
         when(contextRetrievalService.searchComponentCorpus(
                 eq("Ajuste toolbar button examples"),
                 eq("praxis-table"),
-                eq(null),
-                eq(6),
+                eq("authoring_manifest"),
+                eq(12),
                 eq("tenant"),
                 eq("local"),
                 eq("release-1")))
@@ -9526,6 +9526,22 @@ class AgenticAuthoringTurnEngineTest {
                 sink);
 
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        ArgumentCaptor<AgenticAuthoringIntentResolutionRequest> intentRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringIntentResolutionRequest.class);
+        org.mockito.InOrder evidenceBeforeIntent = Mockito.inOrder(contextRetrievalService, intentResolverService);
+        evidenceBeforeIntent.verify(contextRetrievalService).searchComponentCorpus(
+                eq("Ajuste toolbar button examples"), eq("praxis-table"), eq("authoring_manifest"), eq(12),
+                eq("tenant"), eq("local"), eq("release-1"));
+        evidenceBeforeIntent.verify(intentResolverService).resolve(intentRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        org.assertj.core.api.Assertions.assertThat(intentRequest.getValue().contextHints()
+                        .path("authoringEvidence").path("componentId").asText())
+                .isEqualTo("praxis-table");
+        org.assertj.core.api.Assertions.assertThat(intentRequest.getValue().contextHints()
+                        .path("authoringEvidence").path("retrievalStatus").asText())
+                .isEqualTo("resolved");
+        org.assertj.core.api.Assertions.assertThat(intentRequest.getValue().contextHints()
+                        .path("authoringEvidence").path("evidence").path(0).path("sourceRef").asText())
+                .isEqualTo("praxis-ui-angular/examples/ai-recipes/table-toolbar.md");
         ArgumentCaptor<AgenticAuthoringPlanRequest> planRequest =
                 ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
         verify(previewService).preview(planRequest.capture(), eq("tenant"), eq("user"), eq("local"));
@@ -9549,7 +9565,7 @@ class AgenticAuthoringTurnEngineTest {
                     org.assertj.core.api.Assertions.assertThat(node.path("phase").asText())
                             .isEqualTo("authoringEvidence.result");
                     org.assertj.core.api.Assertions.assertThat(node.path("message").asText())
-                            .isEqualTo("As capacidades do componente foram consultadas.");
+                            .isEqualTo("As operações governadas foram recuperadas antes da resolução.");
                     org.assertj.core.api.Assertions.assertThat(node.path("diagnostics").path("sourceRefs").toString())
                             .contains("table-toolbar.md");
                 });
@@ -9564,8 +9580,8 @@ class AgenticAuthoringTurnEngineTest {
         when(contextRetrievalService.searchComponentCorpus(
                 anyString(),
                 eq("praxis-table"),
-                eq(null),
-                eq(6),
+                eq("authoring_manifest"),
+                eq(12),
                 eq("tenant"),
                 eq("local"),
                 eq("release-1")))
@@ -9638,8 +9654,8 @@ class AgenticAuthoringTurnEngineTest {
         verify(contextRetrievalService).searchComponentCorpus(
                 retrievalQuery.capture(),
                 eq("praxis-table"),
-                eq(null),
-                eq(6),
+                eq("authoring_manifest"),
+                eq(12),
                 eq("tenant"),
                 eq("local"),
                 eq("release-1"));
@@ -9662,6 +9678,71 @@ class AgenticAuthoringTurnEngineTest {
                 .isEqualTo(1);
         org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics").path("authoringEvidenceSourceRefs").toString())
                 .contains("table.component.ts");
+    }
+
+    @Test
+    void retrievesSelectedComponentEvidenceEvenWhenAnActiveDecisionIsPresent() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        ContextRetrievalService contextRetrievalService = Mockito.mock(ContextRetrievalService.class);
+        when(contextRetrievalService.searchComponentCorpus(
+                anyString(), eq("praxis-table"), eq("authoring_manifest"), eq(12),
+                eq("tenant"), eq("local"), eq("release-1")))
+                .thenReturn(List.of(new ContextRetrievalService.ComponentCorpusEvidence(
+                        "card-1", "praxis-table", "component_definition", "authoring_manifest", "table-card", "release-1",
+                        "tenant", "local", "allow", "hash", "v1",
+                        "{\"operationId\":\"toolbar.action.add\",\"componentId\":\"praxis-table\"}", 0.95d)));
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(true, List.of(), List.of(), objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(), null, null, "Preview ready."));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper), contextRetrievalService, null, null, objectMapper);
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService, previewService, objectMapper, new AgenticAuthoringCurrentPageAnalyzer(objectMapper), registry);
+        ObjectNode hints = objectMapper.createObjectNode();
+        hints.put("selectedComponentId", "praxis-table");
+        hints.put("releaseId", "release-1");
+
+        engine.execute(requestWithContextHintsAndActiveDecision(
+                "Quero uma ação que destaque a seleção atual.", hints,
+                runtimeRelatedSurfaceDetailDecisionWithDisambiguationSelection("missionTeam", "candidate-1")),
+                principalContext, new CapturingSink());
+
+        ArgumentCaptor<AgenticAuthoringIntentResolutionRequest> intentRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringIntentResolutionRequest.class);
+        verify(intentResolverService).resolve(intentRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        assertThat(intentRequest.getValue().contextHints().path("authoringEvidence").path("componentId").asText())
+                .isEqualTo("praxis-table");
+        verify(contextRetrievalService).searchComponentCorpus(
+                anyString(), eq("praxis-table"), eq("authoring_manifest"), eq(12),
+                eq("tenant"), eq("local"), eq("release-1"));
+    }
+
+    @Test
+    void recordsObservableTextualFallbackWhenSelectedComponentRagIsUnavailable() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(true, List.of(), List.of(), objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(), null, null, "Preview ready."));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper), null, null, null, objectMapper);
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService, previewService, objectMapper, new AgenticAuthoringCurrentPageAnalyzer(objectMapper), registry);
+        ObjectNode hints = objectMapper.createObjectNode();
+        hints.put("selectedComponentId", "praxis-table");
+
+        engine.execute(requestWithContextHints("Altere a apresentação da tabela.", hints), principalContext, new CapturingSink());
+
+        ArgumentCaptor<AgenticAuthoringIntentResolutionRequest> intentRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringIntentResolutionRequest.class);
+        verify(intentResolverService).resolve(intentRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        JsonNode evidence = intentRequest.getValue().contextHints().path("authoringEvidence");
+        assertThat(evidence.path("retrievalStatus").asText()).isEqualTo("unavailable");
+        assertThat(evidence.path("fallbackMode").asText()).isEqualTo("component-capability-textual-ranking");
+        assertThat(evidence.path("diagnostic").asText()).isEqualTo("tool-service-unavailable");
     }
 
     @Test
