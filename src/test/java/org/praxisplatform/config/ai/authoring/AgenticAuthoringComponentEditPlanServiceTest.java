@@ -109,7 +109,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 """);
         when(manifestService.getManifest("praxis-chart")).thenReturn(manifest);
         when(providerManagementService.generateJson(
-                any(), any(), any(), eq("tenant"), eq("user"), eq("local"))).thenReturn(plan);
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local"))).thenReturn(selectionForPlan(plan), plan);
         when(manifestService.compilePatch(eq("praxis-chart"), any()))
                 .thenReturn(new AgenticAuthoringManifestCompileResult(true, java.util.List.of(), java.util.List.of(), compiledPatch));
         AgenticAuthoringComponentEditPlanService service =
@@ -138,7 +138,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<AiJsonSchema> schema = ArgumentCaptor.forClass(AiJsonSchema.class);
         ArgumentCaptor<AiCallConfig> callConfig = ArgumentCaptor.forClass(AiCallConfig.class);
-        verify(providerManagementService).generateJson(
+        verify(providerManagementService, times(2)).generateJson(
                 prompt.capture(), schema.capture(), callConfig.capture(), eq("tenant"), eq("user"), eq("local"));
         assertThat(prompt.getValue())
                 .contains("Never route intent by keywords or regex")
@@ -275,7 +275,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 }
                 """));
         when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
-                .thenReturn(objectMapper.readTree("""
+                .thenReturn(selection("praxis-chart", "crossFilter.configure"), objectMapper.readTree("""
                         {
                           "schemaVersion": "praxis-component-edit-plan.v1",
                           "componentId": "praxis-table",
@@ -298,6 +298,47 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         assertThat(result.failureCodes())
                 .contains("component-edit-plan-component-mismatch", "component-edit-plan-operations-required");
         verify(manifestService, never()).compilePatch(any(), any());
+    }
+
+    @Test
+    void capturesACompactSelectionSchemaAndRejectsAnUnselectedParameterOperationBeforeCompilation() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {"componentId":"praxis-table","operations":[
+                  {"operationId":"column.renderer.set","inputSchema":{"type":"object","properties":{"renderer":{"type":"string"}}}},
+                  {"operationId":"column.visibility.set","inputSchema":{"type":"object","properties":{"visible":{"type":"boolean"}}}},
+                  {"operationId":"column.type.set","inputSchema":{"type":"object","properties":{"type":{"type":"string"}}}}
+                ]}
+                """);
+        JsonNode selection = selection("praxis-table", "column.renderer.set", "column.visibility.set");
+        JsonNode invalidPlan = objectMapper.readTree("""
+                {"schemaVersion":"praxis-component-edit-plan.v1","componentId":"praxis-table","operations":[
+                  {"operationId":"column.renderer.set","input":{"renderer":"compose"}},
+                  {"operationId":"column.type.set","input":{"type":"text"}},
+                  {"operationId":"column.visibility.set","input":{"visible":false}}
+                ]}
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
+                .thenReturn(selection, invalidPlan);
+        AgenticAuthoringComponentEditPlanResult result = new AgenticAuthoringComponentEditPlanService(
+                providerManagementService, manifestService, objectMapper).generateAndCompile(
+                        new AgenticAuthoringPlanRequest("compor foto e ocultar coluna", "openai", "gpt", "key"),
+                        "praxis-table", objectMapper.createObjectNode(), objectMapper.createObjectNode(), "t", "u", "e");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("component-edit-plan-operations-outside-semantic-selection");
+        verify(manifestService, never()).compilePatch(any(), any());
+        ArgumentCaptor<AiJsonSchema> schemas = ArgumentCaptor.forClass(AiJsonSchema.class);
+        verify(providerManagementService, times(2)).generateJson(any(), schemas.capture(), any(), any(), any(), any());
+        JsonNode selectionSchema = objectMapper.readTree(schemas.getAllValues().get(0).jsonSchema());
+        JsonNode parameterSchema = objectMapper.readTree(schemas.getAllValues().get(1).jsonSchema());
+        assertThat(selectionSchema.toString()).doesNotContain("inputSchema", "\"input\"", "\"target\"", "\"confirmed\"");
+        assertThat(selectionSchema.at("/properties/selectedOperationIds/items/enum"))
+                .extracting(JsonNode::toString).asString()
+                .contains("column.renderer.set", "column.visibility.set", "column.type.set");
+        assertThat(parameterSchema.toString())
+                .contains("column.renderer.set", "column.visibility.set")
+                .doesNotContain("column.type.set");
     }
 
     @Test
@@ -355,7 +396,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 """);
         when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
         when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
-                .thenReturn(plan);
+                .thenReturn(selectionForPlan(plan), plan);
         when(manifestService.compilePatch(eq("praxis-table"), any()))
                 .thenReturn(new AgenticAuthoringManifestCompileResult(
                         true, java.util.List.of(), java.util.List.of(), compiledPatch));
@@ -430,7 +471,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 """);
         when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
         when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
-                .thenReturn(providerPlan);
+                .thenReturn(selectionForPlan(providerPlan), providerPlan);
         when(manifestService.compilePatch(eq("praxis-table"), any()))
                 .thenReturn(new AgenticAuthoringManifestCompileResult(
                         true,
@@ -459,7 +500,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         assertThat(result.valid()).isTrue();
         ArgumentCaptor<String> providerPrompt = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<AiJsonSchema> providerSchema = ArgumentCaptor.forClass(AiJsonSchema.class);
-        verify(providerManagementService).generateJson(
+        verify(providerManagementService, times(2)).generateJson(
                 providerPrompt.capture(), providerSchema.capture(), any(), eq("tenant"), eq("user"), eq("local"));
         assertThat(providerPrompt.getValue())
                 .contains("\"operationId\":\"column.add\"")
@@ -554,7 +595,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 """);
         when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
         when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
-                .thenReturn(providerPlan);
+                .thenReturn(selectionForPlan(providerPlan), providerPlan);
         when(manifestService.compilePatch(eq("praxis-table"), any()))
                 .thenReturn(new AgenticAuthoringManifestCompileResult(
                         true,
@@ -582,7 +623,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
 
         assertThat(result.valid()).isTrue();
         ArgumentCaptor<AiJsonSchema> providerSchema = ArgumentCaptor.forClass(AiJsonSchema.class);
-        verify(providerManagementService).generateJson(
+        verify(providerManagementService, times(2)).generateJson(
                 any(), providerSchema.capture(), any(), eq("tenant"), eq("user"), eq("local"));
         JsonNode schema = objectMapper.readTree(providerSchema.getValue().jsonSchema());
         JsonNode input = schema.at("/properties/operations/items/properties/input");
@@ -665,7 +706,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
         when(providerManagementService.generateJson(
                 any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
-                .thenReturn(rejectedProviderPlan, repairedProviderPlan);
+                .thenReturn(selectionForPlan(rejectedProviderPlan), rejectedProviderPlan, repairedProviderPlan);
         when(manifestService.compilePatch(eq("praxis-table"), any()))
                 .thenReturn(
                         new AgenticAuthoringManifestCompileResult(
@@ -706,9 +747,9 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         assertThat(result.plan().at("/operations/0/input/condition/>/1").asInt()).isEqualTo(30000);
         assertThat(result.warnings()).contains("component-edit-plan-provider:semantic-manifest-repair");
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(providerManagementService, times(2)).generateJson(
+        verify(providerManagementService, times(3)).generateJson(
                 prompts.capture(), any(), any(), eq("tenant"), eq("user"), eq("local"));
-        assertThat(prompts.getAllValues().get(1))
+        assertThat(prompts.getAllValues().get(2))
                 .contains(
                         "The first plan was rejected by the canonical manifest validators",
                         "RULE_OPERATOR_UNKNOWN",
@@ -755,7 +796,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 """);
         when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
         when(providerManagementService.generateJson(
-                any(), any(), any(), eq("tenant"), eq("user"), eq("local"))).thenReturn(plan);
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local"))).thenReturn(selectionForPlan(plan), plan);
         when(manifestService.compilePatch(eq("praxis-table"), any()))
                 .thenReturn(new AgenticAuthoringManifestCompileResult(
                         true, java.util.List.of(), java.util.List.of(), objectMapper.createObjectNode()));
@@ -778,7 +819,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
 
         assertThat(result.valid()).isTrue();
         ArgumentCaptor<AiJsonSchema> schema = ArgumentCaptor.forClass(AiJsonSchema.class);
-        verify(providerManagementService).generateJson(
+        verify(providerManagementService, times(2)).generateJson(
                 any(), schema.capture(), any(), eq("tenant"), eq("user"), eq("local"));
         assertThat(schema.getValue().jsonSchema())
                 .contains("column.header.set")
@@ -815,7 +856,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 """);
         when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
         when(providerManagementService.generateJson(
-                any(), any(), any(), eq("tenant"), eq("user"), eq("local"))).thenReturn(plan);
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local"))).thenReturn(selectionForPlan(plan), plan);
         when(manifestService.compilePatch(eq("praxis-table"), any()))
                 .thenReturn(new AgenticAuthoringManifestCompileResult(
                         true, java.util.List.of(), java.util.List.of(), objectMapper.createObjectNode()));
@@ -830,7 +871,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 "tenant", "user", "local").valid()).isTrue();
 
         ArgumentCaptor<AiJsonSchema> schema = ArgumentCaptor.forClass(AiJsonSchema.class);
-        verify(providerManagementService).generateJson(
+        verify(providerManagementService, times(2)).generateJson(
                 any(), schema.capture(), any(), eq("tenant"), eq("user"), eq("local"));
         assertThat(schema.getValue().jsonSchema()).contains("column.header.set");
     }
@@ -871,7 +912,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 """);
         when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
         when(providerManagementService.generateJson(
-                any(), any(), any(), eq("tenant"), eq("user"), eq("local"))).thenReturn(plan);
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local"))).thenReturn(selectionForPlan(plan), plan);
         when(manifestService.compilePatch(eq("praxis-table"), any()))
                 .thenReturn(new AgenticAuthoringManifestCompileResult(
                         true, java.util.List.of(), java.util.List.of(), objectMapper.createObjectNode()));
@@ -886,7 +927,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 "tenant", "user", "local").valid()).isTrue();
 
         ArgumentCaptor<AiJsonSchema> schema = ArgumentCaptor.forClass(AiJsonSchema.class);
-        verify(providerManagementService).generateJson(
+        verify(providerManagementService, times(2)).generateJson(
                 any(), schema.capture(), any(), eq("tenant"), eq("user"), eq("local"));
         assertThat(schema.getValue().jsonSchema())
                 .contains("column.conditionalRenderer.add")
@@ -910,6 +951,89 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 java.util.List.of(),
                 java.util.List.of(),
                 objectMapper.createObjectNode());
+    }
+
+    @Test
+    void compilesThePhotoAndCodeReferencePlanInSelectedOrderWithoutChangingUnrelatedState() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {"componentId":"praxis-table","operations":[
+                  {"operationId":"column.renderer.set","inputSchema":{"type":"object","properties":{"renderer":{"type":"string"}}}},
+                  {"operationId":"column.visibility.set","inputSchema":{"type":"object","properties":{"visible":{"type":"boolean"}}}}
+                ]}
+                """);
+        JsonNode plan = objectMapper.readTree("""
+                {"schemaVersion":"praxis-component-edit-plan.v1","componentId":"praxis-table","operations":[
+                  {"operationId":"column.renderer.set","target":{"value":"codigo"},"input":{"renderer":"compose"}},
+                  {"operationId":"column.visibility.set","target":{"value":"foto"},"input":{"visible":false}}
+                ]}
+                """);
+        JsonNode preservedConfig = objectMapper.readTree("""
+                {"columns":[{"field":"codigo"},{"field":"foto"}],"pageSize":25,"density":"compact"}
+                """);
+        JsonNode compiled = objectMapper.readTree("""
+                {"proposedConfig":{"columns":[
+                  {"field":"codigo","renderer":{"kind":"compose","layout":"row","imageField":"foto","textField":"codigo","imageSize":"small","imageShape":"circle"}},
+                  {"field":"foto","visible":false}],"pageSize":25,"density":"compact"}}
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
+                .thenReturn(selectionForPlan(plan), plan);
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(new AgenticAuthoringManifestCompileResult(true, java.util.List.of(), java.util.List.of(), compiled));
+        AgenticAuthoringComponentEditPlanResult result = new AgenticAuthoringComponentEditPlanService(
+                providerManagementService, manifestService, objectMapper).generateAndCompile(
+                        new AgenticAuthoringPlanRequest("Coloque a foto junto com o código", "openai", "gpt", "key"),
+                        "praxis-table", preservedConfig, objectMapper.createObjectNode(), "t", "u", "e");
+        assertThat(result.valid()).isTrue();
+        assertThat(result.plan().path("operations")).extracting(operation -> operation.path("operationId").asText())
+                .containsExactly("column.renderer.set", "column.visibility.set");
+        assertThat(result.compiledPatch().at("/proposedConfig/columns/0/renderer/layout").asText()).isEqualTo("row");
+        assertThat(result.compiledPatch().at("/proposedConfig/columns/0/renderer/imageShape").asText()).isEqualTo("circle");
+        assertThat(result.compiledPatch().at("/proposedConfig/columns/1/visible").asBoolean()).isFalse();
+        assertThat(result.compiledPatch().at("/proposedConfig/pageSize").asInt()).isEqualTo(25);
+        assertThat(result.compiledPatch().at("/proposedConfig/density").asText()).isEqualTo("compact");
+    }
+
+    @Test
+    void blocksASelectedRemovalAndMutationBeforeGeneratingOrCompilingThePlan() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {"componentId":"praxis-table","manifestVersion":"compatibility-test","operations":[
+                  {"operationId":"column.remove","target":{"kind":"column"},"effects":[{"kind":"remove-by-key","path":"columns[]"}],"affectedPaths":["columns[]"],"preconditions":["target-exists"]},
+                  {"operationId":"column.format.set","target":{"kind":"column"},"effects":[{"kind":"merge-by-key","path":"columns[].format"}],"affectedPaths":["columns[].format"],"preconditions":["target-exists"]}
+                ]}
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
+                .thenReturn(selection("praxis-table", "column.remove", "column.format.set"));
+
+        AgenticAuthoringComponentEditPlanResult result = new AgenticAuthoringComponentEditPlanService(
+                providerManagementService, manifestService, objectMapper).generateAndCompile(
+                new AgenticAuthoringPlanRequest("remova e formate a mesma coluna", "openai", "gpt", "key"),
+                "praxis-table", objectMapper.createObjectNode(), objectMapper.createObjectNode(), "t", "u", "e");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).containsExactly("component-operation-selection-clarification-required");
+        assertThat(result.warnings()).singleElement().asString().contains("component-operation-compatibility-conflict");
+        verify(providerManagementService, times(1)).generateJson(any(), any(), any(), any(), any(), any());
+        verify(manifestService, never()).compilePatch(any(), any());
+    }
+
+    private JsonNode selectionForPlan(JsonNode plan) {
+        var ids = new java.util.ArrayList<String>();
+        plan.path("operations").forEach(operation -> ids.add(operation.path("operationId").asText()));
+        return selection(plan.path("componentId").asText(), ids.toArray(String[]::new));
+    }
+
+    private JsonNode selection(String componentId, String... operationIds) {
+        ObjectNode selection = objectMapper.createObjectNode();
+        selection.put("schemaVersion", AgenticAuthoringComponentOperationSelectionService.SCHEMA_VERSION);
+        selection.put("componentId", componentId);
+        selection.putArray("goals");
+        selection.put("requiresClarification", false);
+        selection.put("clarificationReason", "");
+        var selected = selection.putArray("selectedOperationIds");
+        for (String operationId : operationIds) selected.add(operationId);
+        return selection;
     }
 
     private void assertStrictObjects(JsonNode schema) {

@@ -6,12 +6,10 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiProviderFailureClassifier;
@@ -40,6 +38,8 @@ public class AgenticAuthoringComponentEditPlanService {
     private final AgenticAuthoringManifestService manifestService;
     private final ObjectMapper objectMapper;
     private final int timeoutSeconds;
+    private final AgenticAuthoringComponentOperationSelectionService operationSelectionService;
+    private final AgenticAuthoringProviderSchemaCompiler providerSchemaCompiler;
 
     public AgenticAuthoringComponentEditPlanService(
             AiProviderManagementService providerManagementService,
@@ -59,6 +59,9 @@ public class AgenticAuthoringComponentEditPlanService {
         this.manifestService = Objects.requireNonNull(manifestService, "manifestService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.timeoutSeconds = timeoutSeconds > 0 ? timeoutSeconds : DEFAULT_TIMEOUT_SECONDS;
+        this.operationSelectionService = new AgenticAuthoringComponentOperationSelectionService(
+                providerManagementService, objectMapper, this.timeoutSeconds);
+        this.providerSchemaCompiler = new AgenticAuthoringProviderSchemaCompiler(objectMapper);
     }
 
     public AgenticAuthoringComponentEditPlanResult generateAndCompile(
@@ -80,8 +83,18 @@ public class AgenticAuthoringComponentEditPlanService {
             }
             ComponentConfigBinding configBinding = resolveComponentConfigBinding(manifest, config);
             JsonNode componentConfig = configBinding.componentConfig();
+            AgenticAuthoringComponentOperationSelectionService.Selection selection = operationSelectionService.select(
+                    request, componentId, componentConfig, manifest, tenantId, userId, environment);
+            if (!selection.selected()) {
+                return new AgenticAuthoringComponentEditPlanResult(
+                        false,
+                        List.of("component-operation-selection-clarification-required"),
+                        List.of(selection.clarificationReason()),
+                        missing(), missing());
+            }
+            JsonNode selectedManifest = manifestWithOperations(manifest, selection.operationIds());
             AiJsonSchema providerSchema = AiJsonSchema.ofSchema(objectMapper.writeValueAsString(
-                    outputSchema(componentId, manifest, request.intentResolution())));
+                    outputSchema(componentId, selectedManifest, request.intentResolution())));
 
             AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
                     "component_edit_plan", 1, request.provider(), request.model());
@@ -97,7 +110,7 @@ public class AgenticAuthoringComponentEditPlanService {
             JsonNode plan;
             try {
                 plan = providerManagementService.generateJson(
-                        prompt(request, componentId, manifest, componentConfig, validationContext),
+                        prompt(request, componentId, selectedManifest, componentConfig, validationContext),
                         providerSchema,
                         callConfig,
                         tenantId,
@@ -129,8 +142,9 @@ public class AgenticAuthoringComponentEditPlanService {
             }
             AiProviderInvocationTelemetry invocation = trace.snapshot();
             AiProviderInvocationMetrics.record(invocation);
-            JsonNode canonicalPlan = removeStrictCompatibilityNulls(plan, manifest);
-            List<String> envelopeFailures = validateProviderEnvelope(componentId, canonicalPlan);
+            JsonNode canonicalPlan = providerSchemaCompiler.decodeCompatibilityValues(plan, selectedManifest);
+            List<String> envelopeFailures = validateProviderEnvelope(
+                    componentId, canonicalPlan, selection.operationIds());
             if (!envelopeFailures.isEmpty()) {
                 return new AgenticAuthoringComponentEditPlanResult(
                         false,
@@ -157,7 +171,7 @@ public class AgenticAuthoringComponentEditPlanService {
             return repairAndCompile(
                     request,
                     componentId,
-                    manifest,
+                    selectedManifest,
                     config,
                     componentConfig,
                     configBinding,
@@ -248,8 +262,9 @@ public class AgenticAuthoringComponentEditPlanService {
         }
         AiProviderInvocationTelemetry repairInvocation = repairTrace.snapshot();
         AiProviderInvocationMetrics.record(repairInvocation);
-        JsonNode canonicalRepairedPlan = removeStrictCompatibilityNulls(repairedPlan, manifest);
-        List<String> envelopeFailures = validateProviderEnvelope(componentId, canonicalRepairedPlan);
+        JsonNode canonicalRepairedPlan = providerSchemaCompiler.decodeCompatibilityValues(repairedPlan, manifest);
+        List<String> envelopeFailures = validateProviderEnvelope(
+                componentId, canonicalRepairedPlan, operationIds(manifest));
         if (!envelopeFailures.isEmpty()) {
             return new AgenticAuthoringComponentEditPlanResult(
                     false,
@@ -530,33 +545,26 @@ public class AgenticAuthoringComponentEditPlanService {
         return projection;
     }
 
+    private JsonNode manifestWithOperations(JsonNode manifest, List<String> selectedOperationIds) {
+        ObjectNode scoped = manifest.deepCopy();
+        ArrayNode operations = scoped.putArray("operations");
+        for (String selectedOperationId : selectedOperationIds) {
+            for (JsonNode operation : manifest.path("operations")) {
+                if (selectedOperationId.equals(operation.path("operationId").asText(""))) {
+                    operations.add(operation.deepCopy());
+                    break;
+                }
+            }
+        }
+        return scoped;
+    }
+
     private ObjectNode outputSchema(
             String componentId,
             JsonNode manifest,
             AgenticAuthoringIntentResolutionResult intentResolution) {
-        ObjectNode schema = objectMapper.createObjectNode();
-        schema.put("type", "object");
-        schema.put("additionalProperties", false);
-        schema.putArray("required").add("schemaVersion").add("componentId").add("operations");
-        ObjectNode properties = schema.putObject("properties");
-        properties.putObject("schemaVersion")
-                .put("type", "string")
-                .put("const", PLAN_SCHEMA_VERSION);
-        properties.putObject("componentId")
-                .put("type", "string")
-                .put("const", componentId);
-        ObjectNode operations = properties.putObject("operations");
-        operations.put("type", "array");
-        operations.put("minItems", 1);
-        operations.put("maxItems", 8);
         List<JsonNode> scopedOperations = scopedManifestOperations(manifest, intentResolution);
-        if (scopedOperations.size() == 1) {
-            operations.set("items", providerOperationSchema(scopedOperations.get(0)));
-        } else {
-            ArrayNode variants = operations.putObject("items").putArray("anyOf");
-            scopedOperations.forEach(operation -> variants.add(providerOperationSchema(operation)));
-        }
-        return schema;
+        return providerSchemaCompiler.compileEditPlanSchema(PLAN_SCHEMA_VERSION, componentId, scopedOperations);
     }
 
     private ObjectNode providerOperationSchema(JsonNode operation) {
@@ -570,9 +578,8 @@ public class AgenticAuthoringComponentEditPlanService {
                 .put("const", operation.path("operationId").asText(""));
         JsonNode inputSchema = operation.path("inputSchema");
         operationProperties.set("input", inputSchema.isObject()
-                ? strictProviderSchema(inputSchema)
+                ? providerSchemaCompiler.compileInputSchema(inputSchema)
                 : unconstrainedObjectSchema());
-        operationProperties.set("target", nullableTargetSchema());
         operationProperties.putObject("confirmed").putArray("type").add("boolean").add("null");
         return variant;
     }
@@ -587,56 +594,9 @@ public class AgenticAuthoringComponentEditPlanService {
             AgenticAuthoringIntentResolutionResult intentResolution) {
         List<JsonNode> operations = new ArrayList<>();
         manifest.path("operations").forEach(operations::add);
-        String changeKind = intentResolution == null ? "" : safe(intentResolution.changeKind());
-        if (changeKind.isBlank()) {
-            return List.copyOf(operations);
-        }
-        List<JsonNode> exact = operations.stream()
-                .filter(operation -> changeKind.equalsIgnoreCase(operation.path("operationId").asText("")))
-                .toList();
-        if (exact.size() == 1) {
-            return exact;
-        }
-        String canonicalOperationId = canonicalOperationId(manifest, intentResolution);
-        if (!canonicalOperationId.isBlank()) {
-            List<JsonNode> canonical = operations.stream()
-                    .filter(operation -> canonicalOperationId.equals(operation.path("operationId").asText("")))
-                    .toList();
-            if (canonical.size() == 1) {
-                return canonical;
-            }
-        }
-        String semanticSignature = semanticOperationSignature(changeKind);
-        List<JsonNode> ranked = operations.stream()
-                .filter(operation -> semanticSignature.equals(
-                        semanticOperationSignature(operation.path("operationId").asText(""))))
-                .toList();
-        return ranked.size() == 1 ? ranked : List.copyOf(operations);
-    }
-
-    private String canonicalOperationId(
-            JsonNode manifest,
-            AgenticAuthoringIntentResolutionResult intentResolution) {
-        String componentId = manifest == null ? "" : manifest.path("componentId").asText("");
-        String artifactKind = intentResolution == null ? "" : safe(intentResolution.artifactKind());
-        String changeKind = intentResolution == null ? "" : safe(intentResolution.changeKind());
-        if ("praxis-table".equals(componentId)
-                && "table".equals(artifactKind)
-                && ("rename_or_relabel".equals(changeKind) || "field.label.set".equals(changeKind))) {
-            return "column.header.set";
-        }
-        return "";
-    }
-
-    private String semanticOperationSignature(String value) {
-        String tokenized = safe(value).replaceAll("([a-z0-9])([A-Z])", "$1 $2");
-        return Arrays.stream(tokenized.toLowerCase().split("[^a-z0-9]+"))
-                .filter(token -> !token.isBlank())
-                .map(token -> token.endsWith("s") && token.length() > 3
-                        ? token.substring(0, token.length() - 1)
-                        : token)
-                .sorted()
-                .collect(Collectors.joining("|"));
+        // This manifest has already been narrowed by semantic operation selection. Re-ranking by
+        // a singular changeKind would silently discard a valid multi-operation decision.
+        return List.copyOf(operations);
     }
 
     private ObjectNode strictProviderSchema(JsonNode source) {
@@ -925,7 +885,8 @@ public class AgenticAuthoringComponentEditPlanService {
         }
     }
 
-    private List<String> validateProviderEnvelope(String componentId, JsonNode plan) {
+    private List<String> validateProviderEnvelope(
+            String componentId, JsonNode plan, List<String> selectedOperationIds) {
         List<String> failures = new ArrayList<>();
         if (plan == null || !plan.isObject()) {
             return List.of("component-edit-plan-provider-output-invalid");
@@ -938,8 +899,31 @@ public class AgenticAuthoringComponentEditPlanService {
         }
         if (!plan.path("operations").isArray() || plan.path("operations").isEmpty()) {
             failures.add("component-edit-plan-operations-required");
+        } else if (!matchesSelectedOperationSequence(plan.path("operations"), selectedOperationIds)) {
+            failures.add("component-edit-plan-operations-outside-semantic-selection");
         }
         return List.copyOf(failures);
+    }
+
+    private List<String> operationIds(JsonNode manifest) {
+        List<String> operationIds = new ArrayList<>();
+        manifest.path("operations").forEach(operation -> operationIds.add(operation.path("operationId").asText("")));
+        return List.copyOf(operationIds);
+    }
+
+    private boolean matchesSelectedOperationSequence(JsonNode planOperations, List<String> selectedOperationIds) {
+        if (selectedOperationIds == null || selectedOperationIds.isEmpty()) return false;
+        int selectedIndex = 0;
+        Set<String> observed = new LinkedHashSet<>();
+        for (JsonNode operation : planOperations) {
+            String operationId = operation.path("operationId").asText("");
+            int index = selectedOperationIds.indexOf(operationId);
+            if (index < selectedIndex) return false;
+            if (index < 0) return false;
+            selectedIndex = index;
+            observed.add(operationId);
+        }
+        return observed.containsAll(selectedOperationIds);
     }
 
     private ObjectNode copyOrEmptyObject(JsonNode value) {
