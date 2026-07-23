@@ -79,6 +79,9 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
         assertThat(page.toString()).doesNotContain("availableTargets").doesNotContain("contextDiagnostics");
         assertThat(result.compiledFormPatch().path("componentEdit").path("componentId").asText())
                 .isEqualTo("praxis-chart");
+        assertThat(result.assistantMessage())
+                .contains("crossFilter.configure")
+                .doesNotContain("column.visibility.set", "uncompiled-operation");
 
         ArgumentCaptor<JsonNode> config = ArgumentCaptor.forClass(JsonNode.class);
         ArgumentCaptor<JsonNode> validationContext = ArgumentCaptor.forClass(JsonNode.class);
@@ -136,7 +139,7 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
         assertThat(inputs.at("/config/columns/0/order").asInt()).isZero();
         assertThat(result.warnings()).contains("component-edit-plan-config-input-bound:config");
         assertThat(result.assistantMessage())
-                .contains("coluna salário", "início", "demais configurações atuais serão preservadas");
+                .contains("column.order.set", "demais configurações atuais serão preservadas");
         verify(planService, never()).generateMinimalFormPlan(any(), any(), any(), any());
     }
 
@@ -209,8 +212,8 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
                 "/config/behavior/filtering/advancedFilters/settings/selectedFieldIds/1").asText())
                 .isEqualTo("estadoCivil");
         assertThat(result.assistantMessage())
-                .containsOnlyOnce("demais configurações de filtro serão preservadas")
-                .doesNotContain("demais configurações atuais serão preservadas");
+                .contains("filter.advanced.fields.add", "demais configurações atuais serão preservadas")
+                .doesNotContain("demais configurações de filtro serão preservadas");
         verify(planService, never()).generateMinimalFormPlan(any(), any(), any(), any());
     }
 
@@ -244,6 +247,41 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
                 any(), any(), any(), any(), any(), any(), any());
     }
 
+    @Test
+    void compilesManifestOwnedEditAgainstDirectComponentStateWithoutPageBuilderWidget() throws Exception {
+        JsonNode plan = objectMapper.readTree("""
+                {"schemaVersion":"praxis-component-edit-plan.v1","componentId":"praxis-table",
+                 "operations":[{"operationId":"appearance.density.set","input":{"density":"compact"}}]}
+                """);
+        JsonNode compiled = objectMapper.readTree("""
+                {"manifestVersion":"2.0.0","proposedConfig":{
+                  "columns":[{"field":"name","header":"Nome"}],
+                  "appearance":{"density":"compact"}}}
+                """);
+        when(componentEditPlanService.generateAndCompile(
+                any(), eq("praxis-table"), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringComponentEditPlanResult(
+                        true, List.of(), List.of(), plan, compiled));
+
+        AgenticAuthoringPreviewResult result = previewService().preview(
+                directTableRequest(), "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.compiledFormPatch().path("profileId").asText())
+                .isEqualTo("component-manifest-edit");
+        assertThat(result.compiledFormPatch().at("/patch/appearance/density").asText())
+                .isEqualTo("compact");
+        assertThat(result.compiledFormPatch().at("/componentEdit/plan/operations/0/operationId").asText())
+                .isEqualTo("appearance.density.set");
+        assertThat(result.warnings()).contains("component-edit-target-is-local-component");
+
+        ArgumentCaptor<JsonNode> config = ArgumentCaptor.forClass(JsonNode.class);
+        verify(componentEditPlanService).generateAndCompile(
+                any(), eq("praxis-table"), config.capture(), any(),
+                eq("tenant"), eq("user"), eq("local"));
+        assertThat(config.getValue().at("/appearance/density").asText()).isEqualTo("comfortable");
+    }
+
     private AgenticAuthoringPreviewService previewService() {
         return new AgenticAuthoringPreviewService(
                 planService,
@@ -254,6 +292,46 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
                 null,
                 null,
                 componentEditPlanService);
+    }
+
+    private AgenticAuthoringPlanRequest directTableRequest() throws Exception {
+        JsonNode currentConfig = objectMapper.readTree("""
+                {"columns":[{"field":"name","header":"Nome"}],
+                 "appearance":{"density":"comfortable"}}
+                """);
+        JsonNode contextHints = objectMapper.readTree("""
+                {"contract":"table-component-edit-plan","authoringManifestRef":{
+                  "componentId":"praxis-table","source":"PRAXIS_TABLE_AUTHORING_MANIFEST"}}
+                """);
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "table",
+                "appearance.density.set",
+                "semantic-manifest",
+                "praxis-ui-angular",
+                "praxis-table",
+                null,
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("component-edit", "eligible", List.of()),
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+        return new AgenticAuthoringPlanRequest(
+                "Defina a densidade da tabela como compacta.",
+                "openai",
+                "gpt-5.4-mini",
+                "secret",
+                currentConfig,
+                intent,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                contextHints);
     }
 
     private AgenticAuthoringPlanRequest request(

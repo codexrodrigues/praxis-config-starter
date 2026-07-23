@@ -1144,7 +1144,8 @@ public class AgenticAuthoringIntentResolverService {
                 changeKind,
                 target,
                 selectedCandidate,
-                candidates);
+                candidates,
+                isManifestOwnedComponentOperation(request, changeKind, componentCapabilities));
         gate = withPromptSpecificGateMessages(gate, rawPrompt, prompt, operationKind, artifactKind, selectedCandidate, turn);
         gate = withSharedRuleAuthoringGate(gate, request, prompt, selectedCandidate, llmRequiresGovernedAuthoring, operationKind, deterministicFallbackApplied);
         gate = withExplicitLocalUiCompositionGate(gate, explicitLocalUiComposition, explicitLocalTargetedComposition);
@@ -7501,6 +7502,30 @@ public class AgenticAuthoringIntentResolverService {
                 "lista",
                 "component",
                 "componente");
+    }
+
+    private boolean isManifestOwnedComponentOperation(
+            AgenticAuthoringIntentResolutionRequest request,
+            String changeKind,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        if (request == null
+                || request.targetComponentId() == null
+                || request.targetComponentId().isBlank()
+                || changeKind == null
+                || changeKind.isBlank()
+                || componentCapabilities == null
+                || componentCapabilities.catalogs() == null) {
+            return false;
+        }
+        String targetComponentId = request.targetComponentId().trim();
+        return componentCapabilities.catalogs().stream()
+                .filter(Objects::nonNull)
+                .filter(catalog -> targetComponentId.equals(catalog.componentId()))
+                .filter(catalog -> catalog.capabilities() != null)
+                .flatMap(catalog -> catalog.capabilities().stream())
+                .filter(Objects::nonNull)
+                .anyMatch(capability -> changeKind.equals(capability.id())
+                        || changeKind.equals(capability.changeKind()));
     }
 
     private String explicitLocalTargetedArtifactKind(

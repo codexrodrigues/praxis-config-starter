@@ -98,6 +98,28 @@ class AgenticAuthoringProviderSchemaCompilerTest {
     }
 
     @Test
+    void decodesStructuredRendererTransportBeforeCanonicalManifestValidation() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {"operations":[{"operationId":"column.conditionalRenderer.add","inputSchema":{
+                  "type":"object","required":["renderer"],"properties":{
+                    "renderer":{"type":"object","required":["type"],"properties":{
+                      "type":{"enum":["chip","badge"]},
+                      "chip":{"type":"object","properties":{"color":{"type":"string"}}}
+                    }}}}}]}
+                """);
+        JsonNode providerPlan = objectMapper.readTree("""
+                {"operations":[{"operationId":"column.conditionalRenderer.add","input":{
+                  "renderer":"{\\\"type\\\":\\\"chip\\\",\\\"chip\\\":{\\\"color\\\":\\\"red\\\"}}"
+                }}]}
+                """);
+
+        JsonNode decoded = compiler.decodeCompatibilityValues(providerPlan, manifest);
+
+        assertThat(decoded.at("/operations/0/input/renderer/type").asText()).isEqualTo("chip");
+        assertThat(decoded.at("/operations/0/input/renderer/chip/color").asText()).isEqualTo("red");
+    }
+
+    @Test
     void keepsAnInvalidProviderParameterForTheCanonicalManifestToRejectAfterDecoding() throws Exception {
         JsonNode manifest = objectMapper.readTree("""
                 {"componentId":"praxis-table","operations":[{"operationId":"column.renderer.set","inputSchema":{

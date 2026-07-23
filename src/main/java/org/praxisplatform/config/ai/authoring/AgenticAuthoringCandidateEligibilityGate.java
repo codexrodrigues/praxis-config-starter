@@ -11,7 +11,8 @@ public class AgenticAuthoringCandidateEligibilityGate {
             String changeKind,
             AgenticAuthoringTarget target,
             AgenticAuthoringCandidate selectedCandidate,
-            List<AgenticAuthoringCandidate> candidates) {
+            List<AgenticAuthoringCandidate> candidates,
+            boolean manifestOwnedComponentOperation) {
         List<String> messages = new ArrayList<>();
         if ("unknown".equals(operationKind)) {
             messages.add("intent-operation-unknown");
@@ -39,7 +40,8 @@ public class AgenticAuthoringCandidateEligibilityGate {
                 && isDashboardFilterChange(changeKind);
         if (("modify".equals(operationKind) || "remove".equals(operationKind) || "connect".equals(operationKind))
                 && !targetlessDashboardAddition
-                && !targetlessDashboardFilterControls) {
+                && !targetlessDashboardFilterControls
+                && !manifestOwnedComponentOperation) {
             if (target == null || target.widgetKey() == null || target.widgetKey().isBlank()) {
                 messages.add("target-widget-required");
             }

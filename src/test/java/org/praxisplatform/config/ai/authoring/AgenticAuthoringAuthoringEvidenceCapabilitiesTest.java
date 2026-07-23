@@ -4,9 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.service.ContextRetrievalService;
 
+@Tag("unit")
 class AgenticAuthoringAuthoringEvidenceCapabilitiesTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();

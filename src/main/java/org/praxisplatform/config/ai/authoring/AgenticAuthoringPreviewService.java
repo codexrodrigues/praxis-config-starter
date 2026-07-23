@@ -474,6 +474,7 @@ public class AgenticAuthoringPreviewService {
         if (!manifestRef.isObject()) {
             return Optional.empty();
         }
+        boolean directComponentEdit = isDirectComponentEditRequest(request, manifestRef);
         request = withSchemaFieldContext(
                 request,
                 schemaBaseUrl,
@@ -481,7 +482,7 @@ public class AgenticAuthoringPreviewService {
         contextHints = request.contextHints();
         manifestRef = contextHints.path("authoringManifestRef");
 
-        List<String> contextFailures = validateComponentEditContext(request, manifestRef);
+        List<String> contextFailures = validateComponentEditContext(request, manifestRef, directComponentEdit);
         if (!contextFailures.isEmpty()) {
             return Optional.of(componentEditFailure(
                     request,
@@ -500,7 +501,9 @@ public class AgenticAuthoringPreviewService {
         String selectedWidgetKey = contextHints.path("selectedWidgetKey").asText("").trim();
         String componentId = manifestRef.path("componentId").asText("").trim();
         JsonNode selectedWidget = selectedComponentWidget(request.currentPage(), selectedWidgetKey);
-        JsonNode config = selectedWidget.path("definition").path("inputs");
+        JsonNode config = directComponentEdit
+                ? request.currentPage()
+                : selectedWidget.path("definition").path("inputs");
         ObjectNode validationContext = contextHints.path("validationContext").isObject()
                 ? contextHints.path("validationContext").deepCopy()
                 : objectMapper.createObjectNode();
@@ -540,18 +543,27 @@ public class AgenticAuthoringPreviewService {
                     result.plan(),
                     result.providerInvocations()));
         }
-        ObjectNode compiledFormPatch = materializeComponentEditPagePatch(
-                request.currentPage(),
-                selectedWidgetKey,
-                componentId,
-                result.plan(),
-                result.compiledPatch(),
-                proposedConfig);
+        ObjectNode compiledFormPatch = directComponentEdit
+                ? materializeDirectComponentEditPatch(
+                        componentId,
+                        result.plan(),
+                        result.compiledPatch(),
+                        proposedConfig)
+                : materializeComponentEditPagePatch(
+                        request.currentPage(),
+                        selectedWidgetKey,
+                        componentId,
+                        result.plan(),
+                        result.compiledPatch(),
+                        proposedConfig);
         List<String> warnings = new ArrayList<>(
                 result.warnings() == null ? List.of() : result.warnings());
         warnings.add("compiled-from-component-authoring-manifest");
         if (contextDerivedFromSemanticTarget) {
             warnings.add("component-edit-context-derived-from-semantic-target");
+        }
+        if (directComponentEdit) {
+            warnings.add("component-edit-target-is-local-component");
         }
         if (validationContext.path("schemaFields").isArray()
                 && !validationContext.path("schemaFields").isEmpty()) {
@@ -571,7 +583,7 @@ public class AgenticAuthoringPreviewService {
                         result.plan(),
                         compiledFormPatch),
                 null,
-                componentEditAssistantMessage(request, intent),
+                componentEditAssistantMessage(result.plan()),
                 result.providerInvocations()));
     }
 
@@ -649,37 +661,52 @@ public class AgenticAuthoringPreviewService {
      * projection only prevents the final UX from discarding the specific edit in favor of a generic
      * table message.
      */
-    private String componentEditAssistantMessage(
+    private String componentEditAssistantMessage(JsonNode compiledPlan) {
+        List<String> operationIds = new ArrayList<>();
+        if (compiledPlan != null && compiledPlan.path("operations").isArray()) {
+            compiledPlan.path("operations").forEach(operation -> {
+                String operationId = value(operation.path("operationId").asText());
+                if (!operationId.isBlank() && !operationIds.contains(operationId)) {
+                    operationIds.add(operationId);
+                }
+            });
+        }
+        String operations = operationIds.isEmpty()
+                ? "operações validadas"
+                : String.join(", ", operationIds);
+        return AgenticAuthoringPresentationText.assistantReply(
+                "Preparei uma prévia com " + operations
+                        + ". As demais configurações atuais serão preservadas.");
+    }
+
+    private boolean isDirectComponentEditRequest(
             AgenticAuthoringPlanRequest request,
-            AgenticAuthoringIntentResolutionResult intent) {
-        String message = intent == null ? "" : value(intent.assistantMessage());
-        if (message.isBlank() && request != null) {
-            message = value(request.userPrompt());
+            JsonNode manifestRef) {
+        if (request == null || request.intentResolution() == null || manifestRef == null) {
+            return false;
         }
-        if (!message.isBlank()) {
-            String normalizedMessage = normalize(message);
-            String preservationSuffix = normalizedMessage.contains("demais configuracoes")
-                    && normalizedMessage.contains("preserv")
-                    ? ""
-                    : " As demais configurações atuais serão preservadas.";
-            return AgenticAuthoringPresentationText.assistantReply(
-                    message + preservationSuffix);
-        }
-        return deterministicPreviewAssistantMessage(request, intent, null, true, List.of());
+        String manifestComponentId = manifestRef.path("componentId").asText("").trim();
+        String targetComponentId = value(request.intentResolution().targetComponentId()).trim();
+        boolean pageDocument = request.currentPage() != null
+                && request.currentPage().path("widgets").isArray();
+        return !manifestComponentId.isBlank()
+                && manifestComponentId.equals(targetComponentId)
+                && !pageDocument;
     }
 
     private List<String> validateComponentEditContext(
             AgenticAuthoringPlanRequest request,
-            JsonNode manifestRef) {
+            JsonNode manifestRef,
+            boolean directComponentEdit) {
         List<String> failures = new ArrayList<>();
         JsonNode contextHints = request.contextHints();
         String selectedWidgetKey = contextHints.path("selectedWidgetKey").asText("").trim();
         String selectedComponentId = contextHints.path("selectedComponentId").asText("").trim();
         String manifestComponentId = manifestRef.path("componentId").asText("").trim();
-        if (selectedWidgetKey.isBlank()) {
+        if (!directComponentEdit && selectedWidgetKey.isBlank()) {
             failures.add("component-edit-plan-selected-widget-required");
         }
-        if (selectedComponentId.isBlank()) {
+        if (!directComponentEdit && selectedComponentId.isBlank()) {
             failures.add("component-edit-plan-selected-component-required");
         }
         if (manifestComponentId.isBlank()) {
@@ -691,12 +718,14 @@ public class AgenticAuthoringPreviewService {
             failures.add("component-edit-plan-manifest-component-mismatch");
         }
 
-        JsonNode selectedWidget = selectedComponentWidget(request.currentPage(), selectedWidgetKey);
-        if (selectedWidget.isMissingNode()) {
-            failures.add("component-edit-plan-selected-widget-not-found");
-        } else if (!selectedComponentId.equals(
-                selectedWidget.path("definition").path("id").asText("").trim())) {
-            failures.add("component-edit-plan-selected-widget-component-mismatch");
+        if (!directComponentEdit) {
+            JsonNode selectedWidget = selectedComponentWidget(request.currentPage(), selectedWidgetKey);
+            if (selectedWidget.isMissingNode()) {
+                failures.add("component-edit-plan-selected-widget-not-found");
+            } else if (!selectedComponentId.equals(
+                    selectedWidget.path("definition").path("id").asText("").trim())) {
+                failures.add("component-edit-plan-selected-widget-component-mismatch");
+            }
         }
 
         AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
@@ -704,10 +733,13 @@ public class AgenticAuthoringPreviewService {
             failures.add("component-edit-plan-intent-not-eligible");
         }
         AgenticAuthoringTarget target = intent.target();
-        if (target == null
-                || !selectedWidgetKey.equals(value(target.widgetKey()).trim())
-                || (!value(target.componentId()).trim().isBlank()
-                && !selectedComponentId.equals(value(target.componentId()).trim()))) {
+        boolean semanticTargetMismatch = directComponentEdit
+                ? !manifestComponentId.equals(value(intent.targetComponentId()).trim())
+                : target == null
+                        || !selectedWidgetKey.equals(value(target.widgetKey()).trim())
+                        || (!value(target.componentId()).trim().isBlank()
+                        && !selectedComponentId.equals(value(target.componentId()).trim()));
+        if (semanticTargetMismatch) {
             failures.add("component-edit-plan-semantic-target-mismatch");
         }
 
@@ -725,6 +757,24 @@ public class AgenticAuthoringPreviewService {
             }
         }
         return List.copyOf(new LinkedHashSet<>(failures));
+    }
+
+    private ObjectNode materializeDirectComponentEditPatch(
+            String componentId,
+            JsonNode plan,
+            JsonNode componentPatch,
+            JsonNode proposedConfig) {
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        compiledFormPatch.put("version", "1.0.0");
+        compiledFormPatch.put("profileId", "component-manifest-edit");
+        compiledFormPatch.put("targetComponentId", componentId);
+        ObjectNode componentEdit = compiledFormPatch.putObject("componentEdit");
+        componentEdit.put("componentId", componentId);
+        componentEdit.put("manifestVersion", componentPatch.path("manifestVersion").asText(""));
+        componentEdit.set("plan", plan == null ? MissingNode.getInstance() : plan.deepCopy());
+        componentEdit.set("compiledPatch", componentPatch.deepCopy());
+        compiledFormPatch.set("patch", proposedConfig.deepCopy());
+        return compiledFormPatch;
     }
 
     private JsonNode selectedComponentWidget(JsonNode currentPage, String widgetKey) {

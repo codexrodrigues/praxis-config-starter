@@ -681,6 +681,7 @@ public class AgenticAuthoringTurnEngine {
                     request,
                     turnProviderInvocations);
             String terminalPreviewApplyBlockReason = terminalPreviewApplyBlockReason(
+                    request,
                     preview,
                     terminalApplyTargetResolution);
             decisionDiagnostics.put("terminalPreviewApplyEligible", terminalPreviewApplyBlockReason.isBlank());
@@ -721,6 +722,10 @@ public class AgenticAuthoringTurnEngine {
                             canApply,
                             decisionDiagnostics));
             resultPayload.put("canApply", canApply);
+            JsonNode localComponentResponse = localComponentEditResponse(preview, assistantMessage);
+            if (localComponentResponse != null) {
+                resultPayload.put("response", localComponentResponse);
+            }
             resultPayload.put("decisionDiagnostics", decisionDiagnostics);
             if (terminalApplyTargetResolution.valid()) {
                 resultPayload.put("applyTarget", terminalApplyTargetResolution.target());
@@ -748,10 +753,14 @@ public class AgenticAuthoringTurnEngine {
     }
 
     private String terminalPreviewApplyBlockReason(
+            AgenticAuthoringTurnStreamRequest request,
             AgenticAuthoringPreviewResult preview,
             AgenticAuthoringApplyTarget.Resolution applyTargetResolution) {
         if (preview == null || !preview.valid()) {
             return "preview-invalid";
+        }
+        if (isLocalComponentEditPreview(request, preview)) {
+            return "";
         }
         String compiledPageBlockReason = AgenticAuthoringCompiledPagePatchValidator.terminalApplyBlockReason(
                 preview.compiledFormPatch());
@@ -761,6 +770,42 @@ public class AgenticAuthoringTurnEngine {
         return applyTargetResolution == null || !applyTargetResolution.valid()
                 ? applyTargetResolution == null ? "apply-target-missing" : applyTargetResolution.failureCode()
                 : "";
+    }
+
+    private boolean isLocalComponentEditPreview(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringPreviewResult preview) {
+        JsonNode compiled = preview == null ? null : preview.compiledFormPatch();
+        if (compiled == null
+                || !"component-manifest-edit".equals(compiled.path("profileId").asText(""))) {
+            return false;
+        }
+        String componentId = compiled.path("componentEdit").path("componentId").asText("").trim();
+        return !componentId.isBlank()
+                && request != null
+                && componentId.equals(request.targetComponentId());
+    }
+
+    private JsonNode localComponentEditResponse(
+            AgenticAuthoringPreviewResult preview,
+            String assistantMessage) {
+        if (preview == null || !preview.valid()) {
+            return null;
+        }
+        JsonNode compiled = preview.compiledFormPatch();
+        if (compiled == null
+                || !"component-manifest-edit".equals(compiled.path("profileId").asText(""))
+                || !compiled.path("componentEdit").path("plan").isObject()) {
+            return null;
+        }
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("type", "patch");
+        response.set("componentEditPlan", compiled.path("componentEdit").path("plan").deepCopy());
+        response.set("patch", compiled.path("patch").deepCopy());
+        response.put("explanation", publicAssistantMessage(assistantMessage));
+        response.set("warnings", objectMapper.valueToTree(
+                preview.warnings() == null ? List.of() : preview.warnings()));
+        return response;
     }
 
     private void emitStatus(

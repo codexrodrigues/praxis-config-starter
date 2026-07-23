@@ -90,6 +90,32 @@ class AgenticAuthoringTargetResolverRegistryTest {
     }
 
     @Test
+    void shouldSupportEveryOptionalGlobalTableResolverDeclaredByTheManifest() throws Exception {
+        for (String resolver : java.util.List.of(
+                "conditional-renderer-in-row",
+                "action-in-toolbar-config",
+                "action-in-row-config",
+                "action-in-bulk-config",
+                "action-in-context-config",
+                "table-meta-config",
+                "interaction-config",
+                "loading-config",
+                "empty-state-config",
+                "resizing-config",
+                "dragging-config",
+                "editing-config",
+                "table-runtime-operation-contract",
+                "data-config")) {
+            AgenticAuthoringResolvedTarget result = registry.resolve(
+                    "praxis-table",
+                    operation("table.generated.coverage", "global", resolver, "fail", false),
+                    objectMapper.createObjectNode(),
+                    objectMapper.readTree("{}"));
+            assertThat(result.status()).as(resolver).isEqualTo("not-required");
+        }
+    }
+
+    @Test
     void shouldTreatChartRootResolversAsGlobalWhenOptional() throws Exception {
         AgenticAuthoringResolvedTarget result = registry.resolve(
                 "praxis-chart",

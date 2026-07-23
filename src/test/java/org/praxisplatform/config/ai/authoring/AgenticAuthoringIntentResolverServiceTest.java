@@ -14394,6 +14394,27 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void acceptsManifestOwnedOperationForCanonicalComponentTargetWithoutPageBuilderWidget() {
+        AgenticAuthoringIntentResolutionResult result = tableRefinementService(
+                "appearance.density.set",
+                "/api/human-resources/funcionarios")
+                .resolve(new AgenticAuthoringIntentResolutionRequest(
+                        "Defina a densidade da tabela como compacta.",
+                        "praxis-ui-angular",
+                        "praxis-table",
+                        "/table-authoring",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-5.6-terra",
+                        null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.changeKind()).isEqualTo("appearance.density.set");
+        assertThat(result.failureCodes()).doesNotContain("target-widget-required");
+    }
+
+    @Test
     void consultativeRuleQuestionsDoNotTriggerSharedRuleAuthoringGate() {
         ObjectNode page = funcionariosTablePage();
         AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(

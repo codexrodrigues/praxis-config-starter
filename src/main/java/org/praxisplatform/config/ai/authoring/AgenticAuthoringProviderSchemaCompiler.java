@@ -157,13 +157,13 @@ public final class AgenticAuthoringProviderSchemaCompiler {
             JsonNode child = value.path(field);
             JsonNode childSchema = schema.path("properties").path(field);
             if (child.isNull() && !required.contains(field)) value.remove(field);
-            else if (child.isTextual() && requiresJsonTextEncoding(childSchema)) decodeJsonText(child.asText(""), childSchema).ifPresent(decoded -> value.set(field, decoded));
+            else if (child.isTextual() && expectsStructuredValue(childSchema)) decodeJsonText(child.asText(""), childSchema).ifPresent(decoded -> value.set(field, decoded));
             else if (child instanceof ObjectNode childObject && childSchema.isObject()) removeCompatibilityValues(childObject, childSchema);
             else if (child instanceof ArrayNode array && childSchema.path("items").isObject()) {
                 JsonNode itemSchema = childSchema.path("items");
                 for (int i = 0; i < array.size(); i++) {
                     JsonNode item = array.get(i);
-                    if (item.isTextual() && requiresJsonTextEncoding(itemSchema)) {
+                    if (item.isTextual() && expectsStructuredValue(itemSchema)) {
                         java.util.Optional<JsonNode> decoded = decodeJsonText(item.asText(""), itemSchema);
                         if (decoded.isPresent()) array.set(i, decoded.get());
                     }
@@ -177,13 +177,25 @@ public final class AgenticAuthoringProviderSchemaCompiler {
         if (value == null || value.isBlank()) return java.util.Optional.empty();
         try {
             JsonNode decoded = objectMapper.readTree(value);
-            return (isFreeFormObjectSchema(canonicalSchema) && decoded.isObject()) || (isFreeFormArraySchema(canonicalSchema) && decoded.isArray())
+            return (declaresType(canonicalSchema, "object") && decoded.isObject())
+                    || (declaresType(canonicalSchema, "array") && decoded.isArray())
                     ? java.util.Optional.of(decoded) : java.util.Optional.empty();
         } catch (Exception ignored) { return java.util.Optional.empty(); }
     }
 
     private boolean requiresJsonTextEncoding(JsonNode schema) {
         return isFreeFormObjectSchema(schema) || isFreeFormArraySchema(schema) || isUnconstrainedSchema(schema);
+    }
+    private boolean expectsStructuredValue(JsonNode schema) {
+        return declaresType(schema, "object") || declaresType(schema, "array");
+    }
+    private boolean declaresType(JsonNode schema, String expected) {
+        JsonNode type = schema.path("type");
+        if (type.isTextual()) return expected.equals(type.asText(""));
+        if (type.isArray()) {
+            for (JsonNode value : type) if (expected.equals(value.asText(""))) return true;
+        }
+        return false;
     }
     private boolean isFreeFormObjectSchema(JsonNode schema) { return "object".equals(schema.path("type").asText("")) && (!schema.path("properties").isObject() || schema.path("properties").isEmpty()); }
     private boolean isFreeFormArraySchema(JsonNode schema) { return "array".equals(schema.path("type").asText("")) && (!schema.path("items").isObject() || schema.path("items").isEmpty()); }

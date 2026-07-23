@@ -99,6 +99,81 @@ class AgenticAuthoringTurnEngineTest {
                 .isEqualTo("Could not create the table.");
     }
 
+    @Test
+    void projectsApplicableLocalComponentEditWithoutPageBuilderPersistenceTarget() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        AgenticAuthoringTurnStreamRequest request = previewMessageRequest("pt-BR");
+        request = new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                "praxis-table",
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                request.contextHints(),
+                request.componentCapabilities(),
+                request.activeSemanticDecision(),
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("profileId", "component-manifest-edit");
+        ObjectNode componentEdit = compiled.putObject("componentEdit");
+        componentEdit.put("componentId", "praxis-table");
+        componentEdit.putObject("plan")
+                .put("schemaVersion", "praxis-component-edit-plan.v1")
+                .put("componentId", "praxis-table")
+                .putArray("operations")
+                .addObject()
+                .put("operationId", "appearance.density.set");
+        compiled.putObject("patch").putObject("appearance").put("density", "compact");
+        AgenticAuthoringPreviewResult preview = new AgenticAuthoringPreviewResult(
+                true,
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                compiled,
+                null,
+                null,
+                "Densidade compacta pronta para revisão.");
+
+        String blockReason = ReflectionTestUtils.invokeMethod(
+                engine,
+                "terminalPreviewApplyBlockReason",
+                request,
+                preview,
+                AgenticAuthoringApplyTarget.Resolution.blocked("apply-target-missing"));
+        JsonNode response = ReflectionTestUtils.invokeMethod(
+                engine,
+                "localComponentEditResponse",
+                preview,
+                "Densidade compacta pronta para revisão.");
+
+        assertThat(blockReason).isBlank();
+        assertThat(response.path("type").asText()).isEqualTo("patch");
+        assertThat(response.path("componentEditPlan").path("operations").get(0).path("operationId").asText())
+                .isEqualTo("appearance.density.set");
+        assertThat(response.path("patch").path("appearance").path("density").asText())
+                .isEqualTo("compact");
+        assertThat(response.path("explanation").asText())
+                .isEqualTo("Densidade compacta pronta para revisão.");
+    }
+
     private AgenticAuthoringTurnStreamRequest previewMessageRequest(String responseLocale) {
         return new AgenticAuthoringTurnStreamRequest(
                 "",
