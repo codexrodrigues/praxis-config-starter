@@ -11,6 +11,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
 import lombok.RequiredArgsConstructor;
@@ -67,8 +68,126 @@ public class RegistryIngestionService {
         reindexRegistry(request, tenantId, environment);
     }
 
+    /**
+     * Reconciles only materially changed component definitions when the canonical corpus release
+     * remains stable. A release transition deliberately falls back to a complete reindex so every
+     * component is published under the new release identity.
+     */
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+    public RegistryReindexResult reconcileRegistry(
+            RegistryIngestionRequest request,
+            String tenantId,
+            String environment,
+            String previousReleaseId) {
+        if (request == null || request.getComponents() == null || request.getComponents().isEmpty()) {
+            return reindexRegistry(request, tenantId, environment);
+        }
+
+        preflight(request);
+        String releaseId = RagDocumentIdentity.resolveReleaseId(
+                null,
+                request.getVersion(),
+                request.getGeneratedAt());
+        if (previousReleaseId == null
+                || !releaseId.equals(RagDocumentIdentity.resolveReleaseId(previousReleaseId, null, null))) {
+            log.info(
+                    "AI registry release changed; performing complete reindex (previousReleaseId={}, releaseId={}).",
+                    previousReleaseId,
+                    releaseId);
+            return reindexRegistry(request, tenantId, environment);
+        }
+
+        Map<String, AiRegistry> persistedDefinitions = new LinkedHashMap<>();
+        for (AiRegistry definition : repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                REGISTRY_TYPE_COMPONENT_DEF,
+                COMPONENT_DEF_COMPONENT_TYPE,
+                Scope.SYSTEM,
+                "GLOBAL")) {
+            if (definition != null && definition.getRegistryKey() != null) {
+                persistedDefinitions.put(definition.getRegistryKey(), definition);
+            }
+        }
+
+        Map<String, RegistryIngestionRequest.ComponentEntry> changedComponents = new LinkedHashMap<>();
+        request.getComponents().forEach((componentId, entry) -> {
+            resolveConfigSchema(entry, request.getDefinitions());
+            String description = entry != null ? entry.getDescription() : null;
+            if (description == null || description.isEmpty()) {
+                description = "Component " + componentId;
+            }
+            String expectedPayload = buildPayload(componentId, description, entry);
+            AiRegistry persisted = persistedDefinitions.get(componentId);
+            if (persisted == null || !materialPayloadEquals(persisted.getPayload(), expectedPayload)) {
+                changedComponents.put(componentId, entry);
+            }
+        });
+
+        String resolvedTenant = normalize(tenantId);
+        String resolvedEnvironment = normalize(environment);
+        long corpusExpectedChunkCount = expectedChunkCount(request);
+        if (changedComponents.isEmpty()) {
+            log.info(
+                    "AI registry reconciliation found no material component changes (releaseId={}, components={}).",
+                    releaseId,
+                    request.getComponents().size());
+            return new RegistryReindexResult(
+                    resolvedTenant,
+                    resolvedEnvironment,
+                    releaseId,
+                    normalize(request.getVersion()),
+                    0,
+                    corpusExpectedChunkCount,
+                    0,
+                    List.of(),
+                    ragVectorStoreService.corpusReleaseStatus(
+                            resolvedTenant,
+                            resolvedEnvironment,
+                            releaseId,
+                            corpusExpectedChunkCount));
+        }
+
+        log.info(
+                "AI registry reconciliation will publish only material changes (releaseId={}, changedComponents={}, totalComponents={}).",
+                releaseId,
+                changedComponents.size(),
+                request.getComponents().size());
+        RegistryIngestionRequest delta = RegistryIngestionRequest.builder()
+                .components(changedComponents)
+                .definitions(request.getDefinitions())
+                .version(request.getVersion())
+                .generatedAt(request.getGeneratedAt())
+                .build();
+        RegistryReindexResult deltaResult = reindexRegistry(
+                delta,
+                tenantId,
+                environment,
+                persistedDefinitions);
+        return new RegistryReindexResult(
+                deltaResult.tenantId(),
+                deltaResult.environment(),
+                deltaResult.releaseId(),
+                deltaResult.registryVersion(),
+                deltaResult.componentCount(),
+                corpusExpectedChunkCount,
+                deltaResult.publishedChunkCount(),
+                deltaResult.components(),
+                ragVectorStoreService.corpusReleaseStatus(
+                        resolvedTenant,
+                        resolvedEnvironment,
+                        releaseId,
+                        corpusExpectedChunkCount));
+    }
+
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public RegistryReindexResult reindexRegistry(RegistryIngestionRequest request, String tenantId, String environment) {
+        return reindexRegistry(request, tenantId, environment, Map.of());
+    }
+
+    private RegistryReindexResult reindexRegistry(
+            RegistryIngestionRequest request,
+            String tenantId,
+            String environment,
+            Map<String, AiRegistry> previousDefinitions) {
         if (request == null) {
             log.warn("No registry request found for ingestion.");
             return RegistryReindexResult.empty(normalize(tenantId), normalize(environment), "v1");
@@ -88,16 +207,35 @@ public class RegistryIngestionService {
         String releaseId = RagDocumentIdentity.resolveReleaseId(null, request.getVersion(), request.getGeneratedAt());
         String requestVersion = normalize(request.getVersion());
         var definitions = request.getDefinitions();
+        Map<String, List<Float>> componentEmbeddings =
+                resolveComponentEmbeddings(request, definitions, previousDefinitions);
+        Optional<Map<RagVectorStoreService.RagDocumentScope, Set<String>>> existingRagDocuments =
+                ragVectorStoreService.findDocumentIdsByRelease(
+                        resolvedTenant,
+                        resolvedEnv,
+                        releaseId,
+                        REGISTRY_TYPE_COMPONENT_DEF);
         List<ComponentPublicationStatus> componentStatuses = new ArrayList<>();
+        List<Document> ragDocumentsToUpsert = new ArrayList<>();
         long expectedChunkCount = 0;
         long publishedChunkCount = 0;
         request.getComponents().forEach((componentId, entry) -> {
             try {
-                AiRegistry def = toComponentDefinition(componentId, entry, definitions);
-                upsertDefinition(def);
+                AiRegistry def = toComponentDefinition(
+                        componentId,
+                        entry,
+                        definitions,
+                        componentEmbeddings.get(componentId));
+                upsertDefinition(def, previousDefinitions.get(componentId));
                 List<Document> ragDocuments = toRagDocuments(def, entry, resolvedTenant, resolvedEnv, releaseId, requestVersion);
-                purgeExistingDocuments(resolvedTenant, resolvedEnv, releaseId, componentId, ragDocuments);
-                ragVectorStoreService.upsertDocuments(ragDocuments);
+                ragDocumentsToUpsert.addAll(
+                        planRagDocumentUpserts(
+                                resolvedTenant,
+                                resolvedEnv,
+                                releaseId,
+                                componentId,
+                                ragDocuments,
+                                existingRagDocuments));
                 componentStatuses.add(new ComponentPublicationStatus(
                         componentId,
                         ragDocuments.size(),
@@ -109,12 +247,19 @@ public class RegistryIngestionService {
                         ragDocuments.stream()
                                 .map(Document::getId)
                                 .toList()));
-                log.info("Ingested component: {}", componentId);
+                log.info("Prepared component for registry reconciliation: {}", componentId);
             } catch (Exception e) {
                 log.error("Failed to process component: " + componentId, e);
                 throw new ConfigurationIngestionException("Error processing component: " + componentId, e);
             }
         });
+        if (!ragDocumentsToUpsert.isEmpty()) {
+            ragVectorStoreService.upsertDocuments(ragDocumentsToUpsert);
+        }
+        log.info(
+                "Published reconciled AI registry vector batch (components={}, documents={}).",
+                componentStatuses.size(),
+                ragDocumentsToUpsert.size());
         for (ComponentPublicationStatus status : componentStatuses) {
             expectedChunkCount += status.chunkCount();
             publishedChunkCount += status.chunkCount();
@@ -212,7 +357,8 @@ public class RegistryIngestionService {
     private AiRegistry toComponentDefinition(
             String componentId,
             RegistryIngestionRequest.ComponentEntry entry,
-            com.fasterxml.jackson.databind.JsonNode definitions) {
+            com.fasterxml.jackson.databind.JsonNode definitions,
+            List<Float> resolvedEmbedding) {
         resolveConfigSchema(entry, definitions);
         String description = entry.getDescription();
         if (description == null || description.isEmpty()) {
@@ -220,7 +366,10 @@ public class RegistryIngestionService {
         }
 
         String summary = buildSummary(componentId, description, entry);
-        List<Float> embedding = embeddingService.embed(summary);
+        List<Float> embedding = resolvedEmbedding;
+        if (embedding == null || embedding.isEmpty()) {
+            embedding = embeddingService.embed(summary);
+        }
 
         String payload = buildPayload(componentId, description, entry);
 
@@ -233,6 +382,81 @@ public class RegistryIngestionService {
                 .payload(payload)
                 .embedding(embedding)
                 .build();
+    }
+
+    private Map<String, List<Float>> resolveComponentEmbeddings(
+            RegistryIngestionRequest request,
+            com.fasterxml.jackson.databind.JsonNode definitions,
+            Map<String, AiRegistry> previousDefinitions) {
+        Map<String, List<Float>> resolved = new LinkedHashMap<>();
+        List<String> missingComponentIds = new ArrayList<>();
+        List<String> missingSummaries = new ArrayList<>();
+        request.getComponents().forEach((componentId, entry) -> {
+            resolveConfigSchema(entry, definitions);
+            String description = entry.getDescription();
+            if (description == null || description.isEmpty()) {
+                description = "Component " + componentId;
+            }
+            String summary = buildSummary(componentId, description, entry);
+            List<Float> reusable = reusableEmbedding(
+                    previousDefinitions.get(componentId),
+                    componentId,
+                    summary);
+            if (reusable != null && !reusable.isEmpty()) {
+                resolved.put(componentId, reusable);
+            } else {
+                missingComponentIds.add(componentId);
+                missingSummaries.add(summary);
+            }
+        });
+        if (missingSummaries.isEmpty()) {
+            return resolved;
+        }
+        List<List<Float>> generated = missingSummaries.size() == 1
+                ? List.of(embeddingService.embed(missingSummaries.get(0)))
+                : embeddingService.embedAll(missingSummaries);
+        if (generated == null || generated.size() != missingSummaries.size()) {
+            throw new ConfigurationIngestionException(
+                    "Embedding provider returned an incomplete component-definition batch.");
+        }
+        for (int index = 0; index < missingComponentIds.size(); index++) {
+            resolved.put(missingComponentIds.get(index), generated.get(index));
+        }
+        return resolved;
+    }
+
+    private List<Float> reusableEmbedding(
+            AiRegistry previousDefinition,
+            String componentId,
+            String expectedSummary) {
+        if (previousDefinition == null
+                || previousDefinition.getEmbedding() == null
+                || previousDefinition.getEmbedding().isEmpty()
+                || previousDefinition.getPayload() == null) {
+            return null;
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode componentDefinition =
+                    objectMapper.readTree(previousDefinition.getPayload()).path("componentDefinition");
+            com.fasterxml.jackson.databind.JsonNode schema = componentDefinition.path("jsonSchema");
+            if (!schema.isObject()) {
+                return null;
+            }
+            RegistryIngestionRequest.ComponentEntry previousEntry =
+                    objectMapper.treeToValue(schema, RegistryIngestionRequest.ComponentEntry.class);
+            com.fasterxml.jackson.databind.JsonNode context = componentDefinition.path("componentContext");
+            if (!context.isMissingNode() && !context.isNull()) {
+                previousEntry.setComponentContext(context);
+            }
+            String previousDescription = componentDefinition.path("description")
+                    .asText("Component " + componentId);
+            String previousSummary = buildSummary(componentId, previousDescription, previousEntry);
+            return expectedSummary.equals(previousSummary)
+                    ? List.copyOf(previousDefinition.getEmbedding())
+                    : null;
+        } catch (Exception ex) {
+            return null;
+        }
     }
 
     private List<Document> toRagDocuments(
@@ -329,13 +553,15 @@ public class RegistryIngestionService {
         return documents;
     }
 
-    private void purgeExistingDocuments(
+    private List<Document> planRagDocumentUpserts(
             String tenantId,
             String environment,
             String releaseId,
             String componentId,
-            List<Document> ragDocuments) {
-        Set<SourceScope> scopes = new LinkedHashSet<>();
+            List<Document> ragDocuments,
+            Optional<Map<RagVectorStoreService.RagDocumentScope, Set<String>>> existingRagDocuments) {
+        List<Document> documentsToUpsert = new ArrayList<>();
+        Map<SourceScope, List<Document>> documentsByScope = new LinkedHashMap<>();
         if (ragDocuments != null) {
             for (Document document : ragDocuments) {
                 Map<String, Object> metadata = document.getMetadata() != null ? document.getMetadata() : Map.of();
@@ -349,20 +575,50 @@ public class RegistryIngestionService {
                         toStringValue(metadata.get(RagMetadataKeys.DOC_TYPE)),
                         toStringValue(metadata.get(RagMetadataKeys.RESOURCE_TYPE)),
                         REGISTRY_TYPE_COMPONENT_DEF);
-                scopes.add(new SourceScope(sourceId, sourceKind));
+                documentsByScope.computeIfAbsent(
+                        new SourceScope(sourceId, sourceKind),
+                        ignored -> new ArrayList<>()).add(document);
             }
         }
-        if (scopes.isEmpty()) {
-            scopes.add(new SourceScope(componentId, REGISTRY_TYPE_COMPONENT_DEF));
+        if (documentsByScope.isEmpty()) {
+            documentsByScope.put(new SourceScope(componentId, REGISTRY_TYPE_COMPONENT_DEF), List.of());
         }
-        for (SourceScope scope : scopes) {
-            ragVectorStoreService.deleteDocumentsByScope(
-                    tenantId,
-                    environment,
-                    releaseId,
-                    scope.sourceId(),
-                    scope.sourceKind());
+        for (Map.Entry<SourceScope, List<Document>> scopedDocuments : documentsByScope.entrySet()) {
+            SourceScope scope = scopedDocuments.getKey();
+            List<Document> desiredDocuments = scopedDocuments.getValue();
+            if (existingRagDocuments == null || existingRagDocuments.isEmpty()) {
+                ragVectorStoreService.deleteDocumentsByScope(
+                        tenantId,
+                        environment,
+                        releaseId,
+                        scope.sourceId(),
+                        scope.sourceKind());
+                documentsToUpsert.addAll(desiredDocuments);
+                continue;
+            }
+            Set<String> existingIds = existingRagDocuments.get().getOrDefault(
+                    new RagVectorStoreService.RagDocumentScope(
+                            scope.sourceId(),
+                            scope.sourceKind()),
+                    Set.of());
+            Set<String> desiredIds = new LinkedHashSet<>();
+            for (Document document : desiredDocuments) {
+                desiredIds.add(document.getId());
+            }
+            List<String> staleIds = existingIds.stream()
+                    .filter(id -> !desiredIds.contains(id))
+                    .toList();
+            if (!staleIds.isEmpty()) {
+                ragVectorStoreService.deleteDocuments(staleIds);
+            }
+            List<Document> missingDocuments = desiredDocuments.stream()
+                    .filter(document -> !existingIds.contains(document.getId()))
+                    .toList();
+            if (!missingDocuments.isEmpty()) {
+                documentsToUpsert.addAll(missingDocuments);
+            }
         }
+        return documentsToUpsert;
     }
 
     private Document toRagDocument(
@@ -706,6 +962,28 @@ public class RegistryIngestionService {
         return toJson(root);
     }
 
+    private boolean materialPayloadEquals(String persistedPayload, String expectedPayload) {
+        if (persistedPayload == null || expectedPayload == null) {
+            return Objects.equals(persistedPayload, expectedPayload);
+        }
+        try {
+            return objectMapper.readTree(persistedPayload).equals(objectMapper.readTree(expectedPayload));
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    private long expectedChunkCount(RegistryIngestionRequest request) {
+        if (request == null || request.getComponents() == null) {
+            return 0;
+        }
+        return request.getComponents().values().stream()
+                .mapToLong(entry -> entry != null && entry.getChunks() != null && !entry.getChunks().isEmpty()
+                        ? entry.getChunks().size()
+                        : 1)
+                .sum();
+    }
+
     private void resolveConfigSchema(
             RegistryIngestionRequest.ComponentEntry entry,
             com.fasterxml.jackson.databind.JsonNode definitions) {
@@ -747,13 +1025,16 @@ public class RegistryIngestionService {
         }
     }
 
-    private void upsertDefinition(AiRegistry config) {
-        var existing = repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
-                config.getRegistryType(),
-                config.getRegistryKey(),
-                config.getComponentType(),
-                config.getScope(),
-                config.getScopeKey());
+    private void upsertDefinition(AiRegistry config, AiRegistry previousDefinition) {
+        Optional<AiRegistry> existing = Optional.ofNullable(previousDefinition);
+        if (existing.isEmpty()) {
+            existing = repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                    config.getRegistryType(),
+                    config.getRegistryKey(),
+                    config.getComponentType(),
+                    config.getScope(),
+                    config.getScopeKey());
+        }
 
         if (existing.isPresent()) {
             AiRegistry db = existing.get();

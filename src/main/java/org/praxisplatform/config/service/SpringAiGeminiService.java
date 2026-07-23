@@ -267,10 +267,7 @@ public class SpringAiGeminiService implements AiProvider {
     }
 
     private GoogleGenAiChatOptions buildOptions(AiCallConfig config, boolean jsonMode, String resolvedModel) {
-        int resolvedMaxTokens = resolveMaxTokens(config);
-        if (jsonMode && (config == null || config.getMaxTokens() == null)) {
-            resolvedMaxTokens = Math.max(resolvedMaxTokens, Math.max(1, jsonMinOutputTokens));
-        }
+        int resolvedMaxTokens = resolveGenerationMaxTokens(config, jsonMode);
         GoogleGenAiChatOptions.Builder builder = GoogleGenAiChatOptions.builder()
                 .model(resolvedModel)
                 .temperature(resolveTemperature(config))
@@ -300,6 +297,17 @@ public class SpringAiGeminiService implements AiProvider {
             return config.getMaxTokens();
         }
         return maxTokens;
+    }
+
+    private int resolveGenerationMaxTokens(AiCallConfig config, boolean jsonMode) {
+        int resolvedMaxTokens = resolveMaxTokens(config);
+        if (!jsonMode) {
+            return resolvedMaxTokens;
+        }
+        // Gemini 2.5 counts internal thinking against maxOutputTokens. The authoring callers
+        // intentionally declare compact logical response budgets, but a provider-level JSON
+        // minimum is still required so that reasoning cannot truncate the JSON envelope.
+        return Math.max(resolvedMaxTokens, Math.max(1, jsonMinOutputTokens));
     }
 
     private JsonSchemaResult prepareSchema(String prompt, AiJsonSchema schema) {
@@ -424,10 +432,7 @@ public class SpringAiGeminiService implements AiProvider {
             boolean jsonMode,
             String resolvedModel) {
         double resolvedTemperature = resolveTemperature(config);
-        int resolvedMaxTokens = resolveMaxTokens(config);
-        if (jsonMode && (config == null || config.getMaxTokens() == null)) {
-            resolvedMaxTokens = Math.max(resolvedMaxTokens, Math.max(1, jsonMinOutputTokens));
-        }
+        int resolvedMaxTokens = resolveGenerationMaxTokens(config, jsonMode);
         ObjectNode payload = objectMapper.createObjectNode();
         addTextContent(payload, prompt);
         ObjectNode generationConfig = payload.putObject("generationConfig");
@@ -788,6 +793,9 @@ public class SpringAiGeminiService implements AiProvider {
     }
 
     private boolean isCapacityExhausted(Throwable ex) {
+        if (isNonRetryableQuotaExhaustion(ex)) {
+            return false;
+        }
         Integer status = extractStatusCode(ex);
         if (status != null && (status == 429 || status == 503)) {
             return true;
@@ -804,6 +812,9 @@ public class SpringAiGeminiService implements AiProvider {
     }
 
     private boolean isRetryable(Throwable ex) {
+        if (isNonRetryableQuotaExhaustion(ex)) {
+            return false;
+        }
         Integer status = extractStatusCode(ex);
         if (status != null && (status == 429 || status == 503)) {
             return true;
@@ -817,6 +828,11 @@ public class SpringAiGeminiService implements AiProvider {
                 || normalized.contains("timed out")
                 || normalized.contains("read timed out")
                 || normalized.contains("connect timed out");
+    }
+
+    private boolean isNonRetryableQuotaExhaustion(Throwable ex) {
+        return ex instanceof AiProviderCallException providerException
+                && providerException.getKind() == AiProviderCallException.Kind.QUOTA_EXHAUSTED;
     }
 
     private void logGeminiFallback(

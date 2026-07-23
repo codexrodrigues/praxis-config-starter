@@ -5,6 +5,8 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
@@ -71,6 +73,105 @@ public class RagVectorStoreService {
                     deletedRows, tenantId, environment, releaseId, sourceId, sourceKind);
         } catch (Exception ex) {
             log.warn("Failed to purge documents from vector store. This might be normal if the schema is not initialized yet.", ex);
+        }
+    }
+
+    /**
+     * Reads the document identities already published for one semantic source scope. An empty
+     * optional means the store cannot be inspected safely and callers should use full replacement.
+     */
+    public Optional<Set<String>> findDocumentIdsByScope(
+            String tenantId,
+            String environment,
+            String releaseId,
+            String sourceId,
+            String sourceKind) {
+        if (vectorStoreProvider.getIfAvailable() == null) {
+            return Optional.of(Set.of());
+        }
+        NamedParameterJdbcTemplate jdbcTemplate = jdbcTemplateProvider.getIfAvailable();
+        if (jdbcTemplate == null) {
+            return Optional.empty();
+        }
+        String sql = """
+            SELECT id
+            FROM %s
+            WHERE COALESCE(metadata ->> 'tenantId', 'global') = :tenantId
+              AND COALESCE(metadata ->> 'environment', 'global') = :environment
+              AND COALESCE(metadata ->> 'releaseId', 'v1') = :releaseId
+              AND COALESCE(metadata ->> 'componentId', metadata ->> 'sourceId', metadata ->> 'resourceId', id) = :sourceId
+              AND COALESCE(metadata ->> 'docType', metadata ->> 'sourceKind', metadata ->> 'resourceType') = :sourceKind
+            """.formatted(tableName);
+        Map<String, Object> params = Map.of(
+                "tenantId", RagDocumentIdentity.normalizeToken(tenantId, "global"),
+                "environment", RagDocumentIdentity.normalizeToken(environment, "global"),
+                "releaseId", RagDocumentIdentity.normalizeToken(releaseId, "v1"),
+                "sourceId", RagDocumentIdentity.normalizeToken(sourceId, "unknown-source"),
+                "sourceKind", RagDocumentIdentity.normalizeToken(sourceKind, "unknown-kind"));
+        try {
+            List<String> ids = jdbcTemplate.query(
+                    sql,
+                    params,
+                    (resultSet, rowNumber) -> String.valueOf(resultSet.getObject("id")));
+            return Optional.of(new LinkedHashSet<>(ids));
+        } catch (Exception ex) {
+            log.warn(
+                    "Failed to inspect vector store document identities for release='{}', sourceId='{}'.",
+                    releaseId,
+                    sourceId,
+                    ex);
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Loads the content-addressed document index for a complete release in one database round
+     * trip, allowing large registry reconciliations to compare component scopes in memory.
+     */
+    public Optional<Map<RagDocumentScope, Set<String>>> findDocumentIdsByRelease(
+            String tenantId,
+            String environment,
+            String releaseId,
+            String resourceType) {
+        if (vectorStoreProvider.getIfAvailable() == null) {
+            return Optional.of(Map.of());
+        }
+        NamedParameterJdbcTemplate jdbcTemplate = jdbcTemplateProvider.getIfAvailable();
+        if (jdbcTemplate == null) {
+            return Optional.empty();
+        }
+        String sql = """
+            SELECT
+              id,
+              COALESCE(metadata ->> 'sourceId', metadata ->> 'componentId', metadata ->> 'resourceId', id) AS source_id,
+              COALESCE(metadata ->> 'sourceKind', metadata ->> 'docType', metadata ->> 'resourceType', 'unknown-kind') AS source_kind
+            FROM %s
+            WHERE COALESCE(metadata ->> 'tenantId', 'global') = :tenantId
+              AND COALESCE(metadata ->> 'environment', 'global') = :environment
+              AND COALESCE(metadata ->> 'releaseId', 'v1') = :releaseId
+              AND COALESCE(metadata ->> 'resourceType', metadata ->> 'docType', metadata ->> 'sourceKind') = :resourceType
+            """.formatted(tableName);
+        Map<String, Object> params = Map.of(
+                "tenantId", RagDocumentIdentity.normalizeToken(tenantId, "global"),
+                "environment", RagDocumentIdentity.normalizeToken(environment, "global"),
+                "releaseId", RagDocumentIdentity.normalizeToken(releaseId, "v1"),
+                "resourceType", RagDocumentIdentity.normalizeToken(resourceType, "unknown-kind"));
+        try {
+            Map<RagDocumentScope, Set<String>> idsByScope = new LinkedHashMap<>();
+            jdbcTemplate.query(sql, params, resultSet -> {
+                RagDocumentScope scope = new RagDocumentScope(
+                        resultSet.getString("source_id"),
+                        resultSet.getString("source_kind"));
+                idsByScope.computeIfAbsent(scope, ignored -> new LinkedHashSet<>())
+                        .add(String.valueOf(resultSet.getObject("id")));
+            });
+            return Optional.of(idsByScope);
+        } catch (Exception ex) {
+            log.warn(
+                    "Failed to inspect vector store release identities for release='{}'.",
+                    releaseId,
+                    ex);
+            return Optional.empty();
         }
     }
 
@@ -281,6 +382,9 @@ public class RagVectorStoreService {
                 docType,
                 contentHash,
                 Integer.toString(chunkIndex));
+    }
+
+    public record RagDocumentScope(String sourceId, String sourceKind) {
     }
 
     private Object firstNonNull(Object first, Object second) {

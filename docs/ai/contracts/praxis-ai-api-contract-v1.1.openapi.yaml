@@ -1616,7 +1616,7 @@ components:
       required: false
       schema:
         type: string
-        default: f991cfb03ef0f6a283505c034a7afe40fbb089fb254d3a9251a5c35848d0a2b5
+        default: d817fcf351207371c5cb8528b70c0ba6830648710581b08c7cc2b2b428989289
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1646,7 +1646,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: f991cfb03ef0f6a283505c034a7afe40fbb089fb254d3a9251a5c35848d0a2b5
+        example: d817fcf351207371c5cb8528b70c0ba6830648710581b08c7cc2b2b428989289
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -2114,7 +2114,12 @@ components:
               properties:
                 agenticApplyTarget:
                   $ref: '#/components/schemas/AgenticAuthoringApplyTarget'
-              description: Hints governados do turno. agenticApplyTarget e metadado de transporte, removido antes de qualquer contexto enviado a LLM, e vincula o resultado terminal ao destino de persistencia.
+                clientActions:
+                  type: array
+                  maxItems: 20
+                  items:
+                    $ref: '#/components/schemas/AgenticAuthoringClientAction'
+              description: Hints governados do turno. agenticApplyTarget e metadado de transporte, removido antes de qualquer contexto enviado a LLM, e vincula o resultado terminal ao destino de persistencia. clientActions declara capacidades locais concretas e seu estado atual; a resposta so pode solicitar uma acao pelo mesmo id, kind e capabilityRef declarados.
             componentCapabilities:
               $ref: '#/components/schemas/AgenticAuthoringComponentCapabilitiesResult'
             activeSemanticDecision:
@@ -2384,6 +2389,10 @@ components:
           $ref: '#/components/schemas/AgenticAuthoringApplyTarget'
           nullable: true
           description: Destino e precondicao de concorrencia atestados pelo mesmo evento terminal. page-apply rejeita qualquer divergencia de identidade, escopo, ambiente ou ETag.
+        clientAction:
+          $ref: '#/components/schemas/AgenticAuthoringClientAction'
+          nullable: true
+          description: Instrucao local declarativa autorizada pelo contexto do mesmo turno. O cliente deve reconciliar id, kind, capabilityRef, disponibilidade e alvo antes de executar; nunca inferir a acao a partir do texto.
         decisionDiagnostics:
           $ref: '#/components/schemas/AgenticAuthoringDecisionDiagnostics'
           nullable: true
@@ -2519,6 +2528,40 @@ components:
             type: object
             additionalProperties: true
       additionalProperties: true
+
+    AgenticAuthoringClientAction:
+      type: object
+      description: Capacidade ou instrucao de acao estritamente local. O backend pode devolver somente uma acao previamente declarada pelo cliente no mesmo turno.
+      required:
+        - schemaVersion
+        - id
+        - kind
+        - capabilityRef
+        - available
+      properties:
+        schemaVersion:
+          type: string
+          enum:
+            - praxis-agentic-authoring-client-action.v1
+        id:
+          type: string
+          minLength: 1
+          maxLength: 120
+        kind:
+          type: string
+          enum:
+            - local-undo
+        capabilityRef:
+          type: string
+          minLength: 1
+          maxLength: 120
+        available:
+          type: boolean
+        targetComponentId:
+          type: string
+          nullable: true
+          maxLength: 160
+      additionalProperties: false
 
     AgenticAuthoringApplyRequest:
       type: object

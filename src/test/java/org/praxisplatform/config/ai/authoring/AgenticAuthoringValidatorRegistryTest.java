@@ -97,6 +97,175 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldRejectRendererBlocksThatDoNotMatchTheDeclaredType() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-table",
+                operationWithValidators(
+                        "column.renderer.set",
+                        false,
+                        "renderer-type-supported,renderer-config-match"),
+                plan("\"id\"", """
+                        {
+                          "type": "compose",
+                          "avatar": {
+                            "srcField": "avatarUrl",
+                            "size": 24
+                          },
+                          "compose": {
+                            "items": [
+                              {
+                                "type": "avatar",
+                                "avatar": {
+                                  "srcField": "avatarUrl",
+                                  "size": 24
+                                }
+                              },
+                              {
+                                "type": "value",
+                                "field": "id"
+                              }
+                            ]
+                          }
+                        }
+                        """),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .containsExactly(
+                        "validator renderer-config-match failed for column.renderer.set: renderer type compose must not include incompatible config block avatar");
+    }
+
+    @Test
+    void shouldAcceptAComposeRendererWhoseNestedBlocksMatchEveryItemType() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-table",
+                operationWithValidators(
+                        "column.renderer.set",
+                        false,
+                        "renderer-type-supported,renderer-config-match"),
+                plan("\"id\"", """
+                        {
+                          "type": "compose",
+                          "compose": {
+                            "items": [
+                              {
+                                "type": "avatar",
+                                "avatar": {
+                                  "srcField": "avatarUrl",
+                                  "size": 24
+                                }
+                              },
+                              {
+                                "type": "value",
+                                "field": "id"
+                              }
+                            ]
+                          }
+                        }
+                        """),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+    }
+
+    @Test
+    void shouldValidateLayoutRefinementOnlyForAnExistingComposeRenderer() throws Exception {
+        JsonNode operation = operation(
+                "column.renderer.composeLayout.set",
+                "renderer",
+                "renderer-in-column",
+                true,
+                "target-column-exists,renderer-compose-exists");
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "columns": [{
+                    "field": "id",
+                    "renderer": {
+                      "type": "compose",
+                      "compose": {
+                        "items": [
+                          { "type": "avatar", "avatar": { "srcField": "avatarUrl" } },
+                          { "type": "value", "field": "id" }
+                        ],
+                        "layout": { "direction": "row" }
+                      }
+                    }
+                  }]
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-table",
+                operation,
+                plan("\"id\"", """
+                        { "direction": "column" }
+                        """),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+    }
+
+    @Test
+    void shouldValidateAUniqueExistingComposeItemRefinement() throws Exception {
+        JsonNode operation = operation(
+                "column.renderer.composeItem.set",
+                "renderer",
+                "renderer-in-column",
+                true,
+                "target-column-exists,renderer-compose-item-exists,renderer-type-supported,renderer-config-match");
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "columns": [{
+                    "field": "id",
+                    "renderer": {
+                      "type": "compose",
+                      "compose": {
+                        "items": [
+                          {
+                            "type": "avatar",
+                            "avatar": { "srcField": "avatarUrl", "shape": "rounded", "size": 24 }
+                          },
+                          { "type": "value", "field": "id" }
+                        ]
+                      }
+                    }
+                  }]
+                }
+                """);
+        JsonNode planOperation = plan("\"id\"", """
+                {
+                  "itemType": "avatar",
+                  "item": {
+                    "type": "avatar",
+                    "avatar": { "srcField": "avatarUrl", "shape": "circle" }
+                  }
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-table",
+                operation,
+                planOperation,
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+    }
+
+    @Test
     void shouldValidateAdvancedFilterFieldsAgainstFilterRequestSchemaWhenAvailable() throws Exception {
         List<String> failures = new ArrayList<>();
 

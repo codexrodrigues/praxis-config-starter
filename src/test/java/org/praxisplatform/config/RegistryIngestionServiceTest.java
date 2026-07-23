@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -13,7 +15,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractValidator;
 import org.praxisplatform.config.domain.AiRegistry;
+import org.praxisplatform.config.domain.Scope;
 import org.praxisplatform.config.dto.RegistryIngestionRequest;
+import org.praxisplatform.config.rag.RagDocumentIdentity;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.registry.AiRegistryComponentDefinitionsChangedEvent;
 import org.praxisplatform.config.repository.AiRegistryRepository;
@@ -25,12 +29,15 @@ import org.springframework.core.io.ClassPathResource;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 @Tag("unit")
@@ -68,6 +75,10 @@ class RegistryIngestionServiceTest {
 
     private void setupMocks() {
         lenient().when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
+        lenient().when(embeddingService.embedAll(anyList())).thenAnswer(invocation -> {
+            List<String> inputs = invocation.getArgument(0);
+            return inputs.stream().map(ignored -> List.of(0.1f, 0.2f)).toList();
+        });
         lenient().when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
                 anyString(), anyString(), anyString(), any(), anyString()))
                 .thenReturn(java.util.Optional.empty());
@@ -112,7 +123,7 @@ class RegistryIngestionServiceTest {
 
         ArgumentCaptor<AiRegistry> savedDefinitions = ArgumentCaptor.forClass(AiRegistry.class);
         verify(repository, times(request.getComponents().size())).save(savedDefinitions.capture());
-        verify(ragVectorStoreService, times(request.getComponents().size())).upsertDocuments(any());
+        verify(ragVectorStoreService).upsertDocuments(any());
 
         AiRegistry tableDefinition = savedDefinitions.getAllValues().stream()
                 .filter(definition -> "praxis-table".equals(definition.getRegistryKey()))
@@ -300,6 +311,126 @@ class RegistryIngestionServiceTest {
         verify(embeddingService, never()).embed(anyString());
         verify(ragVectorStoreService, never()).deleteDocumentsByScope(any(), any(), any(), any(), any());
         verify(ragVectorStoreService, never()).upsertDocuments(any());
+    }
+
+    @Test
+    void reconcilesOnlyMateriallyChangedComponentsWithinTheSameRelease() {
+        Map<String, RegistryIngestionRequest.ComponentEntry> components = new java.util.LinkedHashMap<>();
+        components.put("component-a", component(chunk(0, "summary", "Component A")));
+        components.put("component-b", component(chunk(0, "summary", "Component B")));
+        RegistryIngestionRequest request = RegistryIngestionRequest.builder()
+                .version("release-v1")
+                .components(components)
+                .build();
+
+        registryIngestionService.reindexRegistry(request, null, null);
+        ArgumentCaptor<AiRegistry> initialDefinitions = ArgumentCaptor.forClass(AiRegistry.class);
+        verify(repository, times(2)).save(initialDefinitions.capture());
+        AiRegistry persistedComponentA = initialDefinitions.getAllValues().stream()
+                .filter(definition -> "component-a".equals(definition.getRegistryKey()))
+                .findFirst()
+                .orElseThrow();
+        clearInvocations(repository, embeddingService, ragVectorStoreService, eventPublisher);
+        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                "component_definition",
+                "component-definition",
+                Scope.SYSTEM,
+                "GLOBAL"))
+                .thenReturn(List.of(persistedComponentA));
+
+        RegistryIngestionService.RegistryReindexResult result =
+                registryIngestionService.reconcileRegistry(request, null, null, "release-v1");
+
+        ArgumentCaptor<AiRegistry> reconciledDefinition = ArgumentCaptor.forClass(AiRegistry.class);
+        verify(repository).save(reconciledDefinition.capture());
+        assertThat(reconciledDefinition.getValue().getRegistryKey()).isEqualTo("component-b");
+        verify(embeddingService).embed(anyString());
+        verify(ragVectorStoreService).upsertDocuments(any());
+        verify(eventPublisher).publishEvent(any(AiRegistryComponentDefinitionsChangedEvent.class));
+        assertThat(result.componentCount()).isEqualTo(1);
+        assertThat(result.expectedChunkCount()).isEqualTo(2);
+        assertThat(result.publishedChunkCount()).isEqualTo(1);
+    }
+
+    @Test
+    void performsCompleteReindexWhenReleaseIdentityChanges() {
+        RegistryIngestionRequest request = RegistryIngestionRequest.builder()
+                .version("release-v2")
+                .components(Map.of(
+                        "component-a", component(chunk(0, "summary", "Component A")),
+                        "component-b", component(chunk(0, "summary", "Component B"))))
+                .build();
+
+        RegistryIngestionService.RegistryReindexResult result =
+                registryIngestionService.reconcileRegistry(request, null, null, "release-v1");
+
+        verify(repository, times(2)).save(any(AiRegistry.class));
+        verify(embeddingService).embedAll(anyList());
+        verify(embeddingService, never()).embed(anyString());
+        verify(ragVectorStoreService).upsertDocuments(any());
+        assertThat(result.componentCount()).isEqualTo(2);
+        assertThat(result.releaseId()).isEqualTo("release-v2");
+    }
+
+    @Test
+    void reusesSemanticEmbeddingAndSkipsAlreadyPublishedRagContent() {
+        RegistryIngestionRequest.ComponentEntry originalEntry =
+                component(chunk(0, "summary", "Stable semantic content"));
+        RegistryIngestionRequest originalRequest = RegistryIngestionRequest.builder()
+                .version("release-v1")
+                .components(Map.of("component-a", originalEntry))
+                .build();
+        registryIngestionService.reindexRegistry(originalRequest, null, null);
+        ArgumentCaptor<AiRegistry> initialDefinition = ArgumentCaptor.forClass(AiRegistry.class);
+        verify(repository).save(initialDefinition.capture());
+
+        clearInvocations(repository, embeddingService, ragVectorStoreService, eventPublisher);
+        RegistryIngestionRequest.ComponentEntry changedPayloadEntry =
+                component(chunk(0, "summary", "Stable semantic content"));
+        changedPayloadEntry.addAdditionalProperty(
+                "editorialNote",
+                objectMapper.getNodeFactory().textNode("Payload-only revision"));
+        RegistryIngestionRequest changedRequest = RegistryIngestionRequest.builder()
+                .version("release-v1")
+                .components(Map.of("component-a", changedPayloadEntry))
+                .build();
+        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                "component_definition",
+                "component-definition",
+                Scope.SYSTEM,
+                "GLOBAL"))
+                .thenReturn(List.of(initialDefinition.getValue()));
+        String contentHash = RagDocumentIdentity.sha256("Stable semantic content");
+        String documentId = RagDocumentIdentity.buildDocumentId(
+                null,
+                null,
+                "component-a",
+                "release-v1",
+                "component_definition",
+                "summary",
+                contentHash,
+                0);
+        when(ragVectorStoreService.findDocumentIdsByRelease(
+                null,
+                null,
+                "release-v1",
+                "component_definition"))
+                .thenReturn(Optional.of(Map.of(
+                        new RagVectorStoreService.RagDocumentScope(
+                                "component-a",
+                                "component_definition"),
+                        Set.of(documentId))));
+
+        RegistryIngestionService.RegistryReindexResult result =
+                registryIngestionService.reconcileRegistry(changedRequest, null, null, "release-v1");
+
+        verify(repository).save(any(AiRegistry.class));
+        verify(embeddingService, never()).embed(anyString());
+        verify(ragVectorStoreService, never()).upsertDocuments(any());
+        verify(ragVectorStoreService, never()).deleteDocuments(any());
+        verify(ragVectorStoreService, never()).deleteDocumentsByScope(any(), any(), any(), any(), any());
+        assertThat(result.componentCount()).isEqualTo(1);
+        assertThat(result.publishedChunkCount()).isEqualTo(1);
     }
 
     private RegistryIngestionRequest requestWithChunks(

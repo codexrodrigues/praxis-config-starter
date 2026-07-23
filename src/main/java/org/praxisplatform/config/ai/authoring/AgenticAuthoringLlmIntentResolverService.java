@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.praxisplatform.config.service.AiProviderCallException;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
@@ -610,9 +611,13 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Return only one JSON object matching the supplied schema.
 
                 semanticOrientation is prior AI-authored semantic evidence, not a keyword heuristic. Preserve every
-                predicate in semanticOrientation.queryConstraints and preserve concept, operator and value independently.
-                Do not drop a predicate after selecting the resource. Textual business categories remain semantic values
-                at this stage; later governed field and live option-value tools will resolve canonical fields and current IDs.
+                actual data-selection predicate in semanticOrientation.queryConstraints and preserve concept, operator
+                and value independently. Preserve appliesToDataSelection=true only when those predicates constrain which
+                backend records are retrieved or displayed. A header, label, renderer, formatting, composed-cell or
+                displayed-value edit must use appliesToDataSelection=false with an empty filters array, even when its text
+                resembles a current data value. Do not drop an actual data predicate after selecting the resource. Textual
+                business categories remain semantic values at this stage; later governed field and live option-value tools
+                will resolve canonical fields and current IDs.
 
                 Select selectedResourcePath only from resourceDiscovery.candidates. Select the resource whose records the
                 table must display. If a related category or master-data concept constrains those records, keep it as a
@@ -675,6 +680,8 @@ public class AgenticAuthoringLlmIntentResolverService {
 
                 The activeSemanticDecision is canonical lineage. Preserve its operation, artifact, selected resource,
                 visualization decision and every unrelated predicate that already carries governed field evidence.
+                This refinement exists only for a previously confirmed record subset, so preserve
+                queryConstraints.appliesToDataSelection=true while grounding its predicates.
                 selectedResourcePath must remain one of candidateResources. Never invent a resource, field, label or
                 option ID. An ungrounded predicate may be consolidated into the canonical live-option predicate only
                 when its semantic value is represented by current candidates of that same option source; otherwise ask
@@ -938,7 +945,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             String environment,
             List<AiProviderInvocationTelemetry> providerInvocations) {
         List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> capabilities =
-                targetedComponentCapabilities(target, componentCapabilities, effectivePrompt);
+                targetedComponentCapabilities(request, target, componentCapabilities, effectivePrompt);
         if (!shouldTryCompactTargetedComponentIntent(request, target, capabilities)) {
             return Optional.empty();
         }
@@ -1042,6 +1049,7 @@ public class AgenticAuthoringLlmIntentResolverService {
     }
 
     private List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> targetedComponentCapabilities(
+            AgenticAuthoringIntentResolutionRequest request,
             AgenticAuthoringTarget target,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
             String effectivePrompt) {
@@ -1061,12 +1069,33 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .filter(Objects::nonNull)
                 .filter(capability -> StringUtils.hasText(capability.changeKind()))
                 .toList();
-        // The target component is already pinned by governed page context. Textual similarity only
-        // ranks canonical operations inside that scope; the LLM still decides whether the request
-        // edits the component and which semantic capability applies.
-        return AgenticAuthoringContextBundle.promptRelevantCapabilities(
+        // The target component is already pinned by governed page context. The prior semantic
+        // decision reserves one canonical candidate for genuine refinements; prompt similarity
+        // ranks additional candidates inside that scope. Neither decides the current intent.
+        List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> ranked =
+                AgenticAuthoringContextBundle.promptRelevantCapabilities(
                 effectivePrompt,
                 declaredCapabilities);
+        List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> selected = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        String activeChangeKind = request != null && request.activeSemanticDecision() != null
+                ? valueOrDefault(request.activeSemanticDecision().changeKind(), "")
+                : "";
+        declaredCapabilities.stream()
+                .filter(capability -> activeChangeKind.equals(capability.changeKind()))
+                .findFirst()
+                .ifPresent(capability -> {
+                    selected.add(capability);
+                    seen.add(capability.changeKind());
+                });
+        for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : ranked) {
+            if (capability != null && seen.add(capability.changeKind())) {
+                selected.add(capability);
+            }
+        }
+        return selected.stream()
+                .limit(AgenticAuthoringContextBundle.MAX_COMPACT_CAPABILITIES_PER_COMPONENT)
+                .toList();
     }
 
     private String compactTargetedComponentIntentPrompt(
@@ -1108,6 +1137,12 @@ public class AgenticAuthoringLlmIntentResolverService {
                 item.put("text", boundedText(message.text(), 500));
             }
         }
+        JsonNode clientActions = request.contextHints() == null
+                ? null
+                : request.contextHints().path("clientActions");
+        if (clientActions != null && clientActions.isArray()) {
+            context.set("clientActions", clientActions.deepCopy());
+        }
         ArrayNode governedCapabilities = context.putArray("governedCapabilities");
         for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : capabilities) {
             ObjectNode capabilityNode = governedCapabilities.addObject();
@@ -1145,6 +1180,13 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Set matchesSelectedComponentScope=true only when the new request semantically edits the selected
                 component. A request for a new artifact, a different component, a reusable business rule, general
                 guidance or an unrelated task must set it to false so the complete resolver can evaluate it.
+                When the user's primary meaning is to reverse only the most recently materialized local change,
+                select operationKind="undo", keep artifactKind aligned with the selected artifact (for example
+                "table" for praxis-table, "form" for a form, or "component" when no narrower kind applies), and
+                changeKind="undo_last_local_change". clientActions is the declared local capability catalog and
+                availability snapshot; never invent an action or reinterpret undo as a renderer/configuration edit.
+                Availability does not change the semantic intent: the runtime will explain when the declared action
+                cannot currently execute.
                 When it matches, choose changeKind only by comparing the semantic effects and constraints of the
                 governed capabilities. Adding a new schema-backed item is different from formatting, moving,
                 renaming, hiding or changing an existing item. Preserve the current component unless the user asks
@@ -1169,7 +1211,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         properties.putObject("matchesSelectedComponentScope").put("type", "boolean");
         stringEnum(properties, "semanticIntentClass", List.of(
                 "component_authoring", "shared_rule_authoring", "out_of_scope", "unknown"));
-        stringEnum(properties, "operationKind", List.of("modify", "remove", "unknown"));
+        stringEnum(properties, "operationKind", List.of("modify", "remove", "undo", "unknown"));
         stringEnum(properties, "artifactKind", List.of(
                 "dashboard", "chart", "table", "form", "page", "component", "unknown"));
         LinkedHashSet<String> changeKinds = new LinkedHashSet<>();
@@ -1177,6 +1219,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .map(AgenticAuthoringComponentCapabilitiesResult.ComponentCapability::changeKind)
                 .filter(StringUtils::hasText)
                 .forEach(changeKinds::add);
+        changeKinds.add("undo_last_local_change");
         changeKinds.add("unknown");
         stringEnum(properties, "changeKind", List.copyOf(changeKinds));
         stringEnum(properties, "followUpKind", List.of("refinement", "new_instruction", "unknown"));
@@ -1203,19 +1246,23 @@ public class AgenticAuthoringLlmIntentResolverService {
             JsonNode result,
             AgenticAuthoringTarget target,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        String operationKind = nullableText(result, "operationKind");
         if (result == null
                 || !result.isObject()
                 || !result.path("matchesSelectedComponentScope").asBoolean(false)
                 || !"component_authoring".equals(nullableText(result, "semanticIntentClass"))
-                || !"modify".equals(nullableText(result, "operationKind"))
+                || (!"modify".equals(operationKind) && !"undo".equals(operationKind))
                 || result.path("requiresGovernedAuthoring").asBoolean(false)) {
             return Optional.empty();
         }
         String artifactKind = nullableText(result, "artifactKind");
         String changeKind = nullableText(result, "changeKind");
+        boolean localUndo = "undo".equals(operationKind)
+                && "undo_last_local_change".equals(changeKind);
         if (!StringUtils.hasText(artifactKind)
                 || "unknown".equals(artifactKind)
-                || !declaredChangeKind(target.componentId(), changeKind, componentCapabilities)) {
+                || (!localUndo
+                        && !declaredChangeKind(target.componentId(), changeKind, componentCapabilities))) {
             return Optional.empty();
         }
         List<String> warnings = new ArrayList<>(strings(result.path("warnings")));
@@ -1224,7 +1271,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         }
         return Optional.of(new AgenticAuthoringLlmIntentResolution(
                 true,
-                "modify",
+                operationKind,
                 artifactKind,
                 changeKind,
                 target.resourcePath(),
@@ -1748,6 +1795,13 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Set semanticIntentClass to the primary AI-authored semantic decision: platform_guidance, api_catalog_guidance, component_authoring, shared_rule_authoring, out_of_scope, or unknown.
                 Treat semanticRetrievalIntent as prior AI-authored semantic evidence; reconcile it rather than silently replacing a concrete artifact with an unrelated container.
                 Treat activeSemanticDecision and recentConversation as prior governed lineage for the current refinement, not as permission to ignore the new user request.
+                When the user's primary meaning is to reverse only the most recently materialized local change,
+                select semanticIntentClass "component_authoring", operationKind "undo", keep artifactKind aligned
+                with the selected artifact (for example "table" for praxis-table or "form" for a form),
+                changeKind "undo_last_local_change", resolved=true and requiresGovernedAuthoring=false. Use
+                conversationContext.contextHints.clientActions only as the declared local capability/availability
+                catalog; never invent an action and never reinterpret undo as a component configuration edit.
+                Availability does not change the semantic intent because the runtime handles unavailable actions.
                 Select selectedResourcePath only from candidateResources.
                 When exactly one candidateResource is supplied and it matches the requested source, copy its resourcePath into selectedResourcePath.
                 When the requested output displays records of one business entity constrained by a related category or
@@ -1774,7 +1828,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Set requiresGovernedAuthoring=true for reusable governed business decisions, policies, compliance/access/eligibility/approval/privacy/enforcement rules, backend validations, option-source eligibility, approval gates, or shared rules that must go through shared-rule authoring.
                 When requiresGovernedAuthoring=true, do not classify the turn as a materializable dashboard, chart, table, form or page preview. Use operationKind "create" or "modify", artifactKind "unknown", changeKind "route_shared_rule_authoring", and leave visualizationDecision null.
                 Keep requiresGovernedAuthoring=false only for local visual formatting, masks, badges, labels, component configuration, layout, filters, columns, and consultative catalog questions.
-                For component authoring that requests a data subset, preserve every requested predicate in queryConstraints.filters.
+                For component authoring that requests a data subset, set queryConstraints.appliesToDataSelection=true and
+                preserve every requested predicate in queryConstraints.filters. Set appliesToDataSelection=false and
+                filters=[] when the request changes presentation rather than the selected backend records. Headers, labels,
+                renderers, formatting, composed cells, and displayed-value mappings are presentation intent even when
+                their text resembles a current record value.
                 When liveOptionFieldGrounding is present, it is a governed projection of canonical option-source filter
                 fields for the already selected resource. Resolve the predicate's business concept against the meaning,
                 label and description of those candidates. When one candidate is semantically appropriate, copy its
@@ -2392,7 +2450,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         root.put("type", "object");
         ObjectNode properties = root.putObject("properties");
         properties.putObject("resolved").put("type", "boolean");
-        stringEnum(properties, "operationKind", List.of("create", "modify", "remove", "compose", "connect", "explore", "explain", "unknown"));
+        stringEnum(properties, "operationKind", List.of("create", "modify", "remove", "compose", "connect", "undo", "explore", "explain", "unknown"));
         stringEnum(properties, "artifactKind", List.of("dashboard", "chart", "table", "form", "page", "api_catalog", "component", "unknown"));
         stringEnum(properties, "semanticIntentClass", List.of(
                 "platform_guidance",
@@ -2472,6 +2530,11 @@ public class AgenticAuthoringLlmIntentResolverService {
         ObjectNode constraints = objectMapper.createObjectNode();
         constraints.put("type", "object");
         ObjectNode properties = constraints.putObject("properties");
+        properties.putObject("appliesToDataSelection")
+                .put("type", "boolean")
+                .put(
+                        "description",
+                        "True only when filters constrain which backend records are retrieved or displayed; false for headers, labels, renderers, formatting, composed cells, and displayed-value edits.");
         ObjectNode filters = properties.putObject("filters");
         filters.put("type", "array");
         ObjectNode filter = filters.putObject("items");
@@ -2497,7 +2560,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         valueArrayItemTypes.addObject().put("type", "boolean");
         filter.putArray("required").add("concept").add("field").add("operator").add("value");
         filter.put("additionalProperties", false);
-        constraints.putArray("required").add("filters");
+        constraints.putArray("required").add("appliesToDataSelection").add("filters");
         constraints.put("additionalProperties", false);
         return constraints;
     }

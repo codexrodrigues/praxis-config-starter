@@ -257,6 +257,296 @@ class AgenticAuthoringEffectCompilerRegistryTest {
     }
 
     @Test
+    void shouldMergeObjectInsideResolvedColumnWithoutCorruptingSiblingTargets() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "id", "header": "Codigo" },
+                    { "field": "avatarUrl", "header": "Foto" }
+                  ]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation("column.renderer.set", "column", "column-by-field", true,
+                        "merge-object", "columns[].renderer", "", "columns[].renderer"),
+                plan("\"id\"", """
+                        {
+                          "type": "compose",
+                          "compose": {
+                            "direction": "row",
+                            "items": [
+                              { "field": "avatarUrl", "renderer": { "type": "image" } },
+                              { "field": "id" }
+                            ]
+                          }
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation("column.visibility.set", "column", "column-by-field", true,
+                        "set-value", "columns[].visible", "", "columns[].visible"),
+                plan("\"avatarUrl\"", "{ \"visible\": false }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(2);
+        assertThat(patchOperations.get(0).path("resolvedPath").asText())
+                .isEqualTo("columns[]/0.renderer");
+        assertThat(proposedConfig.path("columns")).hasSize(2);
+        assertThat(proposedConfig.path("columns").get(0).path("renderer").path("type").asText())
+                .isEqualTo("compose");
+        assertThat(proposedConfig.path("columns").get(1).path("field").asText())
+                .isEqualTo("avatarUrl");
+        assertThat(proposedConfig.path("columns").get(1).path("visible").asBoolean())
+                .isFalse();
+    }
+
+    @Test
+    void shouldDeepMergeResolvedRendererAndPreserveUnrelatedNestedProperties() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "columns": [
+                    {
+                      "field": "id",
+                      "renderer": {
+                        "type": "compose",
+                        "compose": {
+                          "items": [
+                            {
+                              "type": "avatar",
+                              "avatar": {
+                                "srcField": "avatarUrl",
+                                "altField": "nomeCompleto",
+                                "shape": "rounded",
+                                "size": 32
+                              }
+                            },
+                            { "type": "value", "field": "id" }
+                          ],
+                          "layout": {
+                            "direction": "row",
+                            "align": "center",
+                            "gap": 8
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation("column.renderer.set", "column", "column-by-field", true,
+                        "merge-object", "columns[].renderer", "", "columns[].renderer"),
+                plan("\"id\"", """
+                        {
+                          "type": "compose",
+                          "compose": {
+                            "layout": { "direction": "column" }
+                          }
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        JsonNode renderer = proposedConfig.path("columns").get(0).path("renderer");
+        assertThat(failures).isEmpty();
+        assertThat(renderer.path("compose").path("layout").path("direction").asText())
+                .isEqualTo("column");
+        assertThat(renderer.path("compose").path("layout").path("align").asText())
+                .isEqualTo("center");
+        assertThat(renderer.path("compose").path("layout").path("gap").asInt())
+                .isEqualTo(8);
+        assertThat(renderer.path("compose").path("items")).hasSize(2);
+        assertThat(renderer.path("compose").path("items").get(0).path("avatar").path("size").asInt())
+                .isEqualTo(32);
+        assertThat(renderer.path("compose").path("items").get(0).path("avatar").path("shape").asText())
+                .isEqualTo("rounded");
+    }
+
+    @Test
+    void shouldRefineOnlyTheComposeLayoutAndPreserveEveryItem() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "columns": [{
+                    "field": "id",
+                    "renderer": {
+                      "type": "compose",
+                      "compose": {
+                        "items": [
+                          {
+                            "type": "avatar",
+                            "avatar": {
+                              "srcField": "avatarUrl",
+                              "shape": "rounded",
+                              "size": 24
+                            }
+                          },
+                          { "type": "value", "field": "id" }
+                        ],
+                        "layout": { "direction": "row", "align": "center", "gap": 8 }
+                      }
+                    }
+                  }]
+                }
+                """);
+        JsonNode operation = objectMapper.readTree("""
+                {
+                  "operationId": "column.renderer.composeLayout.set",
+                  "target": {
+                    "kind": "renderer",
+                    "resolver": "renderer-in-column",
+                    "ambiguityPolicy": "fail",
+                    "required": true
+                  },
+                  "effects": [{
+                    "kind": "compile-domain-patch",
+                    "handler": "table-renderer-compose-layout-merge",
+                    "path": "columns[].renderer.compose.layout"
+                  }],
+                  "affectedPaths": ["columns[].renderer.compose.layout"],
+                  "submissionImpact": "visual-only"
+                }
+                """);
+        JsonNode planOperation = objectMapper.readTree("""
+                {
+                  "operationId": "column.renderer.composeLayout.set",
+                  "target": "id",
+                  "input": { "direction": "column" }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                planOperation,
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        JsonNode renderer = proposedConfig.at("/columns/0/renderer");
+        assertThat(failures).isEmpty();
+        assertThat(registry.supportsDomainPatchHandler("table-renderer-compose-layout-merge")).isTrue();
+        assertThat(patchOperations).singleElement().satisfies(compiled -> {
+            assertThat(compiled.path("op").asText()).isEqualTo("merge-compose-layout");
+            assertThat(compiled.path("resolvedPath").asText())
+                    .endsWith(".renderer.compose.layout");
+        });
+        assertThat(renderer.at("/compose/layout/direction").asText()).isEqualTo("column");
+        assertThat(renderer.at("/compose/layout/align").asText()).isEqualTo("center");
+        assertThat(renderer.at("/compose/layout/gap").asInt()).isEqualTo(8);
+        assertThat(renderer.at("/compose/items/0/avatar/shape").asText()).isEqualTo("rounded");
+        assertThat(renderer.at("/compose/items/0/avatar/size").asInt()).isEqualTo(24);
+        assertThat(renderer.at("/compose/items/1/field").asText()).isEqualTo("id");
+    }
+
+    @Test
+    void shouldRefineOnlyTheResolvedComposeItemAndPreserveRootLayoutAndSiblings() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "columns": [{
+                    "field": "id",
+                    "renderer": {
+                      "type": "compose",
+                      "compose": {
+                        "items": [
+                          {
+                            "type": "avatar",
+                            "avatar": {
+                              "srcField": "avatarUrl",
+                              "altField": "nomeCompleto",
+                              "shape": "rounded",
+                              "size": 24
+                            }
+                          },
+                          { "type": "value", "field": "id", "valueField": "id" }
+                        ],
+                        "layout": { "direction": "column", "align": "center", "gap": 8 }
+                      }
+                    }
+                  }]
+                }
+                """);
+        JsonNode operation = objectMapper.readTree("""
+                {
+                  "operationId": "column.renderer.composeItem.set",
+                  "target": {
+                    "kind": "renderer",
+                    "resolver": "renderer-in-column",
+                    "ambiguityPolicy": "fail",
+                    "required": true
+                  },
+                  "effects": [{
+                    "kind": "compile-domain-patch",
+                    "handler": "table-renderer-compose-item-merge",
+                    "path": "columns[].renderer.compose.items[]"
+                  }],
+                  "affectedPaths": ["columns[].renderer.compose.items[]"],
+                  "submissionImpact": "visual-only"
+                }
+                """);
+        JsonNode planOperation = objectMapper.readTree("""
+                {
+                  "operationId": "column.renderer.composeItem.set",
+                  "target": "id",
+                  "input": {
+                    "itemType": "avatar",
+                    "item": {
+                      "type": "avatar",
+                      "avatar": {
+                        "srcField": "avatarUrl",
+                        "shape": "circle"
+                      }
+                    }
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                planOperation,
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        JsonNode renderer = proposedConfig.at("/columns/0/renderer");
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).singleElement().satisfies(compiled -> {
+            assertThat(compiled.path("op").asText()).isEqualTo("merge-compose-item");
+            assertThat(compiled.path("itemIndex").asInt()).isZero();
+        });
+        assertThat(renderer.path("type").asText()).isEqualTo("compose");
+        assertThat(renderer.at("/compose/layout/direction").asText()).isEqualTo("column");
+        assertThat(renderer.at("/compose/items/0/avatar/shape").asText()).isEqualTo("circle");
+        assertThat(renderer.at("/compose/items/0/avatar/size").asInt()).isEqualTo(24);
+        assertThat(renderer.at("/compose/items/0/avatar/altField").asText()).isEqualTo("nomeCompleto");
+        assertThat(renderer.at("/compose/items/1/valueField").asText()).isEqualTo("id");
+    }
+
+    @Test
     void shouldCompileAppendUniqueIntoRootCollectionAndRejectDuplicates() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {

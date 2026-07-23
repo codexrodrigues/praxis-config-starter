@@ -246,10 +246,20 @@ export interface AiContextHintsContract {
   [key: string]: AiJsonValue | AiDomainCatalogContextHintContract | undefined;
 }
 
+export interface AgenticAuthoringClientActionContract {
+  schemaVersion: 'praxis-agentic-authoring-client-action.v1';
+  id: string;
+  kind: 'local-undo';
+  capabilityRef: string;
+  available: boolean;
+  targetComponentId?: string | null;
+}
+
 export interface AgenticAuthoringTurnStreamContextHintsContract {
   domainCatalog?: AiDomainCatalogContextHintContract;
   agenticApplyTarget?: AgenticAuthoringApplyTargetContract;
-  [key: string]: AiJsonValue | AiDomainCatalogContextHintContract | AgenticAuthoringApplyTargetContract | undefined;
+  clientActions?: AgenticAuthoringClientActionContract[];
+  [key: string]: AiJsonValue | AiDomainCatalogContextHintContract | AgenticAuthoringApplyTargetContract | AgenticAuthoringClientActionContract[] | undefined;
 }
 
 export interface AiSchemaContextContract {
@@ -742,9 +752,10 @@ export interface AgenticAuthoringTurnResultPayloadContract {
   quickReplies?: AgenticAuthoringQuickReplyContract[];
   canApply?: boolean | null;
   applyTarget?: AgenticAuthoringApplyTargetContract | null;
+  clientAction?: AgenticAuthoringClientActionContract | null;
   decisionDiagnostics?: AgenticAuthoringDecisionDiagnosticsContract | null;
   toolLoopTrace?: AiJsonObject[] | null;
-  [key: string]: AiJsonValue | AgenticAuthoringIntentResolutionResultContract | AgenticAuthoringPreviewResultContract | AgenticAuthoringQuickReplyContract[] | AgenticAuthoringApplyTargetContract | AgenticAuthoringDecisionDiagnosticsContract | AiJsonObject[] | undefined;
+  [key: string]: AiJsonValue | AgenticAuthoringIntentResolutionResultContract | AgenticAuthoringPreviewResultContract | AgenticAuthoringQuickReplyContract[] | AgenticAuthoringApplyTargetContract | AgenticAuthoringClientActionContract | AgenticAuthoringDecisionDiagnosticsContract | AiJsonObject[] | undefined;
 }
 
 export interface AgenticAuthoringPreviewResultContract {

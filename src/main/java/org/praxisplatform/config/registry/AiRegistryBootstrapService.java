@@ -6,9 +6,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -96,7 +98,7 @@ public class AiRegistryBootstrapService {
                     ? previousSnapshotMetadata.snapshotHash()
                     : null;
             bootstrapState.setPreviousSnapshotHash(previousSnapshotHash);
-            if (shouldSkip(statusReport, previousSnapshotHash, snapshotHash)) {
+            if (shouldSkip(statusReport, previousSnapshotHash, snapshotHash, request)) {
                 bootstrapState.setSkipped(true);
                 bootstrapState.setSkipReason("snapshot-current");
                 bootstrapState.setCompletedAt(Instant.now());
@@ -108,7 +110,20 @@ public class AiRegistryBootstrapService {
             }
 
             bootstrapState.setAttempted(true);
-            ingestionService.ingestRegistry(request, null, null);
+            String releaseId = RagDocumentIdentity.resolveReleaseId(
+                    null,
+                    request.getVersion(),
+                    request.getGeneratedAt());
+            if (previousSnapshotMetadata != null
+                    && releaseId.equals(previousSnapshotMetadata.releaseId())) {
+                ingestionService.reconcileRegistry(
+                        request,
+                        null,
+                        null,
+                        previousSnapshotMetadata.releaseId());
+            } else {
+                ingestionService.ingestRegistry(request, null, null);
+            }
             pruneObsoleteDefinitions(request, previousSnapshotMetadata);
             upsertSnapshotMetadata(
                     request,
@@ -134,7 +149,8 @@ public class AiRegistryBootstrapService {
     private boolean shouldSkip(
             AiRegistryStatusReport statusReport,
             String previousSnapshotHash,
-            String snapshotHash) {
+            String snapshotHash,
+            RegistryIngestionRequest request) {
         if (statusReport == null || !statusReport.isReady()) {
             return false;
         }
@@ -144,7 +160,55 @@ public class AiRegistryBootstrapService {
         if (bootstrapProperties != null && !bootstrapProperties.isRefreshOnSnapshotDrift()) {
             return true;
         }
-        return snapshotHash != null && snapshotHash.equals(previousSnapshotHash);
+        return snapshotHash != null
+                && snapshotHash.equals(previousSnapshotHash)
+                && authoringManifestsMatchSnapshot(request);
+    }
+
+    /**
+     * The global snapshot marker is operational metadata, not proof that every canonical payload
+     * was committed. Verify the high-risk authoring contracts before skipping so an interrupted or
+     * externally modified registry heals itself on the next startup.
+     */
+    private boolean authoringManifestsMatchSnapshot(RegistryIngestionRequest request) {
+        if (request == null || request.getComponents() == null || request.getComponents().isEmpty()) {
+            return true;
+        }
+        Map<String, JsonNode> persistedManifests = new HashMap<>();
+        for (AiRegistry entry : repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                REGISTRY_TYPE_COMPONENT_DEF,
+                COMPONENT_DEF_COMPONENT_TYPE,
+                Scope.SYSTEM,
+                SNAPSHOT_METADATA_SCOPE_KEY)) {
+            try {
+                JsonNode payload = objectMapper.readTree(entry.getPayload());
+                persistedManifests.put(
+                        entry.getRegistryKey(),
+                        payload.path("componentDefinition").path("jsonSchema").path("authoringManifest"));
+            } catch (Exception ex) {
+                log.warn(
+                        "AI registry component payload is unreadable; forcing snapshot refresh (componentId={}).",
+                        entry.getRegistryKey());
+                return false;
+            }
+        }
+        for (Map.Entry<String, RegistryIngestionRequest.ComponentEntry> component
+                : request.getComponents().entrySet()) {
+            RegistryIngestionRequest.ComponentEntry definition = component.getValue();
+            JsonNode expectedManifest = definition == null || definition.getAdditionalProperties() == null
+                    ? null
+                    : definition.getAdditionalProperties().get("authoringManifest");
+            if (expectedManifest == null || !expectedManifest.isObject()) {
+                continue;
+            }
+            if (!expectedManifest.equals(persistedManifests.get(component.getKey()))) {
+                log.warn(
+                        "AI registry snapshot marker is current but an authoring manifest drifted; forcing snapshot refresh (componentId={}).",
+                        component.getKey());
+                return false;
+            }
+        }
+        return true;
     }
 
     private SnapshotMetadata previousSnapshotMetadata() {

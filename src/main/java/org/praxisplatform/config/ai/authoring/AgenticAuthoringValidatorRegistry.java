@@ -156,6 +156,8 @@ public final class AgenticAuthoringValidatorRegistry {
             "renderer-supported",
             "renderer-type-supported",
             "renderer-config-match",
+            "renderer-compose-exists",
+            "renderer-compose-item-exists",
             "renderer-config-compatible",
             "grouping-fields-exist",
             "filter-fields-exist",
@@ -629,6 +631,16 @@ public final class AgenticAuthoringValidatorRegistry {
                         validateJsonLogicLikeInput(operationId, planOperation.path("input"), failures);
                 case "computed-expression-valid" ->
                         validateCanonicalTableJsonLogicInput(operationId, planOperation.path("input"), failures);
+                case "renderer-supported", "renderer-type-supported" ->
+                        validateTableRendererType(operationId, planOperation, failures);
+                case "renderer-config-match", "renderer-config-compatible" ->
+                        validateTableRendererConfig(operationId, planOperation, failures);
+                case "renderer-compose-exists" ->
+                        validateTableComposeExists(
+                                componentId, operation, planOperation, config, failures);
+                case "renderer-compose-item-exists" ->
+                        validateTableComposeItemExists(
+                                componentId, operation, planOperation, config, failures);
                 case "conditional-surface-accessible" ->
                         validateConditionalSurfaceAccessibility(operationId, planOperation.path("input"), config, failures, warnings);
                 case "computed-value-envelope-valid" -> {
@@ -1477,6 +1489,208 @@ public final class AgenticAuthoringValidatorRegistry {
             if (text(planOperation.path("input"), "columnKey").isBlank()) {
                 failures.add("validator scope-supported failed for " + operationId + ": columnKey is required for " + scope + " scope");
             }
+        }
+    }
+
+    private void validateTableRendererConfig(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode renderer = tableRenderer(planOperation);
+        // Conditional renderer operations may validly author tooltip, animation, or effects only.
+        if (!renderer.isObject()) {
+            return;
+        }
+        boolean composeItem = planOperation.path("input").path("item").isObject();
+        validateTableRendererNode(
+                operationId,
+                renderer,
+                composeItem ? "renderer.compose.item" : "renderer",
+                composeItem,
+                failures);
+    }
+
+    private void validateTableRendererType(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode renderer = tableRenderer(planOperation);
+        if (!renderer.isObject()) {
+            return;
+        }
+        String type = text(renderer, "type");
+        if (type.isBlank()) {
+            failures.add("validator renderer-type-supported failed for " + operationId
+                    + ": renderer.type is required");
+            return;
+        }
+        boolean composeItem = planOperation.path("input").path("item").isObject();
+        if ((!composeItem && !tableRendererConfigBlocks().contains(type))
+                || (composeItem && !"value".equals(type) && !tableRendererConfigBlocks().contains(type))) {
+            failures.add("validator renderer-type-supported failed for " + operationId
+                    + ": unsupported renderer type " + type);
+        }
+    }
+
+    private JsonNode tableRenderer(JsonNode planOperation) {
+        JsonNode input = planOperation.path("input");
+        return input.path("renderer").isObject()
+                ? input.path("renderer")
+                : input.path("item").isObject()
+                        ? input.path("item")
+                : input.has("type") ? input : MissingNode.getInstance();
+    }
+
+    private void validateTableComposeExists(
+            String componentId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
+                componentId,
+                operation,
+                planOperation.path("target"),
+                config);
+        if (!AgenticAuthoringTargetResolverRegistry.STATUS_RESOLVED.equals(resolved.status())) {
+            failures.add("validator renderer-compose-exists failed for "
+                    + text(operation, "operationId") + ": " + String.join(", ", resolved.failures()));
+            return;
+        }
+        JsonNode renderer = resolved.value().path("renderer");
+        JsonNode items = renderer.path("compose").path("items");
+        if (!"compose".equals(text(renderer, "type")) || !items.isArray() || items.isEmpty()) {
+            failures.add("validator renderer-compose-exists failed for "
+                    + text(operation, "operationId") + ": target renderer is not a populated compose");
+        }
+    }
+
+    private void validateTableComposeItemExists(
+            String componentId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
+                componentId,
+                operation,
+                planOperation.path("target"),
+                config);
+        if (!AgenticAuthoringTargetResolverRegistry.STATUS_RESOLVED.equals(resolved.status())) {
+            failures.add("validator renderer-compose-item-exists failed for "
+                    + text(operation, "operationId") + ": " + String.join(", ", resolved.failures()));
+            return;
+        }
+        JsonNode renderer = resolved.value().path("renderer");
+        JsonNode items = renderer.path("compose").path("items");
+        if (!"compose".equals(text(renderer, "type")) || !items.isArray()) {
+            failures.add("validator renderer-compose-item-exists failed for "
+                    + text(operation, "operationId") + ": target renderer is not compose");
+            return;
+        }
+        JsonNode input = planOperation.path("input");
+        String itemType = text(input, "itemType");
+        String itemField = text(input, "itemField");
+        if (!itemType.equals(text(input.path("item"), "type"))) {
+            failures.add("validator renderer-compose-item-exists failed for "
+                    + text(operation, "operationId") + ": itemType must match item.type");
+            return;
+        }
+        int matches = 0;
+        for (JsonNode item : items) {
+            if (itemType.equals(text(item, "type"))
+                    && (itemField.isBlank() || tableComposeItemMatchesField(item, itemField))) {
+                matches++;
+            }
+        }
+        if (matches != 1) {
+            failures.add("validator renderer-compose-item-exists failed for "
+                    + text(operation, "operationId") + ": expected one matching item but found " + matches);
+        }
+    }
+
+    private boolean tableComposeItemMatchesField(JsonNode item, String expectedField) {
+        if (expectedField == null || expectedField.isBlank() || item == null || !item.isObject()) {
+            return false;
+        }
+        for (String field : List.of("field", "valueField", "textField")) {
+            if (expectedField.equals(text(item, field))) {
+                return true;
+            }
+        }
+        JsonNode config = item.path(text(item, "type"));
+        for (String field : List.of(
+                "field", "srcField", "altField", "initialsField", "textField", "valueField")) {
+            if (expectedField.equals(text(config, field))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Set<String> tableRendererConfigBlocks() {
+        return Set.of(
+                "button",
+                "menu",
+                "link",
+                "progress",
+                "badge",
+                "chip",
+                "icon",
+                "image",
+                "avatar",
+                "toggle",
+                "rating",
+                "html",
+                "compose");
+    }
+
+    private void validateTableRendererNode(
+            String operationId,
+            JsonNode renderer,
+            String path,
+            boolean composeItem,
+            List<String> failures) {
+        Set<String> configBlocks = tableRendererConfigBlocks();
+        String type = text(renderer, "type");
+        if (type.isBlank()) {
+            failures.add("validator renderer-config-match failed for " + operationId
+                    + ": " + path + ".type is required");
+            return;
+        }
+        boolean valueItem = composeItem && "value".equals(type);
+        if ((!valueItem && !configBlocks.contains(type)) || (!composeItem && "value".equals(type))) {
+            failures.add("validator renderer-type-supported failed for " + operationId
+                    + ": unsupported " + path + " type " + type);
+            return;
+        }
+        if (!valueItem && !renderer.path(type).isObject()) {
+            failures.add("validator renderer-config-match failed for " + operationId
+                    + ": " + path + " type " + type + " requires its matching config block");
+        }
+        for (String configBlock : configBlocks) {
+            if (!configBlock.equals(type) && renderer.has(configBlock)) {
+                failures.add("validator renderer-config-match failed for " + operationId
+                        + ": " + path + " type " + type
+                        + " must not include incompatible config block " + configBlock);
+            }
+        }
+        if (!"compose".equals(type)) {
+            return;
+        }
+        JsonNode items = renderer.path("compose").path("items");
+        if (!items.isArray() || items.isEmpty()) {
+            failures.add("validator renderer-config-match failed for " + operationId
+                    + ": " + path + ".compose.items must contain at least one item");
+            return;
+        }
+        for (int index = 0; index < items.size(); index++) {
+            validateTableRendererNode(
+                    operationId,
+                    items.get(index),
+                    path + ".compose.items[" + index + "]",
+                    true,
+                    failures);
         }
     }
 

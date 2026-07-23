@@ -120,14 +120,42 @@ class AgenticAuthoringProviderSchemaCompilerTest {
     }
 
     @Test
+    void removesEmptyCompatibilityObjectsForRendererVariantsThatWereNotSelected() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {"operations":[{"operationId":"column.renderer.set","inputSchema":{
+                  "type":"object","required":["type"],"properties":{
+                    "type":{"enum":["chip","compose"]},
+                    "chip":{"type":"object","anyOf":[{"required":["text"]},{"required":["textField"]}],
+                      "properties":{"text":{"type":"string"},"textField":{"type":"string"},"color":{"type":"string"}}},
+                    "compose":{"type":"object","required":["items"],"properties":{
+                      "items":{"type":"array","items":{"type":"object"}}
+                    }}
+                  }}}]}
+                """);
+        JsonNode providerPlan = objectMapper.readTree("""
+                {"operations":[{"operationId":"column.renderer.set","input":{
+                  "type":"compose",
+                  "chip":{"text":null,"textField":null,"color":null},
+                  "compose":{"items":[{"type":"image"}]}
+                }}]}
+                """);
+
+        JsonNode decoded = compiler.decodeCompatibilityValues(providerPlan, manifest);
+
+        assertThat(decoded.at("/operations/0/input/chip").isMissingNode()).isTrue();
+        assertThat(decoded.at("/operations/0/input/compose/items/0/type").asText()).isEqualTo("image");
+    }
+
+    @Test
     void keepsAnInvalidProviderParameterForTheCanonicalManifestToRejectAfterDecoding() throws Exception {
         JsonNode manifest = objectMapper.readTree("""
                 {"componentId":"praxis-table","operations":[{"operationId":"column.renderer.set","inputSchema":{
                   "type":"object","required":["renderer"],"properties":{"renderer":{"enum":["image","compose"]},"compose":{"type":"object"}}}}]}
                 """);
         JsonNode selection = objectMapper.readTree("""
-                {"schemaVersion":"praxis-semantic-operation-selection.v1","componentId":"praxis-table",
-                 "goals":[],"selectedOperationIds":["column.renderer.set"],"requiresClarification":false,"clarificationReason":""}
+                {"schemaVersion":"praxis-semantic-operation-selection.v2","componentId":"praxis-table",
+                 "goals":[{"description":"Set renderer","targetConcept":"column","operationIds":["column.renderer.set"]}],
+                 "selectedOperationIds":["column.renderer.set"],"requiresClarification":false,"clarificationReason":""}
                 """);
         JsonNode providerPlan = objectMapper.readTree("""
                 {"schemaVersion":"praxis-component-edit-plan.v1","componentId":"praxis-table","operations":[{

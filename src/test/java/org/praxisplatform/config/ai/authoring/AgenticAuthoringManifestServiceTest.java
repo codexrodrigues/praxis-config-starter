@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.domain.Scope;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 
@@ -546,7 +545,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(result.compiled()).isTrue();
         assertThat(result.failures()).isEmpty();
-        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("2.0.0");
+        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("2.2.0");
         JsonNode operation = result.patch().path("operations").get(0);
         assertThat(operation.path("operationId").asText()).isEqualTo("column.header.set");
         assertThat(operation.path("op").asText()).isEqualTo("merge-by-key");
@@ -890,7 +889,7 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(operation.path("operationId").asText()).isEqualTo("panel.shell.configure");
         assertThat(operation.path("op").asText()).isEqualTo("merge-object");
         assertThat(operation.path("path").asText()).isEqualTo("config");
-        assertThat(operation.path("resolvedPath").asText()).isEqualTo("$");
+        assertThat(operation.path("resolvedPath").asText()).isEqualTo("config");
         assertThat(result.patch().path("proposedConfig").path("config").path("title").asText())
                 .isEqualTo("Preferencias avancadas");
         assertThat(result.patch().path("proposedConfig").path("config").path("titleIcon").asText())
@@ -2113,13 +2112,22 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     private AgenticAuthoringManifestService serviceWithPayload(String componentId, String payload) {
-        when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+        JsonNode manifest;
+        try {
+            manifest = objectMapper.readTree(payload)
+                    .path("componentDefinition")
+                    .path("jsonSchema")
+                    .path("authoringManifest");
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("invalid test payload", ex);
+        }
+        when(repository.findAuthoringManifestPayload(
                 eq("component_definition"),
                 eq(componentId),
                 eq("component-definition"),
-                eq(Scope.SYSTEM),
+                eq(Scope.SYSTEM.name()),
                 eq("GLOBAL")))
-                .thenReturn(Optional.of(AiRegistry.builder().payload(payload).build()));
+                .thenReturn(Optional.of(manifest.toString()));
         AgenticAuthoringTargetResolverRegistry targetResolverRegistry = new AgenticAuthoringTargetResolverRegistry();
         return new AgenticAuthoringManifestService(
                 repository,

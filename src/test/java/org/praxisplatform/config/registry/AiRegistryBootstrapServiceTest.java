@@ -80,15 +80,51 @@ class AiRegistryBootstrapServiceTest {
         when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
                 anyString(), anyString(), anyString(), any(Scope.class), anyString()))
                 .thenReturn(Optional.of(snapshotMetadata(snapshotHash)));
+        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                "component_definition", "component-definition", Scope.SYSTEM, "GLOBAL"))
+                .thenReturn(List.of(componentDefinitionWithManifest("columns.add")));
 
         service().bootstrapIfNeeded();
 
         verify(ingestionService, never()).ingestRegistry(any(), isNull(), isNull());
+        verify(ingestionService, never()).reconcileRegistry(any(), isNull(), isNull(), anyString());
         assertThat(state.isSkipped()).isTrue();
         assertThat(state.getSkipReason()).isEqualTo("snapshot-current");
         assertThat(state.getSnapshotHash()).isEqualTo(snapshotHash);
         assertThat(state.getPreviousSnapshotHash()).isEqualTo(snapshotHash);
         assertThat(state.getSnapshotComponentCount()).isEqualTo(1);
+    }
+
+    @Test
+    void refreshesWhenSnapshotMarkerMatchesButAuthoringManifestPayloadDrifted() throws Exception {
+        String snapshotHash = sha256(SNAPSHOT);
+        when(resourceLoader.getResource(anyString())).thenReturn(snapshotResource());
+        when(statusService.getStatus()).thenReturn(readyStatus());
+        when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                anyString(), anyString(), anyString(), any(Scope.class), anyString()))
+                .thenReturn(
+                        Optional.of(snapshotMetadata(
+                                snapshotHash,
+                                "snapshot-v1",
+                                "2026-04-23T00:00:00Z")),
+                        Optional.of(snapshotMetadata(
+                                snapshotHash,
+                                "snapshot-v1",
+                                "2026-04-23T00:00:00Z")));
+        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+                "component_definition", "component-definition", Scope.SYSTEM, "GLOBAL"))
+                .thenReturn(List.of(componentDefinitionWithManifest("column.valueMapping.set")));
+
+        service().bootstrapIfNeeded();
+
+        verify(ingestionService).reconcileRegistry(
+                any(RegistryIngestionRequest.class),
+                isNull(),
+                isNull(),
+                org.mockito.ArgumentMatchers.eq("snapshot-v1"));
+        verify(ingestionService, never()).ingestRegistry(any(), isNull(), isNull());
+        assertThat(state.isSkipped()).isFalse();
+        assertThat(state.isSucceeded()).isTrue();
     }
 
     @Test
@@ -197,6 +233,7 @@ class AiRegistryBootstrapServiceTest {
         service().bootstrapIfNeeded();
 
         verify(ingestionService, never()).ingestRegistry(any(), isNull(), isNull());
+        verify(ingestionService, never()).reconcileRegistry(any(), isNull(), isNull(), anyString());
         verify(statusService, never()).getStatus();
         verify(repository, never()).save(any());
         verify(repository, never()).deleteAllInBatch(any());
@@ -252,6 +289,27 @@ class AiRegistryBootstrapServiceTest {
                 .scope(Scope.SYSTEM)
                 .scopeKey("GLOBAL")
                 .payload(payload.toString())
+                .build();
+    }
+
+    private AiRegistry componentDefinitionWithManifest(String operationId) {
+        return AiRegistry.builder()
+                .registryType("component_definition")
+                .registryKey("praxis-table")
+                .componentType("component-definition")
+                .scope(Scope.SYSTEM)
+                .scopeKey("GLOBAL")
+                .payload("""
+                        {
+                          "componentDefinition": {
+                            "jsonSchema": {
+                              "authoringManifest": {
+                                "operations": [{"operationId":"%s"}]
+                              }
+                            }
+                          }
+                        }
+                        """.formatted(operationId))
                 .build();
     }
 

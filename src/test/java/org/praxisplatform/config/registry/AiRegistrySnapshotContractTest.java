@@ -20,13 +20,13 @@ import org.springframework.core.io.ClassPathResource;
 class AiRegistrySnapshotContractTest {
 
     private static final String EXPECTED_SNAPSHOT_HASH =
-            "c03a37fbcf332f00f63b27ea93230b9d9968d9ed738ce8c27a5a142f8b013f55";
+            "1694ebb4e87f57201aa38c6052ac459e1759a655ea1a86c7c2cf07a512461977";
     private static final String EXPECTED_VERSION = "1.0.0";
-    private static final String EXPECTED_GENERATED_AT = "2026-07-22T13:53:29.145Z";
+    private static final String EXPECTED_GENERATED_AT = "2026-07-23T21:24:40.874Z";
     private static final int EXPECTED_COMPONENT_COUNT = 105;
     private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 95;
     private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 105;
-    private static final int EXPECTED_CHUNK_COUNT = 2395;
+    private static final int EXPECTED_CHUNK_COUNT = 2409;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -101,6 +101,108 @@ class AiRegistrySnapshotContractTest {
         }
 
         assertThat(unsupportedValidators).isEmpty();
+    }
+
+    @Test
+    void tableComposeRendererKeepsItsExecutableNestedSchemaInThePublishedSnapshot() throws IOException {
+        JsonNode operations = readSnapshot()
+                .path("components")
+                .path("praxis-table")
+                .path("authoringManifest")
+                .path("operations");
+        JsonNode rendererOperation = null;
+        for (JsonNode operation : operations) {
+            if ("column.renderer.set".equals(operation.path("operationId").asText())) {
+                rendererOperation = operation;
+                break;
+            }
+        }
+
+        assertThat(rendererOperation)
+                .as("praxis-table must publish column.renderer.set")
+                .isNotNull();
+        JsonNode composeItem = rendererOperation
+                .path("inputSchema")
+                .path("properties")
+                .path("compose")
+                .path("properties")
+                .path("items")
+                .path("items");
+        assertThat(composeItem.path("properties").path("type").path("enum"))
+                .contains(
+                        objectMapper.valueToTree("value"),
+                        objectMapper.valueToTree("image"),
+                        objectMapper.valueToTree("avatar"));
+        assertThat(composeItem.path("properties").path("field").path("type").asText())
+                .isEqualTo("string");
+        assertThat(composeItem.path("properties").path("image").path("properties").path("srcField").path("type").asText())
+                .isEqualTo("string");
+        assertThat(composeItem.path("properties").path("avatar").path("properties").path("srcField").path("type").asText())
+                .isEqualTo("string");
+        assertThat(composeItem.path("properties").path("avatar").path("properties").path("size").path("type").asText())
+                .isEqualTo("number");
+        assertThat(composeItem.path("allOf").isArray()).isTrue();
+        assertThat(composeItem.path("allOf")).isNotEmpty();
+    }
+
+    @Test
+    void tableComposeItemRefinementIsExecutableInThePublishedSnapshot() throws IOException {
+        JsonNode operations = readSnapshot()
+                .path("components")
+                .path("praxis-table")
+                .path("authoringManifest")
+                .path("operations");
+        JsonNode refinementOperation = null;
+        for (JsonNode operation : operations) {
+            if ("column.renderer.composeItem.set".equals(operation.path("operationId").asText())) {
+                refinementOperation = operation;
+                break;
+            }
+        }
+
+        assertThat(refinementOperation)
+                .as("praxis-table must publish the targeted compose-item operation")
+                .isNotNull();
+        assertThat(refinementOperation.path("inputSchema").path("required"))
+                .contains(
+                        objectMapper.valueToTree("itemType"),
+                        objectMapper.valueToTree("item"));
+        assertThat(refinementOperation.path("effects").get(0).path("handler").asText())
+                .isEqualTo("table-renderer-compose-item-merge");
+        assertThat(refinementOperation.path("validators"))
+                .contains(objectMapper.valueToTree("renderer-compose-item-exists"));
+        assertThat(refinementOperation.path("affectedPaths"))
+                .contains(objectMapper.valueToTree("columns[].renderer.compose.items[]"));
+    }
+
+    @Test
+    void tableComposeLayoutRefinementIsExecutableInThePublishedSnapshot() throws IOException {
+        JsonNode operations = readSnapshot()
+                .path("components")
+                .path("praxis-table")
+                .path("authoringManifest")
+                .path("operations");
+        JsonNode refinementOperation = null;
+        for (JsonNode operation : operations) {
+            if ("column.renderer.composeLayout.set".equals(operation.path("operationId").asText())) {
+                refinementOperation = operation;
+                break;
+            }
+        }
+
+        assertThat(refinementOperation)
+                .as("praxis-table must publish the targeted compose-layout operation")
+                .isNotNull();
+        assertThat(refinementOperation.path("inputSchema").path("properties").path("direction").path("enum"))
+                .contains(
+                        objectMapper.valueToTree("row"),
+                        objectMapper.valueToTree("column"));
+        assertThat(refinementOperation.path("effects").get(0).path("handler").asText())
+                .isEqualTo("table-renderer-compose-layout-merge");
+        assertThat(refinementOperation.path("validators"))
+                .contains(objectMapper.valueToTree("renderer-compose-exists"));
+        assertThat(refinementOperation.path("affectedPaths"))
+                .contains(objectMapper.valueToTree("columns[].renderer.compose.layout"));
     }
 
     @Test

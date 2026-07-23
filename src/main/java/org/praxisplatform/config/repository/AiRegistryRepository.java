@@ -20,6 +20,25 @@ public interface AiRegistryRepository extends
   Optional<AiRegistry> findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
       String registryType, String registryKey, String componentType, Scope scope, String scopeKey);
 
+  @Query(
+      value =
+          """
+      SELECT payload #>> '{componentDefinition,jsonSchema,authoringManifest}'
+      FROM ai_registry
+      WHERE registry_type = :registryType
+        AND registry_key = :registryKey
+        AND component_type = :componentType
+        AND scope = :scope
+        AND scope_key = :scopeKey
+      """,
+      nativeQuery = true)
+  Optional<String> findAuthoringManifestPayload(
+      @Param("registryType") String registryType,
+      @Param("registryKey") String registryKey,
+      @Param("componentType") String componentType,
+      @Param("scope") String scope,
+      @Param("scopeKey") String scopeKey);
+
   List<AiRegistry> findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
       String registryType, String componentType, Scope scope, String scopeKey);
 

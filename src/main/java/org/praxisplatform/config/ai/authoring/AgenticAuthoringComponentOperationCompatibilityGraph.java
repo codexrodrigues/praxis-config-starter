@@ -58,22 +58,12 @@ final class AgenticAuthoringComponentOperationCompatibilityGraph {
         List<String> conflicts = conflicts(requested);
         if (!conflicts.isEmpty()) return Resolution.reject("component-operation-compatibility-conflict:" + String.join(",", conflicts));
 
-        // The graph is allowed to expose only one adjacent layer. It never invents an operation:
-        // an auxiliary operation is included only when it is a declared creator for a selected
-        // target-exists consumer and no selected operation already creates that target kind.
-        LinkedHashSet<Node> expanded = new LinkedHashSet<>(requested);
-        for (Node consumer : requested) {
-            if (!consumer.requiresExistingTarget()) continue;
-            boolean satisfied = requested.stream().anyMatch(candidate -> candidate.creates(consumer));
-            if (satisfied) continue;
-            List<Node> creators = nodes.values().stream()
-                    .filter(candidate -> candidate.creates(consumer))
-                    .filter(candidate -> compatible(candidate, consumer))
-                    .toList();
-            if (creators.size() == 1) expanded.add(creators.get(0));
-        }
-        List<Node> ordered = orderedByDependencies(expanded);
-        if (ordered.size() != expanded.size()) return Resolution.reject("component-operation-compatibility-cycle");
+        // Selection is an LLM-authored semantic decision. The graph may validate and order that
+        // decision, but must never widen it by inferring an unrequested creator from path adjacency.
+        // Target existence is validated later against the current canonical configuration.
+        LinkedHashSet<Node> selected = new LinkedHashSet<>(requested);
+        List<Node> ordered = orderedByDependencies(selected);
+        if (ordered.size() != selected.size()) return Resolution.reject("component-operation-compatibility-cycle");
         return Resolution.accept(ordered.stream().map(Node::operationId).toList());
     }
 

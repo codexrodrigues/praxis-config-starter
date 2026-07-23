@@ -51,7 +51,10 @@ public final class AgenticAuthoringProviderSchemaCompiler {
         properties.putObject("schemaVersion").put("type", "string").put("const", schemaVersion);
         properties.putObject("componentId").put("type", "string").put("const", componentId);
         ObjectNode outputOperations = properties.putObject("operations");
-        outputOperations.put("type", "array").put("minItems", 1).put("maxItems", 8);
+        int exactOperationCount = Math.max(1, operations.size());
+        outputOperations.put("type", "array")
+                .put("minItems", exactOperationCount)
+                .put("maxItems", exactOperationCount);
         if (operations.size() == 1) {
             outputOperations.set("items", compileOperationSchema(operations.get(0)));
         } else {
@@ -158,7 +161,17 @@ public final class AgenticAuthoringProviderSchemaCompiler {
             JsonNode childSchema = schema.path("properties").path(field);
             if (child.isNull() && !required.contains(field)) value.remove(field);
             else if (child.isTextual() && expectsStructuredValue(childSchema)) decodeJsonText(child.asText(""), childSchema).ifPresent(decoded -> value.set(field, decoded));
-            else if (child instanceof ObjectNode childObject && childSchema.isObject()) removeCompatibilityValues(childObject, childSchema);
+            else if (child instanceof ObjectNode childObject && childSchema.isObject()) {
+                removeCompatibilityValues(childObject, childSchema);
+                if (childObject.isEmpty() && !required.contains(field)) {
+                    // Strict provider schemas make every declared property present and nullable.
+                    // For an unselected union/renderer variant the provider can therefore return
+                    // an object containing only null compatibility fields. Once those fields are
+                    // removed, the empty optional container must also be omitted so the canonical
+                    // manifest does not interpret it as an intentionally configured variant.
+                    value.remove(field);
+                }
+            }
             else if (child instanceof ArrayNode array && childSchema.path("items").isObject()) {
                 JsonNode itemSchema = childSchema.path("items");
                 for (int i = 0; i < array.size(); i++) {

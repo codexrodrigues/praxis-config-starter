@@ -30,9 +30,9 @@ public class PraxisEmbeddingModel implements EmbeddingModel {
         EmbeddingOptions options = request.getOptions();
         EmbeddingService.EmbeddingCallConfig config = buildConfig(options);
         List<Embedding> embeddings = new ArrayList<>();
+        List<List<Float>> vectors = embeddingService.embedAll(request.getInstructions(), config);
         int index = 0;
-        for (String input : request.getInstructions()) {
-            List<Float> vector = embeddingService.embed(input, config);
+        for (List<Float> vector : vectors) {
             embeddings.add(new Embedding(toFloatArray(vector), index++));
         }
         return new EmbeddingResponse(embeddings);
@@ -54,10 +54,10 @@ public class PraxisEmbeddingModel implements EmbeddingModel {
             return List.of();
         }
         EmbeddingService.EmbeddingCallConfig config = buildConfig(options);
+        List<String> texts = documents.stream().map(this::resolveContent).toList();
+        List<List<Float>> vectors = embeddingService.embedAll(texts, config);
         List<float[]> embeddings = new ArrayList<>(documents.size());
-        for (Document document : documents) {
-            String text = resolveContent(document);
-            List<Float> vector = embeddingService.embed(text, config);
+        for (List<Float> vector : vectors) {
             embeddings.add(toFloatArray(vector));
         }
         return embeddings;

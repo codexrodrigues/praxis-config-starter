@@ -142,7 +142,9 @@ public class AgenticAuthoringComponentEditPlanService {
             }
             AiProviderInvocationTelemetry invocation = trace.snapshot();
             AiProviderInvocationMetrics.record(invocation);
-            JsonNode canonicalPlan = providerSchemaCompiler.decodeCompatibilityValues(plan, selectedManifest);
+            JsonNode canonicalPlan = normalizeSelectedOperationSequence(
+                    providerSchemaCompiler.decodeCompatibilityValues(plan, selectedManifest),
+                    selection.operationIds());
             List<String> envelopeFailures = validateProviderEnvelope(
                     componentId, canonicalPlan, selection.operationIds());
             if (!envelopeFailures.isEmpty()) {
@@ -262,9 +264,12 @@ public class AgenticAuthoringComponentEditPlanService {
         }
         AiProviderInvocationTelemetry repairInvocation = repairTrace.snapshot();
         AiProviderInvocationMetrics.record(repairInvocation);
-        JsonNode canonicalRepairedPlan = providerSchemaCompiler.decodeCompatibilityValues(repairedPlan, manifest);
+        List<String> selectedOperationIds = operationIds(manifest);
+        JsonNode canonicalRepairedPlan = normalizeSelectedOperationSequence(
+                providerSchemaCompiler.decodeCompatibilityValues(repairedPlan, manifest),
+                selectedOperationIds);
         List<String> envelopeFailures = validateProviderEnvelope(
-                componentId, canonicalRepairedPlan, operationIds(manifest));
+                componentId, canonicalRepairedPlan, selectedOperationIds);
         if (!envelopeFailures.isEmpty()) {
             return new AgenticAuthoringComponentEditPlanResult(
                     false,
@@ -381,6 +386,10 @@ public class AgenticAuthoringComponentEditPlanService {
         if (compiled.warnings() != null) {
             warnings.addAll(compiled.warnings());
         }
+        if (compiledPatch.path("proposedConfig").isObject()
+                && compiledPatch.path("proposedConfig").equals(copyOrEmptyObject(originalConfig))) {
+            warnings.add("component-edit-plan-no-op");
+        }
         return new AgenticAuthoringComponentEditPlanResult(
                 true,
                 List.of(),
@@ -409,6 +418,8 @@ public class AgenticAuthoringComponentEditPlanService {
                 You are the governed Praxis component authoring planner.
                 Produce exactly one semantic component edit plan that satisfies the already-resolved semantic decision.
                 The semantic decision, canonical manifest operations, current config, and transient validation context are authoritative.
+                Apply only the delta requested by userPrompt in this turn. semanticDecision.userGoal may contain prior conversation for context; do not repeat or reapply its earlier effects because currentConfig already materializes them.
+                Resolve contextual references such as "the previous one", "this photo", or relative size and layout requests against the most recently materialized compatible structure in currentConfig. Preserve its target, sibling items, and unrelated properties unless userPrompt explicitly changes them.
                 Never route intent by keywords or regex. Never emit JSON Patch, arbitrary config fields, runtime code, or operations absent from the manifest.
                 Use transientValidationContext only to ground canonical resources, fields, actions, targets, and events. Do not copy that context into the plan or config.
                 If the request cannot be expressed safely with the declared operations, return an empty operations array; the runtime will reject it closed.
@@ -911,19 +922,54 @@ public class AgenticAuthoringComponentEditPlanService {
         return List.copyOf(operationIds);
     }
 
+    private JsonNode normalizeSelectedOperationSequence(
+            JsonNode plan, List<String> selectedOperationIds) {
+        if (!(plan instanceof ObjectNode objectPlan)
+                || !plan.path("operations").isArray()
+                || selectedOperationIds == null
+                || selectedOperationIds.isEmpty()) {
+            return plan;
+        }
+        Set<String> selected = new LinkedHashSet<>(selectedOperationIds);
+        Set<String> observed = new LinkedHashSet<>();
+        if (plan.path("operations").size() != selected.size()) {
+            return plan;
+        }
+        for (JsonNode operation : plan.path("operations")) {
+            String operationId = operation.path("operationId").asText("");
+            if (!selected.contains(operationId) || !observed.add(operationId)) {
+                return plan;
+            }
+        }
+        if (!observed.equals(selected)) {
+            return plan;
+        }
+        ObjectNode normalized = objectPlan.deepCopy();
+        ArrayNode normalizedOperations = normalized.putArray("operations");
+        for (String selectedOperationId : selectedOperationIds) {
+            for (JsonNode operation : plan.path("operations")) {
+                if (selectedOperationId.equals(operation.path("operationId").asText(""))) {
+                    normalizedOperations.add(operation.deepCopy());
+                }
+            }
+        }
+        return normalized;
+    }
+
     private boolean matchesSelectedOperationSequence(JsonNode planOperations, List<String> selectedOperationIds) {
         if (selectedOperationIds == null || selectedOperationIds.isEmpty()) return false;
+        if (planOperations.size() != selectedOperationIds.size()) return false;
         int selectedIndex = 0;
         Set<String> observed = new LinkedHashSet<>();
         for (JsonNode operation : planOperations) {
             String operationId = operation.path("operationId").asText("");
             int index = selectedOperationIds.indexOf(operationId);
-            if (index < selectedIndex) return false;
             if (index < 0) return false;
-            selectedIndex = index;
-            observed.add(operationId);
+            if (index < selectedIndex || !observed.add(operationId)) return false;
+            selectedIndex = index + 1;
         }
-        return observed.containsAll(selectedOperationIds);
+        return observed.size() == selectedOperationIds.size()
+                && observed.containsAll(selectedOperationIds);
     }
 
     private ObjectNode copyOrEmptyObject(JsonNode value) {

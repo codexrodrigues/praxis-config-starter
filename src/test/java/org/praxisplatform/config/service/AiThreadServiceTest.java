@@ -3,6 +3,9 @@ package org.praxisplatform.config.service;
 import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
@@ -17,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.domain.AiThread;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.repository.AiThreadRepository;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 @ExtendWith(MockitoExtension.class)
 @Tag("unit")
@@ -34,7 +38,7 @@ class AiThreadServiceTest {
         storage.clear();
         when(threadRepository.findById(any())).thenAnswer(invocation ->
                 Optional.ofNullable(storage.get(invocation.getArgument(0))));
-        when(threadRepository.save(any(AiThread.class))).thenAnswer(invocation -> {
+        lenient().when(threadRepository.save(any(AiThread.class))).thenAnswer(invocation -> {
             AiThread entity = invocation.getArgument(0, AiThread.class);
             storage.put(entity.getThreadId(), entity);
             return entity;
@@ -69,6 +73,54 @@ class AiThreadServiceTest {
         assertThat(created.getThreadId()).isEqualTo(retried.getThreadId());
         assertThat(retryRequest.getSessionId()).isEqualTo(created.getThreadId());
         assertThat(storage).hasSize(1);
+    }
+
+    @Test
+    void shouldRetryDeterministicCreationAfterTransientDatabaseConnectionFailure() {
+        UUID clientTurnId = UUID.randomUUID();
+        AiOrchestratorRequest request = baseRequest(clientTurnId);
+        when(threadRepository.save(any(AiThread.class)))
+                .thenThrow(new DataAccessResourceFailureException("temporary connection loss"))
+                .thenAnswer(invocation -> {
+                    AiThread entity = invocation.getArgument(0, AiThread.class);
+                    storage.put(entity.getThreadId(), entity);
+                    return entity;
+                });
+
+        AiThread created = threadService.resolveThread(
+                request,
+                "tenant-a",
+                "user-a",
+                "prod",
+                "Atualizar tabela");
+
+        assertThat(request.getSessionId()).isEqualTo(created.getThreadId());
+        assertThat(storage).containsOnlyKeys(created.getThreadId());
+        verify(threadRepository, times(2)).save(any(AiThread.class));
+    }
+
+    @Test
+    void shouldResolveCommittedDeterministicThreadWhenTheFirstInsertResponseTimesOut() {
+        UUID clientTurnId = UUID.randomUUID();
+        AiOrchestratorRequest request = baseRequest(clientTurnId);
+        when(threadRepository.save(any(AiThread.class)))
+                .thenAnswer(invocation -> {
+                    AiThread entity = invocation.getArgument(0, AiThread.class);
+                    storage.put(entity.getThreadId(), entity);
+                    throw new DataAccessResourceFailureException("commit outcome was not observed");
+                })
+                .thenAnswer(invocation -> invocation.getArgument(0, AiThread.class));
+
+        AiThread resolved = threadService.resolveThread(
+                request,
+                "tenant-a",
+                "user-a",
+                "prod",
+                "Atualizar tabela");
+
+        assertThat(request.getSessionId()).isEqualTo(resolved.getThreadId());
+        assertThat(storage).containsOnlyKeys(resolved.getThreadId());
+        verify(threadRepository, times(2)).save(any(AiThread.class));
     }
 
     private AiOrchestratorRequest baseRequest(UUID clientTurnId) {

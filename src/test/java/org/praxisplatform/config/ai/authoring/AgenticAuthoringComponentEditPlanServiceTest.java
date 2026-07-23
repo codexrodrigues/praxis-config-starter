@@ -142,6 +142,9 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 prompt.capture(), schema.capture(), callConfig.capture(), eq("tenant"), eq("user"), eq("local"));
         assertThat(prompt.getValue())
                 .contains("Never route intent by keywords or regex")
+                .contains("Apply only the delta requested by userPrompt in this turn")
+                .contains("do not repeat or reapply its earlier effects")
+                .contains("most recently materialized compatible structure in currentConfig")
                 .contains("crossFilter.configure")
                 .contains("employeesTable")
                 .contains("transientValidationContext");
@@ -158,6 +161,55 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         assertThat(compileRequest.getValue().config()).isEqualTo(config);
         assertThat(compileRequest.getValue().validationContext()).isEqualTo(validationContext);
         assertThat(compileRequest.getValue().plan()).isEqualTo(plan);
+    }
+
+    @Test
+    void marksAnAlreadyMaterializedPlanAsNoOpWithoutRejectingTheGovernedDecision() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "componentId": "praxis-table",
+                  "operations": [{
+                    "operationId": "column.header.set",
+                    "effects": [{ "kind": "merge-object", "path": "columns" }]
+                  }]
+                }
+                """);
+        JsonNode config = objectMapper.readTree("""
+                { "columns": [{ "field": "ativo", "header": "Status" }] }
+                """);
+        JsonNode plan = objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-component-edit-plan.v1",
+                  "componentId": "praxis-table",
+                  "operations": [{
+                    "operationId": "column.header.set",
+                    "target": "ativo",
+                    "input": { "header": "Status" }
+                  }]
+                }
+                """);
+        JsonNode compiledPatch = objectMapper.createObjectNode()
+                .put("manifestVersion", "1.0.0")
+                .set("proposedConfig", config.deepCopy());
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(new AgenticAuthoringManifestCompileResult(
+                        true, java.util.List.of(), java.util.List.of(), compiledPatch));
+
+        AgenticAuthoringComponentEditPlanResult result =
+                new AgenticAuthoringComponentEditPlanService(
+                        providerManagementService, manifestService, objectMapper)
+                        .compileGovernedPlan(
+                                "praxis-table",
+                                config,
+                                plan,
+                                objectMapper.createObjectNode());
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings()).contains("component-edit-plan-no-op");
+        assertThat(result.compiledPatch().path("proposedConfig")).isEqualTo(config);
+        verify(providerManagementService, never()).generateJson(
+                any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -339,6 +391,86 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         assertThat(parameterSchema.toString())
                 .contains("column.renderer.set", "column.visibility.set")
                 .doesNotContain("column.type.set");
+        assertThat(parameterSchema.at("/properties/operations/minItems").asInt()).isEqualTo(2);
+        assertThat(parameterSchema.at("/properties/operations/maxItems").asInt()).isEqualTo(2);
+    }
+
+    @Test
+    void normalizesExactSelectedOperationSetToCanonicalGraphOrderBeforeCompilation() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {"componentId":"praxis-table","operations":[
+                  {"operationId":"column.renderer.set","inputSchema":{"type":"object","properties":{"type":{"type":"string"}}}},
+                  {"operationId":"column.visibility.set","inputSchema":{"type":"object","properties":{"visible":{"type":"boolean"}}}}
+                ]}
+                """);
+        JsonNode selection = selection("praxis-table", "column.renderer.set", "column.visibility.set");
+        JsonNode reversedPlan = objectMapper.readTree("""
+                {"schemaVersion":"praxis-component-edit-plan.v1","componentId":"praxis-table","operations":[
+                  {"operationId":"column.visibility.set","target":"avatarUrl","input":{"visible":false}},
+                  {"operationId":"column.renderer.set","target":"id","input":{"type":"compose"}}
+                ]}
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
+                .thenReturn(selection, reversedPlan);
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(new AgenticAuthoringManifestCompileResult(
+                        true,
+                        java.util.List.of(),
+                        java.util.List.of(),
+                        objectMapper.createObjectNode().putObject("proposedConfig")));
+
+        AgenticAuthoringComponentEditPlanResult result = new AgenticAuthoringComponentEditPlanService(
+                providerManagementService, manifestService, objectMapper).generateAndCompile(
+                        new AgenticAuthoringPlanRequest("compor foto e ocultar coluna", "openai", "gpt", "key"),
+                        "praxis-table",
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        "t",
+                        "u",
+                        "e");
+
+        assertThat(result.valid()).isTrue();
+        ArgumentCaptor<AgenticAuthoringManifestEditPlanRequest> compileRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringManifestEditPlanRequest.class);
+        verify(manifestService).compilePatch(eq("praxis-table"), compileRequest.capture());
+        assertThat(compileRequest.getValue().plan().path("operations"))
+                .extracting(operation -> operation.path("operationId").asText())
+                .containsExactly("column.renderer.set", "column.visibility.set");
+    }
+
+    @Test
+    void rejectsDuplicateOperationsWhenSemanticSelectionRequiresTwoDistinctEffects() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {"componentId":"praxis-table","operations":[
+                  {"operationId":"column.renderer.set","inputSchema":{"type":"object","properties":{"type":{"type":"string"}}}},
+                  {"operationId":"column.visibility.set","inputSchema":{"type":"object","properties":{"visible":{"type":"boolean"}}}}
+                ]}
+                """);
+        JsonNode selection = selection("praxis-table", "column.renderer.set", "column.visibility.set");
+        JsonNode duplicatedPlan = objectMapper.readTree("""
+                {"schemaVersion":"praxis-component-edit-plan.v1","componentId":"praxis-table","operations":[
+                  {"operationId":"column.renderer.set","target":"id","input":{"type":"compose"}},
+                  {"operationId":"column.renderer.set","target":"id","input":{"type":"compose"}}
+                ]}
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
+                .thenReturn(selection, duplicatedPlan);
+
+        AgenticAuthoringComponentEditPlanResult result = new AgenticAuthoringComponentEditPlanService(
+                providerManagementService, manifestService, objectMapper).generateAndCompile(
+                        new AgenticAuthoringPlanRequest("compor foto e ocultar coluna", "openai", "gpt", "key"),
+                        "praxis-table",
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        "t",
+                        "u",
+                        "e");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("component-edit-plan-operations-outside-semantic-selection");
+        verify(manifestService, never()).compilePatch(any(), any());
     }
 
     @Test
@@ -1028,7 +1160,13 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         ObjectNode selection = objectMapper.createObjectNode();
         selection.put("schemaVersion", AgenticAuthoringComponentOperationSelectionService.SCHEMA_VERSION);
         selection.put("componentId", componentId);
-        selection.putArray("goals");
+        var goals = selection.putArray("goals");
+        for (String operationId : operationIds) {
+            var goal = goals.addObject();
+            goal.put("description", "Materialize " + operationId);
+            goal.put("targetConcept", componentId);
+            goal.putArray("operationIds").add(operationId);
+        }
         selection.put("requiresClarification", false);
         selection.put("clarificationReason", "");
         var selected = selection.putArray("selectedOperationIds");

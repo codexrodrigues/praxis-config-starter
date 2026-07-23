@@ -20,6 +20,23 @@ class AgenticAuthoringComponentOperationCompatibilityGraphTest {
     }
 
     @Test
+    void doesNotInventAColumnCreatorForAnExplicitFormattingDecision() throws Exception {
+        var result = graph("1", operations(addColumn(), formatColumn())).resolve(List.of("column.format"));
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.operationIds()).containsExactly("column.format");
+    }
+
+    @Test
+    void doesNotInventAnItemActionCreatorForAnExplicitRemovalDecision() throws Exception {
+        var result = graph("1", operations(
+                op("item.action.add", "item-action", "append-unique", "itemActions[]", ""),
+                op("item.action.remove", "item-action", "remove-by-key", "itemActions[]", "target-exists")))
+                .resolve(List.of("item.action.remove"));
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.operationIds()).containsExactly("item.action.remove");
+    }
+
+    @Test
     void rejectsRemovalTogetherWithLaterColumnMutation() throws Exception {
         var result = graph("1", operations(removeColumn(), formatColumn())).resolve(List.of("column.remove", "column.format"));
         assertThat(result.accepted()).isFalse();

@@ -2,8 +2,12 @@ package org.praxisplatform.config.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Iterator;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
@@ -16,7 +20,6 @@ import org.springframework.ai.google.genai.text.GoogleGenAiTextEmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.util.ReflectionTestUtils;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Tag("unit")
 class EmbeddingServiceTest {
@@ -52,7 +55,7 @@ class EmbeddingServiceTest {
         EmbeddingService service = new EmbeddingService(emptyOpenAiProvider(), provider(client), new ObjectMapper());
         ReflectionTestUtils.setField(service, "provider", "gemini");
         ReflectionTestUtils.setField(service, "geminiApiKey", "gemini-key");
-        ReflectionTestUtils.setField(service, "geminiModel", "text-embedding-004");
+        ReflectionTestUtils.setField(service, "geminiModel", "gemini-embedding-2");
         ReflectionTestUtils.setField(service, "openaiDimensions", 0);
         ReflectionTestUtils.setField(service, "geminiDimensions", 0);
 
@@ -60,6 +63,80 @@ class EmbeddingServiceTest {
 
         assertEquals(2, vector.size());
         assertEquals(0.5f, vector.get(0));
+    }
+
+    @Test
+    void googleGenAiRestPayloadPinsConfiguredVectorDimensions() {
+        EmbeddingService service = new EmbeddingService(
+                emptyOpenAiProvider(),
+                emptyGoogleGenAiProvider(),
+                new ObjectMapper());
+
+        JsonNode payload = ReflectionTestUtils.invokeMethod(
+                service,
+                "googleGenAiEmbeddingPayload",
+                "semantic authoring context",
+                768);
+
+        assertEquals("semantic authoring context", payload.path("content").path("parts").path(0).path("text").asText());
+        assertEquals(768, payload.path("outputDimensionality").asInt());
+    }
+
+    @Test
+    void embedAllUsesOneOpenAiRequestAndPreservesProviderIndexes() {
+        OpenAiEmbeddingModel client = Mockito.mock(OpenAiEmbeddingModel.class);
+        EmbeddingResponse response = new EmbeddingResponse(List.of(
+                new Embedding(new float[] {3.0f, 4.0f}, 1),
+                new Embedding(new float[] {1.0f, 2.0f}, 0)));
+        when(client.call(any(EmbeddingRequest.class))).thenReturn(response);
+
+        EmbeddingService service = new EmbeddingService(provider(client), emptyGoogleGenAiProvider(), new ObjectMapper());
+        ReflectionTestUtils.setField(service, "provider", "openai");
+        ReflectionTestUtils.setField(service, "openaiApiKey", "key");
+        ReflectionTestUtils.setField(service, "openaiBaseUrl", "https://api.openai.com");
+        ReflectionTestUtils.setField(service, "openaiModel", "text-embedding-3-large");
+        ReflectionTestUtils.setField(service, "openaiDimensions", 0);
+        ReflectionTestUtils.setField(service, "geminiDimensions", 0);
+
+        List<List<Float>> vectors = service.embedAll(List.of("first", "second"));
+
+        verify(client, times(1)).call(any(EmbeddingRequest.class));
+        assertEquals(List.of(1.0f, 2.0f), vectors.get(0));
+        assertEquals(List.of(3.0f, 4.0f), vectors.get(1));
+    }
+
+    @Test
+    void embedAllPartitionsLargeOpenAiCorporaWithoutLosingOrder() {
+        OpenAiEmbeddingModel client = Mockito.mock(OpenAiEmbeddingModel.class);
+        when(client.call(any(EmbeddingRequest.class))).thenAnswer(invocation -> {
+            EmbeddingRequest request = invocation.getArgument(0);
+            List<Embedding> results = new java.util.ArrayList<>();
+            for (int index = 0; index < request.getInstructions().size(); index++) {
+                results.add(new Embedding(
+                        new float[] {(float) request.getInstructions().get(index).length()},
+                        index));
+            }
+            return new EmbeddingResponse(results);
+        });
+
+        EmbeddingService service = new EmbeddingService(provider(client), emptyGoogleGenAiProvider(), new ObjectMapper());
+        ReflectionTestUtils.setField(service, "provider", "openai");
+        ReflectionTestUtils.setField(service, "openaiApiKey", "key");
+        ReflectionTestUtils.setField(service, "openaiBaseUrl", "https://api.openai.com");
+        ReflectionTestUtils.setField(service, "openaiModel", "text-embedding-3-large");
+        ReflectionTestUtils.setField(service, "openaiDimensions", 0);
+        ReflectionTestUtils.setField(service, "geminiDimensions", 0);
+        List<String> inputs = List.of(
+                "a".repeat(125_000),
+                "b".repeat(125_000),
+                "final");
+
+        List<List<Float>> vectors = service.embedAll(inputs);
+
+        verify(client, times(2)).call(any(EmbeddingRequest.class));
+        assertEquals(125_000f, vectors.get(0).get(0));
+        assertEquals(125_000f, vectors.get(1).get(0));
+        assertEquals(5f, vectors.get(2).get(0));
     }
 
     private static ObjectProvider<OpenAiEmbeddingModel> provider(OpenAiEmbeddingModel client) {

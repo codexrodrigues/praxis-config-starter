@@ -253,6 +253,7 @@ public class AgenticAuthoringTurnEngine {
         AgenticAuthoringApplyTarget.Resolution terminalApplyTargetResolution =
                 AgenticAuthoringApplyTarget.resolve(request, principalContext);
         request = withoutAgenticApplyTargetContext(request);
+        request = withoutClientAuthoringEvidenceContext(request);
         request = withGroundedRuntimeComponentContext(request);
         AgenticAuthoringTurnState state = initialState(request);
         List<AiProviderInvocationTelemetry> turnProviderInvocations = new ArrayList<>();
@@ -368,6 +369,16 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnRoute route = routeClassifier.classify(request, intentResolution, state);
             state = state.withRouteClass(route.routeClass());
             emitIntentResolved(eventSink, intentResolution, route, request);
+            AgenticAuthoringTurnOutcome clientActionOutcome = maybeCompleteDeclaredClientAction(
+                    request,
+                    eventSink,
+                    state,
+                    intentResolution,
+                    route,
+                    turnProviderInvocations);
+            if (clientActionOutcome != null) {
+                return clientActionOutcome;
+            }
             AgenticAuthoringTurnOutcome postIntentConsultativeOutcome = maybeAnswerPostIntentConsultative(
                     request,
                     principalContext,
@@ -759,6 +770,10 @@ public class AgenticAuthoringTurnEngine {
         if (preview == null || !preview.valid()) {
             return "preview-invalid";
         }
+        if (preview.warnings() != null
+                && preview.warnings().contains("component-edit-plan-no-op")) {
+            return "component-edit-no-op";
+        }
         if (isLocalComponentEditPreview(request, preview)) {
             return "";
         }
@@ -790,6 +805,10 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringPreviewResult preview,
             String assistantMessage) {
         if (preview == null || !preview.valid()) {
+            return null;
+        }
+        if (preview.warnings() != null
+                && preview.warnings().contains("component-edit-plan-no-op")) {
             return null;
         }
         JsonNode compiled = preview.compiledFormPatch();
@@ -1264,6 +1283,100 @@ public class AgenticAuthoringTurnEngine {
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private AgenticAuthoringTurnOutcome maybeCompleteDeclaredClientAction(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringTurnState state,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringTurnRoute route,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+        if (eventSink == null
+                || eventSink.terminalReached()
+                || intentResolution == null
+                || !"undo".equals(safeText(intentResolution.operationKind()))
+                || !"undo_last_local_change".equals(safeText(intentResolution.changeKind()))) {
+            return null;
+        }
+
+        JsonNode declaredAction = declaredClientAction(request, "local-undo");
+        boolean available = declaredAction != null && declaredAction.path("available").asBoolean(false);
+        String assistantMessage = available
+                ? "Vou desfazer somente a última alteração local, preservando as anteriores."
+                : "Não há uma alteração local disponível para desfazer nesta página.";
+        eventSink.append("thought.step", thoughtStepPayload(
+                "client.action.resolve",
+                available
+                        ? "A intenção semântica corresponde a uma ação local declarada e disponível."
+                        : "A intenção semântica foi resolvida, mas a ação local declarada não está disponível.",
+                "Reconciling the semantic intent with declared local client actions.",
+                Map.of(
+                        "actionKind", "local-undo",
+                        "declared", declaredAction != null,
+                        "available", available)));
+
+        Map<String, Object> decisionDiagnostics = decisionDiagnostics(
+                intentResolution,
+                null,
+                null,
+                request,
+                providerInvocations);
+        decisionDiagnostics.put("routeClass", safeText(route == null ? null : route.routeClass()));
+        decisionDiagnostics.put("clientActionRequested", true);
+        decisionDiagnostics.put("clientActionKind", "local-undo");
+        decisionDiagnostics.put("clientActionDeclared", declaredAction != null);
+        decisionDiagnostics.put("clientActionAvailable", available);
+
+        Map<String, Object> resultPayload = new LinkedHashMap<>();
+        resultPayload.put("intentResolution", intentResolution);
+        resultPayload.put("preview", objectMapper.createObjectNode());
+        resultPayload.put("assistantMessage", publicAssistantMessage(assistantMessage, request));
+        resultPayload.put("quickReplies", List.of());
+        resultPayload.put("canApply", false);
+        if (available) {
+            resultPayload.put("clientAction", declaredAction.deepCopy());
+        }
+        resultPayload.put("decisionDiagnostics", decisionDiagnostics);
+        resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
+                available ? "result:declared_client_action" : "result:client_action_unavailable",
+                false));
+        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        return terminalResult.appendedType("result")
+                ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
+                : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private JsonNode declaredClientAction(
+            AgenticAuthoringTurnStreamRequest request,
+            String expectedKind) {
+        if (request == null
+                || request.contextHints() == null
+                || !request.contextHints().isObject()
+                || !StringUtils.hasText(expectedKind)) {
+            return null;
+        }
+        JsonNode actions = request.contextHints().path("clientActions");
+        if (!actions.isArray()) {
+            return null;
+        }
+        for (JsonNode action : actions) {
+            if (action == null
+                    || !action.isObject()
+                    || !"praxis-agentic-authoring-client-action.v1".equals(action.path("schemaVersion").asText())
+                    || !expectedKind.equals(action.path("kind").asText())
+                    || !StringUtils.hasText(action.path("id").asText())
+                    || !StringUtils.hasText(action.path("capabilityRef").asText())) {
+                continue;
+            }
+            String targetComponentId = action.path("targetComponentId").asText("");
+            if (StringUtils.hasText(targetComponentId)
+                    && !targetComponentId.equals(safeText(request.targetComponentId()))) {
+                continue;
+            }
+            return action;
+        }
+        return null;
     }
 
     private AgenticAuthoringTurnOutcome maybeCompleteResolvedPlatformGuidance(
@@ -3344,7 +3457,9 @@ public class AgenticAuthoringTurnEngine {
     }
 
     private JsonNode firstSemanticTextConstraint(JsonNode constraints) {
-        if (constraints == null || !constraints.path("filters").isArray()) {
+        if (constraints == null
+                || !constraints.path("appliesToDataSelection").asBoolean(false)
+                || !constraints.path("filters").isArray()) {
             return null;
         }
         for (JsonNode filter : constraints.path("filters")) {
@@ -5114,6 +5229,16 @@ public class AgenticAuthoringTurnEngine {
         }
         ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
         sanitized.remove("agenticApplyTarget");
+        return copyWithContextHints(request, sanitized.isEmpty() ? null : sanitized);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withoutClientAuthoringEvidenceContext(
+            AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
+            return request;
+        }
+        ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
+        sanitized.remove("authoringEvidence");
         return copyWithContextHints(request, sanitized.isEmpty() ? null : sanitized);
     }
 

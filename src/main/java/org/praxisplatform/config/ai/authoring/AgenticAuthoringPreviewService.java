@@ -569,6 +569,7 @@ public class AgenticAuthoringPreviewService {
                 && !validationContext.path("schemaFields").isEmpty()) {
             warnings.add("component-edit-plan-schema-fields-grounded");
         }
+        boolean noOp = warnings.contains("component-edit-plan-no-op");
         return Optional.of(new AgenticAuthoringPreviewResult(
                 true,
                 List.of(),
@@ -583,7 +584,10 @@ public class AgenticAuthoringPreviewService {
                         result.plan(),
                         compiledFormPatch),
                 null,
-                componentEditAssistantMessage(result.plan()),
+                noOp
+                        ? AgenticAuthoringPresentationText.assistantReply(
+                                "A configuração solicitada já está aplicada. Não fiz nenhuma alteração.")
+                        : componentEditAssistantMessage(result.plan()),
                 result.providerInvocations()));
     }
 

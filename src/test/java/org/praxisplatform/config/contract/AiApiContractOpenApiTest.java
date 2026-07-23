@@ -113,10 +113,31 @@ class AiApiContractOpenApiTest {
                 "AgenticAuthoringCandidate",
                 "AgenticAuthoringPreviewResult",
                 "AgenticAuthoringApplyRequest",
+                "AgenticAuthoringClientAction",
                 "AiDomainCatalogContextHint",
                 "AiDomainCatalogRelationshipHint",
                 "DomainRuleTimelineResponse",
                 "DomainRuleTimelineEventResponse");
+
+        Map<String, Object> clientAction =
+                (Map<String, Object>) schemas.get("AgenticAuthoringClientAction");
+        Map<String, Object> clientActionProperties =
+                (Map<String, Object>) clientAction.get("properties");
+        assertThat(clientActionProperties).containsKeys(
+                "schemaVersion",
+                "id",
+                "kind",
+                "capabilityRef",
+                "available",
+                "targetComponentId");
+        assertThat((List<String>) clientAction.get("required"))
+                .containsExactly(
+                        "schemaVersion",
+                        "id",
+                        "kind",
+                        "capabilityRef",
+                        "available");
+        assertThat(clientAction.get("additionalProperties")).isEqualTo(false);
 
         Map<String, Object> domainCatalogHint =
                 (Map<String, Object>) schemas.get("AiDomainCatalogContextHint");

@@ -22,6 +22,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.google.genai.GoogleGenAiChatModel;
+import org.springframework.ai.google.genai.GoogleGenAiChatOptions;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -122,6 +123,7 @@ class SpringAiGeminiServiceTest {
         ReflectionTestUtils.setField(service, "model", "gemini-2.0-flash");
         ReflectionTestUtils.setField(service, "temperature", 0.1d);
         ReflectionTestUtils.setField(service, "maxTokens", 128);
+        ReflectionTestUtils.setField(service, "jsonMinOutputTokens", 8192);
         when(chatClient.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("{\"value\":321}")))));
 
@@ -131,6 +133,36 @@ class SpringAiGeminiServiceTest {
 
         assertNotNull(node);
         assertEquals(321, node.get("value").asInt());
+    }
+
+    @Test
+    void jsonModeHonorsProviderMinimumWhenCallerDeclaresCompactLogicalBudget() {
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
+        ReflectionTestUtils.setField(service, "temperature", 0.1d);
+        ReflectionTestUtils.setField(service, "maxTokens", 2048);
+        ReflectionTestUtils.setField(service, "jsonMinOutputTokens", 8192);
+        AiCallConfig compactAuthoringCall = AiCallConfig.builder()
+                .maxTokens(640)
+                .build();
+
+        GoogleGenAiChatOptions jsonOptions = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildOptions",
+                compactAuthoringCall,
+                true,
+                "gemini-2.5-flash");
+        GoogleGenAiChatOptions textOptions = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildOptions",
+                compactAuthoringCall,
+                false,
+                "gemini-2.5-flash");
+
+        assertNotNull(jsonOptions);
+        assertNotNull(textOptions);
+        assertEquals(8192, jsonOptions.getMaxOutputTokens());
+        assertEquals("application/json", jsonOptions.getResponseMimeType());
+        assertEquals(640, textOptions.getMaxOutputTokens());
     }
 
     @Test
@@ -151,6 +183,21 @@ class SpringAiGeminiServiceTest {
         JsonNode firstContent = payload.path("contents").path(0);
         assertTrue(firstContent.isObject());
         assertEquals("ping", firstContent.path("parts").path(0).path("text").asText());
+    }
+
+    @Test
+    void quotaExhaustionDoesNotSpendRetriesOrFallbackModels() {
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
+        AiProviderCallException quota = AiProviderCallException.fromHttpStatus(
+                "gemini",
+                429,
+                "You exceeded your current quota; check your plan and billing details.");
+
+        Boolean capacity = ReflectionTestUtils.invokeMethod(service, "isCapacityExhausted", quota);
+        Boolean retryable = ReflectionTestUtils.invokeMethod(service, "isRetryable", quota);
+
+        assertEquals(false, capacity);
+        assertEquals(false, retryable);
     }
 
     private static ObjectProvider<GoogleGenAiChatModel> provider(GoogleGenAiChatModel client) {

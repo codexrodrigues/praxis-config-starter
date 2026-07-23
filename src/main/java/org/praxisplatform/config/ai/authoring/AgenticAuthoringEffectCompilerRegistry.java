@@ -216,7 +216,9 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     }
 
     boolean supportsDomainPatchHandler(String handler) {
-        return "stepper-step-reorder".equals(handler)
+        return "table-renderer-compose-layout-merge".equals(handler)
+                || "table-renderer-compose-item-merge".equals(handler)
+                || "stepper-step-reorder".equals(handler)
                 || "stepper-step-remove".equals(handler)
                 || "stepper-validation-rule-upsert".equals(handler)
                 || "tabs.reorder-tab-and-preserve-selection".equals(handler)
@@ -373,7 +375,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             case "merge-by-key" -> applyMergeByKey(effect, input, resolved, proposedConfig, compiled, failures);
             case "remove-by-key" -> applyRemoveByKey(effect, resolved, proposedConfig, compiled, failures);
             case "set-value" -> applySetValue(effect, input, resolved, proposedConfig, compiled, failures);
-            case "merge-object" -> applyMergeObject(effect, input, proposedConfig, compiled, failures);
+            case "merge-object" -> applyMergeObject(effect, input, resolved, proposedConfig, compiled, failures);
             case "reorder-by-key" -> applyReorderByKey(effect, input, resolved, proposedConfig, compiled, failures);
             case "append", "append-to-array" -> applyAppend(effect, input, resolved, proposedConfig, compiled, failures);
             case "append-unique" -> applyAppendUnique(effect, input, resolved, proposedConfig, compiled, failures);
@@ -395,6 +397,22 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             List<String> failures) {
         String handler = text(effect, "handler");
         return switch (handler) {
+            case "table-renderer-compose-layout-merge" -> compileTableRendererComposeLayoutMerge(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "table-renderer-compose-item-merge" -> compileTableRendererComposeItemMerge(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
             case "stepper-step-reorder" -> compileStepperStepReorder(
                     componentId,
                     operation,
@@ -1019,6 +1037,147 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 yield null;
             }
         };
+    }
+
+    private ObjectNode compileTableRendererComposeLayoutMerge(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode resolvedNode = resolved == null
+                ? MissingNode.getInstance()
+                : nodeAtResolvedPath(proposedConfig, resolved.path());
+        if (!(resolvedNode instanceof ObjectNode column)) {
+            failures.add("table-renderer-compose-layout-merge target column not found");
+            return null;
+        }
+        JsonNode renderer = column.path("renderer");
+        JsonNode compose = renderer.path("compose");
+        if (!"compose".equals(text(renderer, "type"))
+                || !(compose instanceof ObjectNode composeObject)
+                || !compose.path("items").isArray()
+                || compose.path("items").isEmpty()) {
+            failures.add("table-renderer-compose-layout-merge requires an existing compose renderer");
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        if (!input.isObject() || input.isEmpty()) {
+            failures.add("table-renderer-compose-layout-merge requires a non-empty layout patch");
+            return null;
+        }
+        ObjectNode layout = composeObject.path("layout") instanceof ObjectNode currentLayout
+                ? currentLayout
+                : composeObject.putObject("layout");
+        JsonNode previousValue = layout.deepCopy();
+        mergeObject(layout, input);
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "merge-compose-layout");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "columns[].renderer.compose.layout");
+        compiled.put("resolvedPath", resolved.path() + ".renderer.compose.layout");
+        compiled.set("previousValue", previousValue);
+        compiled.set("value", layout.deepCopy());
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", input.deepCopy());
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileTableRendererComposeItemMerge(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode resolvedNode = resolved == null
+                ? MissingNode.getInstance()
+                : nodeAtResolvedPath(proposedConfig, resolved.path());
+        if (!(resolvedNode instanceof ObjectNode column)) {
+            failures.add("table-renderer-compose-item-merge target column not found");
+            return null;
+        }
+        JsonNode renderer = column.path("renderer");
+        if (!"compose".equals(text(renderer, "type"))
+                || !(renderer.path("compose").path("items") instanceof ArrayNode items)) {
+            failures.add("table-renderer-compose-item-merge requires an existing compose renderer");
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        String itemType = text(input, "itemType");
+        String itemField = text(input, "itemField");
+        JsonNode itemPatch = input.path("item");
+        if (itemType.isBlank()
+                || !itemPatch.isObject()
+                || !itemType.equals(text(itemPatch, "type"))) {
+            failures.add("table-renderer-compose-item-merge requires matching itemType and item.type");
+            return null;
+        }
+        List<Integer> matches = new java.util.ArrayList<>();
+        for (int index = 0; index < items.size(); index++) {
+            JsonNode item = items.get(index);
+            if (itemType.equals(text(item, "type"))
+                    && (itemField.isBlank() || tableComposeItemMatchesField(item, itemField))) {
+                matches.add(index);
+            }
+        }
+        if (matches.size() != 1) {
+            failures.add("table-renderer-compose-item-merge expected exactly one item but resolved "
+                    + matches.size());
+            return null;
+        }
+        int itemIndex = matches.get(0);
+        if (!(items.get(itemIndex) instanceof ObjectNode targetItem)) {
+            failures.add("table-renderer-compose-item-merge resolved item is not an object");
+            return null;
+        }
+        JsonNode previousValue = targetItem.deepCopy();
+        mergeObject(targetItem, itemPatch);
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "merge-compose-item");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "columns[].renderer.compose.items[]");
+        compiled.put("resolvedPath", resolved.path() + ".renderer.compose.items[]/" + itemIndex);
+        compiled.put("itemIndex", itemIndex);
+        compiled.set("previousValue", previousValue);
+        compiled.set("value", targetItem.deepCopy());
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", input.deepCopy());
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private boolean tableComposeItemMatchesField(JsonNode item, String expectedField) {
+        if (expectedField == null || expectedField.isBlank() || item == null || !item.isObject()) {
+            return false;
+        }
+        for (String field : List.of("field", "valueField", "textField")) {
+            if (expectedField.equals(text(item, field))) {
+                return true;
+            }
+        }
+        JsonNode config = item.path(text(item, "type"));
+        for (String field : List.of(
+                "field", "srcField", "altField", "initialsField", "textField", "valueField")) {
+            if (expectedField.equals(text(config, field))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private ObjectNode compileStepperStepReorder(
@@ -6027,13 +6186,31 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     private void applyMergeObject(
             JsonNode effect,
             JsonNode input,
+            AgenticAuthoringResolvedTarget resolved,
             ObjectNode proposedConfig,
             ObjectNode compiled,
             List<String> failures) {
-        String path = normalizeDottedPath(text(effect, "path"));
-        JsonNode target = objectAt(proposedConfig, path, true);
+        String path = text(effect, "path");
+        String tail = tailAfterArray(path);
+        JsonNode target;
+        String resolvedPath;
+        if (resolved != null && !tail.isBlank()) {
+            JsonNode resolvedNode = nodeAtResolvedPath(proposedConfig, resolved.path());
+            if (!(resolvedNode instanceof ObjectNode resolvedObject)) {
+                failures.add("merge-object resolved target is not an object: " + resolved.path());
+                return;
+            }
+            String nestedPath = normalizeDottedPath(tail);
+            target = objectAt(resolvedObject, nestedPath, true);
+            resolvedPath = resolved.path() + "." + nestedPath;
+        } else {
+            String normalizedPath = normalizeDottedPath(path);
+            target = objectAt(proposedConfig, normalizedPath, true);
+            resolvedPath = normalizedPath;
+        }
         if (target instanceof ObjectNode targetObject) {
             mergeObject(targetObject, input);
+            compiled.put("resolvedPath", resolvedPath);
             compiled.set("value", input);
         } else {
             failures.add("merge-object path is not an object: " + path);
@@ -6180,7 +6357,15 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         Iterator<Map.Entry<String, JsonNode>> fields = input.fields();
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> field = fields.next();
-            target.set(field.getKey(), field.getValue());
+            JsonNode incoming = field.getValue();
+            JsonNode current = target.path(field.getKey());
+            if (current instanceof ObjectNode currentObject
+                    && incoming != null
+                    && incoming.isObject()) {
+                mergeObject(currentObject, incoming);
+            } else {
+                target.set(field.getKey(), incoming);
+            }
         }
     }
 

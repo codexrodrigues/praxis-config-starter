@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -47,6 +48,9 @@ public class EmbeddingService {
     private static final String PROVIDER_GEMINI = "gemini";
     private static final String PROVIDER_OPENAI = "openai";
     private static final String PROVIDER_MOCK = "mock";
+    private static final String DEFAULT_GEMINI_EMBEDDING_MODEL = "gemini-embedding-2";
+    private static final int MAX_BATCH_UTF8_BYTES = 240_000;
+    private static final int MAX_BATCH_INPUTS = 256;
 
     @Value("${spring.ai.embedding.provider:gemini}")
     private String provider;
@@ -69,7 +73,7 @@ public class EmbeddingService {
     @Value("${spring.ai.openai.embedding.options.model:text-embedding-3-large}")
     private String openaiModel;
 
-    @Value("${spring.ai.google.genai.embedding.text.options.model:text-embedding-004}")
+    @Value("${spring.ai.google.genai.embedding.text.options.model:gemini-embedding-2}")
     private String geminiModel;
 
     @Value("${praxis.ai.timeout-seconds:30}")
@@ -77,6 +81,100 @@ public class EmbeddingService {
 
     public List<Float> embed(String text) {
         return embed(text, null);
+    }
+
+    public List<List<Float>> embedAll(List<String> texts) {
+        return embedAll(texts, null);
+    }
+
+    public List<List<Float>> embedAll(List<String> texts, EmbeddingCallConfig override) {
+        if (texts == null || texts.isEmpty()) {
+            return List.of();
+        }
+        if (texts.size() == 1) {
+            return List.of(embed(texts.get(0), override));
+        }
+        logEmbeddingConfigIfNeeded();
+        String selected = normalizeProvider(override != null ? override.provider() : provider);
+        if (selected == null) {
+            selected = normalizeProvider(provider);
+        }
+        if (selected == null) {
+            selected = PROVIDER_GEMINI;
+        }
+        Integer overrideDimensions = override != null ? override.dimensions() : null;
+        if (PROVIDER_MOCK.equals(selected)) {
+            int dimensions = overrideDimensions != null ? overrideDimensions : resolveDefaultDimensions(selected);
+            List<List<Float>> vectors = new ArrayList<>(texts.size());
+            for (int index = 0; index < texts.size(); index++) {
+                vectors.add(mockEmbedding(dimensions));
+            }
+            return vectors;
+        }
+        if (PROVIDER_OPENAI.equals(selected)) {
+            String effectiveApiKey = resolveApiKey(override, openaiApiKey);
+            if (effectiveApiKey == null || effectiveApiKey.isBlank()) {
+                throw new IllegalStateException(
+                        "spring.ai.openai.api-key is required when spring.ai.embedding.provider=openai.");
+            }
+            try {
+                List<List<Float>> vectors = new ArrayList<>(texts.size());
+                for (List<String> batch : partitionEmbeddingInputs(texts)) {
+                    vectors.addAll(embedAllWithOpenAi(
+                            batch,
+                            override,
+                            effectiveApiKey,
+                            resolveModel(override, openaiModel),
+                            overrideDimensions != null
+                                    ? overrideDimensions
+                                    : resolveDefaultDimensions(selected)));
+                }
+                return vectors;
+            } catch (Exception ex) {
+                throw new IllegalStateException("OpenAI embedding batch failed: " + rootCauseMessage(ex), ex);
+            }
+        }
+        if (PROVIDER_GEMINI.equals(selected)) {
+            String effectiveApiKey = resolveApiKey(override, geminiApiKey);
+            if (effectiveApiKey == null || effectiveApiKey.isBlank()) {
+                throw new IllegalStateException(
+                        "spring.ai.google.genai.embedding.api-key is required when spring.ai.embedding.provider=gemini.");
+            }
+            try {
+                List<List<Float>> vectors = new ArrayList<>(texts.size());
+                for (List<String> batch : partitionEmbeddingInputs(texts)) {
+                    vectors.addAll(embedAllWithGoogleGenAi(batch, override, effectiveApiKey));
+                }
+                return vectors;
+            } catch (Exception ex) {
+                throw new IllegalStateException("Gemini embedding batch failed.", ex);
+            }
+        }
+        throw new IllegalStateException(
+                "Unsupported spring.ai.embedding.provider '" + provider + "'. Supported values: gemini, openai, mock.");
+    }
+
+    private List<List<String>> partitionEmbeddingInputs(List<String> texts) {
+        List<List<String>> batches = new ArrayList<>();
+        List<String> current = new ArrayList<>();
+        int currentBytes = 0;
+        for (String text : texts) {
+            String normalized = text != null ? text : "";
+            int inputBytes = normalized.getBytes(StandardCharsets.UTF_8).length;
+            if (!current.isEmpty()
+                    && (current.size() >= MAX_BATCH_INPUTS
+                            || currentBytes + inputBytes > MAX_BATCH_UTF8_BYTES)) {
+                batches.add(List.copyOf(current));
+                current.clear();
+                currentBytes = 0;
+            }
+            current.add(normalized);
+            currentBytes += inputBytes;
+        }
+        if (!current.isEmpty()) {
+            batches.add(List.copyOf(current));
+        }
+        return batches;
     }
 
     public List<Float> embed(String text, EmbeddingCallConfig override) {
@@ -170,6 +268,21 @@ public class EmbeddingService {
         return vector;
     }
 
+    private List<List<Float>> embedAllWithOpenAi(
+            List<String> texts,
+            EmbeddingCallConfig override,
+            String apiKey,
+            String model,
+            Integer dimensionsOverride) {
+        OpenAiEmbeddingModel client = resolveOpenAiClient(override, apiKey);
+        OpenAiEmbeddingOptions.Builder optionsBuilder = OpenAiEmbeddingOptions.builder().model(model);
+        if (dimensionsOverride != null && dimensionsOverride > 0) {
+            optionsBuilder.dimensions(dimensionsOverride);
+        }
+        EmbeddingResponse response = client.call(new EmbeddingRequest(texts, optionsBuilder.build()));
+        return orderedVectors("openai", response, texts.size(), dimensionsOverride);
+    }
+
     private List<Float> embedWithGoogleGenAi(
             String text,
             EmbeddingCallConfig override,
@@ -195,9 +308,74 @@ public class EmbeddingService {
             validateDimensions("gemini", vector, dimensions);
             return vector;
         }
-        List<Float> vector = embedWithGoogleGenAiRest(text, apiKey);
+        List<Float> vector = embedWithGoogleGenAiRest(
+                text,
+                apiKey,
+                resolveModel(override, geminiModel),
+                dimensions);
         validateDimensions("gemini", vector, dimensions);
         return vector;
+    }
+
+    private List<List<Float>> embedAllWithGoogleGenAi(
+            List<String> texts,
+            EmbeddingCallConfig override,
+            String apiKey) throws Exception {
+        Integer dimensions = override != null ? override.dimensions() : null;
+        if (dimensions == null || dimensions <= 0) {
+            dimensions = geminiDimensions > 0 ? geminiDimensions : null;
+        }
+        GoogleGenAiTextEmbeddingModel client = googleGenAiEmbeddingClientProvider.getIfAvailable();
+        if (client != null) {
+            GoogleGenAiTextEmbeddingOptions.Builder optionsBuilder = GoogleGenAiTextEmbeddingOptions.builder()
+                    .model(resolveModel(override, geminiModel));
+            if (dimensions != null && dimensions > 0) {
+                optionsBuilder.dimensions(dimensions);
+            }
+            EmbeddingResponse response = client.call(new EmbeddingRequest(texts, optionsBuilder.build()));
+            return orderedVectors("gemini", response, texts.size(), dimensions);
+        }
+        List<List<Float>> vectors = new ArrayList<>(texts.size());
+        for (String text : texts) {
+            List<Float> vector = embedWithGoogleGenAiRest(
+                    text,
+                    apiKey,
+                    resolveModel(override, geminiModel),
+                    dimensions);
+            validateDimensions("gemini", vector, dimensions);
+            vectors.add(vector);
+        }
+        return vectors;
+    }
+
+    private List<List<Float>> orderedVectors(
+            String providerName,
+            EmbeddingResponse response,
+            int expectedCount,
+            Integer expectedDimensions) {
+        if (response == null || response.getResults() == null
+                || response.getResults().size() != expectedCount) {
+            throw new IllegalStateException(
+                    providerName + " embedding batch returned "
+                            + (response == null || response.getResults() == null
+                                    ? 0
+                                    : response.getResults().size())
+                            + " result(s), expected " + expectedCount + ".");
+        }
+        List<List<Float>> ordered = new ArrayList<>(java.util.Collections.nCopies(expectedCount, null));
+        for (org.springframework.ai.embedding.Embedding result : response.getResults()) {
+            int index = result.getIndex() != null ? result.getIndex() : -1;
+            if (index < 0 || index >= expectedCount) {
+                throw new IllegalStateException(providerName + " embedding batch returned an invalid result index.");
+            }
+            List<Float> vector = toFloatList(result.getOutput());
+            validateDimensions(providerName, vector, expectedDimensions);
+            ordered.set(index, vector);
+        }
+        if (ordered.stream().anyMatch(java.util.Objects::isNull)) {
+            throw new IllegalStateException(providerName + " embedding batch returned incomplete indexed results.");
+        }
+        return List.copyOf(ordered);
     }
 
     private List<Float> mockEmbedding(int effectiveDimensions) {
@@ -255,20 +433,20 @@ public class EmbeddingService {
         return new OpenAiEmbeddingModel(api);
     }
 
-    private List<Float> embedWithGoogleGenAiRest(String text, String apiKey) throws Exception {
-        String resolvedModel = trimToNull(geminiModel);
+    private List<Float> embedWithGoogleGenAiRest(
+            String text,
+            String apiKey,
+            String model,
+            Integer dimensions) throws Exception {
+        String resolvedModel = trimToNull(model);
         if (resolvedModel == null) {
-            resolvedModel = "text-embedding-004";
+            resolvedModel = DEFAULT_GEMINI_EMBEDDING_MODEL;
         }
         String url = "https://generativelanguage.googleapis.com/v1beta/models/"
                 + resolvedModel
                 + ":embedContent?key="
                 + URLEncoder.encode(apiKey, StandardCharsets.UTF_8);
-        JsonNode payload = objectMapper.createObjectNode()
-                .set("content",
-                        objectMapper.createObjectNode()
-                                .putArray("parts")
-                                .add(objectMapper.createObjectNode().put("text", text)));
+        JsonNode payload = googleGenAiEmbeddingPayload(text, dimensions);
         HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
                 .build();
@@ -292,6 +470,18 @@ public class EmbeddingService {
             vector.add((float) value.asDouble());
         }
         return vector;
+    }
+
+    private ObjectNode googleGenAiEmbeddingPayload(String text, Integer dimensions) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        ObjectNode content = objectMapper.createObjectNode();
+        content.putArray("parts")
+                .add(objectMapper.createObjectNode().put("text", text));
+        payload.set("content", content);
+        if (dimensions != null && dimensions > 0) {
+            payload.put("outputDimensionality", dimensions);
+        }
+        return payload;
     }
 
     private int resolveDefaultDimensions(String selected) {

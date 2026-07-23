@@ -15,7 +15,7 @@ import org.springframework.util.StringUtils;
 final class AgenticAuthoringContextBundle {
 
     private static final int MAX_DETAILED_COMPONENT_CATALOGS = 6;
-    private static final int MAX_COMPACT_CAPABILITIES_PER_COMPONENT = 5;
+    static final int MAX_COMPACT_CAPABILITIES_PER_COMPONENT = 5;
     private static final int MAX_COMPACT_TRIGGER_TERMS = 5;
     private static final int MAX_COMPACT_FIELD_ALIASES = 6;
     private static final int MAX_COMPACT_ALIASES_PER_FIELD = 6;
@@ -199,11 +199,12 @@ final class AgenticAuthoringContextBundle {
                     continue;
                 }
                 int count = 0;
+                List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> retrievedCapabilities =
+                        retrievedOperationCandidates(request, catalog.componentId(), catalog.capabilities());
+                List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> promptCapabilities =
+                        promptRelevantCapabilities(effectivePrompt, catalog.capabilities());
                 List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> selectedCapabilities =
-                        retrievedOperationCandidates(objectMapper, request, catalog.componentId());
-                if (selectedCapabilities.isEmpty()) {
-                    selectedCapabilities = promptRelevantCapabilities(effectivePrompt, catalog.capabilities());
-                }
+                        mergeGroundedOperationCandidates(promptCapabilities, retrievedCapabilities);
                 for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : selectedCapabilities) {
                     if (capability == null || count >= MAX_COMPACT_CAPABILITIES_PER_COMPONENT) {
                         continue;
@@ -224,22 +225,58 @@ final class AgenticAuthoringContextBundle {
         return compact;
     }
 
+    /**
+     * Combines two governed rankings inside an already selected component. Prompt similarity only
+     * restores canonical candidates that retrieval may have omitted; neither ranking decides the
+     * primary user intent, which remains an LLM-authored decision.
+     */
+    private static List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability>
+            mergeGroundedOperationCandidates(
+                    List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> promptCapabilities,
+                    List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> retrievedCapabilities) {
+        List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> merged = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> source
+                : List.of(promptCapabilities, retrievedCapabilities)) {
+            if (source == null) {
+                continue;
+            }
+            for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : source) {
+                if (capability == null || !StringUtils.hasText(capability.id()) || !seen.add(capability.id())) {
+                    continue;
+                }
+                merged.add(capability);
+            }
+        }
+        return List.copyOf(merged);
+    }
+
     private static List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> retrievedOperationCandidates(
-            ObjectMapper objectMapper, AgenticAuthoringIntentResolutionRequest request, String componentId) {
+            AgenticAuthoringIntentResolutionRequest request,
+            String componentId,
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> canonicalCapabilities) {
         JsonNode candidates = request == null || request.contextHints() == null
                 ? null : request.contextHints().path("authoringEvidence").path("operationCandidates");
         JsonNode evidenceComponentId = request == null || request.contextHints() == null
                 ? null : request.contextHints().path("authoringEvidence").path("componentId");
-        if (candidates == null || !candidates.isArray() || !componentId.equals(evidenceComponentId.asText())) {
+        if (candidates == null
+                || !candidates.isArray()
+                || !componentId.equals(evidenceComponentId.asText())
+                || canonicalCapabilities == null
+                || canonicalCapabilities.isEmpty()) {
             return List.of();
         }
         List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> projected = new ArrayList<>();
+        Set<String> selectedIds = new LinkedHashSet<>();
         for (JsonNode candidate : candidates) {
-            if (!candidate.isObject() || !StringUtils.hasText(candidate.path("id").asText())) {
+            String candidateId = candidate.isObject() ? candidate.path("id").asText("") : "";
+            if (!StringUtils.hasText(candidateId) || !selectedIds.add(candidateId)) {
                 continue;
             }
-            projected.add(objectMapper.convertValue(
-                    candidate, AgenticAuthoringComponentCapabilitiesResult.ComponentCapability.class));
+            canonicalCapabilities.stream()
+                    .filter(capability -> capability != null && candidateId.equals(capability.id()))
+                    .findFirst()
+                    .ifPresent(projected::add);
             if (projected.size() >= 12) {
                 break;
             }
@@ -289,13 +326,18 @@ final class AgenticAuthoringContextBundle {
             }
         }
         if (capability.examples() != null) {
+            int bestExampleScore = 0;
             for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample example : capability.examples()) {
                 if (example == null) {
                     continue;
                 }
-                score += matchingTokenScore(prompt, example.prompt(), 8);
-                score += matchingTokenScore(prompt, example.intent(), 3);
+                int exampleScore = matchingTokenScore(prompt, example.prompt(), 8)
+                        + matchingTokenScore(prompt, example.intent(), 3);
+                bestExampleScore = Math.max(bestExampleScore, exampleScore);
             }
+            // Example count must not become a ranking advantage. The examples are alternative
+            // governed demonstrations of one operation, so only the best semantic match counts.
+            score += bestExampleScore;
         }
         return score;
     }

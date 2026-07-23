@@ -29,7 +29,6 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringResolveTargetReque
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResolvedTarget;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTargetResolverRegistry;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
-import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.domain.Scope;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.springframework.http.MediaType;
@@ -349,13 +348,17 @@ class AgenticAuthoringManifestControllerTest {
 
     @Test
     void compilePatchHttpFlowUsesRealManifestServiceAndRegistryPayload() throws Exception {
-        when(registryRepository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+        JsonNode manifest = objectMapper.readTree(realServicePayload())
+                .path("componentDefinition")
+                .path("jsonSchema")
+                .path("authoringManifest");
+        when(registryRepository.findAuthoringManifestPayload(
                 eq("component_definition"),
                 eq("praxis-table"),
                 eq("component-definition"),
-                eq(Scope.SYSTEM),
+                eq(Scope.SYSTEM.name()),
                 eq("GLOBAL")))
-                .thenReturn(java.util.Optional.of(AiRegistry.builder().payload(realServicePayload()).build()));
+                .thenReturn(java.util.Optional.of(manifest.toString()));
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringManifestController(realManifestService()))
                 .build();
 

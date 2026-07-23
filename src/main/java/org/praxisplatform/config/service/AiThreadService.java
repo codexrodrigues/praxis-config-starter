@@ -12,7 +12,10 @@ import org.praxisplatform.config.domain.AiThreadStatus;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiUiContextRef;
 import org.praxisplatform.config.repository.AiThreadRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -28,6 +31,8 @@ import org.springframework.web.server.ResponseStatusException;
 @RequiredArgsConstructor
 public class AiThreadService {
 
+    private static final Logger log = LoggerFactory.getLogger(AiThreadService.class);
+    private static final int DETERMINISTIC_CREATE_MAX_ATTEMPTS = 3;
     private static final Map<String, String> COMPONENT_TYPE_ALIASES = buildAliases();
 
     private final AiThreadRepository threadRepository;
@@ -61,18 +66,19 @@ public class AiThreadService {
                     resolvedUser,
                     resolvedEnvironment);
             if (deterministicThreadId != null) {
-                AiThread existingThread = threadRepository.findById(deterministicThreadId).orElse(null);
-                if (existingThread != null) {
-                    if (!isAuthorized(existingThread, resolvedTenant, resolvedEnvironment, resolvedUser)) {
-                        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Thread access denied");
-                    }
-                    AiThread savedExisting = touchThread(existingThread);
-                    request.setSessionId(savedExisting.getThreadId());
-                    return savedExisting;
-                }
+                return resolveOrCreateDeterministicThread(
+                        request,
+                        deterministicThreadId,
+                        resolvedTenant,
+                        resolvedUser,
+                        resolvedEnvironment,
+                        normalizedComponentType,
+                        routeKey,
+                        resolvedUserPrompt,
+                        uiContextRef);
             }
             AiThread created = AiThread.builder()
-                    .threadId(deterministicThreadId != null ? deterministicThreadId : UUID.randomUUID())
+                    .threadId(UUID.randomUUID())
                     .tenantId(resolvedTenant)
                     .environment(resolvedEnvironment)
                     .userId(resolvedUser)
@@ -86,20 +92,7 @@ public class AiThreadService {
                     .variantId(request.getVariantId() != null ? request.getVariantId()
                             : uiContextRef != null ? uiContextRef.getVariantId() : null)
                     .build();
-            AiThread saved;
-            try {
-                saved = threadRepository.save(created);
-            } catch (DataIntegrityViolationException ex) {
-                if (deterministicThreadId == null) {
-                    throw ex;
-                }
-                AiThread existingThread = threadRepository.findById(deterministicThreadId)
-                        .orElseThrow(() -> ex);
-                if (!isAuthorized(existingThread, resolvedTenant, resolvedEnvironment, resolvedUser)) {
-                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Thread access denied");
-                }
-                saved = touchThread(existingThread);
-            }
+            AiThread saved = threadRepository.save(created);
             request.setSessionId(saved.getThreadId());
             return saved;
         }
@@ -117,6 +110,76 @@ public class AiThreadService {
         AiThread saved = touchThread(thread);
         request.setSessionId(saved.getThreadId());
         return saved;
+    }
+
+    /**
+     * Retries only deterministic thread creation after a transient database connection failure.
+     * The stable id makes the operation safe when the driver timed out after the server may already
+     * have committed: every retry first resolves the canonical row and only then attempts another
+     * insert.
+     */
+    private AiThread resolveOrCreateDeterministicThread(
+            AiOrchestratorRequest request,
+            UUID threadId,
+            String tenantId,
+            String userId,
+            String environment,
+            String componentType,
+            String routeKey,
+            String resolvedUserPrompt,
+            AiUiContextRef uiContextRef) {
+        DataAccessResourceFailureException lastResourceFailure = null;
+        for (int attempt = 1; attempt <= DETERMINISTIC_CREATE_MAX_ATTEMPTS; attempt++) {
+            try {
+                AiThread existingThread = threadRepository.findById(threadId).orElse(null);
+                if (existingThread != null) {
+                    if (!isAuthorized(existingThread, tenantId, environment, userId)) {
+                        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Thread access denied");
+                    }
+                    AiThread savedExisting = touchThread(existingThread);
+                    request.setSessionId(savedExisting.getThreadId());
+                    return savedExisting;
+                }
+                AiThread created = AiThread.builder()
+                        .threadId(threadId)
+                        .tenantId(tenantId)
+                        .environment(environment)
+                        .userId(userId)
+                        .componentType(componentType)
+                        .componentId(request.getComponentId())
+                        .routeKey(routeKey)
+                        .title(buildTitle(resolvedUserPrompt))
+                        .status(AiThreadStatus.ACTIVE)
+                        .summary("")
+                        .schemaHash(uiContextRef != null ? uiContextRef.getSchemaHash() : null)
+                        .variantId(request.getVariantId() != null ? request.getVariantId()
+                                : uiContextRef != null ? uiContextRef.getVariantId() : null)
+                        .build();
+                try {
+                    AiThread saved = threadRepository.save(created);
+                    request.setSessionId(saved.getThreadId());
+                    return saved;
+                } catch (DataIntegrityViolationException ex) {
+                    AiThread concurrentlyCreated = threadRepository.findById(threadId)
+                            .orElseThrow(() -> ex);
+                    if (!isAuthorized(concurrentlyCreated, tenantId, environment, userId)) {
+                        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Thread access denied");
+                    }
+                    AiThread savedExisting = touchThread(concurrentlyCreated);
+                    request.setSessionId(savedExisting.getThreadId());
+                    return savedExisting;
+                }
+            } catch (DataAccessResourceFailureException ex) {
+                lastResourceFailure = ex;
+                if (attempt < DETERMINISTIC_CREATE_MAX_ATTEMPTS) {
+                    log.warn(
+                            "[AiThreadService] Deterministic thread persistence lost its database connection; retrying safely. attempt={} maxAttempts={}",
+                            attempt,
+                            DETERMINISTIC_CREATE_MAX_ATTEMPTS);
+                }
+            }
+        }
+        throw lastResourceFailure;
     }
 
     private boolean shouldCreateNewThread(AiOrchestratorRequest request) {

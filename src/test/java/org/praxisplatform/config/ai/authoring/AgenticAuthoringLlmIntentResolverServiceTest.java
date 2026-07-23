@@ -464,6 +464,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                     "provenance": "llm-planned-focused-resource"
                   },
                   "queryConstraints": {
+                    "appliesToDataSelection": true,
                     "filters": [{
                       "concept": "área de tecnologia",
                       "field": "departamento",
@@ -497,7 +498,8 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         orientation.put("requiresFullIntentResolution", true);
         orientation.put("source", "llm_pre_intent_tool_plan");
         orientation.set("queryConstraints", objectMapper.readTree("""
-                {"filters":[{"concept":"área de tecnologia","field":"departamento",
+                {"appliesToDataSelection":true,
+                "filters":[{"concept":"área de tecnologia","field":"departamento",
                 "operator":"in","value":"tecnologia"}]}
                 """));
 
@@ -545,8 +547,10 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("praxis-agentic-authoring-focused-resource-context.v1")
                 .contains("one focused, LLM-planned Praxis table-authoring request")
                 .contains("\"queryConstraints\"")
+                .contains("\"appliesToDataSelection\":true")
                 .contains("área de tecnologia")
                 .contains("/api/human-resources/funcionarios")
+                .contains("header, label, renderer, formatting, composed-cell")
                 .contains("later governed field and live option-value tools")
                 .doesNotContain("praxis-agentic-authoring-fast-intent-context.v1");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(1800);
@@ -554,6 +558,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(result.resolved()).isTrue();
         assertThat(result.artifactKind()).isEqualTo("table");
         assertThat(result.selectedResourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.queryConstraints().path("appliesToDataSelection").asBoolean()).isTrue();
         assertThat(result.queryConstraints().path("filters").get(0).path("value").asText())
                 .isEqualTo("tecnologia");
         assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
@@ -602,6 +607,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                     "provenance": "governed-live-option-field"
                   },
                   "queryConstraints": {
+                    "appliesToDataSelection": true,
                     "filters": [{
                       "concept": "departamentos de atuação",
                       "field": "departamentoIdsIn",
@@ -698,11 +704,13 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("focused semantic refinement")
                 .contains("\"activeSemanticDecision\"")
                 .contains("\"liveOptionFieldGrounding\"")
-                .contains("\"canonicalFilterField\":\"departamentoIdsIn\"");
+                .contains("\"canonicalFilterField\":\"departamentoIdsIn\"")
+                .contains("queryConstraints.appliesToDataSelection=true");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(1800);
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(24);
         assertThat(configCaptor.getValue().getModel()).isEqualTo("gpt-5.6-luna");
         assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
+        assertThat(result.queryConstraints().path("appliesToDataSelection").asBoolean()).isTrue();
         assertThat(result.queryConstraints().path("filters").get(0).path("field").asText())
                 .isEqualTo("departamentoIdsIn");
         Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
@@ -968,6 +976,62 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 eq("tenant"),
                 eq("user"),
                 eq("local"));
+    }
+
+    @Test
+    void resolvesNaturalLocalUndoThroughTheSemanticSchemaAndDeclaredClientActionCatalog() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiJsonSchema> schemaCaptor = ArgumentCaptor.forClass(AiJsonSchema.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                schemaCaptor.capture(),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "matchesSelectedComponentScope": true,
+                  "semanticIntentClass": "component_authoring",
+                  "operationKind": "undo",
+                  "artifactKind": "table",
+                  "changeKind": "undo_last_local_change",
+                  "followUpKind": "refinement",
+                  "requiresGovernedAuthoring": false,
+                  "assistantMessage": "Vou desfazer somente a última alteração local.",
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+        AgenticAuthoringIntentResolutionRequest request = targetedTableUndoRequest(true);
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        request,
+                        request.userPrompt(),
+                        objectMapper.createObjectNode(),
+                        targetedTableTarget(),
+                        List.of(),
+                        new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("\"clientActions\"")
+                .contains("\"kind\" : \"local-undo\"")
+                .contains("primary meaning is to reverse only the most recently materialized local change")
+                .contains("reinterpret undo as a renderer/configuration edit");
+        assertThat(schemaCaptor.getValue().jsonSchema())
+                .contains("\"undo\"")
+                .contains("undo_last_local_change");
+        assertThat(result.resolved()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("undo");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("undo_last_local_change");
+        assertThat(result.warnings()).contains("llm-compact-targeted-component-intent-used");
     }
 
     @Test
@@ -3174,6 +3238,35 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 List.of(),
                 objectMapper.createObjectNode(),
                 activeDecision);
+    }
+
+    private AgenticAuthoringIntentResolutionRequest targetedTableUndoRequest(boolean available) {
+        AgenticAuthoringIntentResolutionRequest prior = targetedTableRefinementRequest();
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode action = contextHints.putArray("clientActions").addObject();
+        action.put("schemaVersion", "praxis-agentic-authoring-client-action.v1");
+        action.put("id", "page-builder.local-preview.undo");
+        action.put("kind", "local-undo");
+        action.put("capabilityRef", "page-builder.local-preview-history");
+        action.put("available", available);
+        action.put("targetComponentId", "praxis-dynamic-page-builder");
+        return new AgenticAuthoringIntentResolutionRequest(
+                "Desfaz só a última mudança e mantém todas as anteriores.",
+                prior.targetApp(),
+                prior.targetComponentId(),
+                prior.currentRoute(),
+                prior.currentPage(),
+                prior.selectedWidgetKey(),
+                prior.provider(),
+                prior.model(),
+                prior.apiKey(),
+                prior.sessionId(),
+                "turn-undo",
+                prior.conversationMessages(),
+                prior.pendingClarification(),
+                prior.attachmentSummaries(),
+                contextHints,
+                prior.activeSemanticDecision());
     }
 
     private AgenticAuthoringTarget targetedTableTarget() {

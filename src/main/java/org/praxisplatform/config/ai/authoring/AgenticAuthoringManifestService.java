@@ -447,14 +447,13 @@ public class AgenticAuthoringManifestService {
         if (componentId == null || componentId.isBlank()) {
             return Optional.empty();
         }
-        return repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+        return repository.findAuthoringManifestPayload(
                         REGISTRY_TYPE_COMPONENT_DEF,
                         componentId,
                         COMPONENT_DEF_COMPONENT_TYPE,
-                        Scope.SYSTEM,
+                        Scope.SYSTEM.name(),
                         SYSTEM_SCOPE_KEY)
-                .map(registry -> readPayload(registry.getPayload()))
-                .map(payload -> payload.path("componentDefinition").path("jsonSchema").path("authoringManifest"))
+                .map(this::readPayload)
                 .filter(manifest -> manifest != null && manifest.isObject() && !manifest.isMissingNode());
     }
 

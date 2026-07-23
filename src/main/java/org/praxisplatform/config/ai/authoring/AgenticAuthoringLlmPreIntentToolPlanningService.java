@@ -574,9 +574,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 inspection, a concrete domain artifact, or another intent that needs the complete governed resolver.
                 A request to show records on an empty canvas is UI authoring even without a component name.
                 Preserve its constraints for schema-grounded materialization.
-                Encode every user-authored data predicate in queryConstraints.filters. Do not encode resource paths,
-                endpoints, component identifiers or retrieval metadata as data filters. Use an empty filters array when
-                the user did not request a data subset.
+                Set queryConstraints.appliesToDataSelection=true and populate filters only for record selection.
+                For headers, labels, renderers, formatting, composed cells, displayed values, or no subset, use false and
+                filters=[]; retrieval metadata is never a filter.
                 Preserve a semantic category, such as an organizational area, as text or a text list on this first pass.
                 After resource and field grounding, live option resolution replaces it with current canonical IDs.
                 Never invent an option value or use textual contains.
@@ -1029,6 +1029,11 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         ObjectNode queryConstraints = properties.putObject("queryConstraints");
         queryConstraints.put("type", "object");
         ObjectNode queryConstraintProperties = queryConstraints.putObject("properties");
+        queryConstraintProperties.putObject("appliesToDataSelection")
+                .put("type", "boolean")
+                .put(
+                        "description",
+                        "True only when filters constrain which backend records are retrieved or displayed; false for headers, labels, renderers, formatting, composed cells, and displayed-value edits.");
         ObjectNode queryFilters = queryConstraintProperties.putObject("filters");
         queryFilters.put("type", "array");
         ObjectNode queryFilter = queryFilters.putObject("items");
@@ -1056,7 +1061,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         queryValueArrayItemTypes.addObject().put("type", "boolean");
         queryFilter.putArray("required").add("concept").add("field").add("operator").add("value");
         queryFilter.put("additionalProperties", false);
-        queryConstraints.putArray("required").add("filters");
+        queryConstraints.putArray("required").add("appliesToDataSelection").add("filters");
         queryConstraints.put("additionalProperties", false);
         ObjectNode groundingProfile = properties.putObject("groundingProfile");
         groundingProfile.put("type", "string");

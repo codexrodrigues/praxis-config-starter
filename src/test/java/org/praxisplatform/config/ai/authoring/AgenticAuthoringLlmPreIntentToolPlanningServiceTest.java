@@ -114,6 +114,8 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("domainDiscovery")
                 .contains("human-resources.funcionarios")
                 .contains("Artifact kind and defaults are not constraints")
+                .contains("queryConstraints.appliesToDataSelection=true")
+                .contains("headers, labels, renderers, formatting, composed cells")
                 .contains("generic governed dashboard request")
                 .contains("specific measured business subject")
                 .contains("relevant axes and metrics")
@@ -130,6 +132,8 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("assistantMessage")
                 .contains("shouldRetrieveGovernedResources")
                 .contains("retrievalQuery")
+                .contains("appliesToDataSelection")
+                .contains("displayed-value edits")
                 .contains("Canonical business subject explicitly requested by the user")
                 .contains("Dimensions, fields, filters, groupings")
                 .contains("collection dashboard with filters, charts, and a detail table");
@@ -201,7 +205,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                             "excludedConcepts": [],
                             "rationale": "Use concepts only to enrich retrieval of the employee resource."
                           },
-                          "queryConstraints": {"filters": []},
+                          "queryConstraints": {"appliesToDataSelection": false, "filters": []},
                           "requiresFullIntentResolution": false,
                           "reason": "The semantic intent is complete after governed resource discovery."
                         }
@@ -215,6 +219,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
 
         assertThat(result.planned()).isTrue();
         assertThat(result.plan().requiresFullIntentResolution()).isFalse();
+        assertThat(result.plan().queryConstraints().path("appliesToDataSelection").asBoolean()).isFalse();
         assertThat(result.plan().queryConstraints().path("filters")).isEmpty();
     }
 
