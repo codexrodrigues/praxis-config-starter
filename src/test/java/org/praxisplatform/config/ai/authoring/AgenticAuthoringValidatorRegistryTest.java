@@ -177,6 +177,48 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldRejectRendererFieldReferencesThatDoNotExistInTheCurrentTable() throws Exception {
+        JsonNode operation = operation(
+                "column.renderer.set",
+                "renderer",
+                "renderer-in-column",
+                true,
+                "target-column-exists,renderer-type-supported,renderer-config-match,renderer-fields-exist");
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "id" },
+                    { "field": "avatarUrl" },
+                    { "field": "nomeCompleto" }
+                  ]
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-table",
+                operation,
+                plan("\"id\"", """
+                        {
+                          "type": "compose",
+                          "compose": {
+                            "items": [
+                              { "type": "avatar", "avatar": { "srcField": "foto", "initialsField": "nome" } },
+                              { "type": "value", "field": "codigo" }
+                            ]
+                          }
+                        }
+                        """),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).containsExactly(
+                "validator renderer-fields-exist failed for column.renderer.set: "
+                        + "unknown renderer fields [foto, nome, codigo]");
+    }
+
+    @Test
     void shouldValidateLayoutRefinementOnlyForAnExistingComposeRenderer() throws Exception {
         JsonNode operation = operation(
                 "column.renderer.composeLayout.set",

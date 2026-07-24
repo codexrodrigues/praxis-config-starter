@@ -175,6 +175,9 @@ public class AgenticAuthoringComponentOperationSelectionService {
             card.put("submissionImpact", operation.path("submissionImpact").asText(""));
             card.put("destructive", operation.path("destructive").asBoolean(false));
             copyTextValues(operation.path("affectedPaths"), card.putArray("affectedPaths"));
+            ArrayNode stateRequirements = card.putArray("stateRequirements");
+            copyTextValues(operation.path("preconditions"), stateRequirements);
+            copyTextValues(operation.path("validators"), stateRequirements);
 
             ArrayNode inputConcepts = card.putArray("inputConcepts");
             JsonNode inputProperties = operation.path("inputSchema").path("properties");
@@ -220,6 +223,9 @@ public class AgenticAuthoringComponentOperationSelectionService {
                 operationCards are a governed semantic-retrieval shortlist in stable canonical catalog order, not a
                 prior intent decision or ranking signal. Select only the cards that materially implement the current
                 request and reject cards whose semantic boundary matches a semanticCounterExamples item.
+                Reject an operation whose declared state requirement is not satisfied by currentConfig. When the
+                request introduces content that is not yet materialized, select the declared operation that creates
+                that outcome instead of a refinement operation that requires it to exist already.
                 Do not select an operation that moves sibling surfaces to order elements inside rendered content.
                 When content from one surface must be incorporated into another presentation and no longer remain
                 independently visible, select both the declared content/renderer operation and the declared
@@ -337,13 +343,8 @@ public class AgenticAuthoringComponentOperationSelectionService {
                 break;
             }
         }
-        Set<String> semanticContinuity =
-                new LinkedHashSet<>(semanticContinuityOperationIds(request, manifest, declaredOperationIds));
         int supplementalCount = 0;
         for (String operationId : promptRelevantOperationIds(request, manifest)) {
-            if (!semanticContinuity.isEmpty() && !semanticContinuity.contains(operationId)) {
-                continue;
-            }
             if (selected.add(operationId)) {
                 supplementalCount++;
             }

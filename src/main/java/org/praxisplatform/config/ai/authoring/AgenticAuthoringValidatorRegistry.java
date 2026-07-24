@@ -8,6 +8,7 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -156,6 +157,7 @@ public final class AgenticAuthoringValidatorRegistry {
             "renderer-supported",
             "renderer-type-supported",
             "renderer-config-match",
+            "renderer-fields-exist",
             "renderer-compose-exists",
             "renderer-compose-item-exists",
             "renderer-config-compatible",
@@ -635,6 +637,8 @@ public final class AgenticAuthoringValidatorRegistry {
                         validateTableRendererType(operationId, planOperation, failures);
                 case "renderer-config-match", "renderer-config-compatible" ->
                         validateTableRendererConfig(operationId, planOperation, failures);
+                case "renderer-fields-exist" ->
+                        validateTableRendererFieldsExist(operationId, planOperation, config, failures);
                 case "renderer-compose-exists" ->
                         validateTableComposeExists(
                                 componentId, operation, planOperation, config, failures);
@@ -1626,6 +1630,58 @@ public final class AgenticAuthoringValidatorRegistry {
             }
         }
         return false;
+    }
+
+    private void validateTableRendererFieldsExist(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        Set<String> availableFields = new LinkedHashSet<>();
+        JsonNode columns = config == null ? null : config.path("columns");
+        if (columns != null && columns.isArray()) {
+            for (JsonNode column : columns) {
+                String field = text(column, "field");
+                if (!field.isBlank()) {
+                    availableFields.add(field);
+                }
+            }
+        }
+        if (availableFields.isEmpty()) {
+            return;
+        }
+        Set<String> referencedFields = new LinkedHashSet<>();
+        collectRendererFieldReferences(planOperation.path("input"), referencedFields);
+        Set<String> unknownFields = new LinkedHashSet<>(referencedFields);
+        unknownFields.removeAll(availableFields);
+        if (!unknownFields.isEmpty()) {
+            failures.add("validator renderer-fields-exist failed for " + operationId
+                    + ": unknown renderer fields " + unknownFields);
+        }
+    }
+
+    private void collectRendererFieldReferences(JsonNode node, Set<String> referencedFields) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isArray()) {
+            node.forEach(child -> collectRendererFieldReferences(child, referencedFields));
+            return;
+        }
+        if (!node.isObject()) {
+            return;
+        }
+        node.fields().forEachRemaining(entry -> {
+            String property = entry.getKey();
+            JsonNode value = entry.getValue();
+            if (value.isTextual()
+                    && ("field".equals(property) || property.endsWith("Field"))
+                    && !value.asText("").isBlank()) {
+                referencedFields.add(value.asText());
+            } else {
+                collectRendererFieldReferences(value, referencedFields);
+            }
+        });
     }
 
     private Set<String> tableRendererConfigBlocks() {

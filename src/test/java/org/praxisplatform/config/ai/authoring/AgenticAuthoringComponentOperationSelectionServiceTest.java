@@ -129,6 +129,54 @@ class AgenticAuthoringComponentOperationSelectionServiceTest {
     }
 
     @Test
+    void keepsPromptGroundedAlternativesWhenTheResolvedRefinementRequiresMissingState() throws Exception {
+        when(provider.generateJson(anyString(), any(), any(), anyString(), anyString(), anyString()))
+                .thenReturn(selection("column.renderer.set", "column.visibility.set"));
+        var service = new AgenticAuthoringComponentOperationSelectionService(provider, objectMapper, 9);
+        JsonNode currentConfig = objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "id", "header": "Código" },
+                    { "field": "avatarUrl", "header": "Foto" }
+                  ]
+                }
+                """);
+
+        var result = service.select(
+                new AgenticAuthoringPlanRequest(
+                        "Na mesma linha, e a Foto não deve continuar separada: no Código coloca primeiro a foto e depois o código.",
+                        "openai",
+                        "gpt",
+                        "key",
+                        null,
+                        intentForOperation("column.renderer.composeLayout.set"),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        objectMapper.createObjectNode()),
+                "praxis-table",
+                currentConfig,
+                semanticManifest(),
+                "t",
+                "u",
+                "e");
+
+        assertThat(result.operationIds())
+                .containsExactly("column.renderer.set", "column.visibility.set");
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(provider).generateJson(prompt.capture(), any(), any(), anyString(), anyString(), anyString());
+        assertThat(prompt.getValue()).contains(
+                "\"operationId\":\"column.renderer.composeLayout.set\"",
+                "\"operationId\":\"column.renderer.set\"",
+                "\"operationId\":\"column.visibility.set\"",
+                "\"stateRequirements\":[\"target-exists\",\"renderer-compose-exists\"]",
+                "Reject an operation whose declared state requirement is not satisfied by currentConfig",
+                "select the declared operation that creates");
+    }
+
+    @Test
     void usesServerGroundedCandidatesAsABoundedShortlistWithoutTrustingCandidatePayloadFields() throws Exception {
         when(provider.generateJson(anyString(), any(), any(), anyString(), anyString(), anyString()))
                 .thenReturn(selection("column.header.set"));
@@ -446,6 +494,20 @@ class AgenticAuthoringComponentOperationSelectionServiceTest {
                 "properties": { "visible": { "type": "boolean" } }
               },
               "affectedPaths": ["columns[].visible"]
+            },
+            {
+              "operationId": "column.renderer.composeLayout.set",
+              "title": "Refinar layout composto existente",
+              "description": "Change direction only when a compose renderer already exists.",
+              "scope": "column",
+              "targetKind": "renderer",
+              "inputSchema": {
+                "type": "object",
+                "properties": { "direction": { "type": "string" } }
+              },
+              "preconditions": ["target-exists"],
+              "validators": ["renderer-compose-exists"],
+              "affectedPaths": ["columns[].renderer.compose.layout"]
             }
           ],
           "examples": [
