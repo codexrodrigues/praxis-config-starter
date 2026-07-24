@@ -13,6 +13,7 @@ import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.embedding.Embedding;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
@@ -63,6 +64,27 @@ class EmbeddingServiceTest {
 
         assertEquals(2, vector.size());
         assertEquals(0.5f, vector.get(0));
+    }
+
+    @Test
+    void embedRagQueryUsesGeminiEmbedding2RetrievalInstruction() {
+        GoogleGenAiTextEmbeddingModel client = Mockito.mock(GoogleGenAiTextEmbeddingModel.class);
+        when(client.call(any(EmbeddingRequest.class))).thenReturn(new EmbeddingResponse(
+                List.of(new Embedding(new float[] {0.5f}, 0))));
+        EmbeddingService service = new EmbeddingService(emptyOpenAiProvider(), provider(client), new ObjectMapper());
+        ReflectionTestUtils.setField(service, "provider", "gemini");
+        ReflectionTestUtils.setField(service, "geminiApiKey", "gemini-key");
+        ReflectionTestUtils.setField(service, "geminiModel", "gemini-embedding-2");
+        ReflectionTestUtils.setField(service, "geminiDimensions", 0);
+        ReflectionTestUtils.setField(service, "geminiEmbedding2RetrievalInstructionsEnabled", true);
+
+        service.embedRagQuery("coloque o status inativo em vermelho");
+
+        ArgumentCaptor<EmbeddingRequest> requestCaptor = ArgumentCaptor.forClass(EmbeddingRequest.class);
+        verify(client).call(requestCaptor.capture());
+        assertEquals(
+                "task: search result | query: coloque o status inativo em vermelho",
+                requestCaptor.getValue().getInstructions().getFirst());
     }
 
     @Test

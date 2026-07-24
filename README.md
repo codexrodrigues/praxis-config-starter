@@ -357,6 +357,13 @@ readiness with `GET /api/praxis/config/api-catalog/rag/status?releaseId=...`. A 
 or publication failure must not roll back canonical ingestion, and RAG diagnostics should be used to
 decide whether semantic retrieval is operational for that scope.
 
+The derived index is governed by its effective embedding profile (provider, model, dimensions and
+retrieval-format version). Changing any of those values deliberately makes prior vectors ineligible
+for retrieval and makes readiness report the corpus as unreconciled. Rebuild the affected release
+from canonical `api_metadata`, registry or Project Knowledge evidence; never mix vector spaces or
+copy vectors across profiles. With `gemini-embedding-2`, Praxis uses distinct document and query
+instructions for asymmetric retrieval.
+
 API metadata `tags` filters are normalized as comma, semicolon or pipe separated tokens and matched
 case-insensitively as an AND set. Structured retrieval and RAG retrieval must both preserve method,
 tenant, environment and release filters; when RAG is available, nonmatching tagged candidates are

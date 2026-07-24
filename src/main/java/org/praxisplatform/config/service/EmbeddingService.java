@@ -79,12 +79,38 @@ public class EmbeddingService {
     @Value("${praxis.ai.timeout-seconds:30}")
     private int timeoutSeconds;
 
+    @Value("${praxis.ai.rag.embedding.gemini-embedding-2.retrieval-instructions.enabled:true}")
+    private boolean geminiEmbedding2RetrievalInstructionsEnabled;
+
     public List<Float> embed(String text) {
         return embed(text, null);
     }
 
+    /** Embeds a document published to the derived RAG corpus. */
+    public List<Float> embedRagDocument(String text) {
+        return embed(formatRagInput(text, RagEmbeddingPurpose.DOCUMENT, null), null);
+    }
+
+    /** Embeds a user query executed against the derived RAG corpus. */
+    public List<Float> embedRagQuery(String text) {
+        return embedRagQuery(text, null);
+    }
+
+    public List<Float> embedRagQuery(String text, EmbeddingCallConfig override) {
+        return embed(formatRagInput(text, RagEmbeddingPurpose.QUERY, override), override);
+    }
+
     public List<List<Float>> embedAll(List<String> texts) {
         return embedAll(texts, null);
+    }
+
+    public List<List<Float>> embedRagDocuments(List<String> texts, EmbeddingCallConfig override) {
+        if (texts == null || texts.isEmpty()) {
+            return List.of();
+        }
+        return embedAll(texts.stream()
+                .map(text -> formatRagInput(text, RagEmbeddingPurpose.DOCUMENT, override))
+                .toList(), override);
     }
 
     public List<List<Float>> embedAll(List<String> texts, EmbeddingCallConfig override) {
@@ -175,6 +201,20 @@ public class EmbeddingService {
             batches.add(List.copyOf(current));
         }
         return batches;
+    }
+
+    private String formatRagInput(String text, RagEmbeddingPurpose purpose, EmbeddingCallConfig override) {
+        String normalizedText = text != null ? text : "";
+        String selectedProvider = normalizeProvider(override != null ? override.provider() : provider);
+        if (!PROVIDER_GEMINI.equals(selectedProvider)
+                || !geminiEmbedding2RetrievalInstructionsEnabled
+                || !DEFAULT_GEMINI_EMBEDDING_MODEL.equals(resolveModel(override, geminiModel))) {
+            return normalizedText;
+        }
+        if (purpose == RagEmbeddingPurpose.DOCUMENT) {
+            return "title: Praxis governed corpus | text: " + normalizedText;
+        }
+        return "task: search result | query: " + normalizedText;
     }
 
     public List<Float> embed(String text, EmbeddingCallConfig override) {
@@ -391,6 +431,11 @@ public class EmbeddingService {
             String apiKey,
             String model,
             Integer dimensions) {}
+
+    private enum RagEmbeddingPurpose {
+        DOCUMENT,
+        QUERY
+    }
 
     private String normalizeProvider(String value) {
         if (value == null || value.isBlank()) {

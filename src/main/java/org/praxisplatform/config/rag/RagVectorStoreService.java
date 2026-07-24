@@ -12,6 +12,7 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.filter.Filter;
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,14 +25,17 @@ public class RagVectorStoreService {
 
     private final ObjectProvider<VectorStore> vectorStoreProvider;
     private final ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider;
+    private final RagEmbeddingProfile embeddingProfile;
     private final String tableName;
 
     public RagVectorStoreService(
             ObjectProvider<VectorStore> vectorStoreProvider,
             @Qualifier("configNamedParameterJdbcTemplate") ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider,
+            RagEmbeddingProfile embeddingProfile,
             @Value("${praxis.ai.rag.vector-store.table:vector_store}") String tableName) {
         this.vectorStoreProvider = vectorStoreProvider;
         this.jdbcTemplateProvider = jdbcTemplateProvider;
+        this.embeddingProfile = embeddingProfile;
         this.tableName = resolveTableName(tableName);
     }
 
@@ -150,12 +154,15 @@ public class RagVectorStoreService {
               AND COALESCE(metadata ->> 'environment', 'global') = :environment
               AND COALESCE(metadata ->> 'releaseId', 'v1') = :releaseId
               AND COALESCE(metadata ->> 'resourceType', metadata ->> 'docType', metadata ->> 'sourceKind') = :resourceType
+              AND COALESCE(metadata ->> 'embeddingProfile', '') = :embeddingProfile
+              AND COALESCE(metadata ->> 'embeddingProfile', '') = :embeddingProfile
             """.formatted(tableName);
         Map<String, Object> params = Map.of(
                 "tenantId", RagDocumentIdentity.normalizeToken(tenantId, "global"),
                 "environment", RagDocumentIdentity.normalizeToken(environment, "global"),
                 "releaseId", RagDocumentIdentity.normalizeToken(releaseId, "v1"),
-                "resourceType", RagDocumentIdentity.normalizeToken(resourceType, "unknown-kind"));
+                "resourceType", RagDocumentIdentity.normalizeToken(resourceType, "unknown-kind"),
+                "embeddingProfile", embeddingProfile.id());
         try {
             Map<RagDocumentScope, Set<String>> idsByScope = new LinkedHashMap<>();
             jdbcTemplate.query(sql, params, resultSet -> {
@@ -229,7 +236,8 @@ public class RagVectorStoreService {
                 continue;
             }
             validCount++;
-            deduplicatedDocuments.putIfAbsent(buildDedupeKey(document), document);
+            Document profiledDocument = withEmbeddingProfile(document);
+            deduplicatedDocuments.putIfAbsent(buildDedupeKey(profiledDocument), profiledDocument);
         }
         if (deduplicatedDocuments.isEmpty()) {
             return;
@@ -273,10 +281,29 @@ public class RagVectorStoreService {
                 .query(query)
                 .topK(Math.max(1, limit))
                 .similarityThresholdAll();
+        FilterExpressionBuilder filterBuilder = new FilterExpressionBuilder();
+        FilterExpressionBuilder.Op profileFilter = filterBuilder.eq(
+                RagMetadataKeys.EMBEDDING_PROFILE,
+                embeddingProfile.id());
         if (filterExpression != null) {
-            builder.filterExpression(filterExpression);
+            builder.filterExpression(new Filter.Expression(
+                    Filter.ExpressionType.AND,
+                    profileFilter.build(),
+                    filterExpression));
+        } else {
+            builder.filterExpression(profileFilter.build());
         }
         return vectorStore.similaritySearch(builder.build());
+    }
+
+    private Document withEmbeddingProfile(Document document) {
+        Map<String, Object> metadata = new LinkedHashMap<>(document.getMetadata() != null ? document.getMetadata() : Map.of());
+        metadata.put(RagMetadataKeys.EMBEDDING_PROFILE, embeddingProfile.id());
+        return Document.builder()
+                .id(document.getId())
+                .text(document.getText())
+                .metadata(metadata)
+                .build();
     }
 
     public RagCorpusReleaseStatus corpusReleaseStatus(
@@ -332,7 +359,8 @@ public class RagVectorStoreService {
                 "tenantId", resolvedTenant,
                 "environment", resolvedEnvironment,
                 "releaseId", resolvedRelease,
-                "resourceType", resolvedResourceType);
+                "resourceType", resolvedResourceType,
+                "embeddingProfile", embeddingProfile.id());
         try {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, params);
             return RagCorpusReleaseStatus.fromRows(
@@ -372,6 +400,7 @@ public class RagVectorStoreService {
         String contentHash = normalizeMetadataToken(
                 metadata.get(RagMetadataKeys.CONTENT_HASH),
                 RagDocumentIdentity.sha256(document.getText() != null ? document.getText() : document.getId()));
+        String profile = normalizeMetadataToken(metadata.get(RagMetadataKeys.EMBEDDING_PROFILE), "unknown-profile");
         int chunkIndex = toChunkIndex(metadata.get(RagMetadataKeys.CHUNK_INDEX));
         return String.join(
                 "|",
@@ -381,6 +410,7 @@ public class RagVectorStoreService {
                 componentId,
                 docType,
                 contentHash,
+                profile,
                 Integer.toString(chunkIndex));
     }
 

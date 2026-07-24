@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -39,11 +40,15 @@ class RagVectorStoreServiceTest {
     @Mock
     private ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider;
 
+    @Mock
+    private RagEmbeddingProfile embeddingProfile;
+
     private RagVectorStoreService service;
 
     @BeforeEach
     void setUp() {
-        service = new RagVectorStoreService(vectorStoreProvider, jdbcTemplateProvider, "vector_store");
+        lenient().when(embeddingProfile.id()).thenReturn("rag-v1__gemini__gemini-embedding-2__768");
+        service = new RagVectorStoreService(vectorStoreProvider, jdbcTemplateProvider, embeddingProfile, "vector_store");
     }
 
     @Test
@@ -79,6 +84,8 @@ class RagVectorStoreServiceTest {
         assertThat(idsCaptor.getValue()).containsExactly(first.getId());
         assertThat(docsCaptor.getValue()).hasSize(1);
         assertThat(docsCaptor.getValue().get(0).getId()).isEqualTo(first.getId());
+        assertThat(docsCaptor.getValue().get(0).getMetadata())
+                .containsEntry(RagMetadataKeys.EMBEDDING_PROFILE, "rag-v1__gemini__gemini-embedding-2__768");
     }
 
     @Test
@@ -144,7 +151,7 @@ class RagVectorStoreServiceTest {
 
     @Test
     void shouldUseConfiguredVectorStoreTableNameForDeleteDocumentsByScope() {
-        service = new RagVectorStoreService(vectorStoreProvider, jdbcTemplateProvider, "custom_vector_store");
+        service = new RagVectorStoreService(vectorStoreProvider, jdbcTemplateProvider, embeddingProfile, "custom_vector_store");
         when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
         when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
         when(jdbcTemplate.update(anyString(), any(Map.class))).thenReturn(1);
@@ -207,6 +214,8 @@ class RagVectorStoreServiceTest {
         assertThat(sqlCaptor.getValue()).contains("FROM vector_store");
         assertThat(paramsCaptor.getValue()).containsEntry("releaseId", "release-1");
         assertThat(paramsCaptor.getValue()).containsEntry("resourceType", RagResourceTypes.COMPONENT_DEFINITION);
+        assertThat(paramsCaptor.getValue())
+                .containsEntry("embeddingProfile", "rag-v1__gemini__gemini-embedding-2__768");
     }
 
     @Test
