@@ -65,7 +65,7 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
                                     .toList());
         }
         assertThat(result.diagnostics().source()).isEqualTo("snapshot");
-        assertThat(result.diagnostics().degradationReason()).contains("tableManifestVersion=2.0.0");
+        assertThat(result.diagnostics().degradationReason()).contains("tableManifestVersion=2.2.1");
     }
 
     @Test

@@ -44,7 +44,7 @@ class AgenticAuthoringProviderSchemaCompilerTest {
 
         JsonNode schema = compiler.compileEditPlanSchema("praxis-component-edit-plan.v1", "praxis-table", operations);
 
-        assertThat(operations).hasSize(66);
+        assertThat(operations).hasSize(68);
         assertProviderSafe(schema);
         assertThat(manifest).isEqualTo(original);
     }

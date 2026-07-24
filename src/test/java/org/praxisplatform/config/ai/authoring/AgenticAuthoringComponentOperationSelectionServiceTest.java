@@ -180,6 +180,99 @@ class AgenticAuthoringComponentOperationSelectionServiceTest {
     }
 
     @Test
+    void restoresSemanticOperationNeighborhoodWhenRetrievalOmitsCompoundComposeRefinements() throws Exception {
+        when(provider.generateJson(anyString(), any(), any(), anyString(), anyString(), anyString()))
+                .thenReturn(selection(
+                        "column.renderer.composeLayout.set",
+                        "column.renderer.composeItem.set"));
+        var service = new AgenticAuthoringComponentOperationSelectionService(provider, objectMapper, 9);
+        var contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("authoringEvidence")
+                .putArray("operationCandidates")
+                .addObject()
+                .put("id", "column.visibility.set");
+
+        var result = service.select(
+                new AgenticAuthoringPlanRequest(
+                        "Pensando melhor, ajuste o composto sem alterar o restante.",
+                        "openai",
+                        "gpt",
+                        "key",
+                        null,
+                        intentForOperation("column.renderer.composeLayout.set"),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        contextHints),
+                "praxis-table",
+                objectMapper.createObjectNode(),
+                semanticContinuityManifest(),
+                "t",
+                "u",
+                "e");
+
+        assertThat(result.operationIds()).containsExactlyInAnyOrder(
+                "column.renderer.composeLayout.set",
+                "column.renderer.composeItem.set");
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(provider).generateJson(prompt.capture(), any(), any(), anyString(), anyString(), anyString());
+        assertThat(prompt.getValue())
+                .contains(
+                        "\"operationId\":\"column.renderer.composeLayout.set\"",
+                        "\"operationId\":\"column.renderer.composeItem.set\"",
+                        "\"operationId\":\"column.visibility.set\"")
+                .doesNotContain(
+                        "\"operationId\":\"column.renderer.set\"",
+                        "\"operationId\":\"column.header.set\"");
+    }
+
+    @Test
+    void restoresManifestDeclaredBundleSiblingForPairedStatusPresentation() throws Exception {
+        when(provider.generateJson(anyString(), any(), any(), anyString(), anyString(), anyString()))
+                .thenReturn(selection("column.renderer.set", "column.conditionalRenderer.add"));
+        var service = new AgenticAuthoringComponentOperationSelectionService(provider, objectMapper, 9);
+        var contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("authoringEvidence")
+                .putArray("operationCandidates")
+                .addObject()
+                .put("id", "column.conditionalRenderer.add");
+
+        var result = service.select(
+                new AgenticAuthoringPlanRequest(
+                        "Aplique a apresentação sem alterar o restante.",
+                        "openai",
+                        "gpt",
+                        "key",
+                        null,
+                        intentForOperation("column.conditionalRenderer.add"),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        contextHints),
+                "praxis-table",
+                objectMapper.createObjectNode(),
+                statusPresentationBundleManifest(),
+                "t",
+                "u",
+                "e");
+
+        assertThat(result.operationIds())
+                .containsExactlyInAnyOrder("column.renderer.set", "column.conditionalRenderer.add");
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(provider).generateJson(prompt.capture(), any(), any(), anyString(), anyString(), anyString());
+        assertThat(prompt.getValue())
+                .contains(
+                        "\"operationId\":\"column.renderer.set\"",
+                        "\"operationId\":\"column.conditionalRenderer.add\"",
+                        "\"operationBundles\":[{\"semanticIntent\":\"Status com base verde e exceção vermelha.\"",
+                        "\"operationIds\":[\"column.renderer.set\",\"column.conditionalRenderer.add\"]");
+    }
+
+    @Test
     void treatsTheCurrentPromptAsTheDeltaWithoutProjectingHistoricalObjectives() throws Exception {
         when(provider.generateJson(anyString(), any(), any(), anyString(), anyString(), anyString()))
                 .thenReturn(selection("column.renderer.set"));
@@ -303,6 +396,24 @@ class AgenticAuthoringComponentOperationSelectionServiceTest {
                 null,
                 decision);
     }
+    private AgenticAuthoringIntentResolutionResult intentForOperation(String operationKind) {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "table",
+                operationKind,
+                "semantic-manifest",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget("funcionarios-table", "praxis-table", "", "", "", ""),
+                null,
+                java.util.List.of(),
+                new AgenticAuthoringGateResult("component-edit", "eligible", java.util.List.of()),
+                java.util.List.of(),
+                java.util.List.of(),
+                java.util.List.of(),
+                objectMapper.createObjectNode());
+    }
     private JsonNode manifest() throws Exception { return objectMapper.readTree("""
         {"operations":[{"operationId":"column.renderer.set","title":"Renderer"},{"operationId":"column.visibility.set","title":"Visibility"}]}
         """); }
@@ -413,6 +524,72 @@ class AgenticAuthoringComponentOperationSelectionServiceTest {
               "request": "Ativo vira Status sem mudar os valores.",
               "operationId": "column.valueMapping.set",
               "isPositive": false
+            }
+          ]
+        }
+        """); }
+    private JsonNode semanticContinuityManifest() throws Exception { return objectMapper.readTree("""
+        {
+          "operations": [
+            {
+              "operationId": "column.header.set",
+              "targetKind": "column",
+              "affectedPaths": ["columns[].header"]
+            },
+            {
+              "operationId": "column.visibility.set",
+              "targetKind": "column",
+              "affectedPaths": ["columns[].visible"]
+            },
+            {
+              "operationId": "column.renderer.set",
+              "targetKind": "renderer",
+              "affectedPaths": ["columns[].renderer"]
+            },
+            {
+              "operationId": "column.renderer.composeLayout.set",
+              "targetKind": "renderer",
+              "affectedPaths": ["columns[].renderer.compose.layout"]
+            },
+            {
+              "operationId": "column.renderer.composeItem.set",
+              "targetKind": "renderer",
+              "affectedPaths": ["columns[].renderer.compose.items[]"]
+            }
+          ]
+        }
+        """); }
+    private JsonNode statusPresentationBundleManifest() throws Exception { return objectMapper.readTree("""
+        {
+          "operations": [
+            {
+              "operationId": "column.renderer.set",
+              "targetKind": "renderer",
+              "affectedPaths": ["columns[].renderer"]
+            },
+            {
+              "operationId": "column.conditionalRenderer.add",
+              "targetKind": "column",
+              "affectedPaths": ["columns[].conditionalRenderers[]"]
+            },
+            {
+              "operationId": "column.visibility.set",
+              "targetKind": "column",
+              "affectedPaths": ["columns[].visible"]
+            }
+          ],
+          "examples": [
+            {
+              "request": "Status com base verde e exceção vermelha.",
+              "operationId": "column.renderer.set",
+              "target": "ativo",
+              "isPositive": true
+            },
+            {
+              "request": "Status com base verde e exceção vermelha.",
+              "operationId": "column.conditionalRenderer.add",
+              "target": "ativo",
+              "isPositive": true
             }
           ]
         }

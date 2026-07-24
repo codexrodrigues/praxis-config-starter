@@ -6,8 +6,10 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import org.praxisplatform.config.service.AiCallConfig;
@@ -93,6 +95,29 @@ public class AgenticAuthoringComponentEditPlanService {
                         missing(), missing());
             }
             JsonNode selectedManifest = manifestWithOperations(manifest, selection.operationIds());
+            JsonNode manifestBundlePlan = materializeUniqueManifestExampleBundle(
+                    componentId,
+                    manifest,
+                    selection.operationIds());
+            if (manifestBundlePlan != null) {
+                AgenticAuthoringComponentEditPlanResult bundleResult = compileGovernedPlan(
+                        componentId,
+                        config,
+                        componentConfig,
+                        configBinding,
+                        manifestBundlePlan,
+                        validationContext,
+                        List.of(),
+                        "component-edit-plan-source:manifest-example-bundle");
+                if (bundleResult.valid()) {
+                    return bundleResult;
+                }
+                log.info(
+                        "[AgenticAuthoringComponentEditPlan] Canonical example bundle did not compile; falling back to parameter authoring (componentId={}, selectedOperations={}, failureCodes={}).",
+                        componentId,
+                        selection.operationIds(),
+                        bundleResult.failureCodes());
+            }
             AiJsonSchema providerSchema = AiJsonSchema.ofSchema(objectMapper.writeValueAsString(
                     outputSchema(componentId, selectedManifest, request.intentResolution())));
 
@@ -920,6 +945,80 @@ public class AgenticAuthoringComponentEditPlanService {
         List<String> operationIds = new ArrayList<>();
         manifest.path("operations").forEach(operation -> operationIds.add(operation.path("operationId").asText("")));
         return List.copyOf(operationIds);
+    }
+
+    /**
+     * A set of positive examples with the same request declares a canonical multi-operation
+     * materialization. Once the LLM has semantically selected that exact operation set, reuse the
+     * governed targets and parameters instead of asking a second provider call to reconstruct
+     * them. Ambiguous or incomplete bundles deliberately fall back to normal parameter authoring.
+     */
+    private JsonNode materializeUniqueManifestExampleBundle(
+            String componentId,
+            JsonNode manifest,
+            List<String> selectedOperationIds) {
+        if (manifest == null
+                || selectedOperationIds == null
+                || selectedOperationIds.size() < 2
+                || new LinkedHashSet<>(selectedOperationIds).size() != selectedOperationIds.size()) {
+            return null;
+        }
+        Set<String> selected = new LinkedHashSet<>(selectedOperationIds);
+        Map<String, List<JsonNode>> examplesByRequest = new LinkedHashMap<>();
+        for (JsonNode example : manifest.path("examples")) {
+            if (!example.path("isPositive").asBoolean(false)) {
+                continue;
+            }
+            String request = example.path("request").asText("").replaceAll("\\s+", " ").trim();
+            String operationId = example.path("operationId").asText("");
+            if (request.isBlank() || operationId.isBlank()) {
+                continue;
+            }
+            examplesByRequest.computeIfAbsent(request, ignored -> new ArrayList<>()).add(example);
+        }
+
+        List<List<JsonNode>> completeBundles = new ArrayList<>();
+        for (List<JsonNode> examples : examplesByRequest.values()) {
+            Set<String> operationIds = new LinkedHashSet<>();
+            boolean complete = true;
+            for (JsonNode example : examples) {
+                String operationId = example.path("operationId").asText("");
+                if (!operationIds.add(operationId)
+                        || !example.path("params").isObject()) {
+                    complete = false;
+                    break;
+                }
+            }
+            if (complete && operationIds.equals(selected)) {
+                completeBundles.add(examples);
+            }
+        }
+        if (completeBundles.size() != 1) {
+            return null;
+        }
+
+        Map<String, JsonNode> examplesByOperationId = new LinkedHashMap<>();
+        for (JsonNode example : completeBundles.get(0)) {
+            examplesByOperationId.put(example.path("operationId").asText(""), example);
+        }
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("schemaVersion", PLAN_SCHEMA_VERSION);
+        plan.put("componentId", componentId);
+        ArrayNode operations = plan.putArray("operations");
+        for (String operationId : selectedOperationIds) {
+            JsonNode example = examplesByOperationId.get(operationId);
+            if (example == null) {
+                return null;
+            }
+            ObjectNode operation = operations.addObject();
+            operation.put("operationId", operationId);
+            JsonNode target = example.get("target");
+            if (target != null && !target.isNull() && !target.isMissingNode()) {
+                operation.set("target", target.deepCopy());
+            }
+            operation.set("input", example.path("params").deepCopy());
+        }
+        return plan;
     }
 
     private JsonNode normalizeSelectedOperationSequence(

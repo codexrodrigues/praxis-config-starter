@@ -440,6 +440,160 @@ class AgenticAuthoringComponentEditPlanServiceTest {
     }
 
     @Test
+    void compilesUniqueManifestDeclaredExampleBundleWithoutRegeneratingItsParameters() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "componentId":"praxis-table",
+                  "operations":[
+                    {"operationId":"column.renderer.set","inputSchema":{"type":"object"}},
+                    {"operationId":"column.conditionalRenderer.add","inputSchema":{"type":"object"}}
+                  ],
+                  "examples":[
+                    {
+                      "id":"active-base",
+                      "request":"Use chip verde para ativo e vermelho para inativo",
+                      "operationId":"column.renderer.set",
+                      "target":"ativo",
+                      "params":{"type":"chip","chip":{"textField":"ativo","color":"success"}},
+                      "isPositive":true
+                    },
+                    {
+                      "id":"inactive-exception",
+                      "request":"Use chip verde para ativo e vermelho para inativo",
+                      "operationId":"column.conditionalRenderer.add",
+                      "target":"ativo",
+                      "params":{
+                        "id":"chip-inativo",
+                        "condition":{"==":[{"var":"ativo"},false]},
+                        "renderer":{"type":"chip","chip":{"text":"Inativo","color":"warn"}}
+                      },
+                      "isPositive":true
+                    }
+                  ]
+                }
+                """);
+        JsonNode selection = selection(
+                "praxis-table",
+                "column.renderer.set",
+                "column.conditionalRenderer.add");
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
+                .thenReturn(selection);
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(new AgenticAuthoringManifestCompileResult(
+                        true,
+                        java.util.List.of(),
+                        java.util.List.of(),
+                        objectMapper.readTree("""
+                                {"proposedConfig":{"columns":[{"field":"ativo"}]}}
+                                """)));
+
+        AgenticAuthoringComponentEditPlanResult result = new AgenticAuthoringComponentEditPlanService(
+                providerManagementService, manifestService, objectMapper).generateAndCompile(
+                        new AgenticAuthoringPlanRequest(
+                                "No status, deixa ativo verde e inativo vermelho",
+                                "openai",
+                                "gpt",
+                                "key"),
+                        "praxis-table",
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        "t",
+                        "u",
+                        "e");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.providerInvocations()).isEmpty();
+        assertThat(result.warnings()).contains("component-edit-plan-source:manifest-example-bundle");
+        assertThat(result.plan().path("operations"))
+                .extracting(operation -> operation.path("operationId").asText())
+                .containsExactlyInAnyOrder("column.renderer.set", "column.conditionalRenderer.add");
+        JsonNode rendererOperation = findOperation(result.plan(), "column.renderer.set");
+        JsonNode conditionalOperation = findOperation(result.plan(), "column.conditionalRenderer.add");
+        assertThat(rendererOperation.path("target").asText()).isEqualTo("ativo");
+        assertThat(rendererOperation.at("/input/chip/color").asText()).isEqualTo("success");
+        assertThat(conditionalOperation.at("/input/renderer/chip/color").asText()).isEqualTo("warn");
+        verify(providerManagementService, times(1))
+                .generateJson(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void doesNotMaterializeOnlyASubsetOfALargerManifestBundle() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "componentId":"praxis-table",
+                  "operations":[
+                    {"operationId":"column.renderer.set","inputSchema":{"type":"object"}},
+                    {"operationId":"column.conditionalRenderer.add","inputSchema":{"type":"object"}},
+                    {"operationId":"column.visibility.set","inputSchema":{"type":"object"}}
+                  ],
+                  "examples":[
+                    {
+                      "request":"Apresente status e oculte a origem",
+                      "operationId":"column.renderer.set",
+                      "target":"ativo",
+                      "params":{"type":"chip"},
+                      "isPositive":true
+                    },
+                    {
+                      "request":"Apresente status e oculte a origem",
+                      "operationId":"column.conditionalRenderer.add",
+                      "target":"ativo",
+                      "params":{"id":"inativo","condition":{"var":"ativo"},"renderer":{"type":"chip"}},
+                      "isPositive":true
+                    },
+                    {
+                      "request":"Apresente status e oculte a origem",
+                      "operationId":"column.visibility.set",
+                      "target":"statusOrigem",
+                      "params":{"visible":false},
+                      "isPositive":true
+                    }
+                  ]
+                }
+                """);
+        JsonNode selection = selection(
+                "praxis-table",
+                "column.renderer.set",
+                "column.conditionalRenderer.add");
+        JsonNode authoredPlan = objectMapper.readTree("""
+                {
+                  "schemaVersion":"praxis-component-edit-plan.v1",
+                  "componentId":"praxis-table",
+                  "operations":[
+                    {"operationId":"column.conditionalRenderer.add","target":"ativo","input":{"id":"inativo"}},
+                    {"operationId":"column.renderer.set","target":"ativo","input":{"type":"chip"}}
+                  ]
+                }
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
+                .thenReturn(selection, authoredPlan);
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(new AgenticAuthoringManifestCompileResult(
+                        true,
+                        java.util.List.of(),
+                        java.util.List.of(),
+                        objectMapper.readTree("{\"proposedConfig\":{}}")));
+
+        AgenticAuthoringComponentEditPlanResult result = new AgenticAuthoringComponentEditPlanService(
+                providerManagementService, manifestService, objectMapper).generateAndCompile(
+                        new AgenticAuthoringPlanRequest("Ajuste os dois chips", "openai", "gpt", "key"),
+                        "praxis-table",
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        "t",
+                        "u",
+                        "e");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings()).doesNotContain("component-edit-plan-source:manifest-example-bundle");
+        assertThat(result.providerInvocations()).hasSize(1);
+        verify(providerManagementService, times(2))
+                .generateJson(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void rejectsDuplicateOperationsWhenSemanticSelectionRequiresTwoDistinctEffects() throws Exception {
         JsonNode manifest = objectMapper.readTree("""
                 {"componentId":"praxis-table","operations":[
@@ -1172,6 +1326,15 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         var selected = selection.putArray("selectedOperationIds");
         for (String operationId : operationIds) selected.add(operationId);
         return selection;
+    }
+
+    private JsonNode findOperation(JsonNode plan, String operationId) {
+        for (JsonNode operation : plan.path("operations")) {
+            if (operationId.equals(operation.path("operationId").asText())) {
+                return operation;
+            }
+        }
+        throw new AssertionError("Operation not found: " + operationId);
     }
 
     private void assertStrictObjects(JsonNode schema) {

@@ -4215,7 +4215,9 @@ public class AgenticAuthoringTurnEngine {
                 || !route.allowsPreview()
                 || intentResolution == null
                 || !intentResolution.valid()
-                || hasAuthoringEvidenceContext(request)) {
+                || hasPostIntentAuthoringEvidenceContext(request)
+                || hasAuthoringEvidenceContext(request)
+                && !resolvedOperationIsDeclaredComponentCapability(request, intentResolution)) {
             return request;
         }
         String componentId = authoringEvidenceComponentId(request, intentResolution);
@@ -4271,11 +4273,22 @@ public class AgenticAuthoringTurnEngine {
         ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
                 ? request.contextHints().deepCopy()
                 : objectMapper.createObjectNode();
-        contextHints.set("authoringEvidence", authoringEvidenceContext(
+        ObjectNode evidenceContext = authoringEvidenceContext(
                 toolCall.name(),
                 retrievalQuery,
                 componentId,
-                evidence));
+                evidence);
+        evidenceContext.put("phase", "post-intent");
+        evidenceContext.put("semanticChangeKind", safeText(intentResolution.changeKind()));
+        List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> candidates =
+                AgenticAuthoringAuthoringEvidenceCapabilities.select(
+                        objectMapper,
+                        componentId,
+                        evidence,
+                        componentCapabilities(request),
+                        6);
+        evidenceContext.set("operationCandidates", objectMapper.valueToTree(candidates));
+        contextHints.set("authoringEvidence", evidenceContext);
         return copyWithContextHints(request, contextHints);
     }
 
@@ -4316,6 +4329,7 @@ public class AgenticAuthoringTurnEngine {
         List<ContextRetrievalService.ComponentCorpusEvidence> evidence = result.valid()
                 ? componentCorpusEvidence(result, 12) : List.of();
         ObjectNode evidenceContext = authoringEvidenceContext(toolCall.name(), retrievalQuery, componentId, evidence);
+        evidenceContext.put("phase", "pre-intent");
         evidenceContext.put("attempted", true);
         evidenceContext.put("retrievalStatus", result.valid() ? "resolved" : "unavailable");
         if (!result.valid()) {
@@ -4395,6 +4409,32 @@ public class AgenticAuthoringTurnEngine {
                 || request.contextHints().path("authoringEvidence").path("evidence").isArray());
     }
 
+    private boolean hasPostIntentAuthoringEvidenceContext(AgenticAuthoringTurnStreamRequest request) {
+        return request != null
+                && request.contextHints() != null
+                && "post-intent".equals(
+                        request.contextHints().path("authoringEvidence").path("phase").asText(""));
+    }
+
+    private boolean resolvedOperationIsDeclaredComponentCapability(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        String componentId = authoringEvidenceComponentId(request, intentResolution);
+        String changeKind = intentResolution == null ? "" : safeText(intentResolution.changeKind());
+        AgenticAuthoringComponentCapabilitiesResult capabilities = componentCapabilities(request);
+        if (!StringUtils.hasText(componentId)
+                || !StringUtils.hasText(changeKind)
+                || capabilities == null
+                || capabilities.catalogs() == null) {
+            return false;
+        }
+        return capabilities.catalogs().stream()
+                .filter(catalog -> componentId.equals(catalog.componentId()))
+                .filter(catalog -> catalog.capabilities() != null)
+                .flatMap(catalog -> catalog.capabilities().stream())
+                .anyMatch(capability -> changeKind.equals(capability.id()));
+    }
+
     private boolean resolvedByPreIntentGovernedEvidence(AgenticAuthoringIntentResolutionResult intentResolution) {
         return intentResolution != null
                 && containsWarning(
@@ -4427,6 +4467,12 @@ public class AgenticAuthoringTurnEngine {
     private String authoringEvidenceQuery(
             AgenticAuthoringTurnStreamRequest request,
             AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution != null && StringUtils.hasText(intentResolution.changeKind())) {
+            return "Resolved canonical change "
+                    + safeText(intentResolution.changeKind())
+                    + ". Current user delta: "
+                    + safeText(request == null ? "" : request.userPrompt());
+        }
         return firstNonBlank(
                 request == null ? null : request.userPrompt(),
                 intentResolution == null ? null : intentResolution.effectivePrompt(),

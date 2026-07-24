@@ -9846,6 +9846,114 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void refreshesPreIntentEvidenceWithTheResolvedCanonicalComponentOperationBeforePreview() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        ContextRetrievalService contextRetrievalService = Mockito.mock(ContextRetrievalService.class);
+        String humanPrompt = "volta para a mesma linha e aumenta somente a foto para 40 pixels";
+        List<ContextRetrievalService.ComponentCorpusEvidence> preIntentEvidence = List.of(
+                new ContextRetrievalService.ComponentCorpusEvidence(
+                        "pre-1", "praxis-table", "component_definition", "authoring_manifest", "renderer-card",
+                        "release-1", "tenant", "local", "allow", "hash-pre", "2.2.0",
+                        "{\"componentId\":\"praxis-table\",\"operationId\":\"column.renderer.set\"}", 0.90d));
+        List<ContextRetrievalService.ComponentCorpusEvidence> postIntentEvidence = List.of(
+                new ContextRetrievalService.ComponentCorpusEvidence(
+                        "post-1", "praxis-table", "component_definition", "authoring_manifest", "compose-item-card",
+                        "release-1", "tenant", "local", "allow", "hash-item", "2.2.0",
+                        "{\"componentId\":\"praxis-table\",\"operationId\":\"column.renderer.composeItem.set\"}", 0.99d),
+                new ContextRetrievalService.ComponentCorpusEvidence(
+                        "post-2", "praxis-table", "component_definition", "authoring_manifest", "compose-layout-card",
+                        "release-1", "tenant", "local", "allow", "hash-layout", "2.2.0",
+                        "{\"componentId\":\"praxis-table\",\"operationId\":\"column.renderer.composeLayout.set\"}", 0.98d));
+        when(contextRetrievalService.searchComponentCorpus(
+                anyString(), eq("praxis-table"), any(), anyInt(),
+                eq("tenant"), eq("local"), eq("release-1")))
+                .thenAnswer(invocation -> invocation.<String>getArgument(0).startsWith("Resolved canonical change ")
+                        ? postIntentEvidence
+                        : preIntentEvidence);
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringIntentResolutionResult(
+                        true,
+                        "modify",
+                        "table",
+                        "column.renderer.composeItem.set",
+                        "semantic-manifest",
+                        "praxis-ui-angular",
+                        "praxis-table",
+                        new AgenticAuthoringTarget("funcionarios-table", "praxis-table", "", "", "", ""),
+                        null,
+                        List.of(),
+                        new AgenticAuthoringGateResult("component-edit", "eligible", List.of()),
+                        null,
+                        "Preview ready.",
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode()));
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true, List.of(), List.of(), objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(), null, null, "Preview ready."));
+        AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService =
+                Mockito.mock(AgenticAuthoringComponentCapabilitiesService.class);
+        when(componentCapabilitiesService.listCapabilities())
+                .thenReturn(new AgenticAuthoringComponentCapabilitiesResult(
+                        "test",
+                        List.of(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog(
+                                "praxis-table",
+                                "2.2.0",
+                                List.of(
+                                        new AgenticAuthoringComponentCapabilitiesResult.ComponentCapability(
+                                                "column.renderer.composeItem.set",
+                                                "column.renderer.composeItem.set",
+                                                List.of(), List.of(), List.of()),
+                                        new AgenticAuthoringComponentCapabilitiesResult.ComponentCapability(
+                                                "column.renderer.composeLayout.set",
+                                                "column.renderer.composeLayout.set",
+                                                List.of(), List.of(), List.of()))))));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                contextRetrievalService,
+                null,
+                null,
+                objectMapper);
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                null,
+                new AgenticAuthoringOrchestrator(new AgenticAuthoringToolLoopExecutor(
+                        registry,
+                        new AgenticAuthoringDefaultToolLoopPlanner())),
+                null,
+                componentCapabilitiesService);
+        ObjectNode hints = objectMapper.createObjectNode();
+        hints.put("selectedComponentId", "praxis-table");
+        hints.put("releaseId", "release-1");
+
+        engine.execute(requestWithContextHints(humanPrompt, hints), principalContext, new CapturingSink());
+
+        ArgumentCaptor<AgenticAuthoringPlanRequest> planRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
+        verify(previewService).preview(planRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        JsonNode evidence = planRequest.getValue().contextHints().path("authoringEvidence");
+        assertThat(evidence.path("phase").asText()).isEqualTo("post-intent");
+        assertThat(evidence.path("semanticChangeKind").asText())
+                .isEqualTo("column.renderer.composeItem.set");
+        assertThat(evidence.path("retrievalQuery").asText())
+                .startsWith("Resolved canonical change column.renderer.composeItem.set.")
+                .contains(humanPrompt);
+        assertThat(evidence.path("operationCandidates").toString())
+                .contains("column.renderer.composeItem.set", "column.renderer.composeLayout.set")
+                .doesNotContain("column.renderer.set");
+        verify(contextRetrievalService, times(2)).searchComponentCorpus(
+                anyString(), eq("praxis-table"), any(), anyInt(),
+                eq("tenant"), eq("local"), eq("release-1"));
+    }
+
+    @Test
     void retrievesSelectedComponentEvidenceEvenWhenAnActiveDecisionIsPresent() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         ContextRetrievalService contextRetrievalService = Mockito.mock(ContextRetrievalService.class);

@@ -34,6 +34,7 @@ public class AgenticAuthoringComponentOperationSelectionService {
     private static final int MAX_OPERATION_CANDIDATES = 12;
     private static final int MAX_RETRIEVED_OPERATION_CANDIDATES = 8;
     private static final int MAX_PROMPT_SUPPLEMENT_CANDIDATES = 4;
+    private static final int MAX_SEMANTIC_CONTINUITY_CANDIDATES = 6;
     private static final int MAX_CARD_VALUES = 12;
     private static final int MAX_CARD_TEXT_LENGTH = 400;
     private static final int MAX_OPERATION_BUNDLES = 6;
@@ -66,6 +67,8 @@ public class AgenticAuthoringComponentOperationSelectionService {
         }
         Set<String> candidateOperationIds = candidateOperationIds(request, manifest, declaredOperationIds);
         List<String> promptSupplementOperationIds = promptRelevantOperationIds(request, manifest);
+        List<String> semanticContinuityOperationIds =
+                semanticContinuityOperationIds(request, manifest, declaredOperationIds);
         JsonNode response = providerManagementService.generateJson(
                 prompt(request, componentId, currentConfig, manifest, candidateOperationIds),
                 AiJsonSchema.ofSchema(schema(componentId, candidateOperationIds)),
@@ -75,12 +78,13 @@ public class AgenticAuthoringComponentOperationSelectionService {
                 tenantId, userId, environment);
         Selection selection = validate(componentId, response, candidateOperationIds);
         log.info(
-                "[AgenticAuthoringComponentOperationSelection] componentId={} manifestOperationCount={} manifestExampleCount={} candidateCount={} candidates={} promptSupplements={} headerScore={} valueMappingScore={} rawPromptLength={} effectivePromptLength={} selected={} clarificationReason={}",
+                "[AgenticAuthoringComponentOperationSelection] componentId={} manifestOperationCount={} manifestExampleCount={} candidateCount={} candidates={} semanticContinuity={} promptSupplements={} headerScore={} valueMappingScore={} rawPromptLength={} effectivePromptLength={} selected={} clarificationReason={}",
                 componentId,
                 manifest.path("operations").size(),
                 manifest.path("examples").size(),
                 candidateOperationIds.size(),
                 candidateOperationIds,
+                semanticContinuityOperationIds,
                 promptSupplementOperationIds,
                 operationRelevanceScore(request, manifest, "column.header.set"),
                 operationRelevanceScore(request, manifest, "column.valueMapping.set"),
@@ -327,8 +331,19 @@ public class AgenticAuthoringComponentOperationSelectionService {
                 }
             }
         }
+        for (String operationId : semanticContinuityOperationIds(request, manifest, declaredOperationIds)) {
+            selected.add(operationId);
+            if (selected.size() >= MAX_OPERATION_CANDIDATES) {
+                break;
+            }
+        }
+        Set<String> semanticContinuity =
+                new LinkedHashSet<>(semanticContinuityOperationIds(request, manifest, declaredOperationIds));
         int supplementalCount = 0;
         for (String operationId : promptRelevantOperationIds(request, manifest)) {
+            if (!semanticContinuity.isEmpty() && !semanticContinuity.contains(operationId)) {
+                continue;
+            }
             if (selected.add(operationId)) {
                 supplementalCount++;
             }
@@ -343,6 +358,140 @@ public class AgenticAuthoringComponentOperationSelectionService {
         Set<String> canonicalOrder = new LinkedHashSet<>();
         declaredOperationIds.stream().filter(selected::contains).forEach(canonicalOrder::add);
         return canonicalOrder;
+    }
+
+    /**
+     * Restores the canonical operation selected by the semantic intent resolver and the smallest
+     * manifest-declared neighborhood that can safely decompose a compound refinement. This runs
+     * only after semantic component/operation scope exists. It does not choose an operation: the
+     * LLM still receives the bounded cards and authors the final selection.
+     */
+    private List<String> semanticContinuityOperationIds(
+            AgenticAuthoringPlanRequest request,
+            JsonNode manifest,
+            Set<String> declaredOperationIds) {
+        if (request == null || request.intentResolution() == null) {
+            return List.of();
+        }
+        Set<String> seeds = new LinkedHashSet<>();
+        addDeclaredSemanticSeed(seeds, request.intentResolution().changeKind(), declaredOperationIds);
+        if (request.intentResolution().semanticDecision() != null) {
+            addDeclaredSemanticSeed(
+                    seeds,
+                    request.intentResolution().semanticDecision().changeKind(),
+                    declaredOperationIds);
+        }
+        if (seeds.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, JsonNode> operationsById = new LinkedHashMap<>();
+        for (JsonNode operation : manifest.path("operations")) {
+            String operationId = operation.path("operationId").asText("");
+            if (declaredOperationIds.contains(operationId)) {
+                operationsById.put(operationId, operation);
+            }
+        }
+
+        Set<String> related = new LinkedHashSet<>();
+        for (String seed : seeds) {
+            JsonNode seedOperation = operationsById.get(seed);
+            if (seedOperation == null) {
+                continue;
+            }
+            related.add(seed);
+            addManifestBundleSiblings(related, seed, manifest, declaredOperationIds);
+            for (Map.Entry<String, JsonNode> candidate : operationsById.entrySet()) {
+                if (related.size() >= MAX_SEMANTIC_CONTINUITY_CANDIDATES) {
+                    break;
+                }
+                if (sameTargetKind(seedOperation, candidate.getValue())
+                        && affectedPathsShareCanonicalParent(seedOperation, candidate.getValue())) {
+                    related.add(candidate.getKey());
+                }
+            }
+        }
+        return List.copyOf(related);
+    }
+
+    /**
+     * Positive examples with the same semantic request declare an indivisible multi-operation
+     * outcome. Restore those siblings around an already-resolved semantic seed so retrieval cannot
+     * hide a required companion operation. The shared example identity is canonical manifest
+     * evidence; user text is not inspected here.
+     */
+    private void addManifestBundleSiblings(
+            Set<String> related,
+            String seed,
+            JsonNode manifest,
+            Set<String> declaredOperationIds) {
+        Set<String> bundleIntents = new LinkedHashSet<>();
+        for (JsonNode example : manifest.path("examples")) {
+            if (example.path("isPositive").asBoolean(false)
+                    && seed.equals(example.path("operationId").asText(""))) {
+                String semanticIntent = example.path("request").asText("").replaceAll("\\s+", " ").trim();
+                if (!semanticIntent.isBlank()) {
+                    bundleIntents.add(semanticIntent);
+                }
+            }
+        }
+        if (bundleIntents.isEmpty()) {
+            return;
+        }
+        for (JsonNode example : manifest.path("examples")) {
+            if (related.size() >= MAX_SEMANTIC_CONTINUITY_CANDIDATES
+                    || !example.path("isPositive").asBoolean(false)) {
+                continue;
+            }
+            String semanticIntent = example.path("request").asText("").replaceAll("\\s+", " ").trim();
+            String operationId = example.path("operationId").asText("");
+            if (bundleIntents.contains(semanticIntent) && declaredOperationIds.contains(operationId)) {
+                related.add(operationId);
+            }
+        }
+    }
+
+    private void addDeclaredSemanticSeed(
+            Set<String> seeds,
+            String operationId,
+            Set<String> declaredOperationIds) {
+        if (operationId != null && declaredOperationIds.contains(operationId)) {
+            seeds.add(operationId);
+        }
+    }
+
+    private boolean sameTargetKind(JsonNode first, JsonNode second) {
+        String firstKind = firstNonBlank(
+                first.path("targetKind").asText(""),
+                first.path("target").path("kind").asText(""));
+        String secondKind = firstNonBlank(
+                second.path("targetKind").asText(""),
+                second.path("target").path("kind").asText(""));
+        return !firstKind.isBlank() && firstKind.equals(secondKind);
+    }
+
+    private boolean affectedPathsShareCanonicalParent(JsonNode first, JsonNode second) {
+        for (JsonNode firstPath : first.path("affectedPaths")) {
+            for (JsonNode secondPath : second.path("affectedPaths")) {
+                if (commonPathPrefixLength(firstPath.asText(""), secondPath.asText("")) >= 3) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private int commonPathPrefixLength(String first, String second) {
+        String[] firstParts = first.replace("[]", "").split("\\.");
+        String[] secondParts = second.replace("[]", "").split("\\.");
+        int common = 0;
+        int limit = Math.min(firstParts.length, secondParts.length);
+        while (common < limit
+                && !firstParts[common].isBlank()
+                && firstParts[common].equals(secondParts[common])) {
+            common++;
+        }
+        return common;
     }
 
     /**
