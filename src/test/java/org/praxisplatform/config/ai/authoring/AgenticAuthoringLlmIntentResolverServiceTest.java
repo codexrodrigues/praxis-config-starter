@@ -990,16 +990,9 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "matchesSelectedComponentScope": true,
-                  "semanticIntentClass": "component_authoring",
-                  "operationKind": "undo",
-                  "artifactKind": "table",
-                  "changeKind": "undo_last_local_change",
-                  "followUpKind": "refinement",
-                  "requiresGovernedAuthoring": false,
-                  "assistantMessage": "Vou desfazer somente a última alteração local.",
-                  "clarificationQuestions": [],
-                  "warnings": []
+                  "matchesDeclaredAction": true,
+                  "actionKind": "local-undo",
+                  "assistantMessage": "Vou desfazer somente a última alteração local."
                 }
                 """));
         AgenticAuthoringIntentResolutionRequest request = targetedTableUndoRequest(true);
@@ -1020,18 +1013,18 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .orElseThrow();
 
         assertThat(promptCaptor.getValue())
-                .contains("\"clientActions\"")
+                .contains("\"declaredClientActions\"")
                 .contains("\"kind\" : \"local-undo\"")
-                .contains("primary meaning is to reverse only the most recently materialized local change")
-                .contains("reinterpret undo as a renderer/configuration edit");
+                .contains("primary meaning of the current userPrompt")
+                .contains("Availability governs execution only");
         assertThat(schemaCaptor.getValue().jsonSchema())
-                .contains("\"undo\"")
-                .contains("undo_last_local_change");
+                .contains("\"local-undo\"")
+                .contains("matchesDeclaredAction");
         assertThat(result.resolved()).isTrue();
         assertThat(result.operationKind()).isEqualTo("undo");
-        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.artifactKind()).isEqualTo("component");
         assertThat(result.changeKind()).isEqualTo("undo_last_local_change");
-        assertThat(result.warnings()).contains("llm-compact-targeted-component-intent-used");
+        assertThat(result.warnings()).contains("llm-declared-client-action-intent-used");
     }
 
     @Test

@@ -4665,8 +4665,10 @@ public class AgenticAuthoringTurnEngine {
             Map<String, Object> decisionDiagnostics) {
         List<AgenticAuthoringQuickReply> replies = terminalQuickReplies(intentResolution, businessCatalogDiscovery);
         List<AgenticAuthoringQuickReply> contextual = contextualPreviewQuickReplies(request, intentResolution, preview);
-        boolean requiresGovernedRepair = preview != null
-                && !canApply
+        boolean requiresGovernedRepair = !canApply
+                && intentResolution != null
+                && List.of("create", "modify", "remove", "compose", "connect", "undo")
+                        .contains(safeText(intentResolution.operationKind()))
                 && !isAdvisoryCatalogIntent(intentResolution);
         if (contextual.isEmpty() && !requiresGovernedRepair) {
             return replies;

@@ -340,6 +340,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                     category,
                     projection,
                     safeAnswer(parsed.answer(), fallback));
+            message = governedPlatformGuidanceMessage(category, message, componentCapabilities);
             if (message.isBlank()) {
                 return Optional.empty();
             }
@@ -6006,6 +6007,27 @@ public class AgenticAuthoringConsultativeAnswerService {
         }
         message.append("\nQuando você decidir criar ou alterar algo, eu cruzo a intenção com os dados confirmados do domínio e gero uma prévia governada para revisão.");
         return sanitizeUserFacingAnswer(message.toString());
+    }
+
+    private String governedPlatformGuidanceMessage(
+            String category,
+            String generatedMessage,
+            AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        if (!"platform_guidance".equals(category)) {
+            return generatedMessage;
+        }
+        String catalogMessage = componentCatalogFallbackMessage(componentCapabilities);
+        if (!StringUtils.hasText(catalogMessage)) {
+            return generatedMessage;
+        }
+        return sanitizeUserFacingAnswer("""
+                Você pode criar e evoluir formulários, tabelas ou listas, gráficos ou dashboards,
+                filtros e fluxos de interação, além de combinar esses componentes em páginas.
+                A intenção é expressa em linguagem natural, mas cada mudança é validada contra
+                capacidades, dados e decisões governadas antes da materialização.
+
+                %s
+                """.formatted(catalogMessage));
     }
 
     private Optional<String> componentCapabilityFallbackMessage(

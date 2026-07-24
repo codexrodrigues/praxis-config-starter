@@ -193,7 +193,12 @@ public final class AgenticAuthoringTargetResolverRegistry {
     private List<ResolvedCandidate> resolveCandidates(String resolver, String kind, JsonNode config, JsonNode target, String targetValue) {
         List<ResolvedCandidate> candidates = new ArrayList<>();
         switch (resolver) {
-            case "column-by-field" -> addArrayMatches(candidates, config, "columns[]", List.of("field"), targetValue);
+            case "column-by-field" -> addArrayMatches(
+                    candidates,
+                    config,
+                    "columns[]",
+                    List.of("field", "header", "label", "title"),
+                    targetValue);
             case "x-ui-chart-metric-by-field" -> addArrayMatches(candidates, config, "chartDocument.metrics[]", List.of("field", "id", "name"), targetValue);
             case "field-by-name-or-label" -> addArrayMatches(candidates, config, "fieldMetadata[]", List.of("name", "label"), targetValue);
             case "field-by-name" -> addArrayMatches(candidates, config, "fieldMetadata[]", List.of("name"), targetValue);
@@ -221,7 +226,12 @@ public final class AgenticAuthoringTargetResolverRegistry {
             case "crud-action-by-id:edit" -> addArrayMatches(candidates, config, "actions[]", List.of("id", "name", "action"), "edit");
             case "crud-action-by-id:view" -> addArrayMatches(candidates, config, "actions[]", List.of("id", "name", "action"), "view");
             case "crud-action-by-id:delete" -> addArrayMatches(candidates, config, "actions[]", List.of("id", "name", "action"), "delete");
-            case "renderer-in-column" -> addArrayMatches(candidates, config, "columns[]", List.of("field", "id", "key"), targetValue);
+            case "renderer-in-column" -> addArrayMatches(
+                    candidates,
+                    config,
+                    "columns[]",
+                    List.of("field", "id", "key", "header", "label", "title"),
+                    targetValue);
             case "conditional-renderer-in-column" -> addRecursiveArrayMatches(candidates, config, "conditionalRenderers", List.of("id", "key"), targetValue);
             case "style-rule-in-column-or-row" -> {
                 addArrayMatches(candidates, config, "rowConditionalStyles[]", List.of("id", "key"), targetValue);

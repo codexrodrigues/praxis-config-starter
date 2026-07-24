@@ -36,6 +36,29 @@ class AgenticAuthoringTargetResolverRegistryTest {
     }
 
     @Test
+    void shouldGroundDisplayedColumnHeaderToItsCanonicalField() throws Exception {
+        AgenticAuthoringResolvedTarget result = registry.resolve(
+                "praxis-table",
+                operation("column.renderer.composeItem.set", "column", "renderer-in-column", "fail", true),
+                objectMapper.readTree("\"Código\""),
+                objectMapper.readTree("""
+                        {
+                          "columns": [
+                            {
+                              "field": "id",
+                              "header": "Código",
+                              "renderer": { "type": "compose", "items": [] }
+                            }
+                          ]
+                        }
+                        """));
+
+        assertThat(result.status()).isEqualTo("resolved");
+        assertThat(result.path()).isEqualTo("columns[]/0");
+        assertThat(result.value().path("field").asText()).isEqualTo("id");
+    }
+
+    @Test
     void shouldFailAmbiguousTargetByDefault() throws Exception {
         AgenticAuthoringResolvedTarget result = registry.resolve(
                 "praxis-table",

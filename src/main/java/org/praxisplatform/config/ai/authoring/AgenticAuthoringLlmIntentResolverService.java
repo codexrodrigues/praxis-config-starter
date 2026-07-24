@@ -34,6 +34,7 @@ public class AgenticAuthoringLlmIntentResolverService {
     private static final String SYSTEM_PROMPT_TEMPLATE = loadSystemPromptTemplate();
     private static final int MAX_ASSISTANT_MESSAGE_CHARS = 700;
     private static final int MAX_PLATFORM_GUIDANCE_CONFIRMATION_TOKENS = 700;
+    private static final int MAX_DECLARED_CLIENT_ACTION_INTENT_TOKENS = 500;
     private static final int MAX_TARGETED_COMPONENT_INTENT_TOKENS = 900;
     private static final int MAX_TARGETED_COMPONENT_INTENT_ATTEMPTS = 2;
     private static final int MAX_TARGETED_COMPONENT_ATTEMPT_TIMEOUT_SECONDS = 8;
@@ -134,6 +135,17 @@ public class AgenticAuthoringLlmIntentResolverService {
                         tenantId,
                         environment);
         try {
+            Optional<AgenticAuthoringLlmIntentResolution> declaredClientActionIntent =
+                    compactDeclaredClientActionIntent(
+                            request,
+                            effectivePrompt,
+                            tenantId,
+                            userId,
+                            environment,
+                            providerInvocations);
+            if (declaredClientActionIntent.isPresent()) {
+                return declaredClientActionIntent.map(value -> withProviderInvocations(value, providerInvocations));
+            }
             Optional<AgenticAuthoringLlmIntentResolution> platformGuidanceConfirmation =
                     compactPlatformGuidanceConfirmation(
                             request,
@@ -930,6 +942,127 @@ public class AgenticAuthoringLlmIntentResolverService {
         root.putArray("required")
                 .add("matchesSemanticScope")
                 .add("semanticIntentClass")
+                .add("assistantMessage");
+        root.put("additionalProperties", false);
+        return root.toString();
+    }
+
+    private Optional<AgenticAuthoringLlmIntentResolution> compactDeclaredClientActionIntent(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectivePrompt,
+            String tenantId,
+            String userId,
+            String environment,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+        JsonNode clientActions = request.contextHints() == null
+                ? null
+                : request.contextHints().path("clientActions");
+        if (clientActions == null || !clientActions.isArray() || clientActions.isEmpty()) {
+            return Optional.empty();
+        }
+        ArrayNode declaredActions = objectMapper.createArrayNode();
+        clientActions.forEach(action -> {
+            if (action != null
+                    && action.isObject()
+                    && StringUtils.hasText(nullableText(action, "kind"))) {
+                ObjectNode declared = declaredActions.addObject();
+                declared.put("kind", nullableText(action, "kind"));
+                declared.put("available", action.path("available").asBoolean(false));
+                declared.put("targetComponentId", valueOrDefault(
+                        nullableText(action, "targetComponentId"), ""));
+            }
+        });
+        if (declaredActions.isEmpty()) {
+            return Optional.empty();
+        }
+        ObjectNode context = objectMapper.createObjectNode();
+        context.put("userPrompt", boundedText(effectivePrompt, 700));
+        context.set("declaredClientActions", declaredActions);
+        if (request.activeSemanticDecision() != null) {
+            context.put(
+                    "priorObjective",
+                    boundedText(valueOrDefault(
+                            request.activeSemanticDecision().activeObjective(), ""), 300));
+        }
+        try {
+            JsonNode result = invokeJson(
+                    "declared_client_action_intent",
+                    """
+                    Decide whether the primary meaning of the current userPrompt requests one of the
+                    declared client actions. Decide semantically from the whole request, never from a
+                    keyword, regex or the prior objective. The current prompt is authoritative.
+                    A request to reverse only the most recently materialized local change matches
+                    local-undo. A request to create, edit, explain or retry prior authoring does not.
+                    Availability governs execution only and must not change the semantic match.
+                    Return only the schema-conforming JSON.
+
+                    Governed context:
+                    %s
+                    """.formatted(context.toPrettyString()),
+                    AiJsonSchema.ofSchema(declaredClientActionIntentSchema(declaredActions)),
+                    AiCallConfig.builder()
+                            .provider(request.provider())
+                            .model(request.model())
+                            .apiKey(request.apiKey())
+                            .temperature(0.0d)
+                            .maxTokens(MAX_DECLARED_CLIENT_ACTION_INTENT_TOKENS)
+                            .timeoutSeconds(Math.max(
+                                    1,
+                                    Math.min(
+                                            fastIntentTimeoutSeconds,
+                                            MAX_TARGETED_COMPONENT_ATTEMPT_TIMEOUT_SECONDS)))
+                            .build(),
+                    tenantId,
+                    userId,
+                    environment,
+                    providerInvocations);
+            if (!result.path("matchesDeclaredAction").asBoolean(false)
+                    || !"local-undo".equals(nullableText(result, "actionKind"))) {
+                return Optional.empty();
+            }
+            return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                    true,
+                    "undo",
+                    "component",
+                    "undo_last_local_change",
+                    null,
+                    null,
+                    "new_instruction",
+                    conciseAssistantMessage(nullableText(result, "assistantMessage")),
+                    List.of(),
+                    List.of(),
+                    List.of("llm-declared-client-action-intent-used"),
+                    null,
+                    null,
+                    false,
+                    "component_authoring"));
+        } catch (RuntimeException ex) {
+            log.debug(
+                    "[AgenticAuthoringLlmIntentResolver] Declared client action intent failed open to the general semantic resolver; kind={} cause={}",
+                    providerFailureKind(rootCause(ex)),
+                    safeProviderFailureSummary(rootCause(ex)));
+            return Optional.empty();
+        }
+    }
+
+    private String declaredClientActionIntentSchema(ArrayNode declaredActions) {
+        LinkedHashSet<String> kinds = new LinkedHashSet<>();
+        declaredActions.forEach(action -> {
+            String kind = nullableText(action, "kind");
+            if (StringUtils.hasText(kind)) {
+                kinds.add(kind);
+            }
+        });
+        kinds.add("none");
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("type", "object");
+        ObjectNode properties = root.putObject("properties");
+        properties.putObject("matchesDeclaredAction").put("type", "boolean");
+        stringEnum(properties, "actionKind", List.copyOf(kinds));
+        nullableString(properties, "assistantMessage");
+        root.putArray("required")
+                .add("matchesDeclaredAction")
+                .add("actionKind")
                 .add("assistantMessage");
         root.put("additionalProperties", false);
         return root.toString();

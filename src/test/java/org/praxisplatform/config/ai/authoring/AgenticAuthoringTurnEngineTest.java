@@ -7725,7 +7725,7 @@ class AgenticAuthoringTurnEngineTest {
                 .thenReturn("""
                         CONSULTATIVE_CATEGORY: platform_guidance
                         ANSWER:
-                        Voce pode montar listas administrativas, dashboards, formularios, filtros e fluxos guiados usando os componentes governados publicados no registry.
+                        Posso ajudar a montar telas governadas.
                         """);
         AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
                 providerManagementService,
@@ -7746,6 +7746,11 @@ class AgenticAuthoringTurnEngineTest {
 
         org.assertj.core.api.Assertions.assertThat(answer).isPresent();
         org.assertj.core.api.Assertions.assertThat(answer.get().category()).isEqualTo("platform_guidance");
+        org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                .containsIgnoringCase("formulários")
+                .containsIgnoringCase("tabelas ou listas")
+                .containsIgnoringCase("gráficos ou dashboards")
+                .containsIgnoringCase("filtros e fluxos");
         verify(projectionService, never()).projectCompact(any(), any(), any());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(providerManagementService).generateText(
