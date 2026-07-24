@@ -908,9 +908,8 @@ public class AgenticAuthoringPreviewService {
             }
             boolean technicallyValid = planResult.valid();
             boolean semanticallyValid = planResult.valid();
-            JsonNode uiCompositionPlan = normalizeCountMetricBindings(
-                    planResult.uiCompositionPlan(),
-                    warnings);
+            JsonNode uiCompositionPlan = prepareCanonicalChartsForPreview(planResult.uiCompositionPlan());
+            uiCompositionPlan = normalizeCountMetricBindings(uiCompositionPlan, warnings);
             uiCompositionPlan = verifySemanticAxesWithSchema(
                     request,
                     uiCompositionPlan,
@@ -973,6 +972,7 @@ public class AgenticAuthoringPreviewService {
                         semanticDecision(request.intentResolution()))) {
                     markOrphanUnverifiedSemanticAxesAsDropped(uiCompositionPlanObject, warnings);
                 }
+                finalizeCanonicalChartsAfterPreview(uiCompositionPlanObject);
             }
             JsonNode semanticMaterialization = semanticMaterialization(planResult, uiCompositionPlan);
             if (containsUnverifiedSemanticAxes(semanticMaterialization)) {
@@ -1990,6 +1990,202 @@ public class AgenticAuthoringPreviewService {
             return objectNode;
         }
         return copy;
+    }
+
+    /**
+     * The public Chart contract is {@code inputs.chartDocument}.  The preview pipeline predates that
+     * contract and still contains a number of schema/interaction guards expressed against its former
+     * internal projection. Keep that projection strictly ephemeral: it lets the existing governed
+     * checks run without publishing or persisting a second Chart dialect.
+     */
+    private JsonNode prepareCanonicalChartsForPreview(JsonNode uiCompositionPlan) {
+        if (!(uiCompositionPlan instanceof ObjectNode plan) || !plan.path("widgets").isArray()) {
+            return uiCompositionPlan;
+        }
+        boolean hasCanonicalChart = false;
+        for (JsonNode widget : plan.path("widgets")) {
+            if ("praxis-chart".equals(widget.path("componentId").asText(""))
+                    && widget.path("inputs").path("chartDocument").isObject()) {
+                hasCanonicalChart = true;
+                break;
+            }
+        }
+        if (!hasCanonicalChart) {
+            return uiCompositionPlan;
+        }
+        ObjectNode copy = plan.deepCopy();
+        for (JsonNode widget : copy.path("widgets")) {
+            if (!(widget instanceof ObjectNode chart)
+                    || !"praxis-chart".equals(chart.path("componentId").asText(""))) {
+                continue;
+            }
+            ObjectNode inputs = chart.path("inputs") instanceof ObjectNode value ? value : null;
+            if (inputs == null || !inputs.path("chartDocument").isObject() || inputs.path("config").isObject()) {
+                continue;
+            }
+            ObjectNode document = (ObjectNode) inputs.path("chartDocument");
+            ObjectNode config = inputs.putObject("config");
+            config.put("type", document.path("kind").asText("bar"));
+            copyText(document, config, "title");
+            copyText(document, config, "subtitle");
+
+            JsonNode dimension = document.path("dimensions").isArray() && !document.path("dimensions").isEmpty()
+                    ? document.path("dimensions").get(0)
+                    : MissingNode.getInstance();
+            ObjectNode axis = config.putObject("semanticAxis");
+            axis.put("field", dimension.path("field").asText(""));
+            axis.put("label", dimension.path("label").asText(dimension.path("field").asText("")));
+            axis.put("concept", dimension.path("role").asText("category"));
+            hydratePreviewSemanticAxis(copy, axis);
+            ObjectNode x = config.putObject("axes").putObject("x");
+            x.put("field", axis.path("field").asText(""));
+            x.put("label", axis.path("label").asText(""));
+            if ("time".equalsIgnoreCase(dimension.path("role").asText(""))) {
+                x.put("type", "time");
+            }
+            ObjectNode dataSource = config.putObject("dataSource");
+            dataSource.put("resourcePath", document.path("source").path("resource").asText(""));
+            ObjectNode query = dataSource.putObject("query");
+            String operation = document.path("source").path("operation").asText("group-by");
+            query.put("statsOperation", operation);
+            query.put("sourceKind", document.path("source").path("kind").asText(""));
+            String resource = document.path("source").path("resource").asText("");
+            if (!resource.isBlank()) {
+                query.put("statsPath", resource + "/stats/" + operation);
+            }
+            query.set("dimensions", document.path("dimensions").deepCopy());
+            query.set("metrics", document.path("metrics").deepCopy());
+            JsonNode options = document.path("source").path("options");
+            if (options.isObject()) {
+                query.set("sourceOptions", options.deepCopy());
+                if (options.has("granularity")) {
+                    query.put("granularity", options.path("granularity").asText(""));
+                }
+            }
+            ObjectNode statsRequest = query.putObject("statsRequest");
+            statsRequest.put("field", axis.path("field").asText(""));
+            if (document.path("metrics").isArray() && !document.path("metrics").isEmpty()) {
+                if ("comparison".equalsIgnoreCase(operation)) {
+                    statsRequest.set("metrics", document.path("metrics").deepCopy());
+                    String periodField = document.path("source").path("options")
+                            .path("comparisonPeriod").path("field").asText("");
+                    if (!periodField.isBlank()) {
+                        statsRequest.put("periodField", periodField);
+                    }
+                } else {
+                    statsRequest.set("metric", document.path("metrics").get(0).deepCopy());
+                }
+            }
+            ArrayNode series = config.putArray("series");
+            for (JsonNode metric : document.path("metrics")) {
+                ObjectNode item = series.addObject();
+                item.put("categoryField", axis.path("field").asText(""));
+                item.set("metric", metric.deepCopy());
+            }
+            ObjectNode interactions = config.putObject("interactions");
+            ObjectNode actions = interactions.putObject("eventActions");
+            if (document.path("events").isObject()) {
+                actions.setAll((ObjectNode) document.path("events").deepCopy());
+                interactions.put("crossFilter", document.path("events").has("crossFilter"));
+            }
+        }
+        return copy;
+    }
+
+    private void finalizeCanonicalChartsAfterPreview(ObjectNode plan) {
+        if (plan == null || !plan.path("widgets").isArray()) {
+            return;
+        }
+        for (JsonNode widget : plan.path("widgets")) {
+            if (!(widget instanceof ObjectNode chart)
+                    || !"praxis-chart".equals(chart.path("componentId").asText(""))) {
+                continue;
+            }
+            ObjectNode inputs = chart.path("inputs") instanceof ObjectNode value ? value : null;
+            ObjectNode config = inputs != null && inputs.path("config") instanceof ObjectNode value ? value : null;
+            ObjectNode document = inputs != null && inputs.path("chartDocument") instanceof ObjectNode value ? value : null;
+            if (inputs == null || config == null || document == null) {
+                continue;
+            }
+            document.put("kind", config.path("type").asText(document.path("kind").asText("bar")));
+            copyText(config, document, "title");
+            copyText(config, document, "subtitle");
+            ObjectNode axis = config.path("semanticAxis") instanceof ObjectNode value ? value : null;
+            if (axis != null) {
+                ArrayNode dimensions = document.path("dimensions") instanceof ArrayNode value
+                        ? value : document.putArray("dimensions");
+                ObjectNode dimension;
+                if (dimensions.isEmpty()) {
+                    dimension = dimensions.addObject();
+                } else if (dimensions.get(0) instanceof ObjectNode existingDimension) {
+                    dimension = existingDimension;
+                } else {
+                    dimension = objectMapper.createObjectNode();
+                    dimensions.set(0, dimension);
+                }
+                dimension.put("field", axis.path("field").asText(""));
+                dimension.put("label", axis.path("label").asText(axis.path("field").asText("")));
+                String statsOperation = config.path("dataSource").path("query").path("statsOperation").asText("");
+                dimension.put("role", "timeseries".equalsIgnoreCase(statsOperation) ? "time" : "category");
+                synchronizeDiagnosticAxis(plan, axis);
+            }
+            ObjectNode source = document.path("source") instanceof ObjectNode value ? value : document.putObject("source");
+            ObjectNode query = config.path("dataSource").path("query") instanceof ObjectNode value ? value : null;
+            if (query != null) {
+                String resource = config.path("dataSource").path("resourcePath").asText(source.path("resource").asText(""));
+                if (!resource.isBlank()) source.put("resource", businessResourcePath(resource));
+                String operation = query.path("statsOperation").asText(source.path("operation").asText("group-by"));
+                source.put("operation", operation);
+                ObjectNode options = source.path("options") instanceof ObjectNode value ? value : source.putObject("options");
+                if (query.has("granularity")) options.put("granularity", query.path("granularity").asText(""));
+                if ("timeseries".equalsIgnoreCase(operation)) {
+                    options.put("fillGaps", query.path("statsRequest").path("fillGaps").asBoolean(false));
+                }
+                if (query.path("metrics").isArray()) document.set("metrics", query.path("metrics").deepCopy());
+            }
+            JsonNode actions = config.path("interactions").path("eventActions");
+            if (actions.isObject()) document.set("events", actions.deepCopy());
+            // `config` remains a derived preview projection for existing Page Builder compositions.
+            // The executable Chart state is synchronized into chartDocument above; no decision,
+            // validator or compiler consumes this projection as an alternate source of truth.
+        }
+    }
+
+    private void copyText(JsonNode source, ObjectNode target, String field) {
+        if (source != null && source.has(field) && target != null) {
+            target.put(field, source.path(field).asText(""));
+        }
+    }
+
+    private void hydratePreviewSemanticAxis(ObjectNode plan, ObjectNode axis) {
+        JsonNode axes = plan.path("diagnostics").path("semanticAxes");
+        if (!axes.isArray()) return;
+        String field = normalize(axis.path("field").asText(""));
+        for (JsonNode candidate : axes) {
+            if (!(candidate instanceof ObjectNode diagnostic)) continue;
+            String diagnosticField = normalize(diagnostic.path("field").asText(""));
+            String requested = normalize(diagnostic.path("requestedField").asText(""));
+            if (field.equals(diagnosticField) || field.equals(requested)) {
+                axis.setAll(diagnostic.deepCopy());
+                return;
+            }
+        }
+    }
+
+    private void synchronizeDiagnosticAxis(ObjectNode plan, ObjectNode axis) {
+        JsonNode axes = plan.path("diagnostics").path("semanticAxes");
+        if (!axes.isArray()) return;
+        String field = normalize(axis.path("field").asText(""));
+        String requested = normalize(axis.path("requestedField").asText(""));
+        for (JsonNode candidate : axes) {
+            if (!(candidate instanceof ObjectNode diagnostic)) continue;
+            String diagnosticField = normalize(diagnostic.path("field").asText(""));
+            String diagnosticRequested = normalize(diagnostic.path("requestedField").asText(""));
+            if (!field.equals(diagnosticField) && !field.equals(diagnosticRequested)
+                    && !requested.equals(diagnosticField) && !requested.equals(diagnosticRequested)) continue;
+            diagnostic.setAll(axis.deepCopy());
+            return;
+        }
     }
 
     private JsonNode normalizeCountMetricBindings(
@@ -3037,10 +3233,14 @@ public class AgenticAuthoringPreviewService {
     }
 
     private boolean isPraxisStatsChart(ObjectNode widget) {
-        return widget != null
-                && "praxis-chart".equals(widget.path("componentId").asText(""))
-                && "praxis.stats".equals(widget.path("inputs").path("config")
-                        .path("dataSource").path("query").path("sourceKind").asText(""));
+        if (widget == null || !"praxis-chart".equals(widget.path("componentId").asText(""))) {
+            return false;
+        }
+        JsonNode query = widget.path("inputs").path("config").path("dataSource").path("query");
+        // Comparison materializations are already grounded by the governed analytics projection.
+        // They do not use the generic group-by/timeseries stats request dialect validated below.
+        return "praxis.stats".equals(query.path("sourceKind").asText(""))
+                && !"comparison".equalsIgnoreCase(query.path("statsOperation").asText(""));
     }
 
     private int countPraxisStatsCharts(ObjectNode uiCompositionPlan) {

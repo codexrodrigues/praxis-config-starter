@@ -1570,37 +1570,15 @@ class AgenticAuthoringPreviewServiceTest {
                 .filter(widget -> "praxis-chart".equals(widget.path("componentId").asText()))
                 .findFirst()
                 .orElseThrow();
-        JsonNode config = chart.path("inputs").path("config");
-        JsonNode query = config.path("dataSource").path("query");
-        JsonNode statsRequest = query.path("statsRequest");
-        assertThat(query.path("statsOperation").asText()).isEqualTo("comparison");
-        assertThat(statsRequest.has("metric")).isFalse();
-        assertThat(statsRequest.path("metrics")).hasSize(2);
-        assertThat(statsRequest.path("periodField").asText()).isEqualTo("competencia");
-        assertThat(config.path("series")).hasSize(4);
-        assertThat(query.path("metrics").findValuesAsText("field")).containsExactly(
-                "__praxisComparison_funcionarioId_current",
-                "__praxisComparison_funcionarioId_previous",
-                "__praxisComparison_diasAfastado_current",
-                "__praxisComparison_diasAfastado_previous");
-        assertThat(config.path("series").findValuesAsText("field")).containsExactly(
-                "__praxisComparison_funcionarioId_current",
-                "__praxisComparison_funcionarioId_previous",
-                "__praxisComparison_diasAfastado_current",
-                "__praxisComparison_diasAfastado_previous");
-        assertThat(query.path("metrics").findValuesAsText("schemaProbeStatus"))
-                .containsOnly("verified-derived-comparison-output");
-        assertThat(statsRequest.path("metrics").findValuesAsText("field"))
+        JsonNode chartDocument = chart.path("inputs").path("chartDocument");
+        assertThat(chartDocument.path("source").path("operation").asText()).isEqualTo("comparison");
+        assertThat(chartDocument.path("source").path("options").path("comparisonPeriod").path("field").asText())
+                .isEqualTo("competencia");
+        assertThat(chartDocument.path("metrics")).hasSize(2);
+        assertThat(chartDocument.path("metrics").findValuesAsText("field"))
                 .containsExactly("funcionarioId", "diasAfastado");
-        assertThat(config.path("analyticsProjection").path("governance").path("policyRefs").path(0)
-                .path("policyId").asText()).isEqualTo("absence-criticality-policy");
-        assertThat(config.path("analyticsProjection").path("governance").path("policyRefs").path(0)
-                .path("policyVersion").asText()).isEqualTo("2026-07");
-        assertThat(config.path("analyticsProjection").path("bindings").path("primaryDimension")
-                .path("keyFilterField").asText()).isEqualTo("departamentoIdsIn");
-        assertThat(config.path("semanticAxis").path("statsVerified").asBoolean()).isTrue();
-        assertThat(config.path("interactions").path("eventActions").path("crossFilter")
-                .path("mapping").toString()).isEqualTo("{\"key\":\"departamentoIdsIn\"}");
+        assertThat(chartDocument.path("events").path("crossFilter").path("mapping").toString())
+                .isEqualTo("{\"key\":\"departamentoIdsIn\"}");
         assertThat(principalAwareSchemaContexts).extracting(AiSchemaContext::getPath)
                 .containsExactlyInAnyOrder(
                         "/api/human-resources/vw-analytics-afastamentos/stats/comparison",
@@ -1618,7 +1596,7 @@ class AgenticAuthoringPreviewServiceTest {
                 .isEqualTo("payload.filters.departamentoIdsIn");
         assertThat(chartToTable.path("transform").path("template").path("filters")
                 .path("departamentoIdsIn").toString())
-                .isEqualTo("[\"${payload.filters.departamentoIdsIn}\"]");
+                .isEqualTo("\"${payload.filters.departamentoIdsIn}\"");
         assertThat(result.uiCompositionPlan().path("bindings").toString())
                 .doesNotContain("pointClick->surface.open");
         JsonNode list = result.uiCompositionPlan().path("widgets").findParents("componentId").stream()
@@ -1634,9 +1612,9 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(recordOpenAction.path("recordOpen").path("target").path("surfaceId").asText())
                 .isEqualTo("hero-profile");
         assertThat(recordOpenAction.has("globalAction")).isFalse();
-        assertThat(result.warnings()).contains(
-                "semantic-axis-stats-capability-verified",
-                "semantic-chart-interactions-grounded");
+        assertThat(result.warnings()).doesNotContain(
+                "semantic-axis-stats-capability-verification-unsupported",
+                "semantic-chart-temporal-range-filter-target-unresolved");
         assertThat(result.uiCompositionPlan().toString())
                 .doesNotContain("sampleRows")
                 .doesNotContain("rawRows")
@@ -2387,9 +2365,15 @@ class AgenticAuthoringPreviewServiceTest {
         widget.put("key", "incidentes-chart-severidade");
         ObjectNode definition = widget.putObject("definition");
         definition.put("id", "praxis-chart");
-        ObjectNode config = definition.putObject("inputs").putObject("config");
-        config.put("type", "bar");
-        config.putArray("series").addObject().put("type", "bar");
+        ObjectNode chartDocument = definition.putObject("inputs").putObject("chartDocument");
+        chartDocument.put("version", "0.1.0");
+        chartDocument.put("kind", "bar");
+        chartDocument.putObject("source")
+                .put("kind", "praxis.stats")
+                .put("resource", "/api/operations/incidentes")
+                .put("operation", "group-by");
+        chartDocument.putArray("dimensions").addObject().put("field", "severidade").put("role", "category");
+        chartDocument.putArray("metrics").addObject().put("field", "total").put("aggregation", "count");
 
         AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
                 planService,
@@ -2410,10 +2394,10 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.failureCodes()).isEmpty();
         assertThat(result.compiledFormPatch().path("patch").path("page")
-                .path("widgets").get(0).path("definition").path("inputs").path("config").path("type").asText())
+                .path("widgets").get(0).path("definition").path("inputs").path("chartDocument").path("kind").asText())
                 .isEqualTo("line");
         assertThat(result.assistantMessage())
-                .contains("Atualizei o grafico selecionado para linhas")
+                .contains("Atualizei o grafico selecionado mantendo a fonte")
                 .doesNotContain("painel que voce quer montar");
     }
 
@@ -3663,8 +3647,8 @@ class AgenticAuthoringPreviewServiceTest {
                             .equals(widget.path("key").asText()))
                     .findFirst()
                     .orElseThrow();
-            ((ObjectNode) authoredChart.path("inputs").path("config").path("interactions")
-                    .path("eventActions").path("crossFilter").path("mapping"))
+            ((ObjectNode) authoredChart.path("inputs").path("chartDocument").path("events")
+                    .path("crossFilter").path("mapping"))
                     .put("status", "status");
             ObjectNode pointBinding = (ObjectNode) findBinding(
                     authored.uiCompositionPlan().path("bindings"),
@@ -3694,10 +3678,10 @@ class AgenticAuthoringPreviewServiceTest {
                         .equals(widget.path("key").asText()))
                 .findFirst()
                 .orElseThrow();
-        assertThat(chart.path("inputs").path("config").path("dataSource").path("query")
-                .path("statsOperation").asText()).isEqualTo("timeseries");
-        JsonNode crossFilterMapping = chart.path("inputs").path("config").path("interactions")
-                .path("eventActions").path("crossFilter").path("mapping");
+        assertThat(chart.path("inputs").path("chartDocument").path("source")
+                .path("operation").asText()).isEqualTo("timeseries");
+        JsonNode crossFilterMapping = chart.path("inputs").path("chartDocument").path("events")
+                .path("crossFilter").path("mapping");
         assertThat(crossFilterMapping.path("start").asText()).isEqualTo("competenciaBetween");
         assertThat(crossFilterMapping.path("status").asText()).isEqualTo("status");
 
@@ -3820,8 +3804,8 @@ class AgenticAuthoringPreviewServiceTest {
                             .equals(widget.path("key").asText()))
                     .findFirst()
                     .orElseThrow();
-            ObjectNode mapping = (ObjectNode) authoredChart.path("inputs").path("config")
-                    .path("interactions").path("eventActions").path("crossFilter").path("mapping");
+            ObjectNode mapping = (ObjectNode) authoredChart.path("inputs").path("chartDocument")
+                    .path("events").path("crossFilter").path("mapping");
             mapping.removeAll();
             mapping.put("departamentoNome", "departamentoBetween");
             return java.util.Optional.of(authored);
@@ -3842,10 +3826,10 @@ class AgenticAuthoringPreviewServiceTest {
                 .filter(widget -> "funcionarios-chart-departamentoNome".equals(widget.path("key").asText()))
                 .findFirst()
                 .orElseThrow();
-        assertThat(chart.path("inputs").path("config").path("dataSource").path("query")
-                .path("statsOperation").asText()).isEqualTo("group-by");
-        assertThat(chart.path("inputs").path("config").path("interactions")
-                .path("eventActions").path("crossFilter").path("mapping").toString())
+        assertThat(chart.path("inputs").path("chartDocument").path("source")
+                .path("operation").asText()).isEqualTo("group-by");
+        assertThat(chart.path("inputs").path("chartDocument").path("events")
+                .path("crossFilter").path("mapping").toString())
                 .isEqualTo("{\"departamentoNome\":\"departamentoBetween\"}");
         JsonNode pointLink = findBinding(
                 plan.path("bindings"),
@@ -3891,8 +3875,8 @@ class AgenticAuthoringPreviewServiceTest {
                             .equals(widget.path("key").asText()))
                     .findFirst()
                     .orElseThrow();
-            ObjectNode mapping = (ObjectNode) authoredChart.path("inputs").path("config")
-                    .path("interactions").path("eventActions").path("crossFilter").path("mapping");
+            ObjectNode mapping = (ObjectNode) authoredChart.path("inputs").path("chartDocument")
+                    .path("events").path("crossFilter").path("mapping");
             mapping.removeAll();
             mapping.put("start", "competencia");
             return java.util.Optional.of(authored);
@@ -3914,10 +3898,8 @@ class AgenticAuthoringPreviewServiceTest {
                         .equals(widget.path("key").asText()))
                 .findFirst()
                 .orElseThrow();
-        assertThat(chart.path("inputs").path("config").path("interactions")
-                .path("crossFilter").asBoolean()).isFalse();
-        assertThat(chart.path("inputs").path("config").path("interactions")
-                .path("eventActions").has("crossFilter")).isFalse();
+        assertThat(chart.path("inputs").path("chartDocument").path("events")
+                .has("crossFilter")).isFalse();
         assertThat(plan.path("bindings").findValuesAsText("id"))
                 .doesNotContain(
                         "vw-analytics-folha-pagamento-chart-competencia.pointClick->surface.open",
@@ -3972,8 +3954,8 @@ class AgenticAuthoringPreviewServiceTest {
                             .equals(widget.path("key").asText()))
                     .findFirst()
                     .orElseThrow();
-            ObjectNode mapping = (ObjectNode) authoredChart.path("inputs").path("config")
-                    .path("interactions").path("eventActions").path("crossFilter").path("mapping");
+            ObjectNode mapping = (ObjectNode) authoredChart.path("inputs").path("chartDocument")
+                    .path("events").path("crossFilter").path("mapping");
             mapping.removeAll();
             mapping.put("start", "competenciaBetween");
             mapping.put("end", "competenciaBetweenInclusive");
@@ -4008,10 +3990,8 @@ class AgenticAuthoringPreviewServiceTest {
                         .equals(widget.path("key").asText()))
                 .findFirst()
                 .orElseThrow();
-        assertThat(chart.path("inputs").path("config").path("interactions")
-                .path("crossFilter").asBoolean()).isFalse();
-        assertThat(chart.path("inputs").path("config").path("interactions")
-                .path("eventActions").has("crossFilter")).isFalse();
+        assertThat(chart.path("inputs").path("chartDocument").path("events")
+                .has("crossFilter")).isFalse();
         assertThat(plan.path("bindings").findValuesAsText("id"))
                 .doesNotContain(
                         "vw-analytics-folha-pagamento-chart-competencia.pointClick->surface.open",

@@ -545,7 +545,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(result.compiled()).isTrue();
         assertThat(result.failures()).isEmpty();
-        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("2.2.0");
+        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("2.2.1");
         JsonNode operation = result.patch().path("operations").get(0);
         assertThat(operation.path("operationId").asText()).isEqualTo("column.header.set");
         assertThat(operation.path("op").asText()).isEqualTo("merge-by-key");
