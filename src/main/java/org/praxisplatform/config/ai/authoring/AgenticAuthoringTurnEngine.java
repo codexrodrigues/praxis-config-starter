@@ -447,6 +447,7 @@ public class AgenticAuthoringTurnEngine {
                         artifactReconciliationAttempted);
                 intentResolution = artifactReconciliation.intentResolution();
                 artifactReconciliationAttempted = artifactReconciliation.attempted();
+                request = refinedIntentRequest;
                 route = routeClassifier.classify(request, intentResolution, state);
                 state = state.withRouteClass(route.routeClass());
                 emitIntentResolved(eventSink, intentResolution, route, request);
@@ -460,6 +461,17 @@ public class AgenticAuthoringTurnEngine {
                         "Checking refined intent against backend resource evidence.",
                         intentGroundingDiagnostics(intentResolution, route)));
                 emitIntentResolutionProgress(eventSink, intentResolution);
+                AgenticAuthoringTurnOutcome groundedResourceClarification =
+                        maybeAnswerGroundedResourceDiscoveryClarification(
+                                request,
+                                eventSink,
+                                state,
+                                intentResolution,
+                                route,
+                                turnProviderInvocations);
+                if (groundedResourceClarification != null) {
+                    return groundedResourceClarification;
+                }
             }
             LiveOptionFieldGroundingExecution liveOptionFieldGrounding = maybeRunLiveOptionFieldGrounding(
                     request,

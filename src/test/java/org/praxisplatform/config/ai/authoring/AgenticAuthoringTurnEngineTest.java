@@ -11761,6 +11761,103 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void groundsPostIntentResourceDiscoveryClarificationWithCandidateQuickReplies() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringIntentResolverService resolver =
+                Mockito.mock(AgenticAuthoringIntentResolverService.class);
+        AgenticAuthoringPreviewService preview = Mockito.mock(AgenticAuthoringPreviewService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringCandidate employees = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter",
+                "post",
+                0.91d,
+                "semantic retrieval evidence",
+                List.of("api-metadata", "semantic-retrieval"),
+                AgenticAuthoringEvidenceBundle.of("semantic_retrieval", List.of()));
+        AgenticAuthoringCandidate departments = new AgenticAuthoringCandidate(
+                "/api/human-resources/departamentos",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/departamentos/filter&operation=post&schemaType=response",
+                "/api/human-resources/departamentos/filter",
+                "post",
+                0.88d,
+                "semantic retrieval evidence",
+                List.of("api-metadata", "semantic-retrieval"),
+                AgenticAuthoringEvidenceBundle.of("semantic_retrieval", List.of()));
+        when(candidateCatalog.discover(anyString(), anyString(), any(), any(), any()))
+                .thenReturn(List.of(employees, departments));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(candidateCatalog, objectMapper));
+        AgenticAuthoringConsultativeAnswerService consultative =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                resolver,
+                preview,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                null,
+                new AgenticAuthoringOrchestrator(new AgenticAuthoringToolLoopExecutor(
+                        registry,
+                        new AgenticAuthoringDefaultToolLoopPlanner())),
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                consultative);
+        when(resolver.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(
+                        dashboardNeedsResourceClarificationIntent(List.of()),
+                        dashboardNeedsResourceClarificationIntent(List.of(employees, departments)));
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(
+                requestWithContextHintsOnEmptyPage(
+                        "Crie um painel administrativo e me deixe escolher a fonte governada.",
+                        objectMapper.createObjectNode()),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .containsSubsequence("tool.start", "tool.result", "consultative.grounded-clarification");
+        JsonNode result = firstPayloadOfType(sink, "result");
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies")).hasSize(2);
+        org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics")
+                        .path("resourceDiscoveryGroundedClarification").asBoolean())
+                .isTrue();
+        verify(preview, never()).preview(any(), any(), any(), any());
+    }
+
+    private AgenticAuthoringIntentResolutionResult dashboardNeedsResourceClarificationIntent(
+            List<AgenticAuthoringCandidate> candidates) {
+        return new AgenticAuthoringIntentResolutionResult(
+                false,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                candidates,
+                new AgenticAuthoringGateResult(
+                        "candidate-eligibility@0.1.0",
+                        "clarification_required",
+                        List.of("intent-needs-resource-confirmation")),
+                "Crie um painel administrativo e me deixe escolher a fonte governada.",
+                "Qual recurso de negócio deve alimentar este painel?",
+                List.of(),
+                List.of("Qual recurso de negócio deve alimentar este painel?"),
+                List.of("llm-intent-resolution-used"),
+                List.of("resource-candidate-required"),
+                objectMapper.createObjectNode());
+    }
+
+    @Test
     void groundsProviderFailureClarificationInDomainDiscoveryWhenPlannerFailsBeforeSearch() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
