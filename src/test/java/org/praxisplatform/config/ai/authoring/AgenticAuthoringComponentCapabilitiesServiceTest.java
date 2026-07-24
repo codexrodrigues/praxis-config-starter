@@ -444,9 +444,15 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
             assertThat(retryElapsedMs).isLessThan(500L);
             assertThat(retrying.diagnostics().source()).isEqualTo("snapshot-fallback");
             assertThat(retrying.diagnostics().degradationReason()).startsWith("registry-load-timeout");
-            AgenticAuthoringComponentCapabilitiesResult recovered =
-                    awaitComponent(service, "praxis-tabs", true);
-            assertThat(recovered.diagnostics().source()).isIn("registry", "snapshot-fallback");
+            long recoveryDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            AgenticAuthoringComponentCapabilitiesResult recovered = retrying;
+            while ((attempts.get() < 2 || !"registry".equals(recovered.diagnostics().source()))
+                    && System.nanoTime() < recoveryDeadline) {
+                Thread.sleep(10L);
+                recovered = service.listCapabilities();
+            }
+            assertThat(attempts.get()).isGreaterThanOrEqualTo(2);
+            assertThat(recovered.diagnostics().source()).isEqualTo("registry");
             assertThat(recovered.catalogs())
                     .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog::componentId)
                     .contains("praxis-tabs");
