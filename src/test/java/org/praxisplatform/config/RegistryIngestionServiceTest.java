@@ -123,7 +123,7 @@ class RegistryIngestionServiceTest {
 
         ArgumentCaptor<AiRegistry> savedDefinitions = ArgumentCaptor.forClass(AiRegistry.class);
         verify(repository, times(request.getComponents().size())).save(savedDefinitions.capture());
-        verify(ragVectorStoreService).upsertDocuments(any());
+        verify(ragVectorStoreService, times(request.getComponents().size())).upsertDocuments(any());
 
         AiRegistry tableDefinition = savedDefinitions.getAllValues().stream()
                 .filter(definition -> "praxis-table".equals(definition.getRegistryKey()))
@@ -367,7 +367,7 @@ class RegistryIngestionServiceTest {
         verify(repository, times(2)).save(any(AiRegistry.class));
         verify(embeddingService).embedAll(anyList());
         verify(embeddingService, never()).embed(anyString());
-        verify(ragVectorStoreService).upsertDocuments(any());
+        verify(ragVectorStoreService, times(2)).upsertDocuments(any());
         assertThat(result.componentCount()).isEqualTo(2);
         assertThat(result.releaseId()).isEqualTo("release-v2");
     }

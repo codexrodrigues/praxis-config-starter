@@ -23,7 +23,7 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class RagVectorStoreService {
 
-    static final int UPSERT_BATCH_SIZE = 64;
+    static final int UPSERT_BATCH_SIZE = 16;
 
     private final ObjectProvider<VectorStore> vectorStoreProvider;
     private final ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider;

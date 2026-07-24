@@ -216,7 +216,7 @@ public class RegistryIngestionService {
                         releaseId,
                         REGISTRY_TYPE_COMPONENT_DEF);
         List<ComponentPublicationStatus> componentStatuses = new ArrayList<>();
-        List<Document> ragDocumentsToUpsert = new ArrayList<>();
+        long[] vectorDocumentsPublished = {0};
         long expectedChunkCount = 0;
         long publishedChunkCount = 0;
         request.getComponents().forEach((componentId, entry) -> {
@@ -228,14 +228,17 @@ public class RegistryIngestionService {
                         componentEmbeddings.get(componentId));
                 upsertDefinition(def, previousDefinitions.get(componentId));
                 List<Document> ragDocuments = toRagDocuments(def, entry, resolvedTenant, resolvedEnv, releaseId, requestVersion);
-                ragDocumentsToUpsert.addAll(
-                        planRagDocumentUpserts(
-                                resolvedTenant,
-                                resolvedEnv,
-                                releaseId,
-                                componentId,
-                                ragDocuments,
-                                existingRagDocuments));
+                List<Document> plannedDocuments = planRagDocumentUpserts(
+                        resolvedTenant,
+                        resolvedEnv,
+                        releaseId,
+                        componentId,
+                        ragDocuments,
+                        existingRagDocuments);
+                if (!plannedDocuments.isEmpty()) {
+                    ragVectorStoreService.upsertDocuments(plannedDocuments);
+                    vectorDocumentsPublished[0] += plannedDocuments.size();
+                }
                 componentStatuses.add(new ComponentPublicationStatus(
                         componentId,
                         ragDocuments.size(),
@@ -253,13 +256,10 @@ public class RegistryIngestionService {
                 throw new ConfigurationIngestionException("Error processing component: " + componentId, e);
             }
         });
-        if (!ragDocumentsToUpsert.isEmpty()) {
-            ragVectorStoreService.upsertDocuments(ragDocumentsToUpsert);
-        }
         log.info(
                 "Published reconciled AI registry vector batch (components={}, documents={}).",
                 componentStatuses.size(),
-                ragDocumentsToUpsert.size());
+                vectorDocumentsPublished[0]);
         for (ComponentPublicationStatus status : componentStatuses) {
             expectedChunkCount += status.chunkCount();
             publishedChunkCount += status.chunkCount();
