@@ -85,6 +85,34 @@ class AgenticAuthoringCurrentPageAnalyzerTest {
     }
 
     @Test
+    void resolvesSoleWidgetAsStructuralGroundingWithoutInferringIntent() {
+        ObjectNode page = objectMapper.createObjectNode();
+        ObjectNode widget = page.putArray("widgets").addObject();
+        widget.put("key", "employees-table");
+        ObjectNode inputs = widget.putObject("definition")
+                .put("id", "praxis-table")
+                .putObject("inputs");
+        inputs.put("resourcePath", "/api/human-resources/funcionarios");
+
+        AgenticAuthoringTarget target = analyzer.resolveSoleComponentTarget(page);
+
+        assertThat(target).isNotNull();
+        assertThat(target.widgetKey()).isEqualTo("employees-table");
+        assertThat(target.componentId()).isEqualTo("praxis-table");
+        assertThat(target.resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+    }
+
+    @Test
+    void doesNotChooseStructuralGroundingWhenPageHasMultipleWidgets() {
+        ObjectNode page = objectMapper.createObjectNode();
+        var widgets = page.putArray("widgets");
+        widgets.addObject().put("key", "first").put("componentId", "praxis-table");
+        widgets.addObject().put("key", "second").put("componentId", "praxis-chart");
+
+        assertThat(analyzer.resolveSoleComponentTarget(page)).isNull();
+    }
+
+    @Test
     void exposesTabsActiveContentAsEditableContainerContext() {
         ObjectNode page = objectMapper.createObjectNode();
         var widgets = page.putArray("widgets");

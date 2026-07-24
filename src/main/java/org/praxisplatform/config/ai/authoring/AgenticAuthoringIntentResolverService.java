@@ -173,6 +173,9 @@ public class AgenticAuthoringIntentResolverService {
         String effectiveSelectedWidgetKey = effectiveSelectedWidgetKey(request);
         JsonNode currentPageSummary = currentPageAnalyzer.summarize(request.currentPage(), effectiveSelectedWidgetKey);
         AgenticAuthoringTarget target = currentPageAnalyzer.resolveTarget(request.currentPage(), effectiveSelectedWidgetKey);
+        AgenticAuthoringTarget llmGroundingTarget = target == null
+                ? currentPageAnalyzer.resolveSoleComponentTarget(request.currentPage())
+                : target;
         AgenticAuthoringKeywordFallbackResolution fallbackResolution = legacyKeywordFallback(prompt, currentPageSummary, target);
         String operationKind = fallbackResolution.operationKind();
         String artifactKind = fallbackResolution.artifactKind();
@@ -301,7 +304,7 @@ public class AgenticAuthoringIntentResolverService {
                     shouldResolveLlmIntent,
                     llmResolutionRequest,
                     effectivePrompt,
-                    target,
+                    llmGroundingTarget,
                     llmCandidateOptions,
                     semanticOrientation,
                     preIntentGovernedEvidenceTrace);
@@ -312,7 +315,7 @@ public class AgenticAuthoringIntentResolverService {
                     llmResolutionRequest,
                     effectivePrompt,
                     currentPageSummary,
-                    target,
+                    llmGroundingTarget,
                     llmCandidateOptions,
                     componentCapabilities,
                     tenantId,
@@ -329,7 +332,7 @@ public class AgenticAuthoringIntentResolverService {
                 llmResolutionRequest,
                 effectivePrompt,
                 currentPageSummary,
-                target,
+                llmGroundingTarget,
                 llmCandidateOptions,
                 componentCapabilities,
                 llmIntent);
@@ -970,11 +973,6 @@ public class AgenticAuthoringIntentResolverService {
             resourceDiscoveryFocusSelectionApplied = true;
             llmResourceSelectionOverriddenByPromptAlignment = false;
             llmResourceSelectionOverriddenByGovernedRanking = true;
-        }
-        if (selectedCandidate != null
-                && !turn.answeredPendingClarification()
-                && startsWithConfirmation(rawPrompt)) {
-            selectedCandidate = null;
         }
         if (hasMaterializableResourceDiscoveryContext(request)
                 && !explicitLocalUiComposition
@@ -7401,15 +7399,6 @@ public class AgenticAuthoringIntentResolverService {
         }
         String status = messages.isEmpty() ? "eligible" : "clarification_required";
         return new AgenticAuthoringGateResult(gate.gateId(), status, List.copyOf(messages));
-    }
-
-    private boolean startsWithConfirmation(String prompt) {
-        String normalized = normalize(prompt);
-        return normalized.startsWith("sim")
-                || normalized.startsWith("ok")
-                || normalized.startsWith("confirmo")
-                || normalized.startsWith("confirmado")
-                || normalized.startsWith("confirmed");
     }
 
     private AgenticAuthoringGateResult withGateMessage(AgenticAuthoringGateResult gate, String message) {

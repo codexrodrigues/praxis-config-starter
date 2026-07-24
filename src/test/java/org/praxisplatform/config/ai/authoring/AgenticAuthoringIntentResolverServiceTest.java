@@ -5108,18 +5108,16 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.valid()).isFalse();
+        assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
         assertThat(List.of("dashboard", "page")).contains(result.artifactKind());
         assertThat(List.of("create_artifact", "create_master_detail")).contains(result.changeKind());
-        if (result.selectedCandidate() != null) {
-            assertThat(result.selectedCandidate().resourcePath())
-                    .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
-            assertThat(result.selectedCandidate().schemaUrl())
-                    .isEqualTo("/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/stats/group-by&operation=post&schemaType=response");
-        }
-        assertThat(result.gate().status()).isEqualTo("clarification_required");
-        assertThat(result.failureCodes()).contains("resource-candidate-ambiguous");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/vw-analytics-folha-pagamento");
+        assertThat(result.selectedCandidate().schemaUrl())
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/vw-analytics-folha-pagamento/stats/group-by&operation=post&schemaType=response");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.failureCodes()).doesNotContain("resource-candidate-ambiguous");
     }
 
     @Test
@@ -5739,6 +5737,36 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate().operation()).isEqualTo("get");
         assertThat(result.gate().status()).isEqualTo("eligible");
         assertThat(result.failureCodes()).isEmpty();
+    }
+
+    @Test
+    void conversationalMarkerDoesNotDiscardGovernedCurrentTableResource() {
+        ObjectNode page = payrollTablePage();
+        AgenticAuthoringIntentResolverService semanticService = tableRefinementService(
+                "column.renderer.composeLayout.set",
+                "/api/human-resources/folhas-pagamento");
+
+        AgenticAuthoringIntentResolutionResult result = semanticService.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Ok, é possível colocar o código abaixo da foto? Porque os dois estão um do lado do outro.",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        page,
+                        null,
+                        null,
+                        null,
+                        null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("column.renderer.composeLayout.set");
+        assertThat(result.target().widgetKey()).isEqualTo("payroll-table");
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/folhas-pagamento");
+        assertThat(result.selectedCandidate().evidence()).contains("current-page-target-resource");
+        assertThat(result.failureCodes()).doesNotContain("resource-candidate-ambiguous");
     }
 
     @Test

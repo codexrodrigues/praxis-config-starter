@@ -107,6 +107,33 @@ public class AgenticAuthoringCurrentPageAnalyzer {
         return null;
     }
 
+    /**
+     * Resolves structural context only when the current page has a single
+     * unambiguous widget. This does not infer user intent; it gives the semantic
+     * resolver the canonical component manifest before asking the LLM to choose
+     * an operation.
+     */
+    public AgenticAuthoringTarget resolveSoleComponentTarget(JsonNode currentPage) {
+        JsonNode pageWidgets = widgets(currentPage);
+        if (pageWidgets.size() != 1) {
+            return null;
+        }
+        JsonNode widget = pageWidgets.get(0);
+        JsonNode inputs = inputs(widget);
+        String componentId = componentId(widget);
+        if (componentId.isBlank()) {
+            return null;
+        }
+        return new AgenticAuthoringTarget(
+                text(widget, "key"),
+                componentId,
+                resolveResourcePath(inputs),
+                text(inputs, "schemaUrl"),
+                text(inputs, "submitUrl"),
+                resolveSubmitMethod(componentId, inputs)
+        );
+    }
+
     private JsonNode selectedWidget(JsonNode currentPage, String selectedWidgetKey) {
         if (selectedWidgetKey == null || selectedWidgetKey.isBlank()) {
             return MissingNode.getInstance();
