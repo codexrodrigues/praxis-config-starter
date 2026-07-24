@@ -1019,6 +1019,8 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("\"userPrompt\" : \"Desfaz só a última mudança e mantém todas as anteriores.\"")
                 .doesNotContain("Crie uma tabela de funcionários")
                 .contains("primary meaning of the current userPrompt")
+                .contains("self-correction inside the current utterance")
+                .contains("final desired configuration")
                 .contains("Availability governs execution only");
         assertThat(schemaCaptor.getValue().jsonSchema())
                 .contains("\"local-undo\"")

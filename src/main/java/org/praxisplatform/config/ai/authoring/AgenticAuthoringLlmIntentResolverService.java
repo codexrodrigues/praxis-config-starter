@@ -993,6 +993,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                     keyword, regex or the prior objective. The current prompt is authoritative.
                     A request to reverse only the most recently materialized local change matches
                     local-undo. A request to create, edit, explain or retry prior authoring does not.
+                    A hesitation, cancellation or self-correction inside the current utterance does
+                    not match local-undo when the user states a final desired configuration in that
+                    same utterance; honor the final desired state through the general resolver.
                     Availability governs execution only and must not change the semantic match.
                     Return only the schema-conforming JSON.
 
