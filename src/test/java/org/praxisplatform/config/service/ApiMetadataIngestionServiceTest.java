@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -263,10 +264,6 @@ class ApiMetadataIngestionServiceTest {
         when(embeddingService.embed(anyString()))
                 .thenReturn(List.of(0.1f, 0.2f))
                 .thenThrow(new IllegalStateException("embedding unavailable"));
-        when(repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
-                "GLOBAL", "default", "default", "v1", "/api/ok", "GET"))
-                .thenReturn(Optional.empty());
-        when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         assertThatThrownBy(() -> service.ingestCatalog(request, null, null))
                 .isInstanceOf(org.praxisplatform.config.exception.ConfigurationIngestionException.class)
@@ -278,6 +275,34 @@ class ApiMetadataIngestionServiceTest {
                 anyString(),
                 anyString());
         verify(ragVectorStoreService, never()).upsertDocuments(any());
+    }
+
+    @Test
+    void shouldEmbedMultiEndpointCatalogAsOneProviderBatch() {
+        ApiCatalogRequest.ApiEndpointEntry first = ApiCatalogRequest.ApiEndpointEntry.builder()
+                .path("/api/users")
+                .method("GET")
+                .build();
+        ApiCatalogRequest.ApiEndpointEntry second = ApiCatalogRequest.ApiEndpointEntry.builder()
+                .path("/api/teams")
+                .method("GET")
+                .build();
+        ApiCatalogRequest request = ApiCatalogRequest.builder()
+                .endpoints(List.of(first, second))
+                .build();
+
+        when(embeddingService.embedAll(any()))
+                .thenReturn(List.of(List.of(0.1f, 0.2f), List.of(0.3f, 0.4f)));
+        when(repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                anyString(), anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(Optional.empty());
+        when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.ingestCatalog(request, null, null);
+
+        verify(embeddingService).embedAll(any());
+        verify(embeddingService, never()).embed(anyString());
+        verify(repository, times(2)).save(any(ApiMetadata.class));
     }
 
     @Test

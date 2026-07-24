@@ -3,6 +3,7 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -76,7 +77,21 @@ public class ApiMetadataIngestionService {
         String resolvedReleaseId = normalizeOrDefault(releaseId, "v1");
         String generatedAt = normalize(request.getGeneratedAt());
         String serviceKey = DEFAULT_SERVICE_KEY;
-        for (ApiCatalogRequest.ApiEndpointEntry ep : request.getEndpoints()) {
+        List<ApiCatalogRequest.ApiEndpointEntry> endpoints = request.getEndpoints();
+        List<String> embeddingSummaries = endpoints.stream()
+                .map(ep -> buildSummary(
+                        ep.getPath(),
+                        ep.getMethod(),
+                        toCommaSeparated(ep.getTags()),
+                        ep.getSummary(),
+                        ep.getDescription(),
+                        ep.getOperationId(),
+                        ep))
+                .toList();
+        List<List<Float>> embeddings = embedCatalogBatch(endpoints, embeddingSummaries);
+
+        for (int endpointIndex = 0; endpointIndex < endpoints.size(); endpointIndex++) {
+            ApiCatalogRequest.ApiEndpointEntry ep = endpoints.get(endpointIndex);
             try {
                 String path = ep.getPath();
                 String method = ep.getMethod();
@@ -91,7 +106,7 @@ public class ApiMetadataIngestionService {
                 String parameters = safeWrite(ep.getParameters());
                 String rawJson = safeWrite(ep);
 
-                String embeddingSummary = buildSummary(path, method, tags, summary, description, operationId, ep);
+                String embeddingSummary = embeddingSummaries.get(endpointIndex);
                 ingestLog.info(
                         "Ingest start: method={} path={} tags={} summaryLen={} descLen={} reqSchemaLen={} resSchemaLen={} paramsLen={}",
                         method,
@@ -105,7 +120,7 @@ public class ApiMetadataIngestionService {
                 ingestLog.info("Embedding input size={} sample='{}'",
                         safeLen(embeddingSummary),
                         safeSnippet(embeddingSummary));
-                List<Float> embedding = embeddingService.embed(embeddingSummary);
+                List<Float> embedding = embeddings.get(endpointIndex);
                 if (embedding == null || embedding.isEmpty()) {
                     ingestLog.warn("Embedding empty for {} {}", method, path);
                 } else {
@@ -146,6 +161,45 @@ public class ApiMetadataIngestionService {
             }
         }
         publishRagDocumentsAfterCommit(resolvedTenant, resolvedEnv, serviceKey, resolvedReleaseId);
+    }
+
+    private List<List<Float>> embedCatalogBatch(
+            List<ApiCatalogRequest.ApiEndpointEntry> endpoints,
+            List<String> embeddingSummaries) {
+        if (embeddingSummaries.size() == 1) {
+            return List.of(embeddingService.embed(embeddingSummaries.get(0)));
+        }
+        try {
+            List<List<Float>> embeddings = embeddingService.embedAll(embeddingSummaries);
+            if (embeddings == null || embeddings.size() != embeddingSummaries.size()) {
+                throw new IllegalStateException(
+                        "Embedding provider returned "
+                                + (embeddings == null ? 0 : embeddings.size())
+                                + " vector(s) for "
+                                + embeddingSummaries.size()
+                                + " API endpoint(s).");
+            }
+            return embeddings;
+        } catch (RuntimeException batchFailure) {
+            log.warn(
+                    "API catalog batch embedding failed for {} endpoint(s); retrying individually to identify the canonical endpoint failure: {}",
+                    embeddingSummaries.size(),
+                    batchFailure.getMessage());
+            List<List<Float>> embeddings = new ArrayList<>(embeddingSummaries.size());
+            for (int index = 0; index < embeddingSummaries.size(); index++) {
+                ApiCatalogRequest.ApiEndpointEntry endpoint = endpoints.get(index);
+                try {
+                    embeddings.add(embeddingService.embed(embeddingSummaries.get(index)));
+                } catch (RuntimeException endpointFailure) {
+                    String message = "Error ingesting endpoint: "
+                            + endpoint.getMethod()
+                            + " "
+                            + endpoint.getPath();
+                    throw new ConfigurationIngestionException(message, endpointFailure);
+                }
+            }
+            return embeddings;
+        }
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
