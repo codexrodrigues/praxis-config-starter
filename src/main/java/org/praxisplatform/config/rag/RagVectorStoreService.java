@@ -238,8 +238,9 @@ public class RagVectorStoreService {
                 continue;
             }
             validCount++;
-            Document profiledDocument = withEmbeddingProfile(document);
-            deduplicatedDocuments.putIfAbsent(buildDedupeKey(profiledDocument), profiledDocument);
+            deduplicatedDocuments.putIfAbsent(
+                    buildDedupeKey(document, embeddingProfile.id()),
+                    document);
         }
         if (deduplicatedDocuments.isEmpty()) {
             return;
@@ -253,7 +254,9 @@ public class RagVectorStoreService {
         }
         for (int start = 0; start < validDocuments.size(); start += UPSERT_BATCH_SIZE) {
             int end = Math.min(start + UPSERT_BATCH_SIZE, validDocuments.size());
-            List<Document> batch = new ArrayList<>(validDocuments.subList(start, end));
+            List<Document> batch = validDocuments.subList(start, end).stream()
+                    .map(this::withEmbeddingProfile)
+                    .toList();
             List<String> batchIds = batch.stream()
                     .map(Document::getId)
                     .distinct()
@@ -441,7 +444,7 @@ public class RagVectorStoreService {
         }
     }
 
-    private String buildDedupeKey(Document document) {
+    private String buildDedupeKey(Document document, String embeddingProfileId) {
         Map<String, Object> metadata = document.getMetadata() != null ? document.getMetadata() : Map.of();
         String tenantId = normalizeMetadataToken(
                 metadata.get(RagMetadataKeys.TENANT_ID),
@@ -461,7 +464,7 @@ public class RagVectorStoreService {
         String contentHash = normalizeMetadataToken(
                 metadata.get(RagMetadataKeys.CONTENT_HASH),
                 RagDocumentIdentity.sha256(document.getText() != null ? document.getText() : document.getId()));
-        String profile = normalizeMetadataToken(metadata.get(RagMetadataKeys.EMBEDDING_PROFILE), "unknown-profile");
+        String profile = normalizeMetadataToken(embeddingProfileId, "unknown-profile");
         int chunkIndex = toChunkIndex(metadata.get(RagMetadataKeys.CHUNK_INDEX));
         return String.join(
                 "|",
