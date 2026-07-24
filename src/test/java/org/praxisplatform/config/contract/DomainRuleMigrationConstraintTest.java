@@ -143,4 +143,14 @@ class DomainRuleMigrationConstraintTest {
         assertThat(migration).contains("'authenticated'");
         assertThat(migration).contains("actor_type IS NULL");
     }
+
+    @Test
+    void authenticatedReviewersCanBePersistedWhenApplyingMaterializations() throws IOException {
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/V41__allow_authenticated_domain_rule_materialization_actors.sql"));
+
+        assertThat(migration).contains("DROP CONSTRAINT ck_domain_rule_materialization_applied_by_type");
+        assertThat(migration).contains("'authenticated'");
+        assertThat(migration).contains("applied_by_type IS NULL");
+    }
 }
