@@ -525,7 +525,8 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                         objectMapper)
                 .resolve(
                         request,
-                        request.userPrompt(),
+                        "Crie uma tabela de funcionários e preserve as colunas. "
+                                + request.userPrompt(),
                         objectMapper.createObjectNode(),
                         null,
                         List.of(new AgenticAuthoringCandidate(
@@ -1015,6 +1016,8 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(promptCaptor.getValue())
                 .contains("\"declaredClientActions\"")
                 .contains("\"kind\" : \"local-undo\"")
+                .contains("\"userPrompt\" : \"Desfaz só a última mudança e mantém todas as anteriores.\"")
+                .doesNotContain("Crie uma tabela de funcionários")
                 .contains("primary meaning of the current userPrompt")
                 .contains("Availability governs execution only");
         assertThat(schemaCaptor.getValue().jsonSchema())

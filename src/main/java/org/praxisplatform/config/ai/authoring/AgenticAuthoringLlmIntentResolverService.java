@@ -138,7 +138,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             Optional<AgenticAuthoringLlmIntentResolution> declaredClientActionIntent =
                     compactDeclaredClientActionIntent(
                             request,
-                            effectivePrompt,
+                            request.userPrompt(),
                             tenantId,
                             userId,
                             environment,
