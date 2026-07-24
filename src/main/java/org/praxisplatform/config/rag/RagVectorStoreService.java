@@ -23,6 +23,8 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class RagVectorStoreService {
 
+    static final int UPSERT_BATCH_SIZE = 64;
+
     private final ObjectProvider<VectorStore> vectorStoreProvider;
     private final ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider;
     private final RagEmbeddingProfile embeddingProfile;
@@ -243,18 +245,22 @@ public class RagVectorStoreService {
             return;
         }
         List<Document> validDocuments = new ArrayList<>(deduplicatedDocuments.values());
-        LinkedHashSet<String> ids = new LinkedHashSet<>();
-        for (Document document : validDocuments) {
-            ids.add(document.getId());
-        }
         if (validDocuments.size() < validCount) {
             log.debug(
                     "Deduplicated RAG upsert batch from {} to {} documents using metadata scope/hash key.",
                     validCount,
                     validDocuments.size());
         }
-        vectorStore.delete(new ArrayList<>(ids));
-        vectorStore.add(validDocuments);
+        for (int start = 0; start < validDocuments.size(); start += UPSERT_BATCH_SIZE) {
+            int end = Math.min(start + UPSERT_BATCH_SIZE, validDocuments.size());
+            List<Document> batch = new ArrayList<>(validDocuments.subList(start, end));
+            List<String> batchIds = batch.stream()
+                    .map(Document::getId)
+                    .distinct()
+                    .toList();
+            vectorStore.delete(batchIds);
+            vectorStore.add(batch);
+        }
     }
 
     public void deleteDocuments(List<String> ids) {

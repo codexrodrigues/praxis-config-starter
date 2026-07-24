@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -115,6 +116,45 @@ class RagVectorStoreServiceTest {
         verify(vectorStore).add(docsCaptor.capture());
         assertThat(docsCaptor.getValue()).hasSize(1);
         assertThat(docsCaptor.getValue().get(0).getId()).isEqualTo(first.getId());
+    }
+
+    @Test
+    void shouldBoundVectorStoreUpsertsToProtectProviderMemory() {
+        when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
+        int documentCount = RagVectorStoreService.UPSERT_BATCH_SIZE * 2 + 5;
+        List<Document> documents = new ArrayList<>();
+        for (int index = 0; index < documentCount; index++) {
+            documents.add(Document.builder()
+                    .id("id-" + index)
+                    .text("content-" + index)
+                    .metadata(Map.of(
+                            RagMetadataKeys.COMPONENT_ID, "component-" + index,
+                            RagMetadataKeys.DOC_TYPE, "component_definition",
+                            RagMetadataKeys.CONTENT_HASH, "hash-" + index))
+                    .build());
+        }
+
+        service.upsertDocuments(documents);
+
+        ArgumentCaptor<List<String>> idsCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<Document>> docsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore, times(3)).delete(idsCaptor.capture());
+        verify(vectorStore, times(3)).add(docsCaptor.capture());
+
+        assertThat(idsCaptor.getAllValues())
+                .extracting(List::size)
+                .containsExactly(
+                        RagVectorStoreService.UPSERT_BATCH_SIZE,
+                        RagVectorStoreService.UPSERT_BATCH_SIZE,
+                        5);
+        assertThat(docsCaptor.getAllValues())
+                .extracting(List::size)
+                .containsExactly(
+                        RagVectorStoreService.UPSERT_BATCH_SIZE,
+                        RagVectorStoreService.UPSERT_BATCH_SIZE,
+                        5);
+        assertThat(docsCaptor.getAllValues().stream().flatMap(List::stream).map(Document::getId))
+                .containsExactlyElementsOf(documents.stream().map(Document::getId).toList());
     }
 
     @Test
