@@ -9442,7 +9442,9 @@ public class AgenticAuthoringIntentResolverService {
             return reply;
         }
         PlatformQuickReplyDecision declaredDecision = switch (valueOrDefault(reply.id(), "")) {
-            case "platform-create-admin-dashboard", "platform-create-requested-dashboard" ->
+            case "platform-create-admin-dashboard" ->
+                    new PlatformQuickReplyDecision("create", "page", "create_artifact");
+            case "platform-create-requested-dashboard" ->
                     new PlatformQuickReplyDecision("create", "dashboard", "create_artifact");
             case "platform-refine-dashboard-metrics" ->
                     new PlatformQuickReplyDecision("explore", "dashboard", "recommend_dashboard_visualization");

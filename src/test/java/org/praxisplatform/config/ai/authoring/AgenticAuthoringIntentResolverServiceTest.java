@@ -2677,7 +2677,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.quickReplies().get(0).semanticDecision().path("operationKind").asText())
                 .isEqualTo("create");
         assertThat(result.quickReplies().get(0).semanticDecision().path("artifactKind").asText())
-                .isEqualTo("dashboard");
+                .isEqualTo("page");
         assertThat(result.quickReplies().get(0).semanticDecision().path("changeKind").asText())
                 .isEqualTo("create_artifact");
     }
