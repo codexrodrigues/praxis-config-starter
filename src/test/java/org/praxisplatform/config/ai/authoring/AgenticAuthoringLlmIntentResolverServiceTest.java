@@ -1033,6 +1033,62 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     }
 
     @Test
+    void preservesDeclaredLocalUndoWhenPromptMentionsStateThatMustRemainUnchanged() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "matchesDeclaredAction": true,
+                  "actionKind": "local-undo",
+                  "assistantMessage": "Vou desfazer somente a última alteração local."
+                }
+                """));
+        AgenticAuthoringIntentResolutionRequest prior = targetedTableUndoRequest(true);
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "Desfaz somente a última alteração; mantém a composição, o Status e todas as outras colunas como estão.",
+                prior.targetApp(),
+                prior.targetComponentId(),
+                prior.currentRoute(),
+                prior.currentPage(),
+                prior.selectedWidgetKey(),
+                prior.provider(),
+                prior.model(),
+                prior.apiKey(),
+                prior.sessionId(),
+                "turn-undo-preserve-status",
+                prior.conversationMessages(),
+                prior.pendingClarification(),
+                prior.attachmentSummaries(),
+                prior.contextHints(),
+                prior.activeSemanticDecision());
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        request,
+                        request.userPrompt(),
+                        objectMapper.createObjectNode(),
+                        targetedTableTarget(),
+                        List.of(),
+                        new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(result.operationKind()).isEqualTo("undo");
+        assertThat(result.changeKind()).isEqualTo("undo_last_local_change");
+        assertThat(result.warnings())
+                .contains("llm-declared-client-action-intent-used")
+                .doesNotContain("semantic-decision-memory-refinement-applied");
+    }
+
+    @Test
     void targetedComponentIntentProviderFailureDoesNotCascadeIntoTheLargeGenericResolver() {
         when(providerManagementService.generateJson(
                 any(),

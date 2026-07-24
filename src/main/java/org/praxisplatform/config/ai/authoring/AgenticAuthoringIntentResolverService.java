@@ -1929,7 +1929,8 @@ public class AgenticAuthoringIntentResolverService {
         return llmIntent != null
                 && llmIntent.resolved()
                 && "component_authoring".equals(valueOrDefault(llmIntent.semanticIntentClass(), ""))
-                && "modify".equals(valueOrDefault(llmIntent.operationKind(), ""));
+                && Set.of("modify", "undo").contains(
+                        valueOrDefault(llmIntent.operationKind(), ""));
     }
 
     private AgenticAuthoringSemanticRefinement visualProjectionRefinement(String prompt) {
