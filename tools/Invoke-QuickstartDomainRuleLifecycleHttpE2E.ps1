@@ -438,17 +438,28 @@ $materializationBody = @{
     targetArtifactKey = "supplier"
     targetPointer = "/selectionPolicy"
     materializedRuleId = "selection-policy"
-    status = "applied"
+    status = "pending_review"
     sourceHash = "http-smoke-$unique"
     appliedByType = "llm"
     appliedBy = "codex-http-smoke"
 }
 
-$appliedCreationBlocked = Invoke-ExpectedFailure `
+$pendingMaterialization = Invoke-JsonRequest `
     -Method Post `
     -Uri "$base/api/praxis/config/domain-rules/materializations" `
     -Headers $headers `
-    -Body $materializationBody `
+    -Body $materializationBody
+
+$appliedCreationBlocked = Invoke-ExpectedFailure `
+    -Method Patch `
+    -Uri "$base/api/praxis/config/domain-rules/materializations/$($pendingMaterialization.id)/status" `
+    -Headers $reviewerHeaders `
+    -Body @{
+        status = "applied"
+        validationResult = @{
+            checks = @("http-lifecycle-inactive-definition")
+        }
+    } `
     -ExpectedMessage "Rule materialization can only be applied when its definition is active"
 
 $definition = Set-DefinitionStatus `
@@ -526,8 +537,19 @@ $appliedMaterialization = Invoke-JsonRequest `
     -Headers $headers `
     -Body $materializationBody
 
+$appliedMaterialization = Invoke-JsonRequest `
+    -Method Patch `
+    -Uri "$base/api/praxis/config/domain-rules/materializations/$($appliedMaterialization.id)/status" `
+    -Headers $reviewerHeaders `
+    -Body @{
+        status = "applied"
+        validationResult = @{
+            checks = @("http-lifecycle-materialization-review")
+        }
+    }
+
 if ($appliedMaterialization.status -ne "applied") {
-    throw "Expected applied materialization, got '$($appliedMaterialization.status)'."
+    throw "Expected reviewed materialization to be applied, got '$($appliedMaterialization.status)'."
 }
 if ([string]::IsNullOrWhiteSpace([string] $appliedMaterialization.appliedAt)) {
     throw "Expected applied materialization to include appliedAt."
@@ -577,14 +599,25 @@ $failedMaterialization = Invoke-JsonRequest `
         targetArtifactKey = "supplier"
         targetPointer = "/selectionPolicy"
         materializedRuleId = "selection-policy"
-        status = "failed"
+        status = "pending_review"
         sourceHash = "http-smoke-failed-$unique"
         appliedByType = "llm"
         appliedBy = "codex-http-smoke"
     }
 
+$failedMaterialization = Invoke-JsonRequest `
+    -Method Patch `
+    -Uri "$base/api/praxis/config/domain-rules/materializations/$($failedMaterialization.id)/status" `
+    -Headers $reviewerHeaders `
+    -Body @{
+        status = "failed"
+        validationResult = @{
+            checks = @("http-lifecycle-materialization-failed")
+        }
+    }
+
 if ($failedMaterialization.status -ne "failed") {
-    throw "Expected failed materialization, got '$($failedMaterialization.status)'."
+    throw "Expected reviewed materialization to be failed, got '$($failedMaterialization.status)'."
 }
 
 $terminalMaterializationTransitionBlocked = Invoke-ExpectedFailure `
