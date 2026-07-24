@@ -1116,6 +1116,11 @@ class AgenticAuthoringTurnEngineTest {
                 .thenReturn(platformGuidanceIntent);
         AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
                 Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        when(consultativeAnswerService.governedPlatformGuidanceMessage(
+                eq("platform_guidance"),
+                eq("Create dashboards with detail tables, filters, and forms."),
+                any()))
+                .thenReturn("Create governed forms, tables or lists, charts or dashboards, filters and interaction flows.");
         AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
                 intentResolverService,
                 previewService,
@@ -1144,7 +1149,7 @@ class AgenticAuthoringTurnEngineTest {
                 .isEqualTo("platform-create-form");
         org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
         org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
-                .isEqualTo("Create dashboards with detail tables, filters, and forms.");
+                .isEqualTo("Create governed forms, tables or lists, charts or dashboards, filters and interaction flows.");
         JsonNode intentResolved = firstPayloadOfType(sink, "intent.resolved");
         org.assertj.core.api.Assertions.assertThat(intentResolved.path("userFacingUnderstanding").asText())
                 .isEqualTo("Create dashboards with detail tables, filters, and forms.");

@@ -1434,10 +1434,20 @@ public class AgenticAuthoringTurnEngine {
         decisionDiagnostics.put("routeClass", safeText(route == null ? "" : route.routeClass()));
         decisionDiagnostics.put("consultativePostIntent", false);
         decisionDiagnostics.put("resolvedIntentAnswerUsed", true);
+        String assistantMessage = intentResolution.assistantMessage();
+        if (consultativeAnswerService != null) {
+            String governedMessage = consultativeAnswerService.governedPlatformGuidanceMessage(
+                    "platform_guidance",
+                    assistantMessage,
+                    componentCapabilities(request));
+            if (StringUtils.hasText(governedMessage)) {
+                assistantMessage = governedMessage;
+            }
+        }
         Map<String, Object> resultPayload = new LinkedHashMap<>();
         resultPayload.put("intentResolution", intentResolution);
         resultPayload.put("preview", objectMapper.createObjectNode());
-        resultPayload.put("assistantMessage", publicAssistantMessage(intentResolution.assistantMessage(), request));
+        resultPayload.put("assistantMessage", publicAssistantMessage(assistantMessage, request));
         resultPayload.put("assistantContent", intentResolution.assistantContent());
         resultPayload.put("quickReplies", intentResolution.quickReplies() == null
                 ? List.of()

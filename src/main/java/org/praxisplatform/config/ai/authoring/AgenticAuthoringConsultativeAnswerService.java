@@ -6009,7 +6009,7 @@ public class AgenticAuthoringConsultativeAnswerService {
         return sanitizeUserFacingAnswer(message.toString());
     }
 
-    private String governedPlatformGuidanceMessage(
+    String governedPlatformGuidanceMessage(
             String category,
             String generatedMessage,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
