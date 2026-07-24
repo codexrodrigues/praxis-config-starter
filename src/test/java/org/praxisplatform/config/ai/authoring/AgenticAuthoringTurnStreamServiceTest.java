@@ -1957,12 +1957,14 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     private AgenticAuthoringTurnStreamService service(AgenticAuthoringTurnEngine turnEngine) {
-        return new AgenticAuthoringTurnStreamService(
+        AgenticAuthoringTurnStreamService service = new AgenticAuthoringTurnStreamService(
                 turnEngine,
                 threadService,
                 turnService,
                 turnEventService,
                 streamAccessTokenService);
+        applyProductionStreamTimingDefaults(service);
+        return service;
     }
 
     private AgenticAuthoringTurnStreamRequest withSemanticDecision(
@@ -2181,11 +2183,18 @@ class AgenticAuthoringTurnStreamServiceTest {
                 objectMapper,
                 new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
                 new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
-        return new AgenticAuthoringTurnStreamService(
+        AgenticAuthoringTurnStreamService service = new AgenticAuthoringTurnStreamService(
                 turnEngine,
                 threadService,
                 turnService,
                 turnEventService,
                 streamAccessTokenService);
+        applyProductionStreamTimingDefaults(service);
+        return service;
+    }
+
+    private void applyProductionStreamTimingDefaults(AgenticAuthoringTurnStreamService service) {
+        ReflectionTestUtils.setField(service, "processingTimeoutSeconds", 180L);
+        ReflectionTestUtils.setField(service, "processingProgressSeconds", 8L);
     }
 }
