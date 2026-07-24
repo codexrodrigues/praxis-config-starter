@@ -1002,6 +1002,18 @@ public class AgenticAuthoringTurnEngine {
                             "routeClass", safeText(route == null ? "" : route.routeClass()))));
             return null;
         }
+        if (isServerIssuedExecutableQuickReplyContinuation(request, intentResolution)) {
+            eventSink.append("thought.step", thoughtStepPayload(
+                    "consultative.post-intent.skipped",
+                    "A acao escolhida ja representa uma decisao executavel; vou preservar essa decisao e seguir para o grounding governado.",
+                    "Server-issued executable semantic decision must not be downgraded to a terminal consultative answer.",
+                    Map.of(
+                            "serviceAvailable", consultativeAnswerService != null,
+                            "routeClass", safeText(route.routeClass()),
+                            "operationKind", safeText(intentResolution.operationKind()),
+                            "serverIssuedExecutableDecision", true)));
+            return null;
+        }
         AgenticAuthoringTurnOutcome groundedClarificationOutcome =
                 maybeAnswerGroundedResourceDiscoveryClarification(
                         request,
@@ -2450,6 +2462,18 @@ public class AgenticAuthoringTurnEngine {
                 && "server-issued-quick-reply".equals(
                         decision.constraints().path("source").asText(""))
                 && !decision.constraints().path("quickReplyId").asText("").isBlank();
+    }
+
+    private boolean isServerIssuedExecutableQuickReplyContinuation(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (!isServerIssuedQuickReplyContinuation(request) || intentResolution == null) {
+            return false;
+        }
+        return switch (safeText(intentResolution.operationKind())) {
+            case "create", "modify", "edit", "compose" -> true;
+            default -> false;
+        };
     }
 
     private AgenticAuthoringTurnStreamRequest withServerComponentCapabilities(

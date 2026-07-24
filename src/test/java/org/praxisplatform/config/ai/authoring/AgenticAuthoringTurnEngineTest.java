@@ -11862,6 +11862,77 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void serverIssuedExecutableDecisionCannotBeDowngradedToConsultativeTerminalAnswer() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringConsultativeAnswerService consultativeAnswerService =
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class);
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(null, objectMapper)),
+                null,
+                null,
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                consultativeAnswerService);
+        AgenticAuthoringIntentResolutionResult resolved = validIntentWithSelectedCandidate();
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(resolved);
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        objectMapper.createObjectNode(),
+                        "Preview ready."));
+
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("source", "server-issued-quick-reply");
+        constraints.put("quickReplyId", "platform-create-admin-dashboard");
+        AgenticAuthoringSemanticDecision activeDecision = AgenticAuthoringSemanticDecision.from(
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        null,
+                        List.of(),
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        "session-1",
+                        "turn-platform-dashboard",
+                        "Painel administrativo",
+                        "Painel administrativo",
+                        "Server-issued governed platform action.")
+                .withConstraints(constraints);
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(
+                requestWithContextHintsAndActiveDecision(
+                        "Painel administrativo",
+                        objectMapper.createObjectNode(),
+                        activeDecision),
+                principalContext,
+                sink);
+
+        assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        verify(consultativeAnswerService, never()).answer(
+                any(AgenticAuthoringTurnStreamRequest.class),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
+        assertThat(phases(sink)).contains("consultative.post-intent.skipped");
+    }
+
+    @Test
     void emitsPreIntentToolPlanSkippedWhenPlannerBeanIsUnavailable() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
