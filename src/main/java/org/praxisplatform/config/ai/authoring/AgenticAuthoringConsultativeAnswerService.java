@@ -645,6 +645,8 @@ public class AgenticAuthoringConsultativeAnswerService {
                 - End with a complete, concrete next step. Do not leave a dangling sentence or end with a question.
                 - For platform or component questions, stay on platform/component concepts. Do not introduce business-domain examples
                   from project knowledge or domain resources unless the user explicitly asks about data, APIs, domain, resources or business entities.
+                - For broad platform-guidance questions about what can be done here, explicitly cover forms, tables or lists,
+                  charts or dashboards, and filters or interaction flows. Explain each family briefly in user-facing terms.
 
                 User question:
                 %s
@@ -715,6 +717,8 @@ public class AgenticAuthoringConsultativeAnswerService {
                 - When discussing component capability, explain the user-facing options first; put technical config names only if truly necessary and label them as implementation details.
                 - For platform or component questions, stay on platform/component concepts. Do not introduce business-domain examples
                   from project knowledge or domain resources unless the user explicitly asks about data, APIs, domain, resources or business entities.
+                - For broad platform-guidance questions about what can be done here, explicitly cover forms, tables or lists,
+                  charts or dashboards, and filters or interaction flows. Explain each family briefly in user-facing terms.
 
                 User question:
                 %s
@@ -784,7 +788,10 @@ public class AgenticAuthoringConsultativeAnswerService {
                     environment,
                     request.contextHints().path("requestBaseUrl").asText(""));
         } else if (isServerIssuedQuickReplyContinuation(request)) {
-            projection = null;
+            projection = apiCatalogProjectionService.projectCompact(
+                    query,
+                    tenantId,
+                    environment);
         } else {
             projection = apiCatalogProjectionService.projectCompact(query, tenantId, environment);
         }

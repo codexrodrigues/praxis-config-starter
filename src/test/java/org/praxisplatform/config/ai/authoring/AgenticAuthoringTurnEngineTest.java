@@ -7758,7 +7758,11 @@ class AgenticAuthoringTurnEngineTest {
                 .doesNotContain("Funcionarios")
                 .doesNotContain("folha de pagamento")
                 .doesNotContain("Salario Bruto")
-                .contains("componentCatalogs");
+                .contains("componentCatalogs")
+                .contains(
+                        "explicitly cover forms, tables or lists",
+                        "charts or dashboards",
+                        "filters or interaction flows");
     }
 
     @Test
