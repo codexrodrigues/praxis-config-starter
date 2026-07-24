@@ -45,6 +45,7 @@ public class RagProjectKnowledgeDerivedIndexService implements ProjectKnowledgeD
             return;
         }
         Document document = toDocument(concept, evidence);
+        ragVectorStoreService.deleteDocumentByCanonicalContentIdentity(document);
         ragVectorStoreService.upsertDocuments(List.of(document));
         log.debug(
                 "Published derived Project Knowledge RAG document for concept={} evidence={}",

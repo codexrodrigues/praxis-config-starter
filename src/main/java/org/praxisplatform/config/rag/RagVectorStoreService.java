@@ -272,6 +272,61 @@ public class RagVectorStoreService {
         vectorStore.delete(validIds);
     }
 
+    /**
+     * Removes any physical row occupying the canonical content identity of a document.
+     *
+     * <p>This is narrower than a source-scope purge and is intended for derived projections whose
+     * evidence identity may change while the governed content remains equal. The database unique
+     * index owns this identity independently from the Spring AI document id.
+     */
+    public void deleteDocumentByCanonicalContentIdentity(Document document) {
+        if (vectorStoreProvider.getIfAvailable() == null
+                || document == null
+                || document.getId() == null
+                || document.getId().isBlank()) {
+            return;
+        }
+        NamedParameterJdbcTemplate jdbcTemplate = jdbcTemplateProvider.getIfAvailable();
+        if (jdbcTemplate == null) {
+            log.warn("Skipping canonical vector document identity purge because configNamedParameterJdbcTemplate is unavailable.");
+            return;
+        }
+        Map<String, Object> metadata = document.getMetadata() != null ? document.getMetadata() : Map.of();
+        String sql = """
+            DELETE FROM %s
+            WHERE COALESCE(metadata ->> 'tenantId', 'global') = :tenantId
+              AND COALESCE(metadata ->> 'environment', 'global') = :environment
+              AND COALESCE(metadata ->> 'releaseId', metadata ->> 'version', 'v1') = :releaseId
+              AND COALESCE(metadata ->> 'componentId', metadata ->> 'resourceId', id) = :componentId
+              AND COALESCE(metadata ->> 'docType', metadata ->> 'resourceType', 'unknown-doc') = :docType
+              AND COALESCE(metadata ->> 'contentHash', md5(COALESCE(content, ''))) = :contentHash
+              AND (
+                  CASE
+                  WHEN COALESCE(metadata ->> 'chunkIndex', '') ~ '^-?[0-9]+$'
+                      THEN GREATEST((metadata ->> 'chunkIndex')::int, 0)
+                  ELSE 0
+                  END
+              ) = :chunkIndex
+            """.formatted(tableName);
+        Map<String, Object> params = Map.of(
+                "tenantId", normalizeMetadataToken(metadata.get(RagMetadataKeys.TENANT_ID), "global"),
+                "environment", normalizeMetadataToken(metadata.get(RagMetadataKeys.ENVIRONMENT), "global"),
+                "releaseId", normalizeMetadataToken(
+                        firstNonNull(metadata.get(RagMetadataKeys.RELEASE_ID), metadata.get(RagMetadataKeys.VERSION)),
+                        "v1"),
+                "componentId", normalizeMetadataToken(
+                        firstNonNull(metadata.get(RagMetadataKeys.COMPONENT_ID), metadata.get(RagMetadataKeys.RESOURCE_ID)),
+                        document.getId()),
+                "docType", normalizeMetadataToken(
+                        firstNonNull(metadata.get(RagMetadataKeys.DOC_TYPE), metadata.get(RagMetadataKeys.RESOURCE_TYPE)),
+                        "unknown-doc"),
+                "contentHash", normalizeMetadataToken(
+                        metadata.get(RagMetadataKeys.CONTENT_HASH),
+                        RagDocumentIdentity.sha256(document.getText() != null ? document.getText() : document.getId())),
+                "chunkIndex", toChunkIndex(metadata.get(RagMetadataKeys.CHUNK_INDEX)));
+        jdbcTemplate.update(sql, params);
+    }
+
     public List<Document> search(String query, int limit, Filter.Expression filterExpression) {
         VectorStore vectorStore = vectorStoreProvider.getIfAvailable();
         if (vectorStore == null || query == null || query.isBlank()) {

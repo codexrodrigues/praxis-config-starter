@@ -1627,7 +1627,7 @@ public class AgenticAuthoringTurnEngine {
                         "",
                         projection,
                         List.of("resource-discovery-grounded-provider-failure-clarification")), intentResolution)
-                : resourceDiscoveryCandidateQuickReplies(presentableCandidates);
+                : resourceDiscoveryCandidateQuickReplies(request, intentResolution, presentableCandidates);
         String assistantMessage = groundedResourceDiscoveryClarificationMessage(request, presentableCandidates, projection);
         eventSink.append("thought.step", streamEventPayload(
                 "consultative.grounded-clarification",
@@ -1798,7 +1798,10 @@ public class AgenticAuthoringTurnEngine {
         return labels;
     }
 
-    private List<AgenticAuthoringQuickReply> resourceDiscoveryCandidateQuickReplies(JsonNode candidates) {
+    private List<AgenticAuthoringQuickReply> resourceDiscoveryCandidateQuickReplies(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            JsonNode candidates) {
         List<AgenticAuthoringQuickReply> replies = new ArrayList<>();
         if (candidates == null || !candidates.isArray()) {
             return replies;
@@ -1824,8 +1827,9 @@ public class AgenticAuthoringTurnEngine {
             value.put("resourcePath", resourcePath);
             putText(value, "operation", candidate.path("operation").asText(""));
             putCandidateScore(candidate, value);
+            String quickReplyId = resourceDiscoveryQuickReplyId(candidate);
             replies.add(new AgenticAuthoringQuickReply(
-                    "resource-discovery-confirm:" + replies.size(),
+                    quickReplyId,
                     "resource",
                     label,
                     "Use " + label + " como fonte governada para a tela.",
@@ -1833,10 +1837,99 @@ public class AgenticAuthoringTurnEngine {
                     "dataset",
                     "resource",
                     contextHints,
-                    null,
+                    resourceDiscoverySemanticDecision(
+                            request,
+                            intentResolution,
+                            quickReplyId,
+                            label,
+                            candidate),
                     value));
         }
         return replies;
+    }
+
+    private String resourceDiscoveryQuickReplyId(JsonNode candidate) {
+        String identity = firstNonBlank(
+                candidate.path("resourcePath").asText(""),
+                candidate.path("resourceKey").asText(""),
+                resourceDiscoveryCandidateLabel(candidate));
+        String operation = candidate.path("operation").asText("");
+        String slug = (identity + "-" + operation)
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("(^-+|-+$)", "");
+        return "resource-discovery-confirm:" + (slug.isBlank() ? "candidate" : slug);
+    }
+
+    private JsonNode resourceDiscoverySemanticDecision(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            String quickReplyId,
+            String label,
+            JsonNode candidateNode) {
+        AgenticAuthoringSemanticDecision activeDecision = intentResolution != null
+                        && intentResolution.semanticDecision() != null
+                ? intentResolution.semanticDecision()
+                : request == null ? null : request.activeSemanticDecision();
+        String operationKind = firstNonBlank(
+                intentResolution == null ? "" : intentResolution.operationKind(),
+                activeDecision == null ? "" : activeDecision.operationKind(),
+                "create");
+        String artifactKind = firstNonBlank(
+                intentResolution == null ? "" : intentResolution.artifactKind(),
+                activeDecision == null ? "" : activeDecision.artifactKind(),
+                "page");
+        String changeKind = firstNonBlank(
+                intentResolution == null ? "" : intentResolution.changeKind(),
+                activeDecision == null ? "" : activeDecision.changeKind(),
+                "create_artifact");
+        List<String> evidence = new ArrayList<>();
+        JsonNode evidenceNode = candidateNode.path("evidence");
+        if (evidenceNode.isArray()) {
+            evidenceNode.forEach(item -> {
+                String value = item.asText("").trim();
+                if (!value.isBlank()) {
+                    evidence.add(value);
+                }
+            });
+        }
+        if (evidence.isEmpty()) {
+            evidence.add("semantic-retrieval");
+        }
+        AgenticAuthoringCandidate selectedCandidate = new AgenticAuthoringCandidate(
+                candidateNode.path("resourcePath").asText(""),
+                candidateNode.path("operation").asText(""),
+                candidateNode.path("schemaUrl").asText(""),
+                candidateNode.path("submitUrl").asText(""),
+                candidateNode.path("submitMethod").asText(""),
+                candidateNode.path("score").asDouble(0.0d),
+                candidateNode.path("reason").asText("Governed resource discovery candidate."),
+                List.copyOf(evidence));
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("source", "server-issued-quick-reply");
+        constraints.put("quickReplyId", quickReplyId);
+        constraints.put("continuationOf", "resource_discovery");
+        constraints.putArray("conceptKeys");
+        AgenticAuthoringSemanticDecision decision = AgenticAuthoringSemanticDecision.from(
+                        operationKind,
+                        artifactKind,
+                        changeKind,
+                        selectedCandidate,
+                        List.of(selectedCandidate),
+                        activeDecision == null ? null : activeDecision.visualizationDecision(),
+                        List.of(),
+                        null,
+                        null,
+                        activeDecision,
+                        request == null ? "" : request.sessionId(),
+                        (request == null ? "" : request.clientTurnId()) + ":" + quickReplyId,
+                        "Use " + label + " como fonte governada para a tela.",
+                        activeDecision == null
+                                ? "Use " + label + " como fonte governada para a tela."
+                                : activeDecision.activeObjective(),
+                        "The user may select this governed resource discovered for the active authoring decision.")
+                .withConstraints(constraints);
+        return objectMapper.valueToTree(decision);
     }
 
     private String resourceDiscoveryCandidateLabel(JsonNode candidate) {
@@ -4551,7 +4644,9 @@ public class AgenticAuthoringTurnEngine {
         contextHints.put("kind", "governed-review-repair");
         contextHints.put("requiresReview", true);
         if (intentResolution != null) {
+            contextHints.put("operationKind", safeText(intentResolution.operationKind()));
             contextHints.put("artifactKind", safeText(intentResolution.artifactKind()));
+            contextHints.put("changeKind", safeText(intentResolution.changeKind()));
             AgenticAuthoringCandidate selectedCandidate = intentResolution.selectedCandidate();
             String resourcePath = selectedCandidate == null
                     ? ""
@@ -4569,9 +4664,7 @@ public class AgenticAuthoringTurnEngine {
         if (!reviewReason.isBlank()) {
             contextHints.put("reviewReason", reviewReason);
         }
-        JsonNode semanticDecision = intentResolution == null || intentResolution.semanticDecision() == null
-                ? null
-                : objectMapper.valueToTree(intentResolution.semanticDecision());
+        JsonNode semanticDecision = governedReviewRepairSemanticDecision(intentResolution);
         return new AgenticAuthoringQuickReply(
                 "governed-review-revise",
                 "revise",
@@ -4583,6 +4676,25 @@ public class AgenticAuthoringTurnEngine {
                 contextHints,
                 semanticDecision,
                 null);
+    }
+
+    private JsonNode governedReviewRepairSemanticDecision(
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null || intentResolution.semanticDecision() == null) {
+            return null;
+        }
+        AgenticAuthoringSemanticDecision currentDecision = intentResolution.semanticDecision();
+        ObjectNode constraints = currentDecision.constraints() != null
+                        && currentDecision.constraints().isObject()
+                ? currentDecision.constraints().deepCopy()
+                : objectMapper.createObjectNode();
+        constraints.put("source", "server-issued-quick-reply");
+        constraints.put("quickReplyId", "governed-review-revise");
+        constraints.put("continuationOf", "governed_review");
+        if (!constraints.path("conceptKeys").isArray()) {
+            constraints.putArray("conceptKeys");
+        }
+        return objectMapper.valueToTree(currentDecision.withConstraints(constraints));
     }
 
     private List<AgenticAuthoringQuickReply> contextualPreviewQuickReplies(

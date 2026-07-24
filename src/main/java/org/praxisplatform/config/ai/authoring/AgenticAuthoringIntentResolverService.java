@@ -1265,6 +1265,7 @@ public class AgenticAuthoringIntentResolverService {
             quickReplies = platformCapabilityQuickReplies(effectivePrompt, semanticOrientation);
             platformGuidanceQuickRepliesMaterialized = true;
         }
+        quickReplies = withPlatformQuickReplySemanticDecisions(request, quickReplies);
         boolean contextHintSelectionApplied = contextHintCandidate != null
                 && selectedCandidate != null
                 && "eligible".equals(gate.status());
@@ -9424,6 +9425,98 @@ public class AgenticAuthoringIntentResolverService {
                                 "Retorna fontes e campos governados relevantes.",
                                 "Clique para revisar os dados disponiveis.",
                                 "Revisar")));
+    }
+
+    /**
+     * Binds each server-authored platform action to the canonical decision it represents.
+     *
+     * <p>The identifiers below are declared contracts, not textual intent routing. Once the
+     * semantic resolver has chosen to offer one of these actions, selecting it must preserve that
+     * meaning without asking the next model turn to infer the button semantics from accumulated
+     * conversational prose.</p>
+     */
+    private List<AgenticAuthoringQuickReply> withPlatformQuickReplySemanticDecisions(
+            AgenticAuthoringIntentResolutionRequest request,
+            List<AgenticAuthoringQuickReply> quickReplies) {
+        if (quickReplies == null || quickReplies.isEmpty()) {
+            return List.of();
+        }
+        return quickReplies.stream()
+                .map(reply -> withPlatformQuickReplySemanticDecision(request, reply))
+                .toList();
+    }
+
+    private AgenticAuthoringQuickReply withPlatformQuickReplySemanticDecision(
+            AgenticAuthoringIntentResolutionRequest request,
+            AgenticAuthoringQuickReply reply) {
+        if (reply == null || reply.semanticDecision() != null) {
+            return reply;
+        }
+        PlatformQuickReplyDecision declaredDecision = switch (valueOrDefault(reply.id(), "")) {
+            case "platform-create-admin-dashboard", "platform-create-requested-dashboard" ->
+                    new PlatformQuickReplyDecision("create", "dashboard", "create_artifact");
+            case "platform-refine-dashboard-metrics" ->
+                    new PlatformQuickReplyDecision("explore", "dashboard", "recommend_dashboard_visualization");
+            case "platform-review-dashboard-data" ->
+                    new PlatformQuickReplyDecision("explore", "api_catalog", "answer_api_catalog_question");
+            case "platform-create-form" ->
+                    new PlatformQuickReplyDecision("create", "form", "create_artifact");
+            case "platform-explore-components" ->
+                    new PlatformQuickReplyDecision("explain", "component", "answer_component_catalog_question");
+            default -> null;
+        };
+        if (declaredDecision == null) {
+            return reply;
+        }
+        ObjectNode contextHints = reply.contextHints() != null && reply.contextHints().isObject()
+                ? reply.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        contextHints.put("schemaVersion", "praxis-agentic-authoring-platform-action.v1");
+        contextHints.put("source", "platform-capability-catalog");
+        contextHints.put("operationKind", declaredDecision.operationKind());
+        contextHints.put("artifactKind", declaredDecision.artifactKind());
+        contextHints.put("changeKind", declaredDecision.changeKind());
+
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("source", "server-issued-quick-reply");
+        constraints.put("quickReplyId", reply.id());
+        constraints.put("continuationOf", "platform_capability_catalog");
+        constraints.putArray("conceptKeys");
+        AgenticAuthoringSemanticDecision semanticDecision = AgenticAuthoringSemanticDecision.from(
+                        declaredDecision.operationKind(),
+                        declaredDecision.artifactKind(),
+                        declaredDecision.changeKind(),
+                        null,
+                        List.of(),
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        request == null ? null : request.activeSemanticDecision(),
+                        request == null ? "" : valueOrDefault(request.sessionId(), ""),
+                        (request == null ? "" : valueOrDefault(request.clientTurnId(), "")) + ":" + reply.id(),
+                        valueOrDefault(reply.prompt(), ""),
+                        valueOrDefault(reply.prompt(), ""),
+                        "The user may select this governed platform action after capability discovery.",
+                        AgenticAuthoringSemanticRefinement.none())
+                .withConstraints(constraints);
+        return new AgenticAuthoringQuickReply(
+                reply.id(),
+                reply.kind(),
+                reply.label(),
+                reply.prompt(),
+                reply.description(),
+                reply.icon(),
+                reply.tone(),
+                contextHints,
+                objectMapper.valueToTree(semanticDecision),
+                reply.value());
+    }
+
+    private record PlatformQuickReplyDecision(
+            String operationKind,
+            String artifactKind,
+            String changeKind) {
     }
 
     private ObjectNode dashboardContextHints(

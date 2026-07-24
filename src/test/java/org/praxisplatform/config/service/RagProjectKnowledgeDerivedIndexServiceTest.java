@@ -52,9 +52,12 @@ class RagProjectKnowledgeDerivedIndexServiceTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Document>> documentsCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<Document> canonicalIdentityCaptor = ArgumentCaptor.forClass(Document.class);
+        verify(ragVectorStoreService).deleteDocumentByCanonicalContentIdentity(canonicalIdentityCaptor.capture());
         verify(ragVectorStoreService).upsertDocuments(documentsCaptor.capture());
         Document document = documentsCaptor.getValue().get(0);
 
+        assertThat(canonicalIdentityCaptor.getValue()).isSameAs(document);
         assertThat(document.getId()).contains("project_knowledge");
         assertThat(document.getText())
                 .contains("Project Knowledge")

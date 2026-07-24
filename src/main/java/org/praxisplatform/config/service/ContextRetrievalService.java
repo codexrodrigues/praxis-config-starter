@@ -46,6 +46,8 @@ public class ContextRetrievalService {
     private final RagVectorStoreService ragVectorStoreService;
 
     private static final int DEFAULT_SEARCH_LIMIT = 5; // Limite padrão para buscas
+    private static final int HYBRID_CANDIDATE_POOL_MULTIPLIER = 4;
+    private static final int MINIMUM_HYBRID_CANDIDATE_POOL = 20;
     private static final String REGISTRY_TYPE_COMPONENT_DEF = "component_definition";
     private static final String DEFAULT_RAG_RELEASE_FALLBACK = "v1";
 
@@ -388,9 +390,9 @@ public class ContextRetrievalService {
             filter = builder.and(filter, builder.eq(RagMetadataKeys.METHOD, normalizedMethod));
         }
         int effectiveLimit = limit > 0 ? limit : DEFAULT_SEARCH_LIMIT;
-        int vectorLimit = requestedTags.isEmpty()
-                ? effectiveLimit
-                : Math.max(effectiveLimit * 4, DEFAULT_SEARCH_LIMIT);
+        int vectorLimit = Math.max(
+                effectiveLimit * HYBRID_CANDIDATE_POOL_MULTIPLIER,
+                MINIMUM_HYBRID_CANDIDATE_POOL);
         List<Document> documents = ragVectorStoreService.search(
                 query,
                 vectorLimit,
@@ -398,8 +400,10 @@ public class ContextRetrievalService {
         if (documents.isEmpty()) {
             return List.of();
         }
-        return documents.stream()
+        List<Document> scopedCandidates = documents.stream()
                 .filter(document -> matchesTags(document, requestedTags))
+                .toList();
+        return HybridSemanticRanker.rerank(query, scopedCandidates).stream()
                 .limit(effectiveLimit)
                 .map(this::mapToApiSearchResult)
                 .collect(Collectors.toList());

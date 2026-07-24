@@ -164,6 +164,42 @@ class RagVectorStoreServiceTest {
     }
 
     @Test
+    void shouldDeleteCanonicalContentIdentityIndependentFromPhysicalDocumentId() {
+        when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
+        when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
+        Document document = Document.builder()
+                .id("new-evidence-physical-id")
+                .text("governed content")
+                .metadata(Map.of(
+                        RagMetadataKeys.TENANT_ID, "tenant-a",
+                        RagMetadataKeys.ENVIRONMENT, "prod",
+                        RagMetadataKeys.RELEASE_ID, "release-1",
+                        RagMetadataKeys.COMPONENT_ID, "project.preference",
+                        RagMetadataKeys.DOC_TYPE, RagResourceTypes.PROJECT_KNOWLEDGE,
+                        RagMetadataKeys.CONTENT_HASH, "content-hash",
+                        RagMetadataKeys.CHUNK_INDEX, 0))
+                .build();
+
+        service.deleteDocumentByCanonicalContentIdentity(document);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jdbcTemplate).update(sqlCaptor.capture(), paramsCaptor.capture());
+        assertThat(sqlCaptor.getValue())
+                .contains("DELETE FROM vector_store")
+                .contains("contentHash")
+                .contains("chunkIndex");
+        assertThat(paramsCaptor.getValue())
+                .containsEntry("tenantId", "tenant-a")
+                .containsEntry("environment", "prod")
+                .containsEntry("releaseId", "release-1")
+                .containsEntry("componentId", "project.preference")
+                .containsEntry("docType", RagResourceTypes.PROJECT_KNOWLEDGE)
+                .containsEntry("contentHash", "content-hash")
+                .containsEntry("chunkIndex", 0);
+    }
+
+    @Test
     void shouldExecuteDeleteQueryOnDeleteDocumentsByRelease() {
         when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
         when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);

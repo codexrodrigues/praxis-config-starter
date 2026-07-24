@@ -1,6 +1,7 @@
 # Plano de Avaliacao de Qualidade do Retrieval/Authoring
 
-Status: bateria inicial em implementacao pos-Fase 09.
+Status: bateria inicial implementada para retrieval hibrido de `api_metadata`; expansao para
+component corpus/authoring continua incremental.
 
 ## Objetivo
 
@@ -43,8 +44,25 @@ Casos iniciais:
 - `plan_grounding`: `preview.plan` recebeu `authoringEvidence`.
 - `governance_preserved`: fluxo ainda passa por preview/compile/apply.
 - `noise_rate`: numero de evidencias de componente errado.
+- `MRR`: posicao media reciproca do recurso esperado.
+- `Recall@K`: presenca do recurso esperado no conjunto semanticamente recuperado.
 
-## Comando futuro recomendado
+## Benchmark implementado de API metadata
+
+`HybridSemanticRankerTest` mantem cinco variacoes de fala em portugues sobre funcionarios,
+status, foto/codigo, departamentos e folha de pagamento. O corpus e deterministico e nao chama
+provider externo.
+
+O baseline controlado posiciona o recurso esperado em terceiro lugar (`MRR = 0,3333`) e o
+reranking BM25 + RRF dobra essa qualidade (`MRR = 0,6667`), preservando `Recall@3 = 1,0`.
+Os guardrails tambem provam que:
+
+- somente candidatos previamente retornados pela busca vetorial podem aparecer;
+- score e proveniencia vetorial permanecem inalterados;
+- ausencia de evidencia lexical preserva a ordem semantica;
+- filtros de tenant, environment, release, method e tags continuam anteriores ao reranking.
+
+## Expansao futura recomendada
 
 Criar um runner local em fase posterior, preferencialmente em `praxis-config-starter` ou `tools/ai-registry`, que leia um JSON de casos e produza relatorio com:
 

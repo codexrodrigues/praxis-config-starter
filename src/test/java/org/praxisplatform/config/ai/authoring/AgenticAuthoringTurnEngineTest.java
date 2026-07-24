@@ -9358,6 +9358,15 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(repairReply.path("contextHints").path("resourcePath").asText())
                 .isEqualTo("/api/human-resources/funcionarios");
         org.assertj.core.api.Assertions.assertThat(repairReply.path("semanticDecision").isObject()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(repairReply.path("semanticDecision")
+                        .path("constraints").path("source").asText())
+                .isEqualTo("server-issued-quick-reply");
+        org.assertj.core.api.Assertions.assertThat(repairReply.path("semanticDecision")
+                        .path("constraints").path("quickReplyId").asText())
+                .isEqualTo("governed-review-revise");
+        org.assertj.core.api.Assertions.assertThat(repairReply.path("semanticDecision")
+                        .path("selectedResource").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
     }
 
     @Test
@@ -11520,6 +11529,14 @@ class AgenticAuthoringTurnEngineTest {
                 .isEqualTo("/api/human-resources/funcionarios");
         org.assertj.core.api.Assertions.assertThat(result.path("quickReplies").path(0).path("contextHints").path("resourcePath").asText())
                 .doesNotContain("vw-analytics-folha-pagamento");
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies").path(0).path("id").asText())
+                .isEqualTo("resource-discovery-confirm:api-human-resources-funcionarios-post");
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies").path(0)
+                        .path("semanticDecision").path("constraints").path("source").asText())
+                .isEqualTo("server-issued-quick-reply");
+        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies").path(0)
+                        .path("semanticDecision").path("selectedResource").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
     }
 
     @Test

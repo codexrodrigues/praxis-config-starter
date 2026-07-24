@@ -369,6 +369,11 @@ case-insensitively as an AND set. Structured retrieval and RAG retrieval must bo
 tenant, environment and release filters; when RAG is available, nonmatching tagged candidates are
 discarded instead of falling back to a legacy or unscoped corpus.
 
+API metadata retrieval uses a hybrid rank only after the governed vector search has resolved the
+candidate pool. A generic BM25 lexical rank and reciprocal-rank fusion can reorder those semantic
+candidates, but cannot add endpoints, expand tenant/environment/release scope, replace the original
+vector similarity score or decide user intent. Queries without lexical evidence retain vector order.
+
 ## Key HTTP Surfaces
 
 | Surface | Purpose |

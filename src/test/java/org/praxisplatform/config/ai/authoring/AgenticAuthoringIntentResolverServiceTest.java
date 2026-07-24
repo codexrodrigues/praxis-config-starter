@@ -2668,6 +2668,18 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.quickReplies()).allSatisfy(reply ->
                 assertThat(reply.contextHints().path("presentation").path("kind").asText())
                         .isEqualTo("quick-action"));
+        assertThat(result.quickReplies()).allSatisfy(reply -> {
+            assertThat(reply.semanticDecision().path("constraints").path("source").asText())
+                    .isEqualTo("server-issued-quick-reply");
+            assertThat(reply.semanticDecision().path("constraints").path("quickReplyId").asText())
+                    .isEqualTo(reply.id());
+        });
+        assertThat(result.quickReplies().get(0).semanticDecision().path("operationKind").asText())
+                .isEqualTo("create");
+        assertThat(result.quickReplies().get(0).semanticDecision().path("artifactKind").asText())
+                .isEqualTo("dashboard");
+        assertThat(result.quickReplies().get(0).semanticDecision().path("changeKind").asText())
+                .isEqualTo("create_artifact");
     }
 
     @Test
@@ -2721,6 +2733,8 @@ class AgenticAuthoringIntentResolverServiceTest {
             assertThat(reply.prompt()).contains("Confirmed:");
             assertThat(reply.contextHints().path("presentation").path("kind").asText())
                     .isEqualTo("quick-action");
+            assertThat(reply.semanticDecision().path("constraints").path("source").asText())
+                    .isEqualTo("server-issued-quick-reply");
         });
     }
 

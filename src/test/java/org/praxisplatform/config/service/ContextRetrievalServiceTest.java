@@ -1,6 +1,6 @@
 package org.praxisplatform.config.service;
 
-import org.junit.jupiter.api.Tag;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,6 +16,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -118,7 +119,7 @@ class ContextRetrievalServiceTest {
     @Test
     void shouldApplyReleaseScopedFilterWhenSearchingApiMetadata() {
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
-        when(ragVectorStoreService.search(eq("query"), eq(5), any(Filter.Expression.class)))
+        when(ragVectorStoreService.search(eq("query"), eq(20), any(Filter.Expression.class)))
                 .thenReturn(List.of(buildApiDocument("/api/release")));
 
         List<ApiSearchResult> results = contextRetrievalService.searchApiMetadata(
@@ -132,7 +133,7 @@ class ContextRetrievalServiceTest {
                 "release-2026-02");
 
         ArgumentCaptor<Filter.Expression> filterCaptor = ArgumentCaptor.forClass(Filter.Expression.class);
-        verify(ragVectorStoreService).search(eq("query"), eq(5), filterCaptor.capture());
+        verify(ragVectorStoreService).search(eq("query"), eq(20), filterCaptor.capture());
         String filterExpression = String.valueOf(filterCaptor.getValue());
 
         assertNotNull(results);
@@ -146,7 +147,7 @@ class ContextRetrievalServiceTest {
     @Test
     void shouldApplyTagFiltersWhenSearchingApiMetadataWithVectorStore() {
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
-        when(ragVectorStoreService.search(eq("query"), eq(8), any(Filter.Expression.class)))
+        when(ragVectorStoreService.search(eq("query"), eq(20), any(Filter.Expression.class)))
                 .thenReturn(List.of(
                         buildApiDocument("/api/payroll", "payroll,finance"),
                         buildApiDocument("/api/users", "Users, HR"),
@@ -163,7 +164,7 @@ class ContextRetrievalServiceTest {
                 "release-2026-02");
 
         ArgumentCaptor<Filter.Expression> filterCaptor = ArgumentCaptor.forClass(Filter.Expression.class);
-        verify(ragVectorStoreService).search(eq("query"), eq(8), filterCaptor.capture());
+        verify(ragVectorStoreService).search(eq("query"), eq(20), filterCaptor.capture());
         String filterExpression = String.valueOf(filterCaptor.getValue());
 
         assertEquals(1, results.size());
@@ -180,9 +181,41 @@ class ContextRetrievalServiceTest {
     }
 
     @Test
+    void shouldRerankOnlyReleaseScopedSemanticCandidatesWithLexicalEvidence() {
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.search(
+                eq("eu queria ver os funcionários inativos"),
+                eq(20),
+                any(Filter.Expression.class)))
+                .thenReturn(List.of(
+                        buildApiDocument("/api/benefits", null, "benefícios corporativos", 0.93d),
+                        buildApiDocument(
+                                "/api/employees",
+                                null,
+                                "cadastro de funcionários ativos e inativos",
+                                0.86d)));
+
+        List<ApiSearchResult> results = contextRetrievalService.searchApiMetadata(
+                "eu queria ver os funcionários inativos",
+                "GET",
+                null,
+                2,
+                null,
+                "tenant-a",
+                "prod",
+                "release-2026-02");
+
+        assertThat(results)
+                .extracting(ApiSearchResult::getPath)
+                .containsExactly("/api/employees", "/api/benefits");
+        assertEquals(0.86d, results.get(0).getSimilarityScore());
+        verifyNoInteractions(apiMetadataRepository);
+    }
+
+    @Test
     void shouldReturnEmptyWhenVectorTagFilterHasNoMatchWithoutLegacyFallback() {
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
-        when(ragVectorStoreService.search(eq("query"), eq(5), any(Filter.Expression.class)))
+        when(ragVectorStoreService.search(eq("query"), eq(20), any(Filter.Expression.class)))
                 .thenReturn(List.of(buildApiDocument("/api/payroll", "payroll,finance")));
 
         List<ApiSearchResult> results = contextRetrievalService.searchApiMetadata(
@@ -228,7 +261,7 @@ class ContextRetrievalServiceTest {
         ReflectionTestUtils.setField(contextRetrievalService, "ragDefaultRelease", "release-default");
         ReflectionTestUtils.setField(contextRetrievalService, "ragReleaseFallbackToDefaultEnabled", true);
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
-        when(ragVectorStoreService.search(eq("query"), eq(5), any(Filter.Expression.class)))
+        when(ragVectorStoreService.search(eq("query"), eq(20), any(Filter.Expression.class)))
                 .thenReturn(List.of())
                 .thenReturn(List.of(buildApiDocument("/api/default-release")));
 
@@ -243,7 +276,7 @@ class ContextRetrievalServiceTest {
                 "release-custom");
 
         ArgumentCaptor<Filter.Expression> filterCaptor = ArgumentCaptor.forClass(Filter.Expression.class);
-        verify(ragVectorStoreService, times(2)).search(eq("query"), eq(5), filterCaptor.capture());
+        verify(ragVectorStoreService, times(2)).search(eq("query"), eq(20), filterCaptor.capture());
 
         assertNotNull(results);
         assertEquals(1, results.size());
@@ -255,7 +288,7 @@ class ContextRetrievalServiceTest {
     @Test
     void shouldSkipLegacyRepositoryFallbackWhenRagAvailableAndNoReleaseMatch() {
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
-        when(ragVectorStoreService.search(eq("query"), eq(5), any(Filter.Expression.class)))
+        when(ragVectorStoreService.search(eq("query"), eq(20), any(Filter.Expression.class)))
                 .thenReturn(List.of());
 
         List<ApiSearchResult> results = contextRetrievalService.searchApiMetadata(
@@ -380,6 +413,10 @@ class ContextRetrievalServiceTest {
     }
 
     private Document buildApiDocument(String path, String tags) {
+        return buildApiDocument(path, tags, "api metadata", null);
+    }
+
+    private Document buildApiDocument(String path, String tags, String text, Double score) {
         Map<String, Object> metadata = new java.util.LinkedHashMap<>();
         metadata.put(RagMetadataKeys.METHOD, "GET");
         metadata.put(RagMetadataKeys.PATH, path);
@@ -387,11 +424,14 @@ class ContextRetrievalServiceTest {
         if (tags != null) {
             metadata.put(RagMetadataKeys.TAGS, tags);
         }
-        return Document.builder()
+        Document.Builder builder = Document.builder()
                 .id("api-doc:" + path)
-                .text("api metadata")
-                .metadata(metadata)
-                .build();
+                .text(text)
+                .metadata(metadata);
+        if (score != null) {
+            builder.score(score);
+        }
+        return builder.build();
     }
 
     private Document buildComponentCorpusDocument(
