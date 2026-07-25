@@ -3,6 +3,7 @@ package org.praxisplatform.config.rag;
 import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.lenient;
@@ -258,6 +259,73 @@ class RagVectorStoreServiceTest {
         assertThat(params.get("environment")).isEqualTo("prod");
         assertThat(params.get("releaseId")).isEqualTo("v2");
         assertThat(params.get("resourceType")).isEqualTo(RagResourceTypes.API_METADATA);
+    }
+
+    @Test
+    void shouldPurgeSupersededReleasesForResourceType() {
+        when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
+        when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
+
+        service.deleteDocumentsByResourceTypeExceptRelease(
+                "tenant-x", "prod", "release-current", RagResourceTypes.COMPONENT_DEFINITION);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jdbcTemplate).update(sqlCaptor.capture(), paramsCaptor.capture());
+        assertThat(sqlCaptor.getValue())
+                .contains("DELETE FROM vector_store")
+                .contains("<> :activeReleaseId");
+        assertThat(paramsCaptor.getValue())
+                .containsEntry("activeReleaseId", "release-current")
+                .containsEntry("resourceType", RagResourceTypes.COMPONENT_DEFINITION);
+    }
+
+    @Test
+    void shouldPlanSupersededReleasesWithoutDeletingDocuments() {
+        when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
+        when(jdbcTemplate.queryForList(anyString(), anyMap()))
+                .thenReturn(List.of(
+                        Map.of("release_id", "release-old-a", "document_count", 11L),
+                        Map.of("release_id", "release-old-b", "document_count", 7L)));
+
+        RagVectorStoreService.SupersededReleaseCleanupPlan plan =
+                service.planDocumentsByResourceTypeExceptRelease(
+                        "tenant-x",
+                        "prod",
+                        "release-current",
+                        RagResourceTypes.COMPONENT_DEFINITION);
+
+        assertThat(plan.documentCount()).isEqualTo(18L);
+        assertThat(plan.releases())
+                .extracting(RagVectorStoreService.SupersededReleaseDocuments::releaseId)
+                .containsExactly("release-old-a", "release-old-b");
+        verify(jdbcTemplate, never()).update(anyString(), anyMap());
+    }
+
+    @Test
+    void shouldPurgeSupersededDomainCatalogReleasesWithinCanonicalScope() {
+        when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
+        when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
+
+        service.deleteDocumentsByCanonicalScopeExceptRelease(
+                "tenant-x",
+                "prod",
+                "praxis-api-quickstart",
+                null,
+                "catalog-current",
+                RagResourceTypes.DOMAIN_CATALOG);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jdbcTemplate).update(sqlCaptor.capture(), paramsCaptor.capture());
+        assertThat(sqlCaptor.getValue())
+                .contains("metadata ->> 'serviceKey'")
+                .contains("metadata ->> 'resourceKey'")
+                .contains("<> :activeReleaseId");
+        assertThat(paramsCaptor.getValue())
+                .containsEntry("serviceKey", "praxis-api-quickstart")
+                .containsEntry("resourceKey", "")
+                .containsEntry("activeReleaseId", "catalog-current");
     }
 
     @Test

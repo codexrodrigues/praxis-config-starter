@@ -28,6 +28,8 @@ import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.dto.AiRegistryTemplateSearchResult;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.service.AiRegistryTemplateService;
+import org.praxisplatform.config.service.AiIntelligenceReleaseService;
+import org.praxisplatform.config.service.CanonicalJsonHashService;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -41,12 +43,15 @@ class AiRegistryTemplateControllerTest {
   private final ObjectMapper objectMapper = new ObjectMapper();
 
   @Mock private AiRegistryTemplateService service;
+  @Mock private AiIntelligenceReleaseService releaseService;
+  @Mock private CanonicalJsonHashService hashService;
 
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
-    mockMvc = MockMvcBuilders.standaloneSetup(new AiRegistryTemplateController(service)).build();
+    mockMvc = MockMvcBuilders.standaloneSetup(
+        new AiRegistryTemplateController(service, releaseService, hashService)).build();
   }
 
   @Test

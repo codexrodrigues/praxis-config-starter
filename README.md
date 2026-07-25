@@ -364,6 +364,21 @@ from canonical `api_metadata`, registry or Project Knowledge evidence; never mix
 copy vectors across profiles. With `gemini-embedding-2`, Praxis uses distinct document and query
 instructions for asymmetric retrieval.
 
+Registry and Domain Catalog vectors follow replacement semantics. After a successful publication,
+documents from superseded releases in the same canonical scope are purged. Component vector
+metadata intentionally excludes the full `jsonSchema`; retrieval ranks compact chunks and hydrates
+the authoritative schema from the active `ai_registry` record. This keeps `vector_store` a bounded
+derived index instead of a second, release-accumulating copy of canonical payloads.
+
+Before any destructive maintenance, operators can inspect the component-vector candidates of an
+active governed intelligence release with
+`GET /api/praxis/config/ai-registry/releases/{releaseId}/cleanup-plan`. The response groups candidates
+by superseded release and never deletes data. The endpoint fails closed unless the selected release
+is `ACTIVE` and its backend-observed component corpus release id is available; cleanup execution
+remains a separate, explicitly governed operation. The governed publication id and the physical
+component corpus release id are deliberately distinct identities: the former traces one atomic
+publication attempt, while the latter scopes the vector documents that must be retained.
+
 API metadata `tags` filters are normalized as comma, semicolon or pipe separated tokens and matched
 case-insensitively as an AND set. Structured retrieval and RAG retrieval must both preserve method,
 tenant, environment and release filters; when RAG is available, nonmatching tagged candidates are

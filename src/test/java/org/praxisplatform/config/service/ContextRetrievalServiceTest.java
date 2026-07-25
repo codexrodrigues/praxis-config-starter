@@ -24,7 +24,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.dto.ApiSearchResult;
+import org.praxisplatform.config.dto.ComponentSearchResult;
 import org.praxisplatform.config.projection.ApiMetadataProjection;
+import org.praxisplatform.config.projection.ComponentDefinitionProjection;
 import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
@@ -51,6 +53,39 @@ class ContextRetrievalServiceTest {
 
     @InjectMocks
     private ContextRetrievalService contextRetrievalService;
+
+    @Test
+    void shouldHydrateVectorRankedComponentFromCanonicalRegistryPayload() {
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        Document rankedDocument = Document.builder()
+                .id("component-vector")
+                .text("compact retrieval chunk")
+                .metadata(Map.of(
+                        RagMetadataKeys.RESOURCE_TYPE, RagResourceTypes.COMPONENT_DEFINITION,
+                        RagMetadataKeys.SOURCE_ID, "praxis-table"))
+                .score(0.91d)
+                .build();
+        when(ragVectorStoreService.search(eq("table"), eq(5), any(Filter.Expression.class)))
+                .thenReturn(List.of(rankedDocument));
+        ComponentDefinitionProjection canonicalDefinition = mock(ComponentDefinitionProjection.class);
+        when(canonicalDefinition.getId()).thenReturn("praxis-table");
+        when(canonicalDefinition.getDescription()).thenReturn("Canonical table description");
+        when(canonicalDefinition.getJsonSchemaSnippet()).thenReturn("{\"type\":\"object\"}");
+        when(aiRegistryRepository.findComponentDefinitionsByRegistryKeys(
+                        "component_definition",
+                        List.of("praxis-table")))
+                .thenReturn(List.of(canonicalDefinition));
+
+        List<ComponentSearchResult> results = contextRetrievalService.searchComponentDefinitions(
+                "table", 5, null, null, null, "1.0.0");
+
+        assertThat(results).singleElement().satisfies(result -> {
+            assertThat(result.getId()).isEqualTo("praxis-table");
+            assertThat(result.getDescription()).isEqualTo("Canonical table description");
+            assertThat(result.getJsonSchema()).isEqualTo("{\"type\":\"object\"}");
+            assertThat(result.getSimilarityScore()).isEqualTo(0.91d);
+        });
+    }
 
     @Test
     void shouldReturnFullSchemaWithoutTruncation() {

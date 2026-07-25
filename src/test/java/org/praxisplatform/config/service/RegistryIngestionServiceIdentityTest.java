@@ -110,6 +110,7 @@ class RegistryIngestionServiceIdentityTest {
         assertThat(document.getMetadata().get(RagMetadataKeys.CHUNK_INDEX)).isEqualTo(0);
         assertThat(document.getMetadata().get(RagMetadataKeys.TENANT_ID)).isEqualTo("tenant-a");
         assertThat(document.getMetadata().get(RagMetadataKeys.ENVIRONMENT)).isEqualTo("prod");
+        assertThat(document.getMetadata()).doesNotContainKey(RagMetadataKeys.JSON_SCHEMA);
         assertThat(document.getMetadata().get(RagMetadataKeys.VERSION)).isEqualTo("registry-v2");
         assertThat(document.getMetadata().get(RagMetadataKeys.AI_VISIBILITY)).isEqualTo("allow");
     }

@@ -1,6 +1,7 @@
 package org.praxisplatform.config.service;
 
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -436,9 +437,35 @@ public class ContextRetrievalService {
         if (documents.isEmpty()) {
             return List.of();
         }
-        return documents.stream()
-                .map(this::mapToComponentSearchResult)
-                .collect(Collectors.toList());
+        Map<String, Document> rankedDocuments = new LinkedHashMap<>();
+        for (Document document : documents) {
+            String componentId = firstNonBlank(
+                    toString(document.getMetadata().get(RagMetadataKeys.SOURCE_ID)),
+                    toString(document.getMetadata().get(RagMetadataKeys.COMPONENT_ID)),
+                    toString(document.getMetadata().get(RagMetadataKeys.RESOURCE_ID)));
+            if (componentId != null) {
+                rankedDocuments.putIfAbsent(componentId, document);
+            }
+        }
+        if (rankedDocuments.isEmpty()) {
+            return List.of();
+        }
+        Map<String, ComponentDefinitionProjection> canonicalDefinitions =
+                aiRegistryRepository.findComponentDefinitionsByRegistryKeys(
+                                REGISTRY_TYPE_COMPONENT_DEF,
+                                List.copyOf(rankedDocuments.keySet()))
+                        .stream()
+                        .collect(Collectors.toMap(
+                                ComponentDefinitionProjection::getId,
+                                projection -> projection,
+                                (first, ignored) -> first,
+                                LinkedHashMap::new));
+        return rankedDocuments.entrySet().stream()
+                .filter(entry -> canonicalDefinitions.containsKey(entry.getKey()))
+                .map(entry -> mapToComponentSearchResult(
+                        canonicalDefinitions.get(entry.getKey()),
+                        entry.getValue()))
+                .toList();
     }
 
     private List<ComponentCorpusEvidence> searchComponentCorpusWithVectorStore(
@@ -522,6 +549,17 @@ public class ContextRetrievalService {
                 .description(toString(metadata.get(RagMetadataKeys.DESCRIPTION)))
                 .jsonSchema(toString(metadata.get(RagMetadataKeys.JSON_SCHEMA)))
                 .similarityScore(document != null && document.getScore() != null ? document.getScore() : 0.0d)
+                .build();
+    }
+
+    private ComponentSearchResult mapToComponentSearchResult(
+            ComponentDefinitionProjection projection,
+            Document rankedDocument) {
+        return ComponentSearchResult.builder()
+                .id(projection.getId())
+                .description(projection.getDescription())
+                .jsonSchema(projection.getJsonSchemaSnippet())
+                .similarityScore(rankedDocument.getScore() != null ? rankedDocument.getScore() : 0.0d)
                 .build();
     }
 

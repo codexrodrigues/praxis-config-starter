@@ -156,8 +156,7 @@ public class RagVectorStoreService {
               AND COALESCE(metadata ->> 'environment', 'global') = :environment
               AND COALESCE(metadata ->> 'releaseId', 'v1') = :releaseId
               AND COALESCE(metadata ->> 'resourceType', metadata ->> 'docType', metadata ->> 'sourceKind') = :resourceType
-              AND COALESCE(metadata ->> 'embeddingProfile', '') = :embeddingProfile
-              AND COALESCE(metadata ->> 'embeddingProfile', '') = :embeddingProfile
+              AND COALESCE(metadata ->> 'embeddingProfile', 'legacy') = :embeddingProfile
             """.formatted(tableName);
         Map<String, Object> params = Map.of(
                 "tenantId", RagDocumentIdentity.normalizeToken(tenantId, "global"),
@@ -220,6 +219,130 @@ public class RagVectorStoreService {
         } catch (Exception ex) {
             log.warn("Failed to purge release documents from vector store. This might be normal if the schema is not initialized yet.", ex);
         }
+    }
+
+    public void deleteDocumentsByResourceTypeExceptRelease(
+            String tenantId,
+            String environment,
+            String activeReleaseId,
+            String resourceType) {
+        if (vectorStoreProvider.getIfAvailable() == null) {
+            return;
+        }
+        NamedParameterJdbcTemplate jdbcTemplate = jdbcTemplateProvider.getIfAvailable();
+        if (jdbcTemplate == null) {
+            log.warn("Skipping superseded vector release purge because configNamedParameterJdbcTemplate is unavailable.");
+            return;
+        }
+        String sql = """
+            DELETE FROM %s
+            WHERE COALESCE(metadata ->> 'tenantId', 'global') = :tenantId
+              AND COALESCE(metadata ->> 'environment', 'global') = :environment
+              AND COALESCE(metadata ->> 'releaseId', metadata ->> 'version', 'v1') <> :activeReleaseId
+              AND COALESCE(metadata ->> 'resourceType', metadata ->> 'docType', metadata ->> 'sourceKind') = :resourceType
+            """.formatted(tableName);
+        Map<String, Object> params = Map.of(
+                "tenantId", RagDocumentIdentity.normalizeToken(tenantId, "global"),
+                "environment", RagDocumentIdentity.normalizeToken(environment, "global"),
+                "activeReleaseId", RagDocumentIdentity.normalizeToken(activeReleaseId, "v1"),
+                "resourceType", RagDocumentIdentity.normalizeToken(resourceType, "unknown-kind"));
+        int deletedRows = jdbcTemplate.update(sql, params);
+        log.info(
+                "Purged {} superseded vector document(s) for tenant={}, env={}, activeRelease={}, resourceType={}",
+                deletedRows,
+                tenantId,
+                environment,
+                activeReleaseId,
+                resourceType);
+    }
+
+    public SupersededReleaseCleanupPlan planDocumentsByResourceTypeExceptRelease(
+            String tenantId,
+            String environment,
+            String activeReleaseId,
+            String resourceType) {
+        NamedParameterJdbcTemplate jdbcTemplate = jdbcTemplateProvider.getIfAvailable();
+        if (jdbcTemplate == null) {
+            return new SupersededReleaseCleanupPlan(
+                    normalizedScope(tenantId, "global"),
+                    normalizedScope(environment, "global"),
+                    normalizedScope(activeReleaseId, "v1"),
+                    normalizedScope(resourceType, "unknown-kind"),
+                    0L,
+                    List.of());
+        }
+        String sql = """
+            SELECT
+              COALESCE(metadata ->> 'releaseId', metadata ->> 'version', 'v1') AS release_id,
+              COUNT(*) AS document_count
+            FROM %s
+            WHERE COALESCE(metadata ->> 'tenantId', 'global') = :tenantId
+              AND COALESCE(metadata ->> 'environment', 'global') = :environment
+              AND COALESCE(metadata ->> 'releaseId', metadata ->> 'version', 'v1') <> :activeReleaseId
+              AND COALESCE(metadata ->> 'resourceType', metadata ->> 'docType', metadata ->> 'sourceKind') = :resourceType
+            GROUP BY release_id
+            ORDER BY release_id
+            """.formatted(tableName);
+        Map<String, Object> params = Map.of(
+                "tenantId", normalizedScope(tenantId, "global"),
+                "environment", normalizedScope(environment, "global"),
+                "activeReleaseId", normalizedScope(activeReleaseId, "v1"),
+                "resourceType", normalizedScope(resourceType, "unknown-kind"));
+        List<SupersededReleaseDocuments> releases = jdbcTemplate.queryForList(sql, params).stream()
+                .map(row -> new SupersededReleaseDocuments(
+                        String.valueOf(row.get("release_id")),
+                        ((Number) row.get("document_count")).longValue()))
+                .toList();
+        long total = releases.stream().mapToLong(SupersededReleaseDocuments::documentCount).sum();
+        return new SupersededReleaseCleanupPlan(
+                String.valueOf(params.get("tenantId")),
+                String.valueOf(params.get("environment")),
+                String.valueOf(params.get("activeReleaseId")),
+                String.valueOf(params.get("resourceType")),
+                total,
+                releases);
+    }
+
+    public void deleteDocumentsByCanonicalScopeExceptRelease(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String resourceKey,
+            String activeReleaseId,
+            String resourceType) {
+        if (vectorStoreProvider.getIfAvailable() == null) {
+            return;
+        }
+        NamedParameterJdbcTemplate jdbcTemplate = jdbcTemplateProvider.getIfAvailable();
+        if (jdbcTemplate == null) {
+            log.warn("Skipping scoped superseded vector release purge because configNamedParameterJdbcTemplate is unavailable.");
+            return;
+        }
+        String sql = """
+            DELETE FROM %s
+            WHERE COALESCE(metadata ->> 'tenantId', 'global') = :tenantId
+              AND COALESCE(metadata ->> 'environment', 'global') = :environment
+              AND COALESCE(metadata ->> 'serviceKey', '') = :serviceKey
+              AND COALESCE(metadata ->> 'resourceKey', '') = :resourceKey
+              AND COALESCE(metadata ->> 'releaseId', metadata ->> 'version', 'v1') <> :activeReleaseId
+              AND COALESCE(metadata ->> 'resourceType', metadata ->> 'docType', metadata ->> 'sourceKind') = :resourceType
+            """.formatted(tableName);
+        Map<String, Object> params = Map.of(
+                "tenantId", RagDocumentIdentity.normalizeToken(tenantId, "global"),
+                "environment", RagDocumentIdentity.normalizeToken(environment, "global"),
+                "serviceKey", normalizeNullableScopeValue(serviceKey),
+                "resourceKey", normalizeNullableScopeValue(resourceKey),
+                "activeReleaseId", RagDocumentIdentity.normalizeToken(activeReleaseId, "v1"),
+                "resourceType", RagDocumentIdentity.normalizeToken(resourceType, "unknown-kind"));
+        int deletedRows = jdbcTemplate.update(sql, params);
+        log.info(
+                "Purged {} superseded scoped vector document(s) for tenant={}, env={}, service={}, resource={}, activeRelease={}",
+                deletedRows,
+                tenantId,
+                environment,
+                serviceKey,
+                resourceKey,
+                activeReleaseId);
     }
 
     public boolean isAvailable() {
@@ -416,6 +539,7 @@ public class RagVectorStoreService {
               AND COALESCE(metadata ->> 'environment', 'global') = :environment
               AND COALESCE(metadata ->> 'releaseId', 'v1') = :releaseId
               AND COALESCE(metadata ->> 'resourceType', metadata ->> 'docType', metadata ->> 'sourceKind') = :resourceType
+              AND COALESCE(metadata ->> 'embeddingProfile', '') = :embeddingProfile
             GROUP BY source_id, source_kind, chunk_kind, ai_visibility, corpus_version
             ORDER BY source_id, chunk_kind
             """.formatted(tableName);
@@ -489,8 +613,24 @@ public class RagVectorStoreService {
         return RagDocumentIdentity.normalizeToken(value != null ? String.valueOf(value) : null, fallback);
     }
 
+    private String normalizeNullableScopeValue(String value) {
+        return value != null ? value.trim() : "";
+    }
+
     private String normalizedScope(String value, String fallback) {
         return RagDocumentIdentity.normalizeToken(value, fallback);
+    }
+
+    public record SupersededReleaseCleanupPlan(
+            String tenantId,
+            String environment,
+            String activeReleaseId,
+            String resourceType,
+            long documentCount,
+            List<SupersededReleaseDocuments> releases) {
+    }
+
+    public record SupersededReleaseDocuments(String releaseId, long documentCount) {
     }
 
     private int toChunkIndex(Object value) {

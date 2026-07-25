@@ -17,6 +17,8 @@ import org.praxisplatform.config.dto.AiRegistryTemplateSearchResult;
 import org.praxisplatform.config.dto.AiRegistryTemplateUpsertRequest;
 import org.praxisplatform.config.dto.AiRegistryTemplateUpsertResponse;
 import org.praxisplatform.config.service.AiRegistryTemplateService;
+import org.praxisplatform.config.service.AiIntelligenceReleaseService;
+import org.praxisplatform.config.service.CanonicalJsonHashService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -36,6 +38,8 @@ import org.springframework.web.bind.annotation.*;
 public class AiRegistryTemplateController {
 
     private final AiRegistryTemplateService service;
+    private final AiIntelligenceReleaseService releaseService;
+    private final CanonicalJsonHashService hashService;
 
     @GetMapping("/{componentId}")
     public ResponseEntity<AiRegistryTemplateRecord> getTemplate(
@@ -76,7 +80,10 @@ public class AiRegistryTemplateController {
 
     @PostMapping("/bulk")
     public ResponseEntity<AiRegistryTemplateBulkUpsertResponse> bulkUpsert(
-            @Valid @RequestBody AiRegistryTemplateBulkUpsertRequest request) {
+            @Valid @RequestBody AiRegistryTemplateBulkUpsertRequest request,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            @RequestHeader(value = "X-Praxis-Intelligence-Release", required = false) String releaseId) {
 
         List<AiRegistryTemplateBulkError> errors = new ArrayList<>();
         int accepted = 0;
@@ -103,6 +110,10 @@ public class AiRegistryTemplateController {
                 .failed(errors.size())
                 .errors(errors.isEmpty() ? null : errors)
                 .build();
+        if (releaseId != null && !releaseId.isBlank() && errors.isEmpty()) {
+            releaseService.observeTemplates(
+                    tenantId, environment, releaseId, accepted, hashService.sha256(request));
+        }
 
         return ResponseEntity.ok(response);
     }

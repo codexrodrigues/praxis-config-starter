@@ -64,8 +64,11 @@ public class RegistryIngestionService {
     public static final int MAX_CHUNK_UTF8_BYTES = 8_000;
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
-    public void ingestRegistry(RegistryIngestionRequest request, String tenantId, String environment) {
-        reindexRegistry(request, tenantId, environment);
+    public RegistryReindexResult ingestRegistry(
+            RegistryIngestionRequest request,
+            String tenantId,
+            String environment) {
+        return reindexRegistry(request, tenantId, environment);
     }
 
     /**
@@ -500,7 +503,6 @@ public class RegistryIngestionService {
             metadata.put(RagMetadataKeys.CONTENT_HASH, contentHash);
             metadata.put(RagMetadataKeys.CHUNK_INDEX, chunkIndex);
             metadata.put(RagMetadataKeys.DESCRIPTION, description);
-            metadata.put(RagMetadataKeys.JSON_SCHEMA, toJson(entry));
 
             // New contractual keys
             metadata.put(RagMetadataKeys.SOURCE_KIND, sourceKind);
@@ -644,7 +646,6 @@ public class RegistryIngestionService {
         metadata.put(RagMetadataKeys.CONTENT_HASH, contentHash);
         metadata.put(RagMetadataKeys.CHUNK_INDEX, 0);
         metadata.put(RagMetadataKeys.DESCRIPTION, description);
-        metadata.put(RagMetadataKeys.JSON_SCHEMA, toJson(entry));
         metadata.put(RagMetadataKeys.SOURCE_KIND, RagResourceTypes.COMPONENT_DEFINITION);
         metadata.put(RagMetadataKeys.SOURCE_ID, definition.getRegistryKey());
         metadata.put(RagMetadataKeys.CHUNK_KIND, "summary");

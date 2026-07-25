@@ -66,6 +66,24 @@ public interface AiRegistryRepository extends
       value =
           """
       SELECT
+          registry_key as id,
+          payload #>> '{componentDefinition,description}' as description,
+          payload #>> '{componentDefinition,jsonSchema}' as jsonSchema,
+          0.0::double precision as similarityScore
+      FROM ai_registry
+      WHERE registry_type = :registryType
+        AND registry_key IN (:registryKeys)
+        AND status = 'active'
+      """,
+      nativeQuery = true)
+  List<ComponentDefinitionProjection> findComponentDefinitionsByRegistryKeys(
+      @Param("registryType") String registryType,
+      @Param("registryKeys") List<String> registryKeys);
+
+  @Query(
+      value =
+          """
+      SELECT
           registry_key as componentId,
           payload ->> 'aiDescription' as aiDescription,
           payload ->> 'configJson' as configJson,

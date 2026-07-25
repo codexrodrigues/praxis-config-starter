@@ -696,6 +696,13 @@ public class DomainCatalogIngestionService {
             ragVectorStoreService.upsertDocuments(documents.subList(start, end));
             publishedDocuments += end - start;
         }
+        ragVectorStoreService.deleteDocumentsByCanonicalScopeExceptRelease(
+                release.getTenantId(),
+                release.getEnvironment(),
+                release.getServiceKey(),
+                release.getResourceKey(),
+                ragReleaseId(release),
+                RagResourceTypes.DOMAIN_CATALOG);
         log.info(
                 "Published {} domain catalog RAG document(s) for release {} in {} ms using batchSize={}",
                 publishedDocuments,
