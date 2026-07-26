@@ -6,23 +6,22 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
-import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
 import org.praxisplatform.config.rag.RagDocumentIdentity;
+import org.praxisplatform.config.service.CanonicalJsonHashService;
 import org.springframework.core.io.ClassPathResource;
 
 @Tag("unit")
 class AiRegistrySnapshotContractTest {
 
     private static final String EXPECTED_SNAPSHOT_HASH =
-            "5f5b13b3fedcc8dd3900571612bd52d2b3c54e9f92a7e1ad5e7219891504b5a3";
+            "7b978b58849c510b16aa6601c307d96f440cf939dd1e0ba6a9fdbec4a64434e8";
     private static final String EXPECTED_VERSION = "1.0.0";
-    private static final String EXPECTED_GENERATED_AT = "2026-07-24T19:31:48.012Z";
+    private static final String EXPECTED_GENERATED_AT = "2026-07-24T10:19:41.201Z";
     private static final int EXPECTED_COMPONENT_COUNT = 105;
     private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 95;
     private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 105;
@@ -62,7 +61,8 @@ class AiRegistrySnapshotContractTest {
         JsonNode snapshot = objectMapper.readTree(snapshotBytes);
         JsonNode components = snapshot.path("components");
 
-        assertThat(sha256(snapshotBytes)).isEqualTo(EXPECTED_SNAPSHOT_HASH);
+        assertThat(new CanonicalJsonHashService(objectMapper).sha256(snapshot))
+                .isEqualTo(EXPECTED_SNAPSHOT_HASH);
         assertThat(snapshot.path("version").asText()).isEqualTo(EXPECTED_VERSION);
         assertThat(snapshot.path("generatedAt").asText()).isEqualTo(EXPECTED_GENERATED_AT);
         assertThat(RagDocumentIdentity.resolveReleaseId(
@@ -270,11 +270,6 @@ class AiRegistrySnapshotContractTest {
             }
         }
         return count;
-    }
-
-    private String sha256(byte[] bytes) throws Exception {
-        byte[] digest = MessageDigest.getInstance("SHA-256").digest(bytes);
-        return HexFormat.of().formatHex(digest);
     }
 
     private List<String> requiredAuthoringComponents() {
