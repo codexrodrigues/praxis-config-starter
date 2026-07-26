@@ -162,6 +162,12 @@ Use this starter when a Spring Boot host needs:
 
 Do not use it as a replacement for the resource/schema contract published by `praxis-metadata-starter`.
 
+Component edit plans distinguish operation kinds from affected-target cardinality. A semantic
+selection contains each manifest `operationId` once, while the materialization plan may repeat that
+declared `operationId` once per grounded target, up to the bounded plan budget. This lets one
+governed turn update or hide several columns without inventing batch payloads or applying only the
+first target.
+
 ## Installation
 
 Add the dependency to the consuming Spring Boot host and use the latest version from Maven Central.

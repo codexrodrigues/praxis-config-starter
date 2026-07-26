@@ -392,7 +392,8 @@ class AgenticAuthoringComponentEditPlanServiceTest {
                 .contains("column.renderer.set", "column.visibility.set")
                 .doesNotContain("column.type.set");
         assertThat(parameterSchema.at("/properties/operations/minItems").asInt()).isEqualTo(2);
-        assertThat(parameterSchema.at("/properties/operations/maxItems").asInt()).isEqualTo(2);
+        assertThat(parameterSchema.at("/properties/operations/maxItems").asInt())
+                .isEqualTo(AgenticAuthoringProviderSchemaCompiler.MAX_PLAN_OPERATIONS);
     }
 
     @Test
@@ -437,6 +438,65 @@ class AgenticAuthoringComponentEditPlanServiceTest {
         assertThat(compileRequest.getValue().plan().path("operations"))
                 .extracting(operation -> operation.path("operationId").asText())
                 .containsExactly("column.renderer.set", "column.visibility.set");
+    }
+
+    @Test
+    void preservesRepeatedSelectedOperationForEveryAffectedTargetInCanonicalOrder() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {"componentId":"praxis-table","operations":[
+                  {"operationId":"column.renderer.set","inputSchema":{"type":"object","properties":{"type":{"type":"string"}}}},
+                  {"operationId":"column.visibility.set","inputSchema":{"type":"object","properties":{"visible":{"type":"boolean"}}}}
+                ]}
+                """);
+        JsonNode selection = selection("praxis-table", "column.renderer.set", "column.visibility.set");
+        JsonNode multiTargetPlan = objectMapper.readTree("""
+                {"schemaVersion":"praxis-component-edit-plan.v1","componentId":"praxis-table","operations":[
+                  {"operationId":"column.visibility.set","target":"dataAdmissao","input":{"visible":false}},
+                  {"operationId":"column.renderer.set","target":"id","input":{"type":"compose"}},
+                  {"operationId":"column.visibility.set","target":"cargo","input":{"visible":false}},
+                  {"operationId":"column.visibility.set","target":"departamento","input":{"visible":false}},
+                  {"operationId":"column.visibility.set","target":"estadoCivil","input":{"visible":false}}
+                ]}
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
+                .thenReturn(selection, multiTargetPlan);
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(new AgenticAuthoringManifestCompileResult(
+                        true,
+                        java.util.List.of(),
+                        java.util.List.of(),
+                        objectMapper.createObjectNode().putObject("proposedConfig")));
+
+        AgenticAuthoringComponentEditPlanResult result = new AgenticAuthoringComponentEditPlanService(
+                providerManagementService, manifestService, objectMapper).generateAndCompile(
+                        new AgenticAuthoringPlanRequest(
+                                "Mantenha foto e código juntos e oculte data, cargo, departamento e estado civil",
+                                "openai",
+                                "gpt",
+                                "key"),
+                        "praxis-table",
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        "t",
+                        "u",
+                        "e");
+
+        assertThat(result.valid()).isTrue();
+        ArgumentCaptor<AgenticAuthoringManifestEditPlanRequest> compileRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringManifestEditPlanRequest.class);
+        verify(manifestService).compilePatch(eq("praxis-table"), compileRequest.capture());
+        assertThat(compileRequest.getValue().plan().path("operations"))
+                .extracting(operation -> operation.path("operationId").asText())
+                .containsExactly(
+                        "column.renderer.set",
+                        "column.visibility.set",
+                        "column.visibility.set",
+                        "column.visibility.set",
+                        "column.visibility.set");
+        assertThat(compileRequest.getValue().plan().path("operations"))
+                .extracting(operation -> operation.path("target").asText())
+                .containsExactly("id", "dataAdmissao", "cargo", "departamento", "estadoCivil");
     }
 
     @Test
@@ -660,7 +720,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
     }
 
     @Test
-    void rejectsDuplicateOperationsWhenSemanticSelectionRequiresTwoDistinctEffects() throws Exception {
+    void rejectsRepeatedOperationsWhenTheyOmitASelectedDistinctEffect() throws Exception {
         JsonNode manifest = objectMapper.readTree("""
                 {"componentId":"praxis-table","operations":[
                   {"operationId":"column.renderer.set","inputSchema":{"type":"object","properties":{"type":{"type":"string"}}}},

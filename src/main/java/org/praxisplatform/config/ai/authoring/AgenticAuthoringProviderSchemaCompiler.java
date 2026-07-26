@@ -17,6 +17,8 @@ import java.util.Set;
  */
 public final class AgenticAuthoringProviderSchemaCompiler {
 
+    static final int MAX_PLAN_OPERATIONS = 16;
+
     private final ObjectMapper objectMapper;
 
     public AgenticAuthoringProviderSchemaCompiler(ObjectMapper objectMapper) {
@@ -51,10 +53,10 @@ public final class AgenticAuthoringProviderSchemaCompiler {
         properties.putObject("schemaVersion").put("type", "string").put("const", schemaVersion);
         properties.putObject("componentId").put("type", "string").put("const", componentId);
         ObjectNode outputOperations = properties.putObject("operations");
-        int exactOperationCount = Math.max(1, operations.size());
+        int minimumOperationCount = Math.max(1, operations.size());
         outputOperations.put("type", "array")
-                .put("minItems", exactOperationCount)
-                .put("maxItems", exactOperationCount);
+                .put("minItems", minimumOperationCount)
+                .put("maxItems", Math.max(minimumOperationCount, MAX_PLAN_OPERATIONS));
         if (operations.size() == 1) {
             outputOperations.set("items", compileOperationSchema(operations.get(0)));
         } else {

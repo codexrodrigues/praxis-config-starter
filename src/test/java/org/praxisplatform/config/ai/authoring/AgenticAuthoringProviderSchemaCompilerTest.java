@@ -62,6 +62,21 @@ class AgenticAuthoringProviderSchemaCompilerTest {
     }
 
     @Test
+    void boundsRepeatedOperationsWhileRequiringEverySelectedOperationAtLeastOnce() throws Exception {
+        JsonNode manifest = tableManifest();
+        JsonNode schema = compiler.compileEditPlanSchema(
+                "praxis-component-edit-plan.v1",
+                "praxis-table",
+                List.of(
+                        operation(manifest, "column.renderer.set"),
+                        operation(manifest, "column.visibility.set")));
+
+        assertThat(schema.at("/properties/operations/minItems").asInt()).isEqualTo(2);
+        assertThat(schema.at("/properties/operations/maxItems").asInt())
+                .isEqualTo(AgenticAuthoringProviderSchemaCompiler.MAX_PLAN_OPERATIONS);
+    }
+
+    @Test
     void encodesUnconstrainedValuesAndArraysWithoutItemsForProviderTransport() throws Exception {
         JsonNode manifest = tableManifest();
 

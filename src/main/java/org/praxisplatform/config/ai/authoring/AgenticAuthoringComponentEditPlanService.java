@@ -450,6 +450,7 @@ public class AgenticAuthoringComponentEditPlanService {
                 The semantic decision, canonical manifest operations, current config, and transient validation context are authoritative.
                 Apply only the delta requested by userPrompt in this turn. semanticDecision.userGoal may contain prior conversation for context; do not repeat or reapply its earlier effects because currentConfig already materializes them.
                 Resolve contextual references such as "the previous one", "this photo", or relative size and layout requests against the most recently materialized compatible structure in currentConfig. For a relative increase or decrease, inspect the current numeric value and emit a strictly greater or smaller value in the requested direction; never reuse the current value as the requested change. Preserve its target, sibling items, and unrelated properties unless userPrompt explicitly changes them.
+                Emit one operation entry per affected target. When the same selected manifest operation applies to multiple targets, repeat that operationId once for each target instead of collapsing, omitting, or batching the requested targets. Keep repeated entries adjacent and preserve the canonical selected-operation order.
                 Never route intent by keywords or regex. Never emit JSON Patch, arbitrary config fields, runtime code, or operations absent from the manifest.
                 Use transientValidationContext only to ground canonical resources, fields, actions, targets, and events. Do not copy that context into the plan or config.
                 If the request cannot be expressed safely with the declared operations, return an empty operations array; the runtime will reject it closed.
@@ -1143,14 +1144,16 @@ public class AgenticAuthoringComponentEditPlanService {
         }
         Set<String> selected = new LinkedHashSet<>(selectedOperationIds);
         Set<String> observed = new LinkedHashSet<>();
-        if (plan.path("operations").size() != selected.size()) {
+        if (plan.path("operations").size() < selected.size()
+                || plan.path("operations").size() > AgenticAuthoringProviderSchemaCompiler.MAX_PLAN_OPERATIONS) {
             return plan;
         }
         for (JsonNode operation : plan.path("operations")) {
             String operationId = operation.path("operationId").asText("");
-            if (!selected.contains(operationId) || !observed.add(operationId)) {
+            if (!selected.contains(operationId)) {
                 return plan;
             }
+            observed.add(operationId);
         }
         if (!observed.equals(selected)) {
             return plan;
@@ -1169,15 +1172,19 @@ public class AgenticAuthoringComponentEditPlanService {
 
     private boolean matchesSelectedOperationSequence(JsonNode planOperations, List<String> selectedOperationIds) {
         if (selectedOperationIds == null || selectedOperationIds.isEmpty()) return false;
-        if (planOperations.size() != selectedOperationIds.size()) return false;
+        if (planOperations.size() < selectedOperationIds.size()
+                || planOperations.size() > AgenticAuthoringProviderSchemaCompiler.MAX_PLAN_OPERATIONS) {
+            return false;
+        }
         int selectedIndex = 0;
         Set<String> observed = new LinkedHashSet<>();
         for (JsonNode operation : planOperations) {
             String operationId = operation.path("operationId").asText("");
             int index = selectedOperationIds.indexOf(operationId);
             if (index < 0) return false;
-            if (index < selectedIndex || !observed.add(operationId)) return false;
-            selectedIndex = index + 1;
+            if (index < selectedIndex) return false;
+            observed.add(operationId);
+            selectedIndex = index;
         }
         return observed.size() == selectedOperationIds.size()
                 && observed.containsAll(selectedOperationIds);
