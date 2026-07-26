@@ -518,6 +518,72 @@ class AgenticAuthoringComponentEditPlanServiceTest {
     }
 
     @Test
+    void groundsSemanticFieldRolesFromManifestBundleToCurrentPhysicalColumns() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "componentId":"praxis-table",
+                  "operations":[
+                    {"operationId":"column.renderer.set","inputSchema":{"type":"object"}},
+                    {"operationId":"column.visibility.set","inputSchema":{"type":"object"}}
+                  ],
+                  "examples":[
+                    {
+                      "request":"Compor foto e código",
+                      "operationId":"column.renderer.set",
+                      "target":"codigo",
+                      "params":{"type":"compose","compose":{"items":[
+                        {"type":"avatar","avatar":{"srcField":"foto","altField":"nome","initialsField":"nome"}},
+                        {"type":"value","field":"codigo"}
+                      ]}},
+                      "isPositive":true
+                    },
+                    {
+                      "request":"Compor foto e código",
+                      "operationId":"column.visibility.set",
+                      "target":"foto",
+                      "params":{"visible":false},
+                      "isPositive":true
+                    }
+                  ]
+                }
+                """);
+        JsonNode currentConfig = objectMapper.readTree("""
+                {"columns":[
+                  {"field":"id","header":"Código"},
+                  {"field":"avatarUrl","header":"Foto"},
+                  {"field":"nomeCompleto","header":"Nome Completo"}
+                ]}
+                """);
+        when(manifestService.getManifest("praxis-table")).thenReturn(manifest);
+        when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
+                .thenReturn(selection("praxis-table", "column.renderer.set", "column.visibility.set"));
+        when(manifestService.compilePatch(eq("praxis-table"), any()))
+                .thenReturn(new AgenticAuthoringManifestCompileResult(
+                        true,
+                        java.util.List.of(),
+                        java.util.List.of(),
+                        objectMapper.readTree("{\"proposedConfig\":{}}")));
+
+        AgenticAuthoringComponentEditPlanResult result = new AgenticAuthoringComponentEditPlanService(
+                providerManagementService, manifestService, objectMapper).generateAndCompile(
+                        new AgenticAuthoringPlanRequest("Junte foto e código", "openai", "gpt", "key"),
+                        "praxis-table", currentConfig, objectMapper.createObjectNode(), "t", "u", "e");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings()).contains("component-edit-plan-source:manifest-example-bundle");
+        JsonNode renderer = findOperation(result.plan(), "column.renderer.set");
+        JsonNode visibility = findOperation(result.plan(), "column.visibility.set");
+        assertThat(renderer.path("target").asText()).isEqualTo("id");
+        assertThat(renderer.at("/input/compose/items/0/avatar/srcField").asText()).isEqualTo("avatarUrl");
+        assertThat(renderer.at("/input/compose/items/0/avatar/altField").asText()).isEqualTo("nomeCompleto");
+        assertThat(renderer.at("/input/compose/items/0/avatar/initialsField").asText()).isEqualTo("nomeCompleto");
+        assertThat(renderer.at("/input/compose/items/1/field").asText()).isEqualTo("id");
+        assertThat(visibility.path("target").asText()).isEqualTo("avatarUrl");
+        verify(providerManagementService, times(1))
+                .generateJson(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void doesNotMaterializeOnlyASubsetOfALargerManifestBundle() throws Exception {
         JsonNode manifest = objectMapper.readTree("""
                 {

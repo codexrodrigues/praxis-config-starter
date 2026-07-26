@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -35,6 +36,8 @@ public class AgenticAuthoringComponentEditPlanService {
     private static final int MAX_COMPLETION_TOKENS = 1800;
     private static final int DEFAULT_TIMEOUT_SECONDS = 35;
     private static final int MAX_MANIFEST_EXAMPLES = 12;
+    private static final Set<String> FIELD_REFERENCE_KEYS = Set.of(
+            "field", "srcField", "altField", "initialsField", "textField", "imageField", "var");
 
     private final AiProviderManagementService providerManagementService;
     private final AgenticAuthoringManifestService manifestService;
@@ -95,10 +98,12 @@ public class AgenticAuthoringComponentEditPlanService {
                         missing(), missing());
             }
             JsonNode selectedManifest = manifestWithOperations(manifest, selection.operationIds());
-            JsonNode manifestBundlePlan = materializeUniqueManifestExampleBundle(
-                    componentId,
-                    manifest,
-                    selection.operationIds());
+            JsonNode manifestBundlePlan = groundManifestExampleBundleFields(
+                    materializeUniqueManifestExampleBundle(
+                            componentId,
+                            manifest,
+                            selection.operationIds()),
+                    componentConfig);
             if (manifestBundlePlan != null) {
                 AgenticAuthoringComponentEditPlanResult bundleResult = compileGovernedPlan(
                         componentId,
@@ -1019,6 +1024,113 @@ public class AgenticAuthoringComponentEditPlanService {
             operation.set("input", example.path("params").deepCopy());
         }
         return plan;
+    }
+
+    /**
+     * Manifest examples describe semantic field roles so they remain reusable across domains.
+     * Once semantic intent and operations are resolved, bind those roles to the current table's
+     * physical fields before canonical compilation. This is grounding inside an already selected
+     * component contract; it does not participate in primary intent routing.
+     */
+    private JsonNode groundManifestExampleBundleFields(JsonNode plan, JsonNode componentConfig) {
+        if (!(plan instanceof ObjectNode grounded)
+                || !componentConfig.path("columns").isArray()
+                || componentConfig.path("columns").isEmpty()) {
+            return plan;
+        }
+        Map<String, String> aliases = tableFieldAliases(componentConfig.path("columns"));
+        if (aliases.isEmpty()) {
+            return plan;
+        }
+        for (JsonNode operationNode : grounded.path("operations")) {
+            if (!(operationNode instanceof ObjectNode operation)) {
+                continue;
+            }
+            JsonNode target = operation.get("target");
+            if (target != null && target.isTextual()) {
+                operation.put("target", groundedField(target.asText(), aliases));
+            } else if (target instanceof ObjectNode targetObject) {
+                for (String targetKey : List.of("field", "value")) {
+                    if (targetObject.path(targetKey).isTextual()) {
+                        targetObject.put(
+                                targetKey,
+                                groundedField(targetObject.path(targetKey).asText(), aliases));
+                    }
+                }
+                groundFieldReferenceProperties(targetObject, aliases);
+            }
+            groundFieldReferenceProperties(operation.path("input"), aliases);
+        }
+        return grounded;
+    }
+
+    private Map<String, String> tableFieldAliases(JsonNode columns) {
+        Map<String, Set<String>> candidates = new LinkedHashMap<>();
+        for (JsonNode column : columns) {
+            String field = column.path("field").asText("").trim();
+            if (field.isBlank()) {
+                continue;
+            }
+            for (String alias : List.of(
+                    field,
+                    column.path("header").asText(""),
+                    column.path("label").asText(""),
+                    column.path("title").asText(""))) {
+                String normalized = normalizeFieldAlias(alias);
+                if (!normalized.isBlank()) {
+                    candidates.computeIfAbsent(normalized, ignored -> new LinkedHashSet<>()).add(field);
+                }
+            }
+        }
+        Map<String, String> aliases = new LinkedHashMap<>();
+        candidates.forEach((alias, fields) -> {
+            if (fields.size() == 1) {
+                aliases.put(alias, fields.iterator().next());
+            }
+        });
+        return aliases;
+    }
+
+    private void groundFieldReferenceProperties(JsonNode node, Map<String, String> aliases) {
+        if (node instanceof ObjectNode object) {
+            List<String> names = new ArrayList<>();
+            object.fieldNames().forEachRemaining(names::add);
+            for (String name : names) {
+                JsonNode value = object.get(name);
+                if (FIELD_REFERENCE_KEYS.contains(name) && value != null && value.isTextual()) {
+                    object.put(name, groundedField(value.asText(), aliases));
+                } else {
+                    groundFieldReferenceProperties(value, aliases);
+                }
+            }
+        } else if (node != null && node.isArray()) {
+            node.forEach(value -> groundFieldReferenceProperties(value, aliases));
+        }
+    }
+
+    private String groundedField(String semanticRole, Map<String, String> aliases) {
+        String normalizedRole = normalizeFieldAlias(semanticRole);
+        if (normalizedRole.isBlank()) {
+            return semanticRole;
+        }
+        String exact = aliases.get(normalizedRole);
+        if (exact != null) {
+            return exact;
+        }
+        Set<String> prefixMatches = new LinkedHashSet<>();
+        aliases.forEach((alias, field) -> {
+            if (alias.startsWith(normalizedRole) || normalizedRole.startsWith(alias)) {
+                prefixMatches.add(field);
+            }
+        });
+        return prefixMatches.size() == 1 ? prefixMatches.iterator().next() : semanticRole;
+    }
+
+    private String normalizeFieldAlias(String value) {
+        return Normalizer.normalize(value == null ? "" : value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .replaceAll("[^A-Za-z0-9]+", "")
+                .toLowerCase(java.util.Locale.ROOT);
     }
 
     private JsonNode normalizeSelectedOperationSequence(
