@@ -19,9 +19,9 @@ import org.springframework.core.io.ClassPathResource;
 class AiRegistrySnapshotContractTest {
 
     private static final String EXPECTED_SNAPSHOT_HASH =
-            "7d5c9493d63b9a6d5c5c66f692a75737a9cd1ff5a15d563bbad67cf5f3ae05e2";
+            "a4bb295787a4c2595d887e2719df5f343c17393054f9edc13378406edf9335fa";
     private static final String EXPECTED_VERSION = "1.0.0";
-    private static final String EXPECTED_GENERATED_AT = "2026-07-26T12:17:25.253Z";
+    private static final String EXPECTED_GENERATED_AT = "2026-07-26T23:30:30.363Z";
     private static final int EXPECTED_COMPONENT_COUNT = 105;
     private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 95;
     private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 105;
@@ -143,6 +143,45 @@ class AiRegistrySnapshotContractTest {
                 .isEqualTo("number");
         assertThat(composeItem.path("allOf").isArray()).isTrue();
         assertThat(composeItem.path("allOf")).isNotEmpty();
+    }
+
+    @Test
+    void entityLookupPublishesGovernedDialogSearchAuthoringSchema() throws IOException {
+        JsonNode profiles = readSnapshot()
+                .path("components")
+                .path("pdx-entity-lookup")
+                .path("authoringManifest")
+                .path("controlProfiles");
+        JsonNode entityLookupOperation = null;
+        for (JsonNode profile : profiles) {
+            if (!"entity-lookup".equals(profile.path("profileId").asText())) {
+                continue;
+            }
+            for (JsonNode operation : profile.path("operations")) {
+                if ("field.entityLookup.configure".equals(operation.path("operationId").asText())) {
+                    entityLookupOperation = operation;
+                    break;
+                }
+            }
+        }
+
+        assertThat(entityLookupOperation)
+                .as("entity lookup must publish governed dialog authoring")
+                .isNotNull();
+        JsonNode dialog = entityLookupOperation
+                .path("inputSchema")
+                .path("properties")
+                .path("dialog");
+        assertThat(dialog.path("type").asText()).isEqualTo("object");
+        assertThat(dialog.path("properties").path("size").path("enum"))
+                .contains(
+                        objectMapper.valueToTree("sm"),
+                        objectMapper.valueToTree("md"),
+                        objectMapper.valueToTree("lg"),
+                        objectMapper.valueToTree("xl"),
+                        objectMapper.valueToTree("full"));
+        assertThat(entityLookupOperation.path("affectedPaths"))
+                .contains(objectMapper.valueToTree("fieldMetadata.dialog"));
     }
 
     @Test
