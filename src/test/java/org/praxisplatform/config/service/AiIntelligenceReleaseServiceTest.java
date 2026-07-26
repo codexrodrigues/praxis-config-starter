@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import java.util.Optional;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -16,6 +17,7 @@ import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
+@Tag("unit")
 class AiIntelligenceReleaseServiceTest {
     private static final String HASH_A = "a".repeat(64);
     private static final String HASH_B = "b".repeat(64);
