@@ -63,6 +63,47 @@ class SpringAiOpenAiServiceTest {
     }
 
     @Test
+    void economicalGpt56ModelsUseTheLightReasoningProfile() throws Exception {
+        List<JsonNode> capturedRequests = new ArrayList<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/responses", exchange -> {
+            capturedRequests.add(objectMapper.readTree(exchange.getRequestBody().readAllBytes()));
+            writeJson(exchange, 200, completedResponse("pong"));
+        });
+        SpringAiOpenAiService service = service(server, "gpt-5.6-luna");
+        server.start();
+        try {
+            service.generateText("luna", AiCallConfig.builder().maxTokens(2_048).build());
+            service.generateText("terra", AiCallConfig.builder()
+                    .model("gpt-5.6-terra")
+                    .maxTokens(2_048)
+                    .build());
+
+            assertEquals("low", capturedRequests.get(0).path("reasoning").path("effort").asText());
+            assertEquals("low", capturedRequests.get(1).path("reasoning").path("effort").asText());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void versionedEconomicalGpt56ModelsKeepTheLightReasoningProfile() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = responseServer(completedResponse("pong"), capturedRequest);
+        SpringAiOpenAiService service = service(server, "gpt-5.6-terra-2026-07-15");
+        server.start();
+        try {
+            service.generateText("terra");
+
+            assertEquals("low", capturedRequest.get().path("reasoning").path("effort").asText());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
     void agenticAuthoringProfileAttachesOnlyConfiguredHostedSkills() throws Exception {
         AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
         HttpServer server = responseServer(completedResponse("pong"), capturedRequest);

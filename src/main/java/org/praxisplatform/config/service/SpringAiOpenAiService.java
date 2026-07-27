@@ -76,6 +76,7 @@ public class SpringAiOpenAiService implements AiProvider {
     private static final String TRANSPORT = "openai-responses-sdk";
     private static final String STRUCTURED_OUTPUT_NAME = "praxis_response";
     private static final String DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe";
+    private static final String DEFAULT_LIGHT_REASONING_MODELS = "gpt-5.6-luna,gpt-5.6-terra";
 
     private final ObjectMapper objectMapper;
     private final OpenAiHostedSkillProperties hostedSkillProperties;
@@ -98,6 +99,9 @@ public class SpringAiOpenAiService implements AiProvider {
 
     @Value("${praxis.ai.openai.json-min-completion-tokens:8192}")
     private int jsonMinCompletionTokens;
+
+    @Value("${praxis.ai.openai.light-reasoning-models:" + DEFAULT_LIGHT_REASONING_MODELS + "}")
+    private String lightReasoningModels = DEFAULT_LIGHT_REASONING_MODELS;
 
     @Value("${praxis.ai.timeout-seconds:30}")
     private int timeoutSeconds;
@@ -770,7 +774,22 @@ public class SpringAiOpenAiService implements AiProvider {
         if (!supportsCompactReasoningEffort(modelName) || maxOutputTokens > 2048) {
             return Optional.empty();
         }
+        if (usesLightReasoningProfile(modelName)) {
+            return Optional.of(ReasoningEffort.LOW);
+        }
         return Optional.of(supportsNoReasoningEffort(modelName) ? ReasoningEffort.NONE : ReasoningEffort.LOW);
+    }
+
+    private boolean usesLightReasoningProfile(String modelName) {
+        if (modelName == null) {
+            return false;
+        }
+        String normalized = modelName.trim().toLowerCase();
+        return List.of(lightReasoningModels.split(",")).stream()
+                .map(String::trim)
+                .map(String::toLowerCase)
+                .filter(configured -> !configured.isBlank())
+                .anyMatch(configured -> normalized.equals(configured) || normalized.startsWith(configured + "-"));
     }
 
     private boolean supportsNoReasoningEffort(String modelName) {

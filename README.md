@@ -262,6 +262,8 @@ spring:
 praxis:
   ai:
     provider: ${PRAXIS_AI_PROVIDER:mock}
+    openai:
+      light-reasoning-models: ${PRAXIS_AI_OPENAI_LIGHT_REASONING_MODELS:gpt-5.6-luna,gpt-5.6-terra}
     embedding:
       provider: ${PRAXIS_AI_EMBEDDING_PROVIDER:mock}
 ```

@@ -614,6 +614,15 @@ adocao progressiva do Semantic IR nao apaga candidatos ja governados por Domain 
 e schema. Nesse caso `searchApiResources` continua a descoberta e preserva a proveniencia efetiva;
 materializacao segue sujeita aos gates de elegibilidade, schema, capability, preview e revisao.
 
+### OpenAI Light reasoning profile
+
+Chamadas compactas com os modelos econômicos listados em
+`praxis.ai.openai.light-reasoning-models` enviam `reasoning.effort=low` pela Responses API. O default
+governado inclui `gpt-5.6-luna` e `gpt-5.6-terra`, inclusive IDs versionados desses modelos, e pode
+ser substituído por `PRAXIS_AI_OPENAI_LIGHT_REASONING_MODELS`. Modelos GPT-5 fora dessa lista
+preservam a política de compatibilidade já existente; a seleção do perfil não altera roteamento de
+intenção, limites de tokens, gates semânticos ou autorização de materialização.
+
 ### OpenAI hosted skills
 
 Chamadas OpenAI pertencentes ao authoring agentico carregam o perfil interno
