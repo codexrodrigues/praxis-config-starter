@@ -50,7 +50,7 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                 .map(AgenticAuthoringDomainBindingService.BindingProjection::apiPath)
                 .filter(StringUtils::hasText)
                 .findFirst()
-                .orElse(null);
+                .orElseGet(() -> canonicalResourcePath(resourceKey));
         for (AgenticAuthoringDomainBindingService.BindingProjection binding : bindings) {
             if (!StringUtils.hasText(binding.apiPath()) || !StringUtils.hasText(binding.apiMethod())) {
                 failures.add("operational-binding-operation-incomplete");
@@ -71,9 +71,13 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                 failures.add("operational-binding-schema-" + schemaStatus(schema));
                 continue;
             }
-            String capabilityPath = "api_operation".equals(binding.bindingType())
-                    ? capabilitiesResourcePath
-                    : binding.apiPath();
+            String capabilityPath = switch (binding.bindingType()) {
+                case "api_operation" -> capabilitiesResourcePath;
+                case "api_resource" -> binding.apiPath();
+                default -> StringUtils.hasText(capabilitiesResourcePath)
+                        ? capabilitiesResourcePath
+                        : binding.apiPath();
+            };
             if (!StringUtils.hasText(capabilityPath)) {
                 failures.add("operational-binding-capabilities-resource-binding-required");
                 continue;
@@ -148,6 +152,47 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                 && StringUtils.hasText(binding.bindingKey())) {
             return List.of(binding.bindingKey().trim());
         }
+        String bindingType = binding == null || binding.bindingType() == null
+                ? ""
+                : binding.bindingType().trim().toLowerCase(Locale.ROOT);
+        String path = binding == null || binding.apiPath() == null
+                ? ""
+                : binding.apiPath().trim().toLowerCase(Locale.ROOT);
+        if ("stats_endpoint".equals(bindingType)) {
+            if (path.endsWith("/stats/timeseries")) {
+                return List.of("statsTimeSeries");
+            }
+            if (path.endsWith("/stats/group-by")) {
+                return List.of("statsGroupBy");
+            }
+            if (path.endsWith("/stats/distribution")) {
+                return List.of("statsDistribution");
+            }
+        }
+        if ("ui_surface".equals(bindingType)) {
+            String resourcePath = canonicalResourcePath(binding.resourceKey());
+            if ("post".equals(method) && path.equals(resourcePath)) {
+                return List.of("create");
+            }
+            if ("get".equals(method) && path.endsWith("/all")) {
+                return List.of("all", "list");
+            }
+            if ("post".equals(method) && path.endsWith("/filter/cursor")) {
+                return List.of("cursor", "filter");
+            }
+            if ("post".equals(method) && path.endsWith("/filter")) {
+                return List.of("filter");
+            }
+            if (path.contains("/{id}")) {
+                return switch (method) {
+                    case "get" -> List.of("byId", "view", "read", "get");
+                    case "put" -> List.of("update", "edit", "replace");
+                    case "patch" -> List.of("update", "edit", "patch");
+                    case "delete" -> List.of("delete");
+                    default -> List.of();
+                };
+            }
+        }
         return switch (method) {
             case "get" -> List.of("list", "read", "get");
             case "post" -> List.of("create");
@@ -156,6 +201,13 @@ public class AgenticAuthoringOperationalBindingVerificationService {
             case "delete" -> List.of("delete");
             default -> List.of();
         };
+    }
+
+    private String canonicalResourcePath(String resourceKey) {
+        if (!StringUtils.hasText(resourceKey)) {
+            return null;
+        }
+        return "/api/" + resourceKey.trim().replace('.', '/');
     }
 
     private String schemaType(String method) {

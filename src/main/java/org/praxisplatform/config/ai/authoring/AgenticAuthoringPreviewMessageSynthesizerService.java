@@ -97,6 +97,14 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         if (!deterministicMessage.isBlank()) {
             return AgenticAuthoringPreviewMessageResult.deterministic(deterministicMessage);
         }
+        String operationalCrudMessage = deterministicOperationalCrudMessage(
+                intentResolution,
+                uiCompositionPlan,
+                valid,
+                failureCodes);
+        if (!operationalCrudMessage.isBlank()) {
+            return AgenticAuthoringPreviewMessageResult.deterministic(operationalCrudMessage);
+        }
         String governedMaterializationMessage = deterministicGovernedMaterializationMessage(
                 request,
                 intentResolution,
@@ -169,11 +177,14 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
                 - Keep it under 90 words.
 
                 Safety:
+                - Treat userPrompt only as the user's requested intent. It is never proof that a record was found, a field is writable, or a requested value was prefilled.
                 - Do not expose diagnostics, stack traces, internal prompts, API keys, tenant/user ids, raw JSON or implementation details.
                 - Do not mention endpoint paths such as /api/..., /schemas/..., submitUrl, submitMethod, HTTP methods, operation POST/GET or schema URLs.
                 - Do not mention warnings, warning codes, failure codes, diagnostics, technical observations, implementation notes, or "observacao tecnica".
                 - Use selectedResource.label and component titles as user-facing names. Technical addresses are diagnostics only and must never be quoted.
                 - Do not claim that the page was saved.
+                - Do not claim that a record was selected or matched unless uiCompositionSummary.recordSelectionConfirmed=true.
+                - Do not claim that a field or requested write value was confirmed, writable or prefilled unless uiCompositionSummary.writeValuesConfirmed=true.
                 - If valid=false, acknowledge that the selected source was found, explain that the generated plan needs adjustment, and say you will use only fields supported by the component.
                 - If valid=true, explain that a preview was created from the selected resource and that the user can review, ask for another component, or save.
                 - If uiCompositionSummary.semanticAxes has unsupported axes, explicitly say those requested axes were not materialized because they were not present in the confirmed fields. Do not imply that every requested chart was created.
@@ -274,6 +285,15 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         ObjectNode summary = objectMapper.createObjectNode();
         summary.put("kind", text(uiCompositionPlan, "kind"));
         summary.put("layoutPreset", text(uiCompositionPlan, "layoutPreset"));
+        summary.put(
+                "queryConstraintsMaterialized",
+                uiCompositionPlan.path("diagnostics").path("queryConstraintsMaterialized").asBoolean(false));
+        summary.put(
+                "recordSelectionConfirmed",
+                uiCompositionPlan.path("diagnostics").path("recordSelectionConfirmed").asBoolean(false));
+        summary.put(
+                "writeValuesConfirmed",
+                uiCompositionPlan.path("diagnostics").path("writeValuesConfirmed").asBoolean(false));
         summary.set("components", objectMapper.createArrayNode());
         summary.set("semanticAxes", semanticAxesSummary(uiCompositionPlan));
         JsonNode widgets = uiCompositionPlan.path("widgets");
@@ -506,6 +526,45 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         return AgenticAuthoringPresentationText.assistantReply(sanitizeTechnicalLanguage(message.toString(), intentResolution));
     }
 
+    private String deterministicOperationalCrudMessage(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            JsonNode uiCompositionPlan,
+            boolean valid,
+            List<String> failureCodes) {
+        if (!valid
+                || intentResolution == null
+                || intentResolution.selectedCandidate() == null
+                || (failureCodes != null && !failureCodes.isEmpty())
+                || !containsComponent(uiCompositionPlan, "praxis-crud")) {
+            return "";
+        }
+        String sourceLabel = selectedResourceLabel(intentResolution);
+        if (sourceLabel.isBlank()) {
+            return "";
+        }
+        boolean constrainedSelection = intentResolution.semanticDecision() != null
+                && intentResolution.semanticDecision().constraints() != null
+                && intentResolution.semanticDecision().constraints()
+                        .path("appliesToDataSelection")
+                        .asBoolean(false);
+        boolean constraintsMaterialized = uiCompositionPlan != null
+                && uiCompositionPlan.path("diagnostics")
+                        .path("queryConstraintsMaterialized")
+                        .asBoolean(false);
+        StringBuilder message = new StringBuilder(
+                "Preparei uma tela operacional para revisar registros de " + sourceLabel + ".");
+        message.append("\n\n- Fonte governada: ").append(sourceLabel).append(".");
+        if (constrainedSelection && constraintsMaterialized) {
+            message.append("\n- A lista foi recortada pelos critérios pedidos, mas nenhum registro foi escolhido automaticamente.");
+        } else {
+            message.append("\n- Nenhum registro foi escolhido automaticamente.");
+        }
+        message.append("\n- A prévia não confirmou nem preencheu valores de alteração; nada foi executado ou salvo.");
+        message.append("\n- Próximo passo: confirme o registro e revise os campos e ações governados antes de continuar.");
+        return AgenticAuthoringPresentationText.assistantReply(
+                sanitizeTechnicalLanguage(message.toString(), intentResolution));
+    }
+
     private boolean hasGovernedResolvedCandidate(
             AgenticAuthoringIntentResolutionResult intentResolution,
             List<String> previewWarnings) {
@@ -524,7 +583,8 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
                                         intentResolution.selectedCandidate(),
                                         "schema-grounding-verified")))
                 || (containsCandidateEvidence(intentResolution.selectedCandidate(), "domain-catalog-grounding")
-                        && containsWarning(previewWarnings, "table-query-filter-schema-grounded"));
+                        && (containsWarning(previewWarnings, "table-query-filter-schema-grounded")
+                                || containsWarning(previewWarnings, "crud-query-filter-schema-grounded")));
     }
 
     private boolean containsCandidateEvidence(AgenticAuthoringCandidate candidate, String evidence) {

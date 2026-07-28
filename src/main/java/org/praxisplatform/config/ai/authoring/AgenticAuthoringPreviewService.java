@@ -916,7 +916,7 @@ public class AgenticAuthoringPreviewService {
                     warnings,
                     schemaBaseUrl,
                     schemaFetchCache);
-            uiCompositionPlan = groundTableQueryContextFilters(
+            uiCompositionPlan = groundDataQueryContextFilters(
                     request,
                     uiCompositionPlan,
                     warnings,
@@ -937,6 +937,11 @@ public class AgenticAuthoringPreviewService {
             }
             if (warnings.contains("table-query-filter-schema-grounding-incomplete")) {
                 addAllOnce(failureCodes, List.of("table-query-filter-schema-grounding-incomplete"));
+                technicallyValid = false;
+                semanticallyValid = false;
+            }
+            if (warnings.contains("crud-query-filter-schema-grounding-incomplete")) {
+                addAllOnce(failureCodes, List.of("crud-query-filter-schema-grounding-incomplete"));
                 technicallyValid = false;
                 semanticallyValid = false;
             }
@@ -2247,27 +2252,67 @@ public class AgenticAuthoringPreviewService {
         return copy;
     }
 
-    private JsonNode groundTableQueryContextFilters(
+    private JsonNode groundDataQueryContextFilters(
             AgenticAuthoringPlanRequest request,
             JsonNode uiCompositionPlan,
             List<String> warnings,
             String schemaBaseUrl,
             PreviewSchemaFetchCache schemaFetchCache) {
-        if (!containsComponent(uiCompositionPlan, "praxis-table")) {
-            return uiCompositionPlan;
-        }
-        Optional<Map<String, SchemaFieldDescriptor>> filterFields =
-                filterSchemaFields(request, schemaBaseUrl, schemaFetchCache);
-        if (filterFields.isEmpty() || filterFields.get().isEmpty()) {
+        if (!containsQueryContextFilters(uiCompositionPlan)) {
             return uiCompositionPlan;
         }
         JsonNode copy = uiCompositionPlan.deepCopy();
+        Optional<Map<String, SchemaFieldDescriptor>> filterFields =
+                filterSchemaFields(request, schemaBaseUrl, schemaFetchCache);
+        if (filterFields.isEmpty() || filterFields.get().isEmpty()) {
+            markQueryContextFilterGroundingIncomplete(copy, warnings);
+            return copy;
+        }
         if (copy.path("widgets") instanceof ArrayNode widgets) {
             for (JsonNode widget : widgets) {
-                alignTableQueryContextFilters(widget, filterFields.get(), null, warnings);
+                alignDataQueryContextFilters(widget, filterFields.get(), null, warnings);
             }
         }
+        boolean incomplete = warnings.contains("table-query-filter-schema-grounding-incomplete")
+                || warnings.contains("crud-query-filter-schema-grounding-incomplete");
+        if (!incomplete && copy instanceof ObjectNode plan) {
+            ObjectNode diagnostics = plan.path("diagnostics") instanceof ObjectNode existing
+                    ? existing
+                    : plan.putObject("diagnostics");
+            diagnostics.put("queryConstraintsMaterialized", true);
+            diagnostics.put("queryConstraintFieldsSchemaVerified", true);
+        }
         return copy;
+    }
+
+    private boolean containsQueryContextFilters(JsonNode uiCompositionPlan) {
+        JsonNode widgets = uiCompositionPlan == null
+                ? MissingNode.getInstance()
+                : uiCompositionPlan.path("widgets");
+        if (!widgets.isArray()) {
+            return false;
+        }
+        for (JsonNode widget : widgets) {
+            if (queryContextFilters(widget) instanceof ObjectNode filters && !filters.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void markQueryContextFilterGroundingIncomplete(JsonNode uiCompositionPlan, List<String> warnings) {
+        JsonNode widgets = uiCompositionPlan == null
+                ? MissingNode.getInstance()
+                : uiCompositionPlan.path("widgets");
+        if (!widgets.isArray()) {
+            return;
+        }
+        for (JsonNode widget : widgets) {
+            if (!(queryContextFilters(widget) instanceof ObjectNode filters) || filters.isEmpty()) {
+                continue;
+            }
+            addWarningOnce(warnings, queryFilterWarning(widget, "schema-grounding-incomplete"));
+        }
     }
 
     private VisibleTableQueryFilterMaterialization materializeVisibleTableQueryFilters(
@@ -3935,7 +3980,7 @@ public class AgenticAuthoringPreviewService {
             for (int i = widgetArray.size() - 1; i >= 0; i--) {
                 JsonNode widget = widgetArray.get(i);
                 alignAuxiliaryWidgetBindings(widget, schemaFields, filterSchemaFields, schemaResult, warnings);
-                alignTableQueryContextFilters(widget, filterSchemaFields, schemaResult, warnings);
+                alignDataQueryContextFilters(widget, filterSchemaFields, schemaResult, warnings);
                 JsonNode axis = widget.path("inputs").path("config").path("semanticAxis");
                 if (!(axis instanceof ObjectNode axisObject)) {
                     continue;
@@ -4095,14 +4140,12 @@ public class AgenticAuthoringPreviewService {
         }
     }
 
-    private void alignTableQueryContextFilters(
+    private void alignDataQueryContextFilters(
             JsonNode widget,
             Map<String, SchemaFieldDescriptor> filterSchemaFields,
             SchemaFetchResult schemaResult,
             List<String> warnings) {
-        if (!"praxis-table".equals(widget.path("componentId").asText(""))
-                || !(widget.path("inputs").path("queryContext").path("filters") instanceof ObjectNode filters)
-                || filters.isEmpty()) {
+        if (!(queryContextFilters(widget) instanceof ObjectNode filters) || filters.isEmpty()) {
             return;
         }
         ObjectNode aligned = objectMapper.createObjectNode();
@@ -4115,12 +4158,29 @@ public class AgenticAuthoringPreviewService {
             }
         });
         if (aligned.size() != filters.size()) {
-            addWarningOnce(warnings, "table-query-filter-schema-grounding-incomplete");
+            addWarningOnce(warnings, queryFilterWarning(widget, "schema-grounding-incomplete"));
             return;
         }
         filters.removeAll();
         filters.setAll(aligned);
-        addWarningOnce(warnings, "table-query-filter-schema-grounded");
+        addWarningOnce(warnings, queryFilterWarning(widget, "schema-grounded"));
+    }
+
+    private JsonNode queryContextFilters(JsonNode widget) {
+        String componentId = widget == null ? "" : widget.path("componentId").asText("");
+        if ("praxis-table".equals(componentId)) {
+            return widget.path("inputs").path("queryContext").path("filters");
+        }
+        if ("praxis-crud".equals(componentId)) {
+            return widget.path("inputs").path("metadata").path("queryContext").path("filters");
+        }
+        return MissingNode.getInstance();
+    }
+
+    private String queryFilterWarning(JsonNode widget, String suffix) {
+        return "praxis-crud".equals(widget.path("componentId").asText(""))
+                ? "crud-query-filter-" + suffix
+                : "table-query-filter-" + suffix;
     }
 
     private void normalizeFilterQueryContextBindings(

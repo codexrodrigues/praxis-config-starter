@@ -72,7 +72,7 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThat(readableValues(response.validationResult().path("proposedOperationTypes")))
                 .containsExactly("add_evidence");
         assertThat(readableValues(response.validationResult().path("executableOperationTypes")))
-                .containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "approve_concept", "create_concept", "revert_evidence");
+                .containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "approve_binding", "approve_concept", "create_concept", "revert_evidence");
         assertThat(readableValues(response.validationResult().path("executablePatchOperationTypes")))
                 .containsExactly("add_evidence");
         assertThat(readableValues(response.validationResult().path("nonExecutableOperationTypes")))
@@ -286,7 +286,7 @@ class DomainKnowledgeChangeSetServiceTest {
                 .extracting(org.praxisplatform.config.dto.DomainKnowledgeChangeSetValidationIssue::code)
                 .contains("non_executable_operation_type");
         assertThat(validation.proposedOperationTypes()).containsExactly("update_concept_summary");
-        assertThat(validation.executableOperationTypes()).containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "approve_concept", "create_concept", "revert_evidence");
+        assertThat(validation.executableOperationTypes()).containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "approve_binding", "approve_concept", "create_concept", "revert_evidence");
         assertThat(validation.executablePatchOperationTypes()).isEmpty();
         assertThat(validation.nonExecutableOperationTypes()).containsExactly("update_concept_summary");
         ArgumentCaptor<DomainKnowledgeChangeSet> captor = ArgumentCaptor.forClass(DomainKnowledgeChangeSet.class);
@@ -295,7 +295,7 @@ class DomainKnowledgeChangeSetServiceTest {
         assertThat(readableValues(validationResult.path("proposedOperationTypes")))
                 .containsExactly("update_concept_summary");
         assertThat(readableValues(validationResult.path("executableOperationTypes")))
-                .containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "approve_concept", "create_concept", "revert_evidence");
+                .containsExactly("add_alias", "add_binding", "add_evidence", "add_relationship", "approve_binding", "approve_concept", "create_concept", "revert_evidence");
         assertThat(readableValues(validationResult.path("executablePatchOperationTypes")))
                 .isEmpty();
         assertThat(readableValues(validationResult.path("nonExecutableOperationTypes")))
@@ -490,6 +490,105 @@ class DomainKnowledgeChangeSetServiceTest {
         verify(conceptRepository).save(concept);
         verify(derivedIndexService).evidenceActivated(
                 any(DomainKnowledgeConcept.class), any(DomainKnowledgeEvidence.class));
+    }
+
+    @Test
+    void appliesApprovedBindingPromotionForProjectedCatalogBinding() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeBindingRepository bindingRepository = mock(DomainKnowledgeBindingRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        JsonNode target = objectMapper.createObjectNode()
+                .put("tenantId", TENANT)
+                .put("environment", ENVIRONMENT)
+                .put("conceptKey", "human-resources.ferias-afastamentos");
+        var payload = objectMapper.createObjectNode();
+        payload.put("bindingType", "api_resource");
+        payload.put("bindingKey", "/api/human-resources/ferias-afastamentos");
+        var provenance = payload.putObject("provenance");
+        provenance.put("claimId", "claim:human-resources:ferias-afastamentos:binding-approval:v1");
+        provenance.put("sourceClass", "authored");
+        provenance.put("derivationActivity", "reference-domain-binding-review");
+        provenance.putArray("sourceRefs")
+                .add("domain-catalog:human-resources.ferias-afastamentos:v1");
+        DomainKnowledgeChangeSetCreateRequest request = new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:hr:ferias-afastamentos:binding-approve:v1",
+                "proposed",
+                "system",
+                "praxis-reference-pilot",
+                "Approve projected vacation resource binding",
+                "Reviewed catalog binding is eligible for operational grounding.",
+                List.of(new DomainKnowledgeChangeSetOperationRequest(
+                        "op-approve-ferias-afastamentos-binding",
+                        "approve_binding",
+                        target,
+                        "Promote the reviewed binding through the governed lifecycle.",
+                        List.of("domain-catalog:human-resources.ferias-afastamentos:v1"),
+                        1d,
+                        payload)));
+        DomainKnowledgeChangeSet existing = persisted(request);
+        existing.setStatus("approved");
+        DomainKnowledgeConcept concept = DomainKnowledgeConcept.builder()
+                .id(UUID.randomUUID())
+                .tenantId(TENANT)
+                .environment(ENVIRONMENT)
+                .conceptKey("human-resources.ferias-afastamentos")
+                .nodeType("concept")
+                .lifecycle("active")
+                .curationStatus("approved")
+                .aiVisibility("allow")
+                .build();
+        concept.onInsert();
+        DomainKnowledgeBinding binding = DomainKnowledgeBinding.builder()
+                .id(UUID.randomUUID())
+                .tenantId(TENANT)
+                .environment(ENVIRONMENT)
+                .concept(concept)
+                .bindingType("api_resource")
+                .bindingKey("/api/human-resources/ferias-afastamentos")
+                .resourceKey("human-resources.ferias-afastamentos")
+                .curationStatus("generated")
+                .build();
+        binding.onInsert();
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(repository.save(any(DomainKnowledgeChangeSet.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKey(
+                TENANT, ENVIRONMENT, "human-resources.ferias-afastamentos"))
+                .thenReturn(Optional.of(concept));
+        when(bindingRepository.findByTenantIdAndEnvironmentAndBindingTypeAndBindingKey(
+                TENANT, ENVIRONMENT, "api_resource", "/api/human-resources/ferias-afastamentos"))
+                .thenReturn(List.of(binding));
+        when(bindingRepository.save(any(DomainKnowledgeBinding.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKey(
+                TENANT, ENVIRONMENT, "claim:human-resources:ferias-afastamentos:binding-approval:v1"))
+                .thenReturn(List.of());
+        when(evidenceRepository.save(any(DomainKnowledgeEvidence.class))).thenAnswer(invocation -> {
+            DomainKnowledgeEvidence evidence = invocation.getArgument(0);
+            evidence.onInsert();
+            return evidence;
+        });
+        DomainKnowledgeChangeSetService service = new DomainKnowledgeChangeSetService(
+                repository,
+                conceptRepository,
+                mock(DomainKnowledgeAliasRepository.class),
+                bindingRepository,
+                mock(DomainKnowledgeRelationshipRepository.class),
+                evidenceRepository,
+                validator,
+                objectMapper,
+                mock(ProjectKnowledgeDerivedIndexService.class));
+
+        var response = service.apply(existing.getId(), TENANT, ENVIRONMENT);
+
+        assertThat(response.status()).isEqualTo("applied");
+        assertThat(binding.getCurationStatus()).isEqualTo("approved");
+        verify(bindingRepository).save(binding);
+        ArgumentCaptor<DomainKnowledgeEvidence> evidenceCaptor =
+                ArgumentCaptor.forClass(DomainKnowledgeEvidence.class);
+        verify(evidenceRepository).save(evidenceCaptor.capture());
+        assertThat(evidenceCaptor.getValue().getSubjectType()).isEqualTo("binding");
+        assertThat(evidenceCaptor.getValue().getSubjectId()).isEqualTo(binding.getId());
     }
 
     @Test

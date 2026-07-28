@@ -262,11 +262,7 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         if (isPageBuilderComponent(primaryComponent)) {
             return isPageBuilderMaterialization(materialization);
         }
-        if (!"praxis-crud".equals(safe(primaryComponent))) {
-            return false;
-        }
-        return containsComponent(materialization, "praxis-table")
-                && containsComponent(materialization, "praxis-dynamic-form");
+        return false;
     }
 
     private static boolean isPageBuilderComponent(String primaryComponent) {

@@ -237,6 +237,17 @@ public class DomainCatalogIngestionService {
                 log.info("Repaired missing resourceKey for domain catalog release {}", release.getReleaseKey());
             }
             long existingItemCount = itemRepository.countByRelease(release);
+            if (domainKnowledgeProjectionService != null && existingItemCount > 0L) {
+                List<DomainCatalogItem> existingItems = itemRepository.findByRelease(release);
+                if (!existingItems.isEmpty()) {
+                    domainKnowledgeProjectionService.project(release, existingItems);
+                    publishReleaseChanged(release);
+                    log.info(
+                            "Reconciled domain knowledge projection for idempotent domain catalog release {} with {} item(s)",
+                            release.getReleaseKey(),
+                            existingItems.size());
+                }
+            }
             log.info(
                     "Skipped domain catalog release {} because sourceHash {} is already ingested",
                     release.getReleaseKey(),

@@ -390,6 +390,8 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("Show a blocked-supplier badge in this local table")
                 .contains("Which governed supplier data can I use in a dashboard?")
                 .contains("Never reinterpret a requested business rule as a dashboard or page")
+                .contains("For an existing governed resource action or writable record operation")
+                .contains("The CRUD runtime discovers the canonical action")
                 .contains("\"authoringScopePolicy\"")
                 .contains("\"outOfScopeResponseType\" : \"info\"")
                 .contains("\"semanticRetrievalIntent\"")
@@ -953,6 +955,9 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("never from keywords, regexes or capability order")
                 .contains("current userPrompt is authoritative")
                 .contains("row-dependent visual outcome governed by a condition")
+                .contains("mutually exclusive simultaneous subsets")
+                .contains("ask one concise clarificationQuestions question")
+                .contains("Do not hide that mismatch behind a broad surface-configuration")
                 .contains("followUpKind=\"new_instruction\"")
                 .doesNotContain("praxis-agentic-authoring-fast-intent-context.v1");
         assertThat(promptCaptor.getValue().length()).isLessThan(12_000);
@@ -977,6 +982,76 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 eq("tenant"),
                 eq("user"),
                 eq("local"));
+    }
+
+    @Test
+    void keepsAmbiguousConflictingSubsetsInsideTheCompactTargetAsAClarification() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "matchesSelectedComponentScope": true,
+                  "semanticIntentClass": "component_authoring",
+                  "operationKind": "unknown",
+                  "artifactKind": "unknown",
+                  "changeKind": "unknown",
+                  "followUpKind": "refinement",
+                  "requiresGovernedAuthoring": false,
+                  "assistantMessage": "Preciso confirmar como separar os dois conjuntos.",
+                  "clarificationQuestions": ["Você quer duas visualizações separadas, uma para cada status?"],
+                  "warnings": []
+                }
+                """));
+        AgenticAuthoringIntentResolutionRequest prior = targetedTableRefinementRequest();
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "Quero exclusivamente pendentes e exclusivamente aprovados ao mesmo tempo, sem misturar.",
+                prior.targetApp(),
+                prior.targetComponentId(),
+                prior.currentRoute(),
+                prior.currentPage(),
+                prior.selectedWidgetKey(),
+                prior.provider(),
+                prior.model(),
+                prior.apiKey(),
+                prior.sessionId(),
+                "turn-conflict",
+                prior.conversationMessages(),
+                prior.pendingClarification(),
+                prior.attachmentSummaries(),
+                prior.contextHints(),
+                prior.activeSemanticDecision());
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        request,
+                        request.userPrompt(),
+                        objectMapper.createObjectNode(),
+                        targetedTableTarget(),
+                        List.of(),
+                        new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(result.resolved()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("unknown");
+        assertThat(result.artifactKind()).isEqualTo("component");
+        assertThat(result.selectedResourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.clarificationQuestions())
+                .containsExactly("Você quer duas visualizações separadas, uma para cada status?");
+        assertThat(result.warnings())
+                .contains("llm-compact-targeted-component-intent-used")
+                .contains("llm-compact-targeted-component-clarification-used");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(), any(AiJsonSchema.class), any(AiCallConfig.class),
+                eq("tenant"), eq("user"), eq("local"));
     }
 
     @Test

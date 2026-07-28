@@ -11,7 +11,8 @@ public record AgenticAuthoringPreIntentToolPlan(
         String assistantMessage,
         boolean requiresFullIntentResolution,
         JsonNode queryConstraints,
-        String artifactKind
+        String artifactKind,
+        String primaryComponent
 ) {
 
     public AgenticAuthoringPreIntentToolPlan {
@@ -25,6 +26,28 @@ public record AgenticAuthoringPreIntentToolPlan(
                 : semanticIntentClass.trim();
         assistantMessage = assistantMessage == null ? "" : assistantMessage.trim();
         artifactKind = artifactKind == null || artifactKind.isBlank() ? "unknown" : artifactKind.trim();
+        primaryComponent = primaryComponent == null ? "" : primaryComponent.trim();
+    }
+
+    public AgenticAuthoringPreIntentToolPlan(
+            String schemaVersion,
+            String reason,
+            List<AgenticAuthoringToolCall> toolCalls,
+            String semanticIntentClass,
+            String assistantMessage,
+            boolean requiresFullIntentResolution,
+            JsonNode queryConstraints,
+            String artifactKind) {
+        this(
+                schemaVersion,
+                reason,
+                toolCalls,
+                semanticIntentClass,
+                assistantMessage,
+                requiresFullIntentResolution,
+                queryConstraints,
+                artifactKind,
+                "");
     }
 
     public AgenticAuthoringPreIntentToolPlan(
@@ -33,14 +56,14 @@ public record AgenticAuthoringPreIntentToolPlan(
             List<AgenticAuthoringToolCall> toolCalls,
             String semanticIntentClass,
             String assistantMessage) {
-        this(schemaVersion, reason, toolCalls, semanticIntentClass, assistantMessage, false, null, "unknown");
+        this(schemaVersion, reason, toolCalls, semanticIntentClass, assistantMessage, false, null, "unknown", "");
     }
 
     public AgenticAuthoringPreIntentToolPlan(
             String schemaVersion,
             String reason,
             List<AgenticAuthoringToolCall> toolCalls) {
-        this(schemaVersion, reason, toolCalls, "authoring_or_other", "", false, null, "unknown");
+        this(schemaVersion, reason, toolCalls, "authoring_or_other", "", false, null, "unknown", "");
     }
 
     public boolean resolvesPlatformGuidance() {

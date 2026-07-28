@@ -2,6 +2,7 @@ package org.praxisplatform.config.ai.authoring;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Tag;
@@ -100,6 +101,31 @@ class AgenticAuthoringCurrentPageAnalyzerTest {
         assertThat(target.widgetKey()).isEqualTo("employees-table");
         assertThat(target.componentId()).isEqualTo("praxis-table");
         assertThat(target.resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+    }
+
+    @Test
+    void resolvesCrudResourceFromCanonicalMetadataEnvelope() {
+        ObjectNode page = objectMapper.createObjectNode();
+        ObjectNode widget = page.putArray("widgets").addObject();
+        widget.put("key", "eventos-folha-crud");
+        ObjectNode inputs = widget.putObject("definition")
+                .put("id", "praxis-crud")
+                .putObject("inputs");
+        inputs.putObject("metadata")
+                .putObject("resource")
+                .put("path", "/api/human-resources/eventos-folha");
+
+        AgenticAuthoringTarget target = analyzer.resolveSoleComponentTarget(page);
+        JsonNode inspection = analyzer.inspect(page, null);
+
+        assertThat(target).isNotNull();
+        assertThat(target.widgetKey()).isEqualTo("eventos-folha-crud");
+        assertThat(target.componentId()).isEqualTo("praxis-crud");
+        assertThat(target.resourcePath()).isEqualTo("/api/human-resources/eventos-folha");
+        assertThat(inspection.path("boundResource").asText())
+                .isEqualTo("/api/human-resources/eventos-folha");
+        assertThat(inspection.path("serverBindings").path(0).path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/eventos-folha");
     }
 
     @Test

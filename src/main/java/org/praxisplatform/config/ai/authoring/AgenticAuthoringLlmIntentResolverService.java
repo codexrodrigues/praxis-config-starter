@@ -702,9 +702,14 @@ public class AgenticAuthoringLlmIntentResolverService {
                 When liveOptionFieldGrounding is present, reason from the business meaning of originalPredicate and the
                 governed candidate descriptions, never from keyword overlap. If exactly one field is semantically
                 appropriate, replace only that predicate field with canonicalFilterField and preserve its semantic text
-                value, which may be one string or a list of strings. If materially ambiguous, return resolved=false with
-                a natural clarification and do not materialize. This stage confirms a local table filter field; it does
-                not select option values yet and it is not shared-rule authoring. Keep requiresGovernedAuthoring=false.
+                value, which may be one string or a list of strings. A concrete record name or identifier used to locate
+                a writable record is a data-selection predicate and is not automatically an option-source dimension.
+                If an existing governed non-option field already represents that predicate, preserve it. If none of the
+                option-source candidates is semantically appropriate, preserve the governed predicate and treat live
+                option grounding as not applicable; never select the sole candidate merely because it is the only one.
+                If materially ambiguous, return resolved=false with a natural clarification and do not materialize. This
+                stage confirms a local table filter field; it does not select option values yet and it is not shared-rule
+                authoring. Keep requiresGovernedAuthoring=false.
 
                 When liveOptionValueGrounding is present, reason semantically over all current candidates for the already
                 selected canonical field; the field-selection stage is already complete and must not be reopened. Reason
@@ -1313,9 +1318,16 @@ public class AgenticAuthoringLlmIntentResolverService {
                 or when the current request unambiguously refers to that same change. Otherwise set
                 followUpKind="new_instruction" and resolve the current request independently while preserving only
                 unrelated, successfully materialized component state.
-                Set matchesSelectedComponentScope=true only when the new request semantically edits the selected
-                component. A request for a new artifact, a different component, a reusable business rule, general
-                guidance or an unrelated task must set it to false so the complete resolver can evaluate it.
+                Set matchesSelectedComponentScope=true when the new request semantically concerns the selected
+                component. When that scoped request contains internally conflicting or ambiguous requirements, or no
+                single declared capability can faithfully represent its requested outcome, keep
+                matchesSelectedComponentScope=true, semanticIntentClass="component_authoring", set operationKind,
+                artifactKind and changeKind to "unknown", and ask one concise clarificationQuestions question. This
+                includes ambiguous requests for mutually exclusive simultaneous subsets of the selected resource.
+                Do not hide that mismatch behind a broad surface-configuration capability or claim that the current
+                configuration already satisfies a different requested outcome. Set matchesSelectedComponentScope=false
+                only for a clear request for a new artifact, a different component, a reusable business rule, general
+                guidance or an unrelated task so the complete resolver can evaluate it.
                 When the user's primary meaning is to reverse only the most recently materialized local change,
                 select operationKind="undo", keep artifactKind aligned with the selected artifact (for example
                 "table" for praxis-table, "form" for a form, or "component" when no narrower kind applies), and
@@ -1387,12 +1399,42 @@ public class AgenticAuthoringLlmIntentResolverService {
                 || !result.isObject()
                 || !result.path("matchesSelectedComponentScope").asBoolean(false)
                 || !"component_authoring".equals(nullableText(result, "semanticIntentClass"))
-                || (!"modify".equals(operationKind) && !"undo".equals(operationKind))
                 || result.path("requiresGovernedAuthoring").asBoolean(false)) {
             return Optional.empty();
         }
         String artifactKind = nullableText(result, "artifactKind");
         String changeKind = nullableText(result, "changeKind");
+        List<String> clarificationQuestions = strings(result.path("clarificationQuestions"));
+        List<String> warnings = new ArrayList<>(strings(result.path("warnings")));
+        if (!warnings.contains("llm-compact-targeted-component-intent-used")) {
+            warnings.add("llm-compact-targeted-component-intent-used");
+        }
+        boolean scopedClarification = "unknown".equals(operationKind)
+                && "unknown".equals(artifactKind)
+                && "unknown".equals(changeKind)
+                && !clarificationQuestions.isEmpty();
+        if (scopedClarification) {
+            warnings.add("llm-compact-targeted-component-clarification-used");
+            return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                    true,
+                    "unknown",
+                    "component",
+                    "unknown",
+                    target.resourcePath(),
+                    null,
+                    valueOrDefault(nullableText(result, "followUpKind"), "refinement"),
+                    conciseAssistantMessage(nullableText(result, "assistantMessage")),
+                    List.of(),
+                    clarificationQuestions,
+                    List.copyOf(warnings),
+                    null,
+                    null,
+                    false,
+                    "component_authoring"));
+        }
+        if (!"modify".equals(operationKind) && !"undo".equals(operationKind)) {
+            return Optional.empty();
+        }
         boolean localUndo = "undo".equals(operationKind)
                 && "undo_last_local_change".equals(changeKind);
         if (!StringUtils.hasText(artifactKind)
@@ -1400,10 +1442,6 @@ public class AgenticAuthoringLlmIntentResolverService {
                 || (!localUndo
                         && !declaredChangeKind(target.componentId(), changeKind, componentCapabilities))) {
             return Optional.empty();
-        }
-        List<String> warnings = new ArrayList<>(strings(result.path("warnings")));
-        if (!warnings.contains("llm-compact-targeted-component-intent-used")) {
-            warnings.add("llm-compact-targeted-component-intent-used");
         }
         return Optional.of(new AgenticAuthoringLlmIntentResolution(
                 true,
@@ -1415,7 +1453,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 valueOrDefault(nullableText(result, "followUpKind"), "refinement"),
                 conciseAssistantMessage(nullableText(result, "assistantMessage")),
                 List.of(),
-                strings(result.path("clarificationQuestions")),
+                clarificationQuestions,
                 List.copyOf(warnings),
                 null,
                 null,
@@ -1930,6 +1968,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Decide from the user's meaning, not from backend keywords.
                 Set semanticIntentClass to the primary AI-authored semantic decision: platform_guidance, api_catalog_guidance, component_authoring, shared_rule_authoring, out_of_scope, or unknown.
                 Treat semanticRetrievalIntent as prior AI-authored semantic evidence; reconcile it rather than silently replacing a concrete artifact with an unrelated container.
+                When conversationContext.contextHints.preIntentSemanticOrientation contains primaryComponent, preserve
+                that prior AI-authored host decision unless later governed component or resource evidence proves it
+                incompatible. In particular, do not replace praxis-crud with a generic form or master-detail page merely
+                because both can display fields.
                 Treat activeSemanticDecision and recentConversation as prior governed lineage for the current refinement, not as permission to ignore the new user request.
                 When the user's primary meaning is to reverse only the most recently materialized local change,
                 select semanticIntentClass "component_authoring", operationKind "undo", keep artifactKind aligned
@@ -1955,6 +1997,16 @@ public class AgenticAuthoringLlmIntentResolverService {
                 If authoringScopePolicy is present and the semantic user intent is a loose instruction, assistant meta request, greeting, or unrelated ask that does not request an authorable UI/business decision, answer as an informational chat reply using the policy outOfScopeResponseType; do not create a component preview, edit plan, or governed authoring route.
                 For a requested page organized as accordion/acordeon/expansion panels, use artifactKind "page", operationKind "create", layoutKind "accordion_layout" or "single_column_expansion_page", primaryComponent "praxis-expansion", and no chart axes unless the user asks for a chart.
                 For a requested page organized as tabs/abas, use artifactKind "page", operationKind "create", layoutKind "tabs_layout", primaryComponent "praxis-tabs", and no chart axes unless the user asks for a chart.
+                For an existing governed resource action or writable record operation, such as approving, rejecting,
+                deactivating, reactivating, paying, scheduling or editing a concrete record, use component_authoring,
+                operationKind "create", artifactKind "page", changeKind "create_artifact" and primaryComponent
+                "praxis-crud" when that component is authorable. The CRUD runtime discovers the canonical action,
+                availability, schema and form. Do not reinterpret an existing operation as shared-rule authoring or
+                a bare create form, and do not invent an action when governed evidence does not expose one.
+                A record name or identifier in the prompt is only requested selection intent, and a proposed new value
+                is only write intent. Do not treat either as proof that the record was located, the field is writable or
+                the value was prefilled. Preserve the selection predicate for governed lookup/materialization and require
+                explicit runtime or tool evidence before representing those facts as confirmed.
                 For chart axes, use the grouping/time field in axes[].field and numeric measures in metricField/metricAggregation.
                 When a candidate publishes analyticsFields, choose grouping/time and metric fields exclusively from that
                 governed catalog, copy their field names exactly, and use only published allowedAggregations. Do not
@@ -1973,8 +2025,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                 fields for the already selected resource. Resolve the predicate's business concept against the meaning,
                 label and description of those candidates. When one candidate is semantically appropriate, copy its
                 canonicalFilterField exactly into the predicate while preserving the original semantic text value,
-                whether a single concept or a list of concepts, for the subsequent live-value lookup. Do not choose from
-                word overlap or invent a field. If candidates are
+                whether a single concept or a list of concepts, for the subsequent live-value lookup. A concrete record
+                name or identifier used to locate a writable record is not automatically an option-source dimension. If
+                its predicate already has a governed non-option field, preserve that field; absence from this candidate
+                list means option-source grounding is not applicable. Never select the sole candidate merely because it
+                is the only one. Do not choose from word overlap or invent a field. If candidates are
                 materially ambiguous, ask a natural clarification before any value lookup or materialization.
                 When liveOptionValueGrounding is present, it is a post-intent enumeration of current governed master-data
                 values for exactly one canonical filter field. Reason semantically over all candidates. If the intended

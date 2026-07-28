@@ -791,6 +791,219 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void skipsOptionSourceFieldRefinementForExactGovernedRecordIdentityField() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode payload = objectMapper.createObjectNode();
+        ObjectNode properties = payload.putObject("schema").putObject("properties");
+        properties.putObject("nome")
+                .put("description", "Nome civil usado para identificar o cadastro do funcionário.");
+        ObjectNode department = properties.putObject("departamentoIdsIn");
+        department.put("description", "Departamentos que limitam uma consulta de funcionários.");
+        department.putObject("x-ui")
+                .put("label", "Departamentos")
+                .putObject("optionSource")
+                .put("key", "department")
+                .put("resourcePath", "/api/human-resources/departamentos");
+        department.putObject("x-domain-governance")
+                .putObject("aiUsage")
+                .put("visibility", "allow")
+                .put("reasoningUse", "allow");
+        ObjectNode recordIdentity = objectMapper.createObjectNode()
+                .put("concept", "funcionário chamado Rodrigo")
+                .put("field", "nome")
+                .put("operator", "eq")
+                .put("value", "Rodrigo");
+
+        ObjectNode projection = ReflectionTestUtils.invokeMethod(
+                engine,
+                "liveOptionFieldProjection",
+                payload,
+                "/api/human-resources/funcionarios",
+                recordIdentity);
+
+        assertThat(projection).isNull();
+    }
+
+    @Test
+    void groundsExactStaticEnumFilterValueFromCanonicalSchema() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode payload = objectMapper.createObjectNode();
+        ObjectNode status = payload.putObject("schema")
+                .putObject("properties")
+                .putObject("status");
+        status.put("type", "string");
+        status.putArray("enum").add("PENDENTE").add("APROVADO").add("REJEITADO");
+        status.putObject("x-ui")
+                .putArray("options")
+                .addObject()
+                .put("value", "PENDENTE")
+                .put("label", "Pendente");
+        ObjectNode predicate = objectMapper.createObjectNode()
+                .put("concept", "eventos pendentes")
+                .put("field", "status")
+                .put("operator", "eq")
+                .put("value", "pendente");
+
+        ObjectNode grounding = ReflectionTestUtils.invokeMethod(
+                engine,
+                "staticEnumFilterGroundingProjection",
+                payload,
+                "/api/human-resources/eventos-folha",
+                predicate);
+
+        assertThat(grounding).isNotNull();
+        assertThat(grounding.path("canonicalFilterField").asText()).isEqualTo("status");
+        assertThat(grounding.path("canonicalValue").asText()).isEqualTo("PENDENTE");
+        assertThat(grounding.path("source").asText()).isEqualTo("canonical-filter-schema-enum");
+    }
+
+    @Test
+    void groundsHumanPluralStaticEnumValueFromCanonicalSchema() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.putObject("schema")
+                .putObject("properties")
+                .putObject("status")
+                .putArray("enum")
+                .add("PENDENTE")
+                .add("APROVADO")
+                .add("REJEITADO");
+        ObjectNode predicate = objectMapper.createObjectNode()
+                .put("concept", "eventos da folha que ainda estão pendentes")
+                .put("field", "situação")
+                .put("operator", "eq")
+                .put("value", "pendentes");
+
+        ObjectNode grounding = ReflectionTestUtils.invokeMethod(
+                engine,
+                "staticEnumFilterGroundingProjection",
+                payload,
+                "/api/human-resources/eventos-folha",
+                predicate);
+
+        assertThat(grounding).isNotNull();
+        assertThat(grounding.path("canonicalFilterField").asText()).isEqualTo("status");
+        assertThat(grounding.path("canonicalValue").asText()).isEqualTo("PENDENTE");
+    }
+
+    @Test
+    void refusesAmbiguousStaticEnumFieldWhenCanonicalValueExistsInMultipleFields() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode properties = objectMapper.createObjectNode();
+        properties.putObject("workflowStatus").putArray("enum").add("PENDENTE").add("APROVADO");
+        properties.putObject("auditStatus").putArray("enum").add("PENDENTE").add("APROVADO");
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.putObject("schema").set("properties", properties);
+        ObjectNode predicate = objectMapper.createObjectNode()
+                .put("concept", "registros pendentes")
+                .put("field", "situação")
+                .put("operator", "eq")
+                .put("value", "pendentes");
+
+        ObjectNode grounding = ReflectionTestUtils.invokeMethod(
+                engine,
+                "staticEnumFilterGroundingProjection",
+                payload,
+                "/api/example",
+                predicate);
+
+        assertThat(grounding).isNull();
+    }
+
+    @Test
+    void canonicalStaticEnumGroundingOnlyRewritesTheResolvedConstraintValue() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", true);
+        constraints.putArray("filters").addObject()
+                .put("concept", "eventos pendentes")
+                .put("field", "status")
+                .put("operator", "eq")
+                .put("value", "pendente");
+        ObjectNode grounding = objectMapper.createObjectNode()
+                .put("canonicalFilterField", "status")
+                .put("canonicalValue", "PENDENTE");
+
+        AgenticAuthoringIntentResolutionResult grounded = ReflectionTestUtils.invokeMethod(
+                engine,
+                "withCanonicalStaticEnumConstraint",
+                intentWithConstraints(constraints),
+                grounding);
+
+        assertThat(grounded).isNotNull();
+        JsonNode filter = grounded.semanticDecision().constraints().path("filters").get(0);
+        assertThat(filter.path("field").asText()).isEqualTo("status");
+        assertThat(filter.path("operator").asText()).isEqualTo("eq");
+        assertThat(filter.path("value").asText()).isEqualTo("PENDENTE");
+        assertThat(grounded.warnings()).contains("static-enum-filter-grounded-by-canonical-schema");
+    }
+
+    @Test
+    void canonicalStaticEnumGroundingReconcilesConceptualFieldToCanonicalField() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode originalPredicate = objectMapper.createObjectNode()
+                .put("concept", "eventos pendentes")
+                .put("field", "situação")
+                .put("operator", "eq")
+                .put("value", "pendentes");
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", true);
+        constraints.putArray("filters").add(originalPredicate.deepCopy());
+        ObjectNode grounding = objectMapper.createObjectNode()
+                .put("canonicalFilterField", "status")
+                .put("canonicalValue", "PENDENTE");
+        grounding.set("originalPredicate", originalPredicate.deepCopy());
+
+        AgenticAuthoringIntentResolutionResult grounded = ReflectionTestUtils.invokeMethod(
+                engine,
+                "withCanonicalStaticEnumConstraint",
+                intentWithConstraints(constraints),
+                grounding);
+
+        JsonNode groundedFilter = grounded.semanticDecision().constraints().path("filters").path(0);
+        assertThat(groundedFilter.path("field").asText()).isEqualTo("status");
+        assertThat(groundedFilter.path("value").asText()).isEqualTo("PENDENTE");
+        assertThat(groundedFilter.path("concept").asText()).isEqualTo("eventos pendentes");
+        assertThat(groundedFilter.path("operator").asText()).isEqualTo("eq");
+    }
+
+    @Test
     void startsCanonicalFieldDiscoveryFromASemanticConceptWhenTheLlmHasNotNamedAField() {
         AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
                 intentResolverService,
@@ -841,7 +1054,7 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void usesSingleSchemaFieldOnlyAsAReadOnlyBridgeToFinalLlmValueConfirmation() {
+    void requiresExactCanonicalFieldBeforeRunningLiveOptionValueGrounding() {
         AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
                 intentResolverService,
                 previewService,
@@ -849,31 +1062,33 @@ class AgenticAuthoringTurnEngineTest {
                 new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
                 new AgenticAuthoringToolRegistry(
                         new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
-        ObjectNode constraints = objectMapper.createObjectNode();
-        constraints.putArray("filters").addObject()
-                .put("concept", "área organizacional")
-                .put("field", "")
-                .put("operator", "in")
-                .putArray("value")
-                .add("engenharia")
-                .add("inteligência artificial");
         ObjectNode fieldGrounding = objectMapper.createObjectNode();
         fieldGrounding.putArray("candidates").addObject()
                 .put("canonicalFilterField", "departamentoIdsIn")
                 .put("label", "Departamentos")
                 .put("multiple", true);
 
-        AgenticAuthoringIntentResolutionResult provisional = ReflectionTestUtils.invokeMethod(
+        Boolean exactOptionField = ReflectionTestUtils.invokeMethod(
                 engine,
-                "withProvisionalCanonicalLiveOptionField",
-                intentWithConstraints(constraints),
+                "isCanonicalLiveOptionConstraint",
+                objectMapper.createObjectNode()
+                        .put("concept", "área organizacional")
+                        .put("field", "departamentoIdsIn")
+                        .put("operator", "in")
+                        .put("value", "engenharia"),
+                fieldGrounding);
+        Boolean unrelatedTextField = ReflectionTestUtils.invokeMethod(
+                engine,
+                "isCanonicalLiveOptionConstraint",
+                objectMapper.createObjectNode()
+                        .put("concept", "funcionário chamado Rodrigo")
+                        .put("field", "nomeCompleto")
+                        .put("operator", "contains")
+                        .put("value", "Rodrigo"),
                 fieldGrounding);
 
-        JsonNode filter = provisional.semanticDecision().constraints().path("filters").get(0);
-        assertThat(filter.path("field").asText()).isEqualTo("departamentoIdsIn");
-        assertThat(filter.path("value")).isEqualTo(constraints.path("filters").get(0).path("value"));
-        assertThat(provisional.warnings()).contains("live-option-field-provisional-schema-candidate");
-        assertThat(provisional.semanticDecision().constraints()).isNotSameAs(constraints);
+        assertThat(exactOptionField).isTrue();
+        assertThat(unrelatedTextField).isFalse();
     }
 
     @Test
@@ -10622,6 +10837,61 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void scopedSemanticClarificationWinsOverGenericResourceCandidateClarification() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(scopedComponentClarificationIntent());
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(
+                request("Quero exclusivamente os pendentes e exclusivamente os aprovados ao mesmo tempo."),
+                principalContext,
+                sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        org.assertj.core.api.Assertions.assertThat(outcome.state().routeClass()).isEqualTo("needs_clarification");
+        verify(previewService, never()).preview(any(), any(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(phases(sink))
+                .contains("consultative.scoped-semantic-clarification")
+                .doesNotContain("consultative.grounded-clarification");
+        JsonNode result = firstPayloadOfType(sink, "result");
+        org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
+                .contains("duas visualizações separadas")
+                .doesNotContain("confirmação semântica da intenção falhou");
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics")
+                        .path("scopedSemanticClarification").asBoolean())
+                .isTrue();
+    }
+
+    @Test
+    void governedRecordClarificationShowsTheLlmQuestionInsteadOfGenericResourceReview() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(governedRecordClarificationIntent());
+
+        AgenticAuthoringTurnOutcome outcome = engine().execute(
+                request("Altere o nome do funcionário Rodrigo para Rodrygo."),
+                principalContext,
+                sink);
+
+        assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        assertThat(outcome.state().routeClass()).isEqualTo("needs_clarification");
+        verify(previewService, never()).preview(any(), any(), any(), any());
+        assertThat(phases(sink))
+                .contains("consultative.scoped-semantic-clarification")
+                .doesNotContain("consultative.grounded-clarification");
+        JsonNode result = firstPayloadOfType(sink, "result");
+        assertThat(result.path("assistantMessage").asText())
+                .contains("Qual informação identifica com segurança o funcionário Rodrigo?")
+                .doesNotContain("confirmação semântica da intenção falhou");
+        assertThat(result.path("canApply").asBoolean()).isFalse();
+    }
+
+    @Test
     void advisoryExplorationRouteSkipsPreviewUntilUserConfirmsMaterialization() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
@@ -11662,7 +11932,7 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void groundsNeedsClarificationInResourceDiscoveryCandidatesWithoutProviderFailure() throws Exception {
+    void suppressesResourceQuickRepliesWhenAiAuthoredFocusRemainsUnconfirmed() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringIntentResolverService intentResolverService =
@@ -11749,15 +12019,14 @@ class AgenticAuthoringTurnEngineTest {
                 eq("local"));
         JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
         org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
-                .contains("contracts")
-                .contains("suppliers")
-                .contains("não vou materializar a tela automaticamente");
+                .contains("ainda não possuem vínculo semântico e operacional aprovado")
+                .contains("não vou materializar a tela nem oferecer uma dessas fontes como confirmação");
         org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics")
                         .path("resourceDiscoveryGroundedClarification")
                         .asBoolean())
                 .isTrue();
         org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
-                .hasSize(2);
+                .isEmpty();
     }
 
     @Test
@@ -13700,6 +13969,102 @@ class AgenticAuthoringTurnEngineTest {
                 objectMapper.createObjectNode());
     }
 
+    private AgenticAuthoringIntentResolutionResult scopedComponentClarificationIntent() {
+        AgenticAuthoringTarget target = new AgenticAuthoringTarget(
+                "eventos-folha-crud",
+                "praxis-crud",
+                "/api/human-resources/eventos-folha",
+                "",
+                "/api/human-resources/eventos-folha/filter/cursor",
+                "post");
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/eventos-folha/filter/cursor",
+                "post",
+                "",
+                "/api/human-resources/eventos-folha",
+                "POST",
+                1.0,
+                "selected governed component resource",
+                List.of("current-page-selected-component"));
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "unknown",
+                "component",
+                "unknown",
+                "component-edit",
+                "praxis-ui-angular",
+                "praxis-crud",
+                target,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult(
+                        "candidate-eligibility@0.1.0",
+                        "clarification_required",
+                        List.of("semantic-intent-confirmation-required")),
+                "Quero exclusivamente os pendentes e exclusivamente os aprovados ao mesmo tempo.",
+                "Os dois subconjuntos são mutuamente exclusivos na mesma visualização.",
+                null,
+                List.of(),
+                null,
+                List.of("Você quer duas visualizações separadas, uma para cada status?"),
+                List.of(
+                        "llm-compact-targeted-component-intent-used",
+                        "llm-compact-targeted-component-clarification-used"),
+                List.of("semantic-intent-confirmation-required"),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null,
+                null);
+    }
+
+    private AgenticAuthoringIntentResolutionResult governedRecordClarificationIntent() {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                "/api/human-resources/funcionarios",
+                "POST",
+                0.92,
+                "selected governed employee resource",
+                List.of("api-metadata", "semantic-retrieval"));
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", true);
+        constraints.putArray("filters").addObject()
+                .put("concept", "funcionário")
+                .put("field", "nome")
+                .put("operator", "eq")
+                .put("value", "Rodrigo");
+        AgenticAuthoringIntentResolutionResult base = intentWithConstraints(constraints);
+        return new AgenticAuthoringIntentResolutionResult(
+                false,
+                "modify",
+                "page",
+                "verify_update_action",
+                base.authoringProfile(),
+                base.targetApp(),
+                base.targetComponentId(),
+                base.target(),
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult(
+                        "candidate-eligibility@0.1.0",
+                        "clarification_required",
+                        List.of("record-identity-required")),
+                "Altere o nome do funcionário Rodrigo para Rodrygo.",
+                "Preciso confirmar qual cadastro deve ser alterado.",
+                base.assistantContent(),
+                base.apiCatalogAnswer(),
+                List.of(),
+                null,
+                List.of("Qual informação identifica com segurança o funcionário Rodrigo?"),
+                List.of("llm-intent-resolution-used"),
+                List.of("record-identity-required"),
+                base.currentPageSummary(),
+                base.llmDiagnostics(),
+                null,
+                base.semanticDecision());
+    }
+
     private AgenticAuthoringIntentResolutionResult advisoryDashboardIntent() {
         AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
                 "/api/human-resources/vw-analytics-folha-pagamento",
@@ -13909,6 +14274,7 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 List.of(
                         "llm-intent-resolution-used",
+                        "llm-resource-selection-unconfirmed-by-ai-authored-focus",
                         "llm-intent-resolution-unresolved-fallback-deterministic",
                         "keyword-fallback-applied",
                         "keyword-fallback-fail-safe-applied"),

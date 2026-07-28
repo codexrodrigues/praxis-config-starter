@@ -9,6 +9,14 @@ agentic authoring do Praxis. Ele deve ser lido antes de abrir PRs que mexam em:
 - consumo Angular em `@praxisui/ai`
 - fluxos do Page Builder dependentes de authoring backend-driven
 
+## Programa transversal atual
+
+O programa que fecha a continuidade entre dominio governado, selecao de componente, operacao
+executavel, materializacao, observacao e explicacao fica em
+[Praxis Generative UI Platform Program](../../generative-ui-platform/README.md). Ele reutiliza este
+trilho de turn engine/transport/apply e nao o substitui. A tabela e o piloto de complexidade; o
+metodo de certificacao deve se expandir para todas as familias de componentes Praxis.
+
 ## Objetivo
 
 Sair do estado atual, em que o fluxo de authoring ainda e majoritariamente

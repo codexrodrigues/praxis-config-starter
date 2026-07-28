@@ -493,6 +493,10 @@ public class DomainKnowledgeChangeSetService {
             applyApproveConceptOperation(changeSet, operation);
             return;
         }
+        if ("approve_binding".equals(operationType)) {
+            applyApproveBindingOperation(changeSet, operation);
+            return;
+        }
         if ("add_alias".equals(operationType)) {
             applyAliasOperation(changeSet, operation);
             return;
@@ -614,6 +618,38 @@ public class DomainKnowledgeChangeSetService {
         DomainKnowledgeAlias savedAlias = aliasRepository.save(alias);
         persistClaimEvidence(
                 changeSet, "alias", savedAlias.getId(), null, payload, operation.confidence());
+    }
+
+    private void applyApproveBindingOperation(
+            DomainKnowledgeChangeSet changeSet,
+            DomainKnowledgeChangeSetOperationRequest operation) {
+        DomainKnowledgeConcept concept = requireConcept(changeSet, text(operation.target(), "conceptKey"));
+        if (!"active".equals(normalize(concept.getLifecycle()))
+                || !"approved".equals(normalize(concept.getCurationStatus()))) {
+            throw new ConfigurationIngestionException(
+                    "Domain knowledge binding cannot be approved before its concept is active and approved");
+        }
+        JsonNode payload = operation.payload();
+        String bindingType = requireText(text(payload, "bindingType"), "payload.bindingType");
+        String bindingKey = requireText(text(payload, "bindingKey"), "payload.bindingKey");
+        DomainKnowledgeBinding binding = bindingRepository
+                .findByTenantIdAndEnvironmentAndBindingTypeAndBindingKey(
+                        changeSet.getTenantId(), changeSet.getEnvironment(), bindingType, bindingKey)
+                .stream()
+                .filter(candidate -> candidate.getConcept() != null
+                        && java.util.Objects.equals(candidate.getConcept().getId(), concept.getId()))
+                .findFirst()
+                .orElseThrow(() -> new ConfigurationIngestionException(
+                        "Domain knowledge binding not found in request scope for concept "
+                                + concept.getConceptKey() + ": " + bindingType + "/" + bindingKey));
+        if ("rejected".equals(normalize(binding.getCurationStatus()))) {
+            throw new ConfigurationIngestionException(
+                    "Rejected domain knowledge binding cannot be approved: " + bindingType + "/" + bindingKey);
+        }
+        binding.setCurationStatus("approved");
+        DomainKnowledgeBinding savedBinding = bindingRepository.save(binding);
+        persistClaimEvidence(
+                changeSet, "binding", savedBinding.getId(), null, payload, operation.confidence());
     }
 
     private void applyBindingOperation(

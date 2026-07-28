@@ -175,4 +175,55 @@ class AgenticAuthoringOperationalBindingVerificationServiceTest {
             assertThat(operation.apiPath()).endsWith("/filter/cursor");
         });
     }
+
+    @Test
+    void verifiesNativeDomainCatalogUiSurfaceAgainstCanonicalResourceCapabilities() throws Exception {
+        AgenticAuthoringDomainBindingService.BindingProjection binding =
+                new AgenticAuthoringDomainBindingService.BindingProjection(
+                        "human-resources.ferias-afastamentos.surface.absence-calendar-board",
+                        "ui_surface",
+                        "binding:human-resources.ferias-afastamentos.surface.absence-calendar-board:ui-surface",
+                        "human-resources.ferias-afastamentos",
+                        "/api/human-resources/ferias-afastamentos/filter",
+                        "POST",
+                        null,
+                        1.0,
+                        "hr-v1",
+                        List.of("domain-knowledge:evidence-status:active"));
+        when(bindingService.resolve("tenant", "dev", "human-resources.ferias-afastamentos", 12))
+                .thenReturn(List.of(binding));
+        when(schemaService.fetchSchemaResult(any(), any(), any(), any(), any()))
+                .thenReturn(SchemaFetchResult.success(
+                        new ObjectMapper().readTree("{\"type\":\"object\"}"), "schema-url"));
+        when(capabilitiesService.fetchCapabilitiesResult(
+                "/api/human-resources/ferias-afastamentos",
+                "http://localhost",
+                "tenant",
+                "user",
+                "dev"))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        new ObjectMapper().readTree("""
+                                {
+                                  "operations": {
+                                    "create": {"supported":true,"availability":{"allowed":true}},
+                                    "filter": {"supported":true,"availability":{"allowed":true}}
+                                  }
+                                }
+                                """),
+                        "capabilities-url"));
+
+        AgenticAuthoringOperationalBindingVerificationService.VerificationResult result = service.verify(
+                "human-resources.ferias-afastamentos",
+                "http://localhost",
+                new AiPrincipalContext("tenant", "user", "dev", true));
+
+        assertThat(result.verified()).isTrue();
+        assertThat(result.operations()).singleElement().satisfies(operation -> {
+            assertThat(operation.capabilityOperationId()).isEqualTo("filter");
+            assertThat(operation.resourcePath())
+                    .isEqualTo("/api/human-resources/ferias-afastamentos");
+            assertThat(operation.apiPath())
+                    .isEqualTo("/api/human-resources/ferias-afastamentos/filter");
+        });
+    }
 }

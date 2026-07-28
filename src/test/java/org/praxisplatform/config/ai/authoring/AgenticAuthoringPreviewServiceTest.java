@@ -623,29 +623,7 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
-    void previewAcceptsCrudPrimaryComponentWhenMaterializedAsMasterDetailComposition() throws Exception {
-        ObjectNode plan = objectMapper.createObjectNode();
-        plan.put("version", "1.0");
-        plan.put("kind", "praxis.ui-composition-plan");
-        ArrayNode planWidgets = plan.putArray("widgets");
-        planWidgets.addObject().put("key", "employees-master").put("componentId", "praxis-table");
-        planWidgets.addObject().put("key", "employees-detail").put("componentId", "praxis-dynamic-form");
-        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
-        ObjectNode page = compiledFormPatch.putObject("patch").putObject("page");
-        ArrayNode widgets = page.putArray("widgets");
-        ObjectNode table = widgets.addObject();
-        table.put("id", "employees-master");
-        table.putObject("definition").put("id", "praxis-table");
-        ObjectNode form = widgets.addObject();
-        form.put("id", "employees-detail");
-        form.putObject("definition").put("id", "praxis-dynamic-form");
-        AgenticAuthoringUiCompositionPlanProvider provider = ignored -> java.util.Optional.of(
-                new AgenticAuthoringUiCompositionPlanResult(
-                        true,
-                        List.of(),
-                        List.of("ui-composition-plan-provider:test-master-detail"),
-                        plan,
-                        compiledFormPatch));
+    void previewAcceptsCrudPrimaryComponentOnlyWhenCanonicalCrudIsMaterialized() throws Exception {
         AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
                 "/api/human-resources/funcionarios",
                 "post",
@@ -692,7 +670,7 @@ class AgenticAuthoringPreviewServiceTest {
                 planService,
                 patchCompilerService,
                 objectMapper,
-                List.of(provider))
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)))
                 .preview(new AgenticAuthoringPlanRequest(
                         "Crie uma tela para acompanhar colaboradores e abrir perfil",
                         "openai",
@@ -705,7 +683,23 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.failureCodes())
                 .doesNotContain(AgenticAuthoringSemanticMaterializationPolicy.PRIMARY_COMPONENT_REQUIRED_FAILURE);
         assertThat(result.warnings()).doesNotContain("semantic-preview-materialization-mismatch");
-        assertThat(result.uiCompositionPlan().path("widgets").toString()).contains("praxis-table", "praxis-dynamic-form");
+        assertThat(result.uiCompositionPlan().path("layoutPreset").asText()).isEqualTo("resource-crud");
+        assertThat(result.uiCompositionPlan().path("widgets").toString())
+                .contains("praxis-crud")
+                .doesNotContain("praxis-table", "praxis-dynamic-form");
+        assertThat(result.compiledFormPatch().path("patch").path("page")
+                .path("widgets").path(0).path("definition").path("id").asText())
+                .isEqualTo("praxis-crud");
+
+        ObjectNode legacyComposite = objectMapper.createObjectNode();
+        legacyComposite.putArray("widgets")
+                .addObject().put("key", "employees-master").put("componentId", "praxis-table");
+        legacyComposite.withArray("widgets")
+                .addObject().put("key", "employees-detail").put("componentId", "praxis-dynamic-form");
+        AgenticAuthoringSemanticMaterializationPolicy.ValidationResult legacyValidation =
+                AgenticAuthoringSemanticMaterializationPolicy.validate(intent.semanticDecision(), legacyComposite);
+        assertThat(legacyValidation.failureCodes())
+                .contains(AgenticAuthoringSemanticMaterializationPolicy.PRIMARY_COMPONENT_REQUIRED_FAILURE);
     }
 
     @Test
@@ -2746,6 +2740,87 @@ class AgenticAuthoringPreviewServiceTest {
                 .isEqualTo("filter.advanced.configure");
         assertThat(validationContext.getValue().at("/filterSchemaFields/0/name").asText())
                 .isEqualTo("departamentoIdsIn");
+    }
+
+    @Test
+    void previewGroundsCrudRecordPredicateAgainstCanonicalFilterSchemaBeforeClaimingMaterialization()
+            throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Prepare a edição do funcionário Rodrigo sem salvar",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                null,
+                filteredEmployeeCrudIntent("nome"));
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.putObject("properties")
+                .putObject("nomeCompleto")
+                .put("type", "string")
+                .put("description", "Nome completo do funcionário")
+                .putObject("x-ui")
+                .put("label", "Nome completo");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings()).contains("crud-query-filter-schema-grounded");
+        assertThat(result.uiCompositionPlan().at(
+                "/widgets/0/inputs/metadata/queryContext/filters/nomeCompleto").asText())
+                .isEqualTo("Rodrigo");
+        assertThat(result.uiCompositionPlan().at(
+                "/widgets/0/inputs/metadata/queryContext/filters/nome").isMissingNode())
+                .isTrue();
+        assertThat(result.uiCompositionPlan().at(
+                "/diagnostics/queryConstraintsMaterialized").asBoolean())
+                .isTrue();
+        assertThat(result.uiCompositionPlan().at(
+                "/diagnostics/queryConstraintFieldsSchemaVerified").asBoolean())
+                .isTrue();
+    }
+
+    @Test
+    void previewBlocksCrudWhenRecordPredicateCannotBeReconciledWithCanonicalFilterSchema()
+            throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Prepare a edição do funcionário Rodrigo sem salvar",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                null,
+                filteredEmployeeCrudIntent("apelidoInformal"));
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.putObject("properties")
+                .putObject("nomeCompleto")
+                .put("type", "string")
+                .putObject("x-ui")
+                .put("label", "Nome completo");
+        when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
+                .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("crud-query-filter-schema-grounding-incomplete");
+        assertThat(result.warnings()).contains("crud-query-filter-schema-grounding-incomplete");
+        assertThat(result.uiCompositionPlan().at(
+                "/diagnostics/queryConstraintsMaterialized").asBoolean())
+                .isFalse();
     }
 
     @Test
@@ -5954,6 +6029,92 @@ class AgenticAuthoringPreviewServiceTest {
                 objectMapper.createObjectNode(),
                 objectMapper.createObjectNode(),
                 null,
+                semanticDecision);
+    }
+
+    private AgenticAuthoringIntentResolutionResult filteredEmployeeCrudIntent(String requestedField) {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "get",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios",
+                "GET",
+                0.98d,
+                "matched governed employee resource",
+                List.of("semantic-retrieval", "tool-search-api-resources", "schema-available"));
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", true);
+        constraints.putArray("filters").addObject()
+                .put("concept", "funcionário chamado Rodrigo")
+                .put("field", requestedField)
+                .put("operator", "eq")
+                .put("value", "Rodrigo");
+        AgenticAuthoringVisualizationDecision visualizationDecision =
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "review_employee_record_edit",
+                        "operational-crud",
+                        "praxis-crud",
+                        List.of(),
+                        false,
+                        true,
+                        "llm-authored-semantic-decision");
+        AgenticAuthoringSemanticDecision semanticDecision = new AgenticAuthoringSemanticDecision(
+                AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                "filtered-employee-crud-decision",
+                "create",
+                "page",
+                "create_artifact",
+                new AgenticAuthoringSemanticDecision.SelectedResource(
+                        candidate.resourcePath(),
+                        candidate.operation(),
+                        candidate.schemaUrl(),
+                        candidate.submitUrl(),
+                        candidate.submitMethod()),
+                visualizationDecision,
+                new AgenticAuthoringSemanticDecision.RetrievalEvidence(
+                        "semantic_retrieval",
+                        List.of("tool-search-api-resources"),
+                        1),
+                null,
+                false,
+                "",
+                "",
+                "",
+                "session-filtered-crud",
+                "turn-filtered-crud",
+                "Preparar a edição do funcionário Rodrigo sem salvar",
+                "Preparar a edição do funcionário Rodrigo sem salvar",
+                "record-edit-review",
+                "operational-crud",
+                constraints,
+                null,
+                "",
+                "Resource and record predicate were resolved semantically; field awaits schema grounding.",
+                0.98d);
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Prepare a edição do funcionário Rodrigo sem salvar",
+                "Vou preparar a tela operacional para revisão.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of("llm-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                visualizationDecision,
                 semanticDecision);
     }
 

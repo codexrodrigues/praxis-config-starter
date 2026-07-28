@@ -30,7 +30,7 @@ class DomainKnowledgeChangeSetValidatorTest {
         assertThat(report.issues()).isEmpty();
         assertThat(report.proposedOperationTypes()).containsExactly("add_evidence");
         assertThat(report.executableOperationTypes()).containsExactly(
-                "add_alias", "add_binding", "add_evidence", "add_relationship", "approve_concept", "create_concept", "revert_evidence");
+                "add_alias", "add_binding", "add_evidence", "add_relationship", "approve_binding", "approve_concept", "create_concept", "revert_evidence");
         assertThat(report.executablePatchOperationTypes()).containsExactly("add_evidence");
         assertThat(report.nonExecutableOperationTypes()).isEmpty();
     }
@@ -121,6 +121,33 @@ class DomainKnowledgeChangeSetValidatorTest {
 
         assertThat(report.valid()).isTrue();
         assertThat(report.executablePatchOperationTypes()).containsExactly("approve_concept");
+        assertThat(report.nonExecutableOperationTypes()).isEmpty();
+    }
+
+    @Test
+    void acceptsGovernedApprovalOfProjectedBinding() {
+        var payload = (com.fasterxml.jackson.databind.node.ObjectNode) semanticConceptPayload();
+        payload.put("bindingType", "stats_endpoint");
+        payload.put(
+                "bindingKey",
+                "binding:human-resources.ferias-afastamentos.stats.group-by:openapi-stats");
+        var request = new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:hr:ferias-afastamentos:binding-approve:v1",
+                "proposed",
+                "system",
+                "praxis-reference-pilot",
+                "Approve projected vacation resource binding",
+                "A reviewed catalog binding must become eligible for operational grounding.",
+                List.of(operation(
+                        "op-approve-ferias-afastamentos-binding",
+                        "approve_binding",
+                        conceptTarget("human-resources.ferias-afastamentos"),
+                        payload)));
+
+        var report = validator.validateCreateRequest(TENANT, ENVIRONMENT, request);
+
+        assertThat(report.valid()).isTrue();
+        assertThat(report.executablePatchOperationTypes()).containsExactly("approve_binding");
         assertThat(report.nonExecutableOperationTypes()).isEmpty();
     }
 

@@ -17,6 +17,7 @@ import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.ContextRetrievalService;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @Tag("unit")
 class AgenticAuthoringIntentResolverServiceTest {
@@ -24,6 +25,290 @@ class AgenticAuthoringIntentResolverServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AgenticAuthoringIntentResolverService service =
             new AgenticAuthoringIntentResolverService(objectMapper, quickstartCandidateCatalog());
+
+    @Test
+    void compactSemanticComponentDecisionAvoidsRedundantFullPassForConstrainedPage() {
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", true);
+        constraints.putArray("filters").addObject()
+                .put("concept", "eventos pendentes")
+                .put("field", "status")
+                .put("operator", "eq")
+                .put("value", "pendentes");
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "The user requested an operational workflow and a governed subset.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                true,
+                constraints,
+                "page",
+                "praxis-crud");
+
+        Boolean requiresAdditionalResolution = ReflectionTestUtils.invokeMethod(
+                service,
+                "requiresAdditionalIntentResolution",
+                orientation);
+
+        assertThat(requiresAdditionalResolution).isFalse();
+        AgenticAuthoringVisualizationDecision visualizationDecision = ReflectionTestUtils.invokeMethod(
+                service,
+                "preIntentVisualizationDecision",
+                orientation);
+        assertThat(visualizationDecision).isNotNull();
+        assertThat(visualizationDecision.primaryComponent()).isEqualTo("praxis-crud");
+        assertThat(visualizationDecision.layoutKind()).isEqualTo("resource-crud");
+    }
+
+    @Test
+    void constrainedRecordEditPreservesTheAiAuthoredCrudHostAcrossTheFullIntentPass() {
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", true);
+        constraints.putArray("filters").addObject()
+                .put("concept", "funcionário chamado Rodrigo")
+                .put("field", "nomeCompleto")
+                .put("operator", "eq")
+                .put("value", "Rodrigo");
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "The user requested a governed record edit that must remain reviewable.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                true,
+                constraints,
+                "page",
+                "praxis-crud");
+        AgenticAuthoringVisualizationDecision driftedVisualization =
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "edit employee record",
+                        "master-detail",
+                        "praxis-dynamic-form",
+                        List.of(),
+                        false,
+                        true,
+                        "llm-full-intent");
+        AgenticAuthoringLlmIntentResolution fullResolution = new AgenticAuthoringLlmIntentResolution(
+                true,
+                "create",
+                "page",
+                "create_artifact",
+                "/api/human-resources/funcionarios",
+                null,
+                "none",
+                "Vou preparar a edição para revisão.",
+                List.of(),
+                List.of(),
+                List.of(),
+                null,
+                driftedVisualization,
+                false,
+                "component_authoring",
+                constraints,
+                List.of());
+        AgenticAuthoringCandidate employeeCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter",
+                "post",
+                0.96d,
+                "governed employee resource",
+                List.of("tool-search-api-resources", "schema-grounding-verified"));
+
+        AgenticAuthoringLlmIntentResolution normalized = ReflectionTestUtils.invokeMethod(
+                service,
+                "normalizeConstrainedAuthoringResolution",
+                fullResolution,
+                orientation,
+                List.of(employeeCandidate));
+
+        assertThat(normalized).isNotNull();
+        assertThat(normalized.visualizationDecision()).isNotNull();
+        assertThat(normalized.visualizationDecision().primaryComponent()).isEqualTo("praxis-crud");
+        assertThat(normalized.visualizationDecision().layoutKind()).isEqualTo("resource-crud");
+        assertThat(normalized.queryConstraints()).isEqualTo(constraints);
+        assertThat(normalized.warnings()).contains("llm-pre-intent-primary-component-reconciled");
+    }
+
+    @Test
+    void aiResolvedFilterRefinementPreservesActiveGovernedResource() {
+        AgenticAuthoringCandidate activeResource = new AgenticAuthoringCandidate(
+                "/api/human-resources/eventos-folha",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/eventos-folha/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/eventos-folha/filter/cursor",
+                "POST",
+                0.94,
+                "active governed CRUD resource",
+                List.of("api-metadata", "semantic-retrieval"));
+        AgenticAuthoringSemanticDecision activeDecision = AgenticAuthoringSemanticDecision.from(
+                "create",
+                "page",
+                "create_artifact",
+                activeResource,
+                List.of(activeResource),
+                null,
+                List.of(),
+                null,
+                null,
+                null,
+                "conversation-1",
+                "turn-1",
+                "Conferir eventos da folha pendentes",
+                "Conferir eventos da folha pendentes",
+                "Initial governed CRUD decision.");
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", true);
+        constraints.putArray("filters").addObject()
+                .put("concept", "status de pendência")
+                .put("field", "status")
+                .put("operator", "eq")
+                .put("value", "pendente");
+        AgenticAuthoringLlmIntentResolution llmIntent = new AgenticAuthoringLlmIntentResolution(
+                true,
+                "modify",
+                "table",
+                "list.surface.configure",
+                "/api/human-resources/folhas-pagamento",
+                null,
+                "refinement",
+                "Vou manter o recorte solicitado.",
+                List.of(),
+                List.of(),
+                List.of(),
+                null,
+                null,
+                false,
+                "component_authoring",
+                constraints,
+                List.of());
+
+        AgenticAuthoringSemanticRefinement refinement = ReflectionTestUtils.invokeMethod(
+                service,
+                "semanticRefinement",
+                "Nessa tela, quero exclusivamente os pendentes e mantenha a ação em lote.",
+                activeDecision,
+                llmIntent);
+
+        assertThat(refinement).isNotNull();
+        assertThat(refinement.active()).isTrue();
+        assertThat(refinement.refinementKind()).isEqualTo("filtering");
+        assertThat(refinement.preserve()).containsExactly("resource", "source");
+        assertThat(refinement.add()).containsEntry("filters", List.of("status"));
+    }
+
+    @Test
+    void promotesSoleComponentTargetOnlyAfterCompactLlmConfirmsItsGovernedResource() {
+        AgenticAuthoringTarget soleTarget = new AgenticAuthoringTarget(
+                "eventos-folha-crud",
+                "praxis-crud",
+                "/api/human-resources/eventos-folha",
+                "/schemas/filtered?path=/api/human-resources/eventos-folha/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/eventos-folha/filter/cursor",
+                "post");
+        AgenticAuthoringLlmIntentResolution confirmedIntent = new AgenticAuthoringLlmIntentResolution(
+                true,
+                "modify",
+                "table",
+                "list.surface.configure",
+                "/api/human-resources/eventos-folha",
+                null,
+                "refinement",
+                "Vou refinar a tela atual.",
+                List.of(),
+                List.of(),
+                List.of("llm-compact-targeted-component-intent-used"),
+                null,
+                null,
+                false,
+                "component_authoring");
+
+        Boolean promoted = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldPromoteCompactTarget",
+                confirmedIntent,
+                soleTarget,
+                null);
+
+        assertThat(promoted).isTrue();
+    }
+
+    @Test
+    void doesNotPromoteSoleComponentTargetWhenCompactLlmSelectsAnotherResource() {
+        AgenticAuthoringTarget soleTarget = new AgenticAuthoringTarget(
+                "eventos-folha-crud",
+                "praxis-crud",
+                "/api/human-resources/eventos-folha",
+                "",
+                "/api/human-resources/eventos-folha/filter/cursor",
+                "post");
+        AgenticAuthoringLlmIntentResolution divergentIntent = new AgenticAuthoringLlmIntentResolution(
+                true,
+                "modify",
+                "table",
+                "list.surface.configure",
+                "/api/human-resources/folhas-pagamento",
+                null,
+                "refinement",
+                "Vou alterar outra fonte.",
+                List.of(),
+                List.of(),
+                List.of("llm-compact-targeted-component-intent-used"),
+                null,
+                null,
+                false,
+                "component_authoring");
+
+        Boolean promoted = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldPromoteCompactTarget",
+                divergentIntent,
+                soleTarget,
+                null);
+
+        assertThat(promoted).isFalse();
+    }
+
+    @Test
+    void promotesSoleComponentTargetWhenCompactLlmRequestsScopedClarification() {
+        AgenticAuthoringTarget soleTarget = new AgenticAuthoringTarget(
+                "eventos-folha-crud",
+                "praxis-crud",
+                "/api/human-resources/eventos-folha",
+                "",
+                "/api/human-resources/eventos-folha/filter/cursor",
+                "post");
+        AgenticAuthoringLlmIntentResolution clarification = new AgenticAuthoringLlmIntentResolution(
+                true,
+                "unknown",
+                "component",
+                "unknown",
+                "/api/human-resources/eventos-folha",
+                null,
+                "refinement",
+                "Preciso esclarecer como separar os dois estados.",
+                List.of(),
+                List.of("Você quer duas visualizações separadas?"),
+                List.of(
+                        "llm-compact-targeted-component-intent-used",
+                        "llm-compact-targeted-component-clarification-used"),
+                null,
+                null,
+                false,
+                "component_authoring");
+
+        Boolean promoted = ReflectionTestUtils.invokeMethod(
+                service,
+                "shouldPromoteCompactTarget",
+                clarification,
+                soleTarget,
+                null);
+
+        assertThat(promoted).isTrue();
+    }
 
     private AgenticAuthoringIntentResolverService tableRefinementService(
             String operationId,
@@ -684,7 +969,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 "folha de pagamento",
                                 List.of("departamento", "indicadores", "custos"),
                                 "painel analítico",
-                                "low",
+                                "",
                                 "The user wants aggregated payroll analytics by department."))));
 
         assertThat(result.selectedCandidate()).isNotNull();
@@ -729,7 +1014,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 "funcionarios",
                                 List.of("cargo", "departamento", "graficos", "metricas", "detalhes"),
                                 "dashboard 360 com filtros e graficos por departamento e cargo e tabela de detalhes",
-                                "low",
+                                "",
                                 "The primary business entity is the employee registry; charts support its overview."))));
 
         assertThat(result.selectedCandidate()).isNotNull();
@@ -826,7 +1111,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 "funcionarios",
                                 List.of("departamento", "cargo", "distribuicao", "metricas"),
                                 "dashboard analitico com distribuicao por departamento e cargo",
-                                "low",
+                                "",
                                 "The employee registry is the primary subject; analytics are its presentation."))));
 
         assertThat(result.selectedCandidate()).isNotNull();
@@ -861,7 +1146,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 "folha de pagamento",
                                 List.of("departamento", "salario", "custos", "metricas"),
                                 "dashboard analitico de folha de pagamento por departamento",
-                                "low",
+                                "",
                                 "Payroll is the explicit primary business entity."))));
 
         assertThat(result.selectedCandidate()).isNotNull();
@@ -896,7 +1181,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 "funcionarios",
                                 List.of("nome", "cargo", "departamento", "resumo individual"),
                                 "perfil 360 individual do funcionario",
-                                "low",
+                                "",
                                 "The requested surface is an individual employee profile."))));
 
         assertThat(result.selectedCandidate()).isNotNull();
@@ -938,7 +1223,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 "funcionarios",
                                 List.of("perfil", "resumo individual", "cargo", "departamento"),
                                 "perfil 360 individual do funcionario",
-                                "low",
+                                "",
                                 "Profile is the governed surface; the chart is only supporting content."))));
 
         assertThat(result.selectedCandidate()).isNotNull();
@@ -14043,6 +14328,199 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 true,
                                 "llm-test"),
                         false)));
+    }
+
+    @Test
+    void fullIntentResolutionCannotBeSkippedByAComponentHintAndOneGovernedCandidate() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/human-resources/funcionarios",
+                        0.96d,
+                        List.of("funcionários", "cadastro", "departamento")),
+                        "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        employeeCandidate = withEvidence(employeeCandidate, "lexical-fallback");
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "form",
+                        "create_artifact",
+                        "/api/human-resources/funcionarios",
+                        null,
+                        "none",
+                        "O recurso de funcionários não representa os apontamentos nem comprova as ações solicitadas.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService service = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode contextHints = resourceDiscoveryContext(
+                "form",
+                List.of(employeeCandidate),
+                new AgenticAuthoringResourceSearchFocus(
+                        "apontamentos de horas da equipe",
+                        List.of("aprovação", "devolução para correção"),
+                        "formulário operacional",
+                        "recurso de apontamentos ainda não confirmado",
+                        "o recurso e suas ações precisam ser confirmados"));
+        ObjectNode orientation = contextHints.putObject("preIntentSemanticOrientation");
+        orientation.put("semanticIntentClass", "authoring_or_other");
+        orientation.put("artifactKind", "form");
+        orientation.put("primaryComponent", "praxis-dynamic-form");
+        orientation.put("requiresFullIntentResolution", true);
+        orientation.putObject("queryConstraints")
+                .put("appliesToDataSelection", false)
+                .putArray("filters");
+
+        AgenticAuthoringPreIntentToolPlan semanticOrientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "The requested workflow needs a canonical time-entry resource and its actions.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                true,
+                orientation.path("queryConstraints"),
+                "form",
+                "praxis-dynamic-form");
+        AgenticAuthoringIntentResolutionResult result = service.resolve(
+                requestWithContextHints(
+                        "Crie um formulário para aprovar ou devolver apontamentos de horas.",
+                        "deterministic-smoke-disabled",
+                        contextHints),
+                "tenant",
+                "user",
+                "local",
+                semanticOrientation);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.operationKind()).isEqualTo("unknown");
+        assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.changeKind()).isEqualTo("needs_clarification");
+        assertThat(result.clarificationQuestions())
+                .containsExactly("recurso de apontamentos ainda não confirmado");
+        assertThat(result.warnings())
+                .contains(
+                        "llm-intent-resolution-used",
+                        "llm-resource-selection-unconfirmed-by-ai-authored-focus")
+                .doesNotContain("llm-intent-resolution-satisfied-by-pre-intent-governed-evidence");
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+    }
+
+    @Test
+    void canonicalAiAuthoredResourceIdentityPreventsPreIntentShortcutForMismatchedOperationalCandidate() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/human-resources/funcionarios",
+                        0.96d,
+                        List.of("funcionários", "cadastro", "departamento")),
+                        "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        false,
+                        "unknown",
+                        "unknown",
+                        "needs_clarification",
+                        null,
+                        null,
+                        "none",
+                        "Preciso confirmar qual recurso representa os apontamentos de horas.",
+                        List.of(),
+                        List.of("Qual recurso representa os apontamentos de horas?"),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService service = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode contextHints = resourceDiscoveryContext(
+                "form",
+                List.of(employeeCandidate),
+                new AgenticAuthoringResourceSearchFocus(
+                        "human-resources.ferias-afastamentos",
+                        List.of("aprovação", "devolução para correção"),
+                        "formulário operacional",
+                        "",
+                        "o candidato operacional não corresponde à identidade canônica authorada"));
+        AgenticAuthoringPreIntentToolPlan semanticOrientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "Search first; the resource still needs semantic confirmation.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                false,
+                objectMapper.createObjectNode().put("appliesToDataSelection", false).putArray("filters"),
+                "form",
+                "praxis-dynamic-form");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(
+                requestWithContextHints(
+                        "Crie um formulário para aprovar ou devolver apontamentos de horas.",
+                        "deterministic-smoke-disabled",
+                        contextHints),
+                "tenant",
+                "user",
+                "local",
+                semanticOrientation);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.changeKind()).isEqualTo("needs_clarification");
+        assertThat(result.warnings())
+                .contains(
+                        "llm-intent-resolution-used",
+                        "llm-resource-selection-unconfirmed-by-ai-authored-focus")
+                .doesNotContain("llm-intent-resolution-satisfied-by-pre-intent-governed-evidence");
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
     }
 
     private ObjectNode resourceDiscoveryContext(

@@ -4382,18 +4382,18 @@ components:
 
     DomainKnowledgeChangeSetOperationRequest:
       type: object
-      description: Operacao semantica governada de Domain Knowledge. O corte atual permite apenas `add_evidence` e `revert_evidence`.
+      description: Operacao semantica governada de Domain Knowledge, validada e materializada apenas apos aprovacao explicita do change set.
       properties:
         operationId:
           type: string
         operationType:
           type: string
-          enum: [add_evidence, revert_evidence]
+          enum: [create_concept, approve_concept, approve_binding, add_alias, add_binding, add_relationship, add_evidence, revert_evidence]
         target:
           type: object
           nullable: true
           additionalProperties: true
-          description: Alvo semantico. Para `add_evidence` e `revert_evidence`, `target.conceptKey` e obrigatorio.
+          description: Alvo semantico. `target.conceptKey` e obrigatorio para operacoes de conceito, alias, binding e evidencia; relacoes usam sourceConceptKey e targetConceptKey.
         reason:
           type: string
         evidenceRefs:
@@ -4408,7 +4408,7 @@ components:
           type: object
           nullable: true
           additionalProperties: true
-          description: Payload allowlisted. `payload.evidenceKey` e obrigatorio para `add_evidence` e `revert_evidence`; `payload.revertReason` e obrigatorio para `revert_evidence`.
+          description: Payload allowlisted com proveniencia por claim. `approve_binding` exige bindingType e bindingKey; `add_evidence` e `revert_evidence` exigem evidenceKey, e revert_evidence exige revertReason.
       required:
         - operationId
         - operationType

@@ -184,6 +184,54 @@ class DomainCatalogIngestionServiceTest {
     }
 
     @Test
+    void reconcilesDerivedKnowledgeProjectionWhenAnExistingReleaseIsReingested() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainKnowledgeProjectionService projectionService = mock(DomainKnowledgeProjectionService.class);
+        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                projectionService,
+                false,
+                false,
+                100,
+                eventPublisher);
+        DomainCatalogRelease existingRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-api-quickstart:test")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-api-quickstart")
+                .resourceKey("human-resources.folhas-pagamento")
+                .sourceHash("sha256:test")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .build();
+        DomainCatalogItem existingItem = DomainCatalogItem.builder()
+                .release(existingRelease)
+                .itemType("node")
+                .itemKey("human-resources.folhas-pagamento")
+                .payload("{\"nodeKey\":\"human-resources.folhas-pagamento\"}")
+                .build();
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.of(existingRelease));
+        when(itemRepository.countByRelease(existingRelease)).thenReturn(1L);
+        when(itemRepository.findByRelease(existingRelease)).thenReturn(List.of(existingItem));
+
+        DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:test");
+        assertThat(response.itemCount()).isEqualTo(1);
+        verify(projectionService).project(existingRelease, List.of(existingItem));
+        verify(eventPublisher).publishEvent(any(DomainCatalogReleaseChangedEvent.class));
+        verify(itemRepository, never()).deleteByRelease(any());
+        verify(itemRepository, never()).saveAll(any());
+    }
+
+    @Test
     void ingestsTheSameContentAddressedReleaseKeyIndependentlyAcrossScopes() throws Exception {
         DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);

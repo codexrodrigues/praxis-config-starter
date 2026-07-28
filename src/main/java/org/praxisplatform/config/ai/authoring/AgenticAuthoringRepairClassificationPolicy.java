@@ -51,6 +51,7 @@ final class AgenticAuthoringRepairClassificationPolicy {
                         "analytics-custom-breakdown-required")
                 || hasAny(preview == null ? null : preview.failureCodes(),
                         "intent-resolution-selected-candidate-required",
+                        "component-operation-selection-clarification-required",
                         "resource-candidate-required",
                         "target-widget-required",
                         "intent-confirmation-required",

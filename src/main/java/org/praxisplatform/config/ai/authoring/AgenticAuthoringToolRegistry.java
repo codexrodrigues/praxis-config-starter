@@ -795,7 +795,7 @@ public class AgenticAuthoringToolRegistry {
                 return null;
             }
             long distinctResources = verification.operations().stream()
-                    .map(AgenticAuthoringOperationalBindingVerificationService.OperationProjection::apiPath)
+                    .map(AgenticAuthoringOperationalBindingVerificationService.OperationProjection::resourcePath)
                     .filter(path -> path != null && !path.isBlank())
                     .distinct()
                     .count();

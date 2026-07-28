@@ -198,10 +198,20 @@ public class DomainKnowledgeProjectionService {
             binding.setConcept(concept);
             binding.setBindingType(bindingType);
             binding.setBindingKey(bindingKey);
-            binding.setResourceKey(firstText(text(payload, "resourceKey"), concept.getResourceKey()));
-            binding.setApiPath(firstText(text(payload, "apiPath"), text(payload.path("target"), "apiPath")));
-            binding.setApiMethod(firstText(text(payload, "apiMethod"), text(payload.path("target"), "apiMethod")));
-            binding.setSchemaPointer(firstText(text(payload, "schemaPointer"), schemaPointer(payload.path("target"))));
+            JsonNode target = payload.path("target");
+            binding.setResourceKey(firstText(
+                    text(payload, "resourceKey"),
+                    text(target, "resourceKey"),
+                    concept.getResourceKey()));
+            binding.setApiPath(firstText(
+                    text(payload, "apiPath"),
+                    text(target, "apiPath"),
+                    text(target, "path")));
+            binding.setApiMethod(firstText(
+                    text(payload, "apiMethod"),
+                    text(target, "apiMethod"),
+                    text(target, "method")));
+            binding.setSchemaPointer(firstText(text(payload, "schemaPointer"), schemaPointer(target)));
             binding.setSourceRelease(release);
             binding.setConfidence(confidence(payload, null));
             binding.setPayload(item.getPayload());

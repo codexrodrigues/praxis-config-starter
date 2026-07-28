@@ -123,8 +123,11 @@ class DomainKnowledgeProjectionServiceTest {
                           "bindingType": "ui_surface",
                           "confidence": 0.93,
                           "target": {
-                            "apiPath": "/api/folhas-pagamento",
-                            "apiMethod": "POST"
+                            "resourceKey": "human-resources.folhas-pagamento",
+                            "resourcePath": "/api/human-resources/folhas-pagamento",
+                            "operationId": "create",
+                            "path": "/api/folhas-pagamento",
+                            "method": "POST"
                           }
                         }
                         """),
@@ -209,6 +212,7 @@ class DomainKnowledgeProjectionServiceTest {
                 .filteredOn(binding -> "ui_surface".equals(binding.getBindingType()))
                 .singleElement()
                 .satisfies(binding -> {
+                    assertThat(binding.getResourceKey()).isEqualTo("human-resources.folhas-pagamento");
                     assertThat(binding.getApiPath()).isEqualTo("/api/folhas-pagamento");
                     assertThat(binding.getApiMethod()).isEqualTo("POST");
                 });

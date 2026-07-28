@@ -1,0 +1,127 @@
+{
+  "schemaVersion": "praxis-generative-ui-study-baseline.v1",
+  "capturedAt": "2026-07-27T19:58:08-03:00",
+  "authority": "documentation-evidence-only",
+  "notes": [
+    "This snapshot records the inspected workspace and is not a runtime or public API contract.",
+    "The workspace contained pre-existing uncommitted changes; future sessions must inspect only relevant deltas."
+  ],
+  "repositories": {
+    "praxis-config-starter": {
+      "branch": "main",
+      "head": "2ec344daeb8a0c4236dcf324310bde9e0720eb13",
+      "dirtyPathCountBeforeDocumentation": 36
+    },
+    "praxis-ui-angular": {
+      "branch": "main",
+      "head": "1858566e2a97551725c760400c942d20c9fdde18",
+      "dirtyPathCountBeforeDocumentation": 6
+    },
+    "praxis-metadata-starter": {
+      "branch": "main",
+      "head": "d9dbbfd5d8de65228f110b6851fa4b580d97dd75",
+      "dirtyPathCountBeforeDocumentation": 0
+    },
+    "praxis-api-quickstart": {
+      "branch": "main",
+      "head": "24b3e54893c199f39eb1f275f40a11f4a53524e4",
+      "dirtyPathCountBeforeDocumentation": 4
+    },
+    "praxis-ui-landing-page": {
+      "branch": "main",
+      "head": "a2a7e6ae90151074e4432d4e652522de72034f68",
+      "dirtyPathCountBeforeDocumentation": 0
+    },
+    "praxisui-http-examples": {
+      "branch": "main",
+      "head": "6d26d9cd4f59d2e5d145ddcdbd0649e24140049c",
+      "dirtyPathCountBeforeDocumentation": 0
+    }
+  },
+  "workingTreeEvidenceSourceSha256": {
+    "praxis-config-starter": {
+      "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringPreviewService.java": "84a26ab1ac830f0d82e8c107252137ef4e5f2d9914db389750edf5df7a6ba01b",
+      "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnEngine.java": "a6a792ec5d363d39f843245ac1595336b96843e8ff5f277ad1a10971595a6913",
+      "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringToolRegistry.java": "4e6b12a00c2b615f1cff6ba899551d666d17430396205835c2f22f7f3d90828d",
+      "src/main/java/org/praxisplatform/config/service/ContextRetrievalService.java": "0d763cf7c172846fefdc27dbf3ac16fd2ee0aeb71a8216d633783a6415e89036",
+      "src/main/java/org/praxisplatform/config/service/SpringAiOpenAiService.java": "d8fbdc26dd11a7d47ab443f6adf7846579cfdf4f666ad2f4e44c56328f854416",
+      "src/main/resources/praxis-config-defaults.properties": "0a7539c4d415e32aeb3a00e0878ba56a546a4e5c6fd4124965ea75bf476a99f2",
+      "src/main/resources/db/migration/V10__upgrade_embedding_dimensions.sql": "d22d019a0296e5683a2825d8f9bf2c2de7ed8ca8d311ee1d57bbfb5f79efa17b",
+      "docs/2026-07-machine-first-semantic-ir-rfc.md": "0ace606a2f56afb7e7590342c7ccf9be4627aacb2d31519ba8478befc560e22c"
+    },
+    "praxis-ui-angular": {
+      "projects/praxis-table/src/lib/ai/praxis-table-authoring-manifest.ts": "631337043a18c382d62464ff69cf62c98e237dcf910c136d3ccc197291879427",
+      "projects/praxis-table/src/lib/praxis-table.ts": "5d56857bf4942d8133b8d9c7f379898848d26c399ca703f19cec3025a0b58c6c",
+      "projects/praxis-table/src/lib/ai/table-ai.adapter.spec.ts": "cd11c9ade04e6b4df87a95b653a0241a3dc8accce2e6d4acc1989f229a9a3fb7",
+      "projects/praxis-page-builder/test-dev/e2e/page-builder-table-human-authoring.playwright.spec.ts": "4fc8a3ce32cd3237ff79f7f359141fe4c34bbd9bdb6da4c09af80782bc8aa029",
+      "projects/praxis-core/src/lib/ai/authoring-manifest.types.ts": "be5814b89037576898331ae7d1ed4040f9c091db2eff6fce1485657413ace5a7"
+    }
+  },
+  "registry": {
+    "generatedAt": "2026-07-26T23:30:30.363Z",
+    "schemaVersion": "1.0.0",
+    "aggregateSha256": "7c88964c45ad530856d80d4f9ce6ac3b1daf6ee30c5ca55be81f4e36e8c40cd6",
+    "componentEntries": 105,
+    "entriesWithManifestProjection": 95,
+    "entriesWithoutManifestProjection": 10,
+    "uniqueManifestFamilies": 20,
+    "canonicalFamilyOperationPairs": 289,
+    "globallyDistinctOperationIds": 278,
+    "naiveProjectedOperationCount": 889,
+    "entriesWithManifestProfiles": 76,
+    "manifestProfileProjectionObjects": 93,
+    "uniqueManifestProfileIds": 18,
+    "componentDocsEntries": 101,
+    "ingestionOnlyAggregateIdentities": [
+      "praxis-domain-catalog",
+      "praxis-dynamic-fields",
+      "praxis-editorial-forms",
+      "praxis-runtime-component-observation"
+    ]
+  },
+  "tablePilot": {
+    "componentId": "praxis-table",
+    "manifestVersion": "2.2.2",
+    "capabilityPaths": 500,
+    "capabilitiesWithDependsOn": 340,
+    "distinctDependencyPaths": 79,
+    "operations": 68,
+    "validators": 23,
+    "editableTargets": 32,
+    "examples": 52,
+    "chunks": 168,
+    "chunksByKind": {
+      "summary": 1,
+      "capabilities": 12,
+      "authoring_manifest": 106,
+      "context_pack": 14,
+      "recipe": 35
+    },
+    "staticCoverageArtifactSha256": "175d7fb9f449808e772c87a625ea47a7bfa5643ed66f98c795486503eb43058d",
+    "staticOperationCardRecall": 1,
+    "pairwiseCases": 180,
+    "humanBrowserTurns": 8
+  },
+  "knownFailure": {
+    "operationId": "rowAction.add",
+    "dependencyKnownByCapabilityCatalog": "actions.row.actions[] dependsOn actions.row.enabled",
+    "manifestEffect": "append-unique actions.row.actions[]",
+    "missingMaterialization": "actions.row.enabled=true",
+    "runtimeCondition": "actions.row.enabled must be true before _actions is displayed",
+    "result": "operation can compile while the action column remains invisible"
+  },
+  "retrieval": {
+    "defaultSearchLimit": 5,
+    "preIntentAuthoringChunkKind": "authoring_manifest",
+    "preIntentAuthoringLimit": 12,
+    "risk": "dependency evidence can live in capability chunks while the exact operation slice remains incomplete"
+  },
+  "openAi": {
+    "observedLocalModelFamily": "gpt-5.6-terra",
+    "embeddingModel": "text-embedding-3-large",
+    "embeddingDimensions": 3072,
+    "configuredHostedSkillIdsInObservedLocalProcess": 0,
+    "hostedSkillSlotsDeclared": 7
+  },
+  "nextMilestone": "phase-01-component-inventory"
+}

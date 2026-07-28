@@ -473,6 +473,33 @@ public class AgenticAuthoringTurnEngine {
                     return groundedResourceClarification;
                 }
             }
+            StaticEnumFilterGroundingExecution staticEnumFilterGrounding = maybeRunStaticEnumFilterGrounding(
+                    request,
+                    principalContext,
+                    eventSink,
+                    intentResolution,
+                    route,
+                    schemaBaseUrl);
+            if (staticEnumFilterGrounding.projection() != null) {
+                request = withStaticEnumFilterGrounding(request, staticEnumFilterGrounding.projection());
+                intentResolution = withCanonicalStaticEnumConstraint(
+                        intentResolution,
+                        staticEnumFilterGrounding.projection());
+                route = routeClassifier.classify(request, intentResolution, state);
+                state = state.withRouteClass(route.routeClass());
+                emitIntentResolved(eventSink, intentResolution, route, request);
+                emitIntentResolutionProgress(eventSink, intentResolution);
+                AgenticAuthoringTurnOutcome staticFilterClarificationOutcome = maybeCompleteScopedSemanticClarification(
+                        request,
+                        eventSink,
+                        state,
+                        intentResolution,
+                        route,
+                        turnProviderInvocations);
+                if (staticFilterClarificationOutcome != null) {
+                    return staticFilterClarificationOutcome;
+                }
+            }
             LiveOptionFieldGroundingExecution liveOptionFieldGrounding = maybeRunLiveOptionFieldGrounding(
                     request,
                     principalContext,
@@ -498,14 +525,6 @@ public class AgenticAuthoringTurnEngine {
                     fieldRefinedResolution = withIntentResolutionWarning(
                             intentResolution,
                             "live-option-field-confirmed-by-canonical-schema");
-                } else if (hasSingleCanonicalLiveOptionFieldCandidate(
-                        liveOptionFieldGrounding.projection())) {
-                    // This is a read-only bridge to the live-value stage, not the final semantic
-                    // decision. The next LLM pass must still return this exact field with current
-                    // candidate IDs and the byIds tool must confirm them before materialization.
-                    fieldRefinedResolution = withProvisionalCanonicalLiveOptionField(
-                            intentResolution,
-                            liveOptionFieldGrounding.projection());
                 } else {
                     fieldRefinedResolution = intentResolverService.resolve(
                             toIntentRequest(fieldGroundedRequest),
@@ -526,6 +545,16 @@ public class AgenticAuthoringTurnEngine {
                 state = state.withRouteClass(route.routeClass());
                 emitIntentResolved(eventSink, intentResolution, route, request);
                 emitIntentResolutionProgress(eventSink, intentResolution);
+                AgenticAuthoringTurnOutcome fieldClarificationOutcome = maybeCompleteScopedSemanticClarification(
+                        request,
+                        eventSink,
+                        state,
+                        intentResolution,
+                        route,
+                        turnProviderInvocations);
+                if (fieldClarificationOutcome != null) {
+                    return fieldClarificationOutcome;
+                }
             }
             LiveOptionGroundingExecution liveOptionGrounding = maybeRunLiveOptionValueGrounding(
                     request,
@@ -602,6 +631,16 @@ public class AgenticAuthoringTurnEngine {
                 state = state.withRouteClass(route.routeClass());
                 emitIntentResolved(eventSink, intentResolution, route, request);
                 emitIntentResolutionProgress(eventSink, intentResolution);
+                AgenticAuthoringTurnOutcome valueClarificationOutcome = maybeCompleteScopedSemanticClarification(
+                        request,
+                        eventSink,
+                        state,
+                        intentResolution,
+                        route,
+                        turnProviderInvocations);
+                if (valueClarificationOutcome != null) {
+                    return valueClarificationOutcome;
+                }
             }
             AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery =
                     maybeRunBusinessCatalogResourceDiscoveryTool(
@@ -1026,6 +1065,17 @@ public class AgenticAuthoringTurnEngine {
                             "serverIssuedExecutableDecision", true)));
             return null;
         }
+        AgenticAuthoringTurnOutcome scopedSemanticClarification =
+                maybeCompleteScopedSemanticClarification(
+                        request,
+                        eventSink,
+                        state,
+                        intentResolution,
+                        route,
+                        providerInvocations);
+        if (scopedSemanticClarification != null) {
+            return scopedSemanticClarification;
+        }
         AgenticAuthoringTurnOutcome groundedClarificationOutcome =
                 maybeAnswerGroundedResourceDiscoveryClarification(
                         request,
@@ -1160,6 +1210,85 @@ public class AgenticAuthoringTurnEngine {
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private AgenticAuthoringTurnOutcome maybeCompleteScopedSemanticClarification(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringTurnState state,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringTurnRoute route,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+        if (eventSink == null
+                || eventSink.terminalReached()
+                || intentResolution == null
+                || route == null
+                || !"needs_clarification".equals(route.routeClass())
+                || intentResolution.clarificationQuestions() == null
+                || intentResolution.clarificationQuestions().isEmpty()
+                || !hasGovernedClarificationScope(intentResolution)) {
+            return null;
+        }
+        String assistantMessage = safeText(intentResolution.assistantMessage());
+        for (String question : intentResolution.clarificationQuestions()) {
+            String safeQuestion = safeText(question);
+            if (!safeQuestion.isBlank() && !assistantMessage.contains(safeQuestion)) {
+                assistantMessage = assistantMessage.isBlank()
+                        ? safeQuestion
+                        : assistantMessage + " " + safeQuestion;
+            }
+        }
+        eventSink.append("thought.step", streamEventPayload(
+                "consultative.scoped-semantic-clarification",
+                "Completed the turn from the clarification resolved for the selected governed component.",
+                Map.of(
+                        "routeClass", safeText(route.routeClass()),
+                        "questionCount", intentResolution.clarificationQuestions().size(),
+                        "governedScopePreserved", true,
+                        "secondInferenceSkipped", true),
+                "consultative.scoped-semantic-clarification:selected_component"));
+        Map<String, Object> decisionDiagnostics = decisionDiagnostics(
+                intentResolution,
+                null,
+                null,
+                request,
+                providerInvocations);
+        decisionDiagnostics.put("routeClass", safeText(route.routeClass()));
+        decisionDiagnostics.put("consultativePostIntent", false);
+        decisionDiagnostics.put("scopedSemanticClarification", true);
+        decisionDiagnostics.put("secondInferenceSkipped", true);
+        Map<String, Object> resultPayload = new LinkedHashMap<>();
+        resultPayload.put("intentResolution", intentResolution);
+        resultPayload.put("preview", objectMapper.createObjectNode());
+        resultPayload.put("assistantMessage", publicAssistantMessage(assistantMessage, request));
+        resultPayload.put("assistantContent", intentResolution.assistantContent());
+        resultPayload.put("quickReplies", intentResolution.quickReplies() == null
+                ? List.of()
+                : intentResolution.quickReplies());
+        resultPayload.put("canApply", false);
+        resultPayload.put("decisionDiagnostics", decisionDiagnostics);
+        resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
+                "result:scoped_semantic_clarification",
+                false));
+        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        return terminalResult.appendedType("result")
+                ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
+                : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private boolean hasGovernedClarificationScope(AgenticAuthoringIntentResolutionResult resolution) {
+        if (resolution == null) {
+            return false;
+        }
+        if (contains(resolution.warnings(), "llm-compact-targeted-component-clarification-used")) {
+            return true;
+        }
+        if (resolution.target() != null || resolution.selectedCandidate() != null) {
+            return true;
+        }
+        return resolution.semanticDecision() != null
+                && resolution.semanticDecision().selectedResource() != null
+                && StringUtils.hasText(resolution.semanticDecision().selectedResource().resourcePath());
     }
 
     private boolean requiresExecutableResourceGrounding(
@@ -1649,10 +1778,13 @@ public class AgenticAuthoringTurnEngine {
         boolean providerFailure = contains(
                 intentResolution == null ? null : intentResolution.warnings(),
                 "llm-provider-error");
+        boolean unconfirmedAiAuthoredResourceFocus = contains(
+                intentResolution == null ? null : intentResolution.warnings(),
+                "llm-resource-selection-unconfirmed-by-ai-authored-focus");
         if (onlyWeakCandidates && !providerFailure) {
             return null;
         }
-        List<AgenticAuthoringQuickReply> quickReplies = onlyWeakCandidates
+        List<AgenticAuthoringQuickReply> quickReplies = onlyWeakCandidates || unconfirmedAiAuthoredResourceFocus
                 ? List.of()
                 : projection != null && projection.hasResources()
                 ? consultativeQuickReplies(request, new AgenticAuthoringConsultativeAnswer(
@@ -1662,7 +1794,9 @@ public class AgenticAuthoringTurnEngine {
                         projection,
                         List.of("resource-discovery-grounded-provider-failure-clarification")), intentResolution)
                 : resourceDiscoveryCandidateQuickReplies(request, intentResolution, presentableCandidates);
-        String assistantMessage = groundedResourceDiscoveryClarificationMessage(request, presentableCandidates, projection);
+        String assistantMessage = unconfirmedAiAuthoredResourceFocus
+                ? unconfirmedAiAuthoredResourceFocusMessage()
+                : groundedResourceDiscoveryClarificationMessage(request, presentableCandidates, projection);
         eventSink.append("thought.step", streamEventPayload(
                 "consultative.grounded-clarification",
                 "Answered clarification from governed resource discovery evidence.",
@@ -1672,7 +1806,8 @@ public class AgenticAuthoringTurnEngine {
                         "presentableCandidateCount", presentableCandidates.size(),
                         "hasApiCatalogProjection", projection != null && projection.hasResources(),
                         "onlyWeakCandidates", onlyWeakCandidates,
-                        "providerFailure", providerFailure),
+                        "providerFailure", providerFailure,
+                        "unconfirmedAiAuthoredResourceFocus", unconfirmedAiAuthoredResourceFocus),
                 "consultative.grounded-clarification:resource_discovery"));
         Map<String, Object> decisionDiagnostics = decisionDiagnostics(
                 intentResolution,
@@ -1700,6 +1835,12 @@ public class AgenticAuthoringTurnEngine {
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private String unconfirmedAiAuthoredResourceFocusMessage() {
+        return "Os candidatos recuperados ainda não possuem vínculo semântico e operacional aprovado com o recurso e as ações solicitados. "
+                + "Por segurança, não vou materializar a tela nem oferecer uma dessas fontes como confirmação. "
+                + "Verifique a projeção e a aprovação do binding canônico no catálogo governado antes de continuar.";
     }
 
     private ArrayNode intentResolutionCandidateNodes(AgenticAuthoringIntentResolutionResult intentResolution) {
@@ -2919,6 +3060,7 @@ public class AgenticAuthoringTurnEngine {
         context.put("schemaVersion", "praxis-agentic-authoring-pre-intent-orientation-context.v1");
         context.put("semanticIntentClass", safeText(orientation.semanticIntentClass()));
         context.put("artifactKind", safeText(orientation.artifactKind()));
+        context.put("primaryComponent", safeText(orientation.primaryComponent()));
         context.put("requiresFullIntentResolution", orientation.requiresFullIntentResolution());
         context.put("source", "llm_pre_intent_tool_plan");
         if (orientation.queryConstraints() != null && !orientation.queryConstraints().isNull()) {
@@ -3438,11 +3580,18 @@ public class AgenticAuthoringTurnEngine {
                 || intentResolution.semanticDecision().selectedResource() == null
                 || request == null
                 || request.contextHints() != null
-                        && request.contextHints().path("liveOptionValueGrounding").isObject()) {
+                        && (request.contextHints().path("liveOptionValueGrounding").isObject()
+                                || request.contextHints().path("staticEnumFilterGrounding").isObject())) {
             return LiveOptionGroundingExecution.none();
         }
         JsonNode filter = firstSemanticTextConstraint(intentResolution.semanticDecision().constraints());
         if (filter == null) {
+            return LiveOptionGroundingExecution.none();
+        }
+        JsonNode fieldGrounding = request.contextHints() == null
+                ? null
+                : request.contextHints().path("liveOptionFieldGrounding");
+        if (!isCanonicalLiveOptionConstraint(filter, fieldGrounding)) {
             return LiveOptionGroundingExecution.none();
         }
         String resourcePath = intentResolution.semanticDecision().selectedResource().resourcePath();
@@ -3500,7 +3649,8 @@ public class AgenticAuthoringTurnEngine {
                 || intentResolution.semanticDecision().selectedResource() == null
                 || request == null
                 || request.contextHints() != null
-                        && request.contextHints().path("liveOptionFieldGrounding").isObject()) {
+                        && (request.contextHints().path("liveOptionFieldGrounding").isObject()
+                                || request.contextHints().path("staticEnumFilterGrounding").isObject())) {
             return LiveOptionFieldGroundingExecution.none();
         }
         JsonNode filter = firstSemanticTextConstraint(intentResolution.semanticDecision().constraints());
@@ -3551,12 +3701,358 @@ public class AgenticAuthoringTurnEngine {
         return new LiveOptionFieldGroundingExecution(toolResult, projection);
     }
 
+    private StaticEnumFilterGroundingExecution maybeRunStaticEnumFilterGrounding(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringTurnRoute route,
+            String requestBaseUrl) {
+        if (eventSink.terminalReached()
+                || route == null
+                || !route.allowsPreview()
+                || intentResolution == null
+                || !intentResolution.valid()
+                || intentResolution.semanticDecision() == null
+                || intentResolution.semanticDecision().selectedResource() == null
+                || request == null
+                || request.contextHints() != null
+                        && request.contextHints().path("staticEnumFilterGrounding").isObject()) {
+            return StaticEnumFilterGroundingExecution.none();
+        }
+        JsonNode filter = firstSemanticTextConstraint(intentResolution.semanticDecision().constraints());
+        if (filter == null) {
+            return StaticEnumFilterGroundingExecution.none();
+        }
+        String resourcePath = intentResolution.semanticDecision().selectedResource().resourcePath();
+        if (!StringUtils.hasText(resourcePath)) {
+            return StaticEnumFilterGroundingExecution.none();
+        }
+        String filterPath = resourcePath.endsWith("/filter") ? resourcePath : resourcePath + "/filter";
+        AgenticAuthoringToolCall toolCall = new AgenticAuthoringToolCall(
+                AgenticAuthoringToolRegistry.SEARCH_SCHEMA_FIELDS,
+                route.routeClass(),
+                new SchemaFieldsToolRequest(
+                        filterPath,
+                        "post",
+                        "request",
+                        filter.path("field").asText(""),
+                        requestBaseUrl,
+                        50));
+        AgenticAuthoringToolResult toolResult = toolRegistry.execute(
+                toolCall,
+                principalContext,
+                "retrieveEvidence",
+                requestBaseUrl);
+        ObjectNode projection = toolResult.valid()
+                ? staticEnumFilterGroundingProjection(toolResult.payload(), resourcePath, filter)
+                : null;
+        if (projection != null) {
+            eventSink.append("thought.step", safeToolProjection(
+                    "tool.result",
+                    "Validei o valor solicitado no enum publicado pelo schema do filtro.",
+                    Map.of(
+                            "tool", toolCall.name(),
+                            "canonicalFilterField", projection.path("canonicalFilterField").asText(""),
+                            "source", "canonical-filter-schema-enum")));
+        }
+        return new StaticEnumFilterGroundingExecution(toolResult, projection);
+    }
+
+    private ObjectNode staticEnumFilterGroundingProjection(
+            Object payload,
+            String resourcePath,
+            JsonNode originalPredicate) {
+        JsonNode schema = payload instanceof JsonNode node ? node.path("schema") : null;
+        if (schema == null || !schema.path("properties").isObject() || originalPredicate == null) {
+            return null;
+        }
+
+        List<StaticEnumPropertyCandidate> candidates = new ArrayList<>();
+        schema.path("properties").fields().forEachRemaining(entry -> {
+            JsonNode property = entry.getValue();
+            JsonNode enumValues = property.path("enum");
+            if (!property.isObject() || !enumValues.isArray() || enumValues.isEmpty()) {
+                return;
+            }
+            JsonNode canonicalValue = canonicalStaticEnumValue(property, originalPredicate.path("value"));
+            if (canonicalValue == null) {
+                return;
+            }
+            candidates.add(new StaticEnumPropertyCandidate(
+                    entry.getKey(),
+                    canonicalValue,
+                    staticEnumFieldMatchScore(entry.getKey(), property, originalPredicate)));
+        });
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        int highestScore = candidates.stream()
+                .mapToInt(StaticEnumPropertyCandidate::fieldMatchScore)
+                .max()
+                .orElse(0);
+        List<StaticEnumPropertyCandidate> finalists = highestScore > 0
+                ? candidates.stream().filter(candidate -> candidate.fieldMatchScore() == highestScore).toList()
+                : candidates;
+        if (finalists.size() != 1) {
+            return null;
+        }
+        StaticEnumPropertyCandidate selected = finalists.get(0);
+        ObjectNode projection = objectMapper.createObjectNode();
+        projection.put("schemaVersion", "praxis-static-enum-filter-grounding.v1");
+        projection.put("resourcePath", resourcePath);
+        projection.put("canonicalFilterField", selected.field());
+        projection.set("canonicalValue", selected.canonicalValue());
+        projection.set("originalPredicate", originalPredicate.deepCopy());
+        projection.put("source", "canonical-filter-schema-enum");
+        return projection;
+    }
+
+    private int staticEnumFieldMatchScore(
+            String canonicalField,
+            JsonNode property,
+            JsonNode originalPredicate) {
+        String requestedField = normalizeGroundingText(originalPredicate.path("field").asText(""));
+        String concept = normalizeGroundingText(originalPredicate.path("concept").asText(""));
+        List<String> canonicalNames = List.of(
+                normalizeGroundingText(canonicalField),
+                normalizeGroundingText(property.path("x-ui").path("name").asText("")),
+                normalizeGroundingText(property.path("x-ui").path("label").asText("")));
+        int score = 0;
+        for (int index = 0; index < canonicalNames.size(); index++) {
+            String canonicalName = canonicalNames.get(index);
+            if (!StringUtils.hasText(canonicalName)) {
+                continue;
+            }
+            if (requestedField.equals(canonicalName)) {
+                score = Math.max(score, 100 - (index * 5));
+            } else if (StringUtils.hasText(requestedField)
+                    && (containsGroundingPhrase(requestedField, canonicalName)
+                            || containsGroundingPhrase(canonicalName, requestedField))) {
+                score = Math.max(score, 75 - (index * 5));
+            }
+            if (containsGroundingPhrase(concept, canonicalName)) {
+                score = Math.max(score, 55 - (index * 5));
+            }
+        }
+        return score;
+    }
+
+    private boolean containsGroundingPhrase(String text, String phrase) {
+        return StringUtils.hasText(text)
+                && StringUtils.hasText(phrase)
+                && (" " + text + " ").contains(" " + phrase + " ");
+    }
+
+    private JsonNode canonicalStaticEnumValue(JsonNode property, JsonNode requestedValue) {
+        if (requestedValue == null || requestedValue.isNull()) {
+            return null;
+        }
+        if (requestedValue.isTextual()) {
+            return canonicalStaticEnumScalar(property, requestedValue.asText(""));
+        }
+        if (!requestedValue.isArray() || requestedValue.isEmpty()) {
+            return null;
+        }
+        ArrayNode canonical = objectMapper.createArrayNode();
+        for (JsonNode item : requestedValue) {
+            if (!item.isTextual()) {
+                return null;
+            }
+            JsonNode resolved = canonicalStaticEnumScalar(property, item.asText(""));
+            if (resolved == null) {
+                return null;
+            }
+            canonical.add(resolved);
+        }
+        return canonical;
+    }
+
+    private JsonNode canonicalStaticEnumScalar(JsonNode property, String requestedValue) {
+        String requested = normalizeGroundingText(requestedValue);
+        if (!StringUtils.hasText(requested)) {
+            return null;
+        }
+        JsonNode enumValues = property.path("enum");
+        for (JsonNode enumValue : enumValues) {
+            if (enumValue.isTextual()
+                    && requested.equals(normalizeGroundingText(enumValue.asText("")))) {
+                return enumValue.deepCopy();
+            }
+        }
+        JsonNode options = property.path("x-ui").path("options");
+        if (options.isArray()) {
+            for (JsonNode option : options) {
+                if (!requested.equals(normalizeGroundingText(option.path("label").asText("")))) {
+                    continue;
+                }
+                JsonNode optionValue = option.get("value");
+                if (optionValue == null || !optionValue.isTextual()) {
+                    return null;
+                }
+                for (JsonNode enumValue : enumValues) {
+                    if (enumValue.equals(optionValue)) {
+                        return enumValue.deepCopy();
+                    }
+                }
+            }
+        }
+        JsonNode nearMatch = null;
+        for (JsonNode enumValue : enumValues) {
+            if (!enumValue.isTextual()
+                    || !isNearCanonicalGroundingText(requested, normalizeGroundingText(enumValue.asText("")))) {
+                continue;
+            }
+            if (nearMatch != null && !nearMatch.equals(enumValue)) {
+                return null;
+            }
+            nearMatch = enumValue.deepCopy();
+        }
+        if (options.isArray()) {
+            for (JsonNode option : options) {
+                JsonNode optionValue = option.get("value");
+                if (optionValue == null
+                        || !optionValue.isTextual()
+                        || !isNearCanonicalGroundingText(
+                                requested,
+                                normalizeGroundingText(option.path("label").asText("")))) {
+                    continue;
+                }
+                if (nearMatch != null && !nearMatch.equals(optionValue)) {
+                    return null;
+                }
+                nearMatch = optionValue.deepCopy();
+            }
+        }
+        return nearMatch;
+    }
+
+    private boolean isNearCanonicalGroundingText(String requested, String canonical) {
+        if (!StringUtils.hasText(requested)
+                || !StringUtils.hasText(canonical)
+                || Math.abs(requested.length() - canonical.length()) > 1) {
+            return false;
+        }
+        int previous = 0;
+        int requestedIndex = 0;
+        int canonicalIndex = 0;
+        while (requestedIndex < requested.length() && canonicalIndex < canonical.length()) {
+            if (requested.charAt(requestedIndex) == canonical.charAt(canonicalIndex)) {
+                requestedIndex++;
+                canonicalIndex++;
+                continue;
+            }
+            if (++previous > 1) {
+                return false;
+            }
+            if (requested.length() > canonical.length()) {
+                requestedIndex++;
+            } else if (canonical.length() > requested.length()) {
+                canonicalIndex++;
+            } else {
+                requestedIndex++;
+                canonicalIndex++;
+            }
+        }
+        if (requestedIndex < requested.length() || canonicalIndex < canonical.length()) {
+            previous++;
+        }
+        return previous == 1;
+    }
+
+    private AgenticAuthoringTurnStreamRequest withStaticEnumFilterGrounding(
+            AgenticAuthoringTurnStreamRequest request,
+            JsonNode projection) {
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        contextHints.set("staticEnumFilterGrounding", projection.deepCopy());
+        return copyWithContextHints(request, contextHints);
+    }
+
+    private AgenticAuthoringIntentResolutionResult withCanonicalStaticEnumConstraint(
+            AgenticAuthoringIntentResolutionResult resolution,
+            JsonNode grounding) {
+        if (resolution == null
+                || resolution.semanticDecision() == null
+                || resolution.semanticDecision().constraints() == null
+                || grounding == null
+                || !StringUtils.hasText(grounding.path("canonicalFilterField").asText(""))
+                || grounding.get("canonicalValue") == null) {
+            return resolution;
+        }
+        String field = grounding.path("canonicalFilterField").asText("");
+        JsonNode originalPredicate = grounding.path("originalPredicate");
+        ObjectNode constraints = resolution.semanticDecision().constraints().deepCopy();
+        boolean replaced = false;
+        for (JsonNode filter : constraints.path("filters")) {
+            boolean matchesOriginalPredicate = originalPredicate.isObject() && originalPredicate.equals(filter);
+            boolean matchesOriginalField = originalPredicate.isObject()
+                    && StringUtils.hasText(originalPredicate.path("field").asText(""))
+                    && originalPredicate.path("field").asText("").equals(filter.path("field").asText(""));
+            if (!replaced
+                    && filter.isObject()
+                    && (matchesOriginalPredicate || matchesOriginalField || field.equals(filter.path("field").asText("")))) {
+                ((ObjectNode) filter).put("field", field);
+                ((ObjectNode) filter).set("value", grounding.path("canonicalValue").deepCopy());
+                replaced = true;
+            }
+        }
+        if (!replaced) {
+            return resolution;
+        }
+        LinkedHashSet<String> warnings = new LinkedHashSet<>(
+                resolution.warnings() == null ? List.of() : resolution.warnings());
+        warnings.add("static-enum-filter-grounded-by-canonical-schema");
+        AgenticAuthoringSemanticDecision groundedDecision = resolution.semanticDecision().withConstraints(constraints);
+        return new AgenticAuthoringIntentResolutionResult(
+                resolution.valid(),
+                resolution.operationKind(),
+                resolution.artifactKind(),
+                resolution.changeKind(),
+                resolution.authoringProfile(),
+                resolution.targetApp(),
+                resolution.targetComponentId(),
+                resolution.target(),
+                resolution.selectedCandidate(),
+                resolution.candidates(),
+                resolution.gate(),
+                resolution.effectivePrompt(),
+                resolution.assistantMessage(),
+                resolution.assistantContent(),
+                resolution.apiCatalogAnswer(),
+                resolution.quickReplies(),
+                resolution.pendingClarification(),
+                resolution.clarificationQuestions(),
+                List.copyOf(warnings),
+                resolution.failureCodes(),
+                resolution.currentPageSummary(),
+                resolution.llmDiagnostics(),
+                resolution.visualizationDecision(),
+                groundedDecision);
+    }
+
     private ObjectNode liveOptionFieldProjection(
             Object payload,
             String resourcePath,
             JsonNode originalPredicate) {
         JsonNode schema = payload instanceof JsonNode node ? node.path("schema") : null;
         if (schema == null || !schema.path("properties").isObject()) {
+            return null;
+        }
+        String authoredField = originalPredicate == null
+                ? ""
+                : originalPredicate.path("field").asText("");
+        JsonNode authoredProperty = StringUtils.hasText(authoredField)
+                ? schema.path("properties").path(authoredField)
+                : null;
+        if (authoredProperty != null
+                && authoredProperty.isObject()
+                && !authoredProperty.path("x-ui").path("optionSource").isObject()) {
+            // The prior semantic pass already authored an exact field that exists in the
+            // canonical filter schema. A record identity such as nome=Rodrigo must stay on
+            // that governed non-option field; unrelated option-source candidates are not an
+            // invitation to reinterpret the predicate as a master-data dimension.
             return null;
         }
         ObjectNode projection = objectMapper.createObjectNode();
@@ -4006,69 +4502,22 @@ public class AgenticAuthoringTurnEngine {
         return exactCanonicalMatches == 1;
     }
 
-    private boolean hasSingleCanonicalLiveOptionFieldCandidate(JsonNode fieldGrounding) {
-        return fieldGrounding != null
-                && fieldGrounding.path("candidates").isArray()
-                && fieldGrounding.path("candidates").size() == 1
-                && StringUtils.hasText(fieldGrounding.path("candidates").get(0)
-                        .path("canonicalFilterField").asText(""));
-    }
-
-    private AgenticAuthoringIntentResolutionResult withProvisionalCanonicalLiveOptionField(
-            AgenticAuthoringIntentResolutionResult resolution,
-            JsonNode fieldGrounding) {
-        if (resolution == null
-                || resolution.semanticDecision() == null
-                || resolution.semanticDecision().constraints() == null
-                || !hasSingleCanonicalLiveOptionFieldCandidate(fieldGrounding)) {
-            return resolution;
+    private boolean isCanonicalLiveOptionConstraint(JsonNode predicate, JsonNode fieldGrounding) {
+        if (predicate == null
+                || fieldGrounding == null
+                || !fieldGrounding.path("candidates").isArray()) {
+            return false;
         }
-        String canonicalField = fieldGrounding.path("candidates").get(0)
-                .path("canonicalFilterField").asText("");
-        ObjectNode constraints = resolution.semanticDecision().constraints().deepCopy();
-        JsonNode filters = constraints.path("filters");
-        boolean replaced = false;
-        if (filters.isArray()) {
-            for (JsonNode filter : filters) {
-                if (!replaced && filter.isObject() && isSemanticTextValue(filter.path("value"))) {
-                    ((ObjectNode) filter).put("field", canonicalField);
-                    replaced = true;
-                }
+        String authoredField = predicate.path("field").asText("");
+        if (!StringUtils.hasText(authoredField)) {
+            return false;
+        }
+        for (JsonNode candidate : fieldGrounding.path("candidates")) {
+            if (authoredField.equals(candidate.path("canonicalFilterField").asText(""))) {
+                return true;
             }
         }
-        if (!replaced) {
-            return resolution;
-        }
-        LinkedHashSet<String> warnings = new LinkedHashSet<>(
-                resolution.warnings() == null ? List.of() : resolution.warnings());
-        warnings.add("live-option-field-provisional-schema-candidate");
-        AgenticAuthoringSemanticDecision provisionalDecision =
-                resolution.semanticDecision().withConstraints(constraints);
-        return new AgenticAuthoringIntentResolutionResult(
-                resolution.valid(),
-                resolution.operationKind(),
-                resolution.artifactKind(),
-                resolution.changeKind(),
-                resolution.authoringProfile(),
-                resolution.targetApp(),
-                resolution.targetComponentId(),
-                resolution.target(),
-                resolution.selectedCandidate(),
-                resolution.candidates(),
-                resolution.gate(),
-                resolution.effectivePrompt(),
-                resolution.assistantMessage(),
-                resolution.assistantContent(),
-                resolution.apiCatalogAnswer(),
-                resolution.quickReplies(),
-                resolution.pendingClarification(),
-                resolution.clarificationQuestions(),
-                List.copyOf(warnings),
-                resolution.failureCodes(),
-                resolution.currentPageSummary(),
-                resolution.llmDiagnostics(),
-                resolution.visualizationDecision(),
-                provisionalDecision);
+        return false;
     }
 
     private boolean hasConfirmedLiveOptionSelection(
@@ -7328,6 +7777,21 @@ public class AgenticAuthoringTurnEngine {
         private static LiveOptionFieldGroundingExecution none() {
             return new LiveOptionFieldGroundingExecution(null, null);
         }
+    }
+
+    private record StaticEnumFilterGroundingExecution(
+            AgenticAuthoringToolResult toolResult,
+            ObjectNode projection) {
+
+        private static StaticEnumFilterGroundingExecution none() {
+            return new StaticEnumFilterGroundingExecution(null, null);
+        }
+    }
+
+    private record StaticEnumPropertyCandidate(
+            String field,
+            JsonNode canonicalValue,
+            int fieldMatchScore) {
     }
 
     private enum TokenKind {

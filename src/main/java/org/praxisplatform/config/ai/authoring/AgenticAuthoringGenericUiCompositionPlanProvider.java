@@ -85,6 +85,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 && (isPrimaryComponent(visualizationDecision, "praxis-expansion")
                 || hasLayoutKind(visualizationDecision, "accordion", "expansion", "expansion-panels", "collapsible-panels")
                 || hasVisualIntent(visualizationDecision, "accordion", "expansion", "expansivel", "paineis"));
+        boolean crudRequested = !excludesComponent(visualizationDecision, "praxis-crud")
+                && isPrimaryComponent(visualizationDecision, "praxis-crud");
         if (!List.of("table", "dashboard", "page", "chart").contains(artifactKind)
                 && !(tabsRequested && "component".equals(artifactKind))
                 && !(expansionRequested && "component".equals(artifactKind))) {
@@ -100,7 +102,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         }
         boolean chartOnly = isChartOnlyRequest(request, visualizationDecision);
         boolean dashboardMaterialization = shouldMaterializeDashboard(request, artifactKind, visualizationDecision);
-        ObjectNode plan = expansionRequested ? expansionPlan(candidate) : tabsRequested ? tabsPlan(request, candidate, visualizationDecision) : chartOnly ? singleChartPlan(request, candidate, visualizationDecision) : switch (artifactKind) {
+        ObjectNode plan = crudRequested ? crudPlan(request, candidate) : expansionRequested ? expansionPlan(candidate) : tabsRequested ? tabsPlan(request, candidate, visualizationDecision) : chartOnly ? singleChartPlan(request, candidate, visualizationDecision) : switch (artifactKind) {
             case "dashboard" -> dashboardPlan(request, candidate, visualizationDecision);
             case "table" -> dashboardMaterialization
                     ? dashboardPlan(request, candidate, visualizationDecision)
@@ -111,7 +113,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                     : tablePlan(request, candidate);
         };
         preserveComponentSelectionAudit(request, plan);
-        String providerArtifactKind = chartOnly ? "chart" : dashboardMaterialization ? "dashboard" : artifactKind;
+        String providerArtifactKind = crudRequested ? "crud" : chartOnly ? "chart" : dashboardMaterialization ? "dashboard" : artifactKind;
         return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
                 true,
                 List.of(),
@@ -318,6 +320,18 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         return plan;
     }
 
+    private ObjectNode crudPlan(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringCandidate candidate) {
+        ObjectNode plan = basePlan("resource-crud");
+        String crudKey = widgetKey(candidate, "crud");
+        addCrud(plan.putArray("widgets"), candidate, crudKey);
+        applyGovernedQueryConstraints(plan, request);
+        addSingleTableCanvas(plan, candidate, crudKey);
+        addSingleTableDeviceLayouts(plan, crudKey);
+        return plan;
+    }
+
     private void applyGovernedQueryConstraints(
             ObjectNode plan,
             AgenticAuthoringPlanRequest request) {
@@ -331,16 +345,26 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             return;
         }
         for (JsonNode widget : plan.path("widgets")) {
-            if (!(widget instanceof ObjectNode widgetObject)
-                    || !"praxis-table".equals(widget.path("componentId").asText(""))) {
+            if (!(widget instanceof ObjectNode widgetObject)) {
                 continue;
             }
+            String componentId = widget.path("componentId").asText("");
             ObjectNode inputs = widgetObject.path("inputs") instanceof ObjectNode existingInputs
                     ? existingInputs
                     : widgetObject.putObject("inputs");
-            ObjectNode queryContext = inputs.path("queryContext") instanceof ObjectNode existingQueryContext
+            ObjectNode queryContextHost;
+            if ("praxis-table".equals(componentId)) {
+                queryContextHost = inputs;
+            } else if ("praxis-crud".equals(componentId)) {
+                queryContextHost = inputs.path("metadata") instanceof ObjectNode existingMetadata
+                        ? existingMetadata
+                        : inputs.putObject("metadata");
+            } else {
+                continue;
+            }
+            ObjectNode queryContext = queryContextHost.path("queryContext") instanceof ObjectNode existingQueryContext
                     ? existingQueryContext
-                    : inputs.putObject("queryContext");
+                    : queryContextHost.putObject("queryContext");
             ObjectNode filters = queryContext.path("filters") instanceof ObjectNode existingFilters
                     ? existingFilters
                     : queryContext.putObject("filters");
@@ -354,14 +378,20 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 }
             }
             if (!filters.isEmpty()) {
-                ArrayNode bindingOrder = widgetObject.withArray("bindingOrder");
-                if (!containsText(bindingOrder, "queryContext")) {
-                    bindingOrder.add("queryContext");
+                if ("praxis-table".equals(componentId)) {
+                    ArrayNode bindingOrder = widgetObject.withArray("bindingOrder");
+                    if (!containsText(bindingOrder, "queryContext")) {
+                        bindingOrder.add("queryContext");
+                    }
                 }
                 ObjectNode diagnostics = plan.path("diagnostics") instanceof ObjectNode existingDiagnostics
                         ? existingDiagnostics
                         : plan.putObject("diagnostics");
-                diagnostics.put("queryConstraintsMaterialized", true);
+                // The provider only projects the AI-authored predicate. Canonical field
+                // confirmation belongs to the preview boundary, which has access to the
+                // governed /schemas/filtered contract. Do not claim materialization before
+                // that evidence has been reconciled.
+                diagnostics.put("queryConstraintsRequested", true);
             }
         }
     }
@@ -895,6 +925,32 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode config = inputs.putObject("config");
         config.put("title", resourceTitle(candidate));
         config.putArray("columns");
+    }
+
+    private void addCrud(ArrayNode widgets, AgenticAuthoringCandidate candidate, String key) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", key);
+        widget.put("componentId", "praxis-crud");
+        widget.put("role", "main");
+        widget.putArray("bindingOrder")
+                .add("crudId")
+                .add("componentInstanceId")
+                .add("metadata")
+                .add("enableCustomization");
+        ObjectNode inputs = widget.putObject("inputs");
+        inputs.put("crudId", key);
+        inputs.put("componentInstanceId", key);
+        inputs.put("enableCustomization", true);
+        ObjectNode metadata = inputs.putObject("metadata");
+        metadata.put("component", "praxis-crud");
+        ObjectNode resource = metadata.putObject("resource");
+        resource.put("path", businessResourcePath(candidate.resourcePath()));
+        resource.put("idField", "id");
+        resource.put("title", resourceTitle(candidate));
+        ObjectNode table = metadata.putObject("table");
+        table.put("title", resourceTitle(candidate));
+        table.putArray("columns");
+        metadata.putObject("defaults").put("openMode", "drawer");
     }
 
     private void addList(

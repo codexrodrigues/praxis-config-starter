@@ -731,6 +731,60 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void materializesCanonicalCrudWhenSemanticDecisionRequestsOperationalCrud() {
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "review_and_approve_payroll_events",
+                "operational-crud",
+                "praxis-crud",
+                List.of(),
+                false,
+                true,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringIntentResolutionResult operationalIntent = intent(
+                "create", "page", "create_artifact", "/api/payroll/events", visualizationDecision);
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", true);
+        constraints.putArray("filters")
+                .addObject()
+                .put("field", "employeeName")
+                .put("operator", "eq")
+                .put("value", "Rodrigo");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Prepare uma tela para revisar eventos da folha de Rodrigo",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                withConstraints(operationalIntent, constraints)))
+                .orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(result.warnings()).containsExactly("ui-composition-plan-provider:generic-resource-crud");
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-crud");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-crud");
+        JsonNode inputs = findWidgetInputs(plan, "praxis-crud");
+        assertThat(inputs.path("crudId").asText()).isEqualTo("events-crud");
+        assertThat(inputs.path("componentInstanceId").asText()).isEqualTo("events-crud");
+        assertThat(inputs.path("metadata").path("component").asText()).isEqualTo("praxis-crud");
+        assertThat(inputs.path("metadata").path("resource").path("path").asText())
+                .isEqualTo("/api/payroll/events");
+        assertThat(inputs.path("metadata").path("resource").path("idField").asText()).isEqualTo("id");
+        assertThat(inputs.path("metadata").path("table").path("columns").isArray()).isTrue();
+        assertThat(inputs.path("metadata").path("defaults").path("openMode").asText()).isEqualTo("drawer");
+        assertThat(inputs.path("metadata").path("queryContext").path("filters").path("employeeName").asText())
+                .isEqualTo("Rodrigo");
+        assertThat(plan.path("diagnostics").path("queryConstraintsRequested").asBoolean()).isTrue();
+        assertThat(plan.path("diagnostics").path("queryConstraintsMaterialized").asBoolean()).isFalse();
+        assertThat(inputs.path("metadata").has("actions")).isFalse();
+        assertThat(plan.path("widgets").toString())
+                .doesNotContain("praxis-table")
+                .doesNotContain("praxis-dynamic-form");
+    }
+
+    @Test
     void materializesMasterDetailPageWithFullWidthPresentationCanvas() {
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "quero criar algo que mostre informacoes dos empregados",
@@ -2595,6 +2649,36 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 objectMapper.createObjectNode(),
                 objectMapper.createObjectNode(),
                 visualizationDecision);
+    }
+
+    private AgenticAuthoringIntentResolutionResult withConstraints(
+            AgenticAuthoringIntentResolutionResult intent,
+            JsonNode constraints) {
+        return new AgenticAuthoringIntentResolutionResult(
+                intent.valid(),
+                intent.operationKind(),
+                intent.artifactKind(),
+                intent.changeKind(),
+                intent.authoringProfile(),
+                intent.targetApp(),
+                intent.targetComponentId(),
+                intent.target(),
+                intent.selectedCandidate(),
+                intent.candidates(),
+                intent.gate(),
+                intent.effectivePrompt(),
+                intent.assistantMessage(),
+                intent.assistantContent(),
+                intent.apiCatalogAnswer(),
+                intent.quickReplies(),
+                intent.pendingClarification(),
+                intent.clarificationQuestions(),
+                intent.warnings(),
+                intent.failureCodes(),
+                intent.currentPageSummary(),
+                intent.llmDiagnostics(),
+                intent.visualizationDecision(),
+                intent.semanticDecision().withConstraints(constraints));
     }
 
     private AgenticAuthoringIntentResolutionResult chartModificationIntent() {

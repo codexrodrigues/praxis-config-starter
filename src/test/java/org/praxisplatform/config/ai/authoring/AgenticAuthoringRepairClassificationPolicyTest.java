@@ -43,6 +43,14 @@ class AgenticAuthoringRepairClassificationPolicyTest {
     }
 
     @Test
+    void doesNotRetryAComponentOperationSemanticClarification() {
+        assertThat(AgenticAuthoringRepairClassificationPolicy.classify(
+                        intent("eligible", List.of()),
+                        preview(false, List.of("component-operation-selection-clarification-required"))))
+                .isEqualTo("user_clarification_required");
+    }
+
+    @Test
     void classifiesValidOrMissingPreviewAsNonRetryable() {
         assertThat(AgenticAuthoringRepairClassificationPolicy.classify(
                         intent("eligible", List.of()),

@@ -113,12 +113,13 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("not yet commanding creation")
                 .contains("domainDiscovery")
                 .contains("human-resources.funcionarios")
-                .contains("Artifact kind and defaults are not constraints")
+                .contains("Resource discovery, artifact kind")
+                .contains("defaults and a generic dashboard are not constraints")
                 .contains("queryConstraints.appliesToDataSelection=true")
                 .contains("headers, labels, renderers, formatting, composed cells")
-                .contains("generic governed dashboard request")
-                .contains("specific measured business subject")
-                .contains("relevant axes and metrics")
+                .contains("generic dashboard are not constraints")
+                .contains("Set primaryComponent semantically")
+                .contains("praxis-crud for governed record")
                 .contains("Feasibility questions stay platform_guidance")
                 .contains("they do not")
                 .contains("informações salariais")
@@ -134,6 +135,8 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("retrievalQuery")
                 .contains("appliesToDataSelection")
                 .contains("displayed-value edits")
+                .contains("primaryComponent")
+                .contains("praxis-crud")
                 .contains("Canonical business subject explicitly requested by the user")
                 .contains("Dimensions, fields, filters, groupings")
                 .contains("collection dashboard with filters, charts, and a detail table");
@@ -141,6 +144,53 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         assertThat(configCaptor.getValue().getModel()).isEqualTo("gpt-5.6-luna");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(640);
         assertThat(configCaptor.getValue().getInvocationTrace()).isNotNull();
+    }
+
+    @Test
+    void preservesCrudAsPrimaryComponentForGovernedWorkflowActions() throws Exception {
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "semanticIntentClass": "authoring_or_other",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "requiresFullIntentResolution": true,
+                          "queryConstraints": {
+                            "appliesToDataSelection": true,
+                            "filters": [{
+                              "concept": "eventos pendentes",
+                              "field": "status",
+                              "operator": "eq",
+                              "value": "pendentes"
+                            }]
+                          },
+                          "groundingProfile": "api_resource",
+                          "artifactKind": "page",
+                          "primaryComponent": "praxis-crud",
+                          "retrievalQuery": "eventos da folha com ação de aprovação em lote",
+                          "resourceSearchFocus": {
+                            "primaryBusinessEntity": "human-resources.eventos-folha",
+                            "supportingConcepts": ["status pendente", "aprovação em lote"],
+                            "desiredSurface": "lista operacional com ação governada",
+                            "uncertainty": null,
+                            "rationale": "A interação exige preservar ações do recurso existente."
+                          },
+                          "reason": "Ground the resource and preserve its governed workflow actions."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("monte uma lista dos eventos pendentes e deixe a aprovação em lote disponível"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().primaryComponent()).isEqualTo("praxis-crud");
+        assertThat(result.plan().requiresFullIntentResolution()).isTrue();
+        assertThat(result.plan().queryConstraints().path("filters")).hasSize(1);
     }
 
     @Test

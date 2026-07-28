@@ -353,6 +353,10 @@ public class AgenticAuthoringCurrentPageAnalyzer {
         if (!resourcePath.isBlank()) {
             return normalizeResourcePath(resourcePath);
         }
+        String metadataResourcePath = text(inputs.path("metadata").path("resource"), "path");
+        if (!metadataResourcePath.isBlank()) {
+            return normalizeResourcePath(metadataResourcePath);
+        }
         String chartDataSourceResourcePath = text(inputs.path("config").path("dataSource"), "resourcePath");
         if (!chartDataSourceResourcePath.isBlank()) {
             return normalizeResourcePath(chartDataSourceResourcePath);

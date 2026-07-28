@@ -199,6 +199,45 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
     }
 
     @Test
+    void synthesizeOperationalCrudDoesNotClaimRecordOrWriteValueGrounding() {
+        AgenticAuthoringIntentResolutionResult intent = operationalCrudIntent();
+
+        String result = service().synthesize(
+                new AgenticAuthoringPlanRequest(
+                        "Encontre Rodrigo, prepare Rodrygo e sexo masculino, mas não salve.",
+                        "openai",
+                        "gpt-5.6-terra",
+                        "test-key",
+                        null,
+                        intent),
+                intent,
+                operationalCrudPlan(),
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:generic-resource-crud"),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result)
+                .contains("tela operacional")
+                .contains("Funcionários")
+                .contains("lista foi recortada pelos critérios pedidos")
+                .contains("nenhum registro foi escolhido automaticamente")
+                .contains("não confirmou nem preencheu valores de alteração")
+                .contains("nada foi executado ou salvo")
+                .doesNotContain("nome e sexo")
+                .doesNotContain("campos confirmados");
+        org.mockito.Mockito.verify(providerManagementService, org.mockito.Mockito.never()).generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                any(String.class),
+                any(String.class),
+                any(String.class));
+    }
+
+    @Test
     void synthesizeCollapsesRepeatedSemanticGoalInGovernedMessage() {
         String result = service().synthesize(
                 governedPreIntentRequest(),
@@ -760,6 +799,52 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
         return governedPreIntentIntent("dashboard");
     }
 
+    private AgenticAuthoringIntentResolutionResult operationalCrudIntent() {
+        AgenticAuthoringIntentResolutionResult base = governedPreIntentIntent("page");
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", true);
+        constraints.putArray("filters")
+                .addObject()
+                .put("field", "nomeCompleto")
+                .put("operator", "eq")
+                .put("value", "Rodrigo");
+        AgenticAuthoringSemanticDecision decision = base.semanticDecision().withConstraints(constraints);
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter",
+                "POST",
+                0.94d,
+                "LLM selected the governed employee resource",
+                List.of("tool-search-api-resources", "schema-available"));
+        return new AgenticAuthoringIntentResolutionResult(
+                base.valid(),
+                base.operationKind(),
+                "page",
+                base.changeKind(),
+                base.authoringProfile(),
+                base.targetApp(),
+                "praxis-crud",
+                base.target(),
+                candidate,
+                List.of(candidate),
+                base.gate(),
+                base.effectivePrompt(),
+                base.assistantMessage(),
+                base.assistantContent(),
+                base.apiCatalogAnswer(),
+                base.quickReplies(),
+                base.pendingClarification(),
+                base.clarificationQuestions(),
+                base.warnings(),
+                base.failureCodes(),
+                base.currentPageSummary(),
+                base.llmDiagnostics(),
+                base.visualizationDecision(),
+                decision);
+    }
+
     private AgenticAuthoringIntentResolutionResult governedPreIntentIntent(String artifactKind) {
         return new AgenticAuthoringIntentResolutionResult(
                 true,
@@ -1162,6 +1247,21 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
         ObjectNode inputs = widget.putObject("inputs");
         inputs.put("resourcePath", "/api/operations/vw-resumo-missoes");
         inputs.put("schemaPath", "/schemas/filtered?path=/api/operations/vw-resumo-missoes/all&operation=get&schemaType=response");
+        return plan;
+    }
+
+    private ObjectNode operationalCrudPlan() {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("kind", "praxis.ui-composition-plan");
+        plan.put("layoutPreset", "resource-crud");
+        ObjectNode widget = plan.putArray("widgets").addObject();
+        widget.put("key", "funcionarios-crud");
+        widget.put("componentId", "praxis-crud");
+        widget.put("title", "Funcionários");
+        ObjectNode metadata = widget.putObject("inputs").putObject("metadata");
+        metadata.put("component", "praxis-crud");
+        metadata.putObject("queryContext").putObject("filters").put("nomeCompleto", "Rodrigo");
+        plan.putObject("diagnostics").put("queryConstraintsMaterialized", true);
         return plan;
     }
 

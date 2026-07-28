@@ -230,19 +230,33 @@ class AgenticAuthoringToolRegistryTest {
                 .thenReturn(new AgenticAuthoringOperationalBindingVerificationService.VerificationResult(
                         true,
                         "human-resources.funcionarios",
-                        List.of(new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
-                                "hr:employee-management",
-                                "resource:human-resources.funcionarios",
-                                "human-resources.funcionarios",
-                                "/api/human-resources/funcionarios",
-                                "/api/human-resources/funcionarios/filter/cursor",
-                                "post",
-                                "request",
-                                "http://localhost/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Ffuncionarios%2Ffilter%2Fcursor&operation=post&schemaType=request",
-                                "http://localhost/api/human-resources/funcionarios/capabilities",
-                                "cursor",
-                                "hr-v1",
-                                binding.evidence())),
+                        List.of(
+                                new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
+                                        "hr:employee-management",
+                                        "resource:human-resources.funcionarios",
+                                        "human-resources.funcionarios",
+                                        "/api/human-resources/funcionarios",
+                                        "/api/human-resources/funcionarios/filter/cursor",
+                                        "post",
+                                        "request",
+                                        "http://localhost/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Ffuncionarios%2Ffilter%2Fcursor&operation=post&schemaType=request",
+                                        "http://localhost/api/human-resources/funcionarios/capabilities",
+                                        "cursor",
+                                        "hr-v1",
+                                        binding.evidence()),
+                                new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
+                                        "hr:employee-management",
+                                        "update:human-resources.funcionarios",
+                                        "human-resources.funcionarios",
+                                        "/api/human-resources/funcionarios",
+                                        "/api/human-resources/funcionarios/{id}",
+                                        "put",
+                                        "request",
+                                        "http://localhost/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Ffuncionarios%2F%7Bid%7D&operation=put&schemaType=request",
+                                        "http://localhost/api/human-resources/funcionarios/capabilities",
+                                        "update",
+                                        "hr-v1",
+                                        binding.evidence())),
                         List.of()));
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
                 resourceDiscoveryService,
@@ -269,7 +283,7 @@ class AgenticAuthoringToolRegistryTest {
 
         assertThat(result.valid()).isTrue();
         assertThat(result.safeDiagnostics())
-                .containsEntry("candidateCount", 1)
+                .containsEntry("candidateCount", 2)
                 .containsEntry("retrievalSource", "domain_binding")
                 .extractingByKey("resourceDiscoveryDiagnostics")
                 .isInstanceOfSatisfying(Map.class, diagnostics -> assertThat(diagnostics)
@@ -277,9 +291,21 @@ class AgenticAuthoringToolRegistryTest {
                         .containsEntry("bindingVerification", "schemas.filtered+resource.capabilities"));
         AgenticAuthoringResourceCandidatesResult payload =
                 (AgenticAuthoringResourceCandidatesResult) result.payload();
-        assertThat(payload.candidates()).singleElement().satisfies(candidate -> {
-            assertThat(candidate.resourcePath()).isEqualTo("/api/human-resources/funcionarios");
-            assertThat(candidate.submitUrl()).isEqualTo("/api/human-resources/funcionarios/filter/cursor");
+        assertThat(payload.candidates())
+                .extracting(
+                        AgenticAuthoringCandidate::resourcePath,
+                        AgenticAuthoringCandidate::submitUrl,
+                        AgenticAuthoringCandidate::submitMethod)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                "/api/human-resources/funcionarios",
+                                "/api/human-resources/funcionarios/filter/cursor",
+                                "POST"),
+                        org.assertj.core.groups.Tuple.tuple(
+                                "/api/human-resources/funcionarios",
+                                "/api/human-resources/funcionarios/{id}",
+                                "PUT"));
+        assertThat(payload.candidates()).allSatisfy(candidate -> {
             assertThat(candidate.evidenceBundle().retrievalSource()).isEqualTo("domain_binding");
             assertThat(candidate.evidenceBundle().evidence())
                     .extracting(AgenticAuthoringEvidenceBundle.Evidence::kind)

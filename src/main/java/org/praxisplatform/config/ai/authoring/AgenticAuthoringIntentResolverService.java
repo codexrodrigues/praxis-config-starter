@@ -326,6 +326,29 @@ public class AgenticAuthoringIntentResolverService {
                 llmIntent,
                 semanticOrientation,
                 llmCandidateOptions);
+        llmIntent = failClosedForUnconfirmedAiAuthoredResourceSelection(
+                request,
+                semanticOrientation,
+                llmCandidateOptions,
+                llmIntent);
+        boolean unconfirmedAiAuthoredResourceFocus = hasUnconfirmedAiAuthoredResourceFocus(
+                request,
+                llmCandidateOptions);
+        if (unconfirmedAiAuthoredResourceFocus) {
+            llmIntent = withLlmWarning(
+                    llmIntent,
+                    "llm-resource-selection-unconfirmed-by-ai-authored-focus");
+        }
+        boolean unconfirmedAiAuthoredResourceSelection = hasLlmWarning(
+                llmIntent,
+                "llm-resource-selection-unconfirmed-by-ai-authored-focus");
+        if (shouldPromoteCompactTarget(llmIntent, llmGroundingTarget, target)) {
+            target = llmGroundingTarget;
+            AgenticAuthoringCandidate compactTargetCandidate = targetCandidate(target);
+            if (compactTargetCandidate != null) {
+                candidates = withPriorityCandidate(candidates, compactTargetCandidate);
+            }
+        }
         semanticRefinement = semanticRefinement(prompt, activeDecision, llmIntent);
         decisionMemoryRefinement = semanticRefinement.active();
         JsonNode llmDiagnostics = llmDiagnostics(
@@ -1131,6 +1154,16 @@ public class AgenticAuthoringIntentResolverService {
             changeKind = "provider_error";
             selectedCandidate = null;
         }
+        if (unconfirmedAiAuthoredResourceSelection) {
+            // This is a post-semantic grounding gate. It never routes intent from user text:
+            // the AI-authored focus declared the uncertainty, and canonical candidate evidence
+            // proves that the selected resource was not anchored to the requested entity.
+            operationKind = "unknown";
+            artifactKind = "unknown";
+            changeKind = "needs_clarification";
+            selectedCandidate = null;
+            deterministicFallbackApplied = false;
+        }
         changeKind = normalizeTargetlessCreationChangeKind(
                 operationKind,
                 artifactKind,
@@ -1165,7 +1198,7 @@ public class AgenticAuthoringIntentResolverService {
                 componentCapabilities);
         if ((!hasGovernedClarificationGate(gate) || shouldUseLlmArtifactClarification(gate))
                 && llmIntent != null
-                && llmIntent.resolved()
+                && (llmIntent.resolved() || unconfirmedAiAuthoredResourceSelection)
                 && llmIntent.assistantMessage() != null
                 && !llmIntent.assistantMessage().isBlank()
                 && !shouldSuppressLlmAssistantMessageForExplicitLocalComposition(explicitLocalUiComposition, llmIntent)
@@ -1853,8 +1886,24 @@ public class AgenticAuthoringIntentResolverService {
         if (activeDecision == null || activeDecision.selectedResource() == null) {
             return AgenticAuthoringSemanticRefinement.none();
         }
-        if (isResolvedComponentAuthoringIntent(llmIntent)) {
+        boolean llmDataSelectionRefinement = isLlmDataSelectionRefinement(llmIntent);
+        if (isResolvedComponentAuthoringIntent(llmIntent) && !llmDataSelectionRefinement) {
             return AgenticAuthoringSemanticRefinement.none();
+        }
+        if (llmDataSelectionRefinement) {
+            List<String> filterFields = semanticConstraintFields(llmIntent.queryConstraints());
+            Map<String, List<String>> add = filterFields.isEmpty()
+                    ? Map.of()
+                    : Map.of("filters", filterFields);
+            return new AgenticAuthoringSemanticRefinement(
+                    AgenticAuthoringSemanticRefinement.SCHEMA_VERSION,
+                    "filtering",
+                    List.of("resource", "source"),
+                    Map.of(),
+                    add,
+                    List.of(),
+                    "The AI-resolved follow-up changes the selected record subset while preserving the active governed resource.",
+                    0.92d);
         }
         String normalized = normalize(prompt);
         String followUpKind = llmIntent == null ? "" : valueOrDefault(llmIntent.followUpKind(), "");
@@ -1925,12 +1974,53 @@ public class AgenticAuthoringIntentResolverService {
                 explicitPreserve ? 0.90d : 0.86d);
     }
 
+    private boolean isLlmDataSelectionRefinement(AgenticAuthoringLlmIntentResolution llmIntent) {
+        return llmIntent != null
+                && llmIntent.resolved()
+                && "refinement".equals(valueOrDefault(llmIntent.followUpKind(), ""))
+                && llmIntent.queryConstraints() != null
+                && llmIntent.queryConstraints().path("appliesToDataSelection").asBoolean(false);
+    }
+
+    private List<String> semanticConstraintFields(JsonNode queryConstraints) {
+        if (queryConstraints == null || !queryConstraints.path("filters").isArray()) {
+            return List.of();
+        }
+        LinkedHashSet<String> fields = new LinkedHashSet<>();
+        for (JsonNode filter : queryConstraints.path("filters")) {
+            String field = filter.path("field").asText("").trim();
+            if (!field.isBlank()) {
+                fields.add(field);
+            }
+        }
+        return List.copyOf(fields);
+    }
+
     private boolean isResolvedComponentAuthoringIntent(AgenticAuthoringLlmIntentResolution llmIntent) {
         return llmIntent != null
                 && llmIntent.resolved()
                 && "component_authoring".equals(valueOrDefault(llmIntent.semanticIntentClass(), ""))
                 && Set.of("modify", "undo").contains(
                         valueOrDefault(llmIntent.operationKind(), ""));
+    }
+
+    private boolean shouldPromoteCompactTarget(
+            AgenticAuthoringLlmIntentResolution llmIntent,
+            AgenticAuthoringTarget llmGroundingTarget,
+            AgenticAuthoringTarget explicitTarget) {
+        boolean scopedCompactIntent = isResolvedComponentAuthoringIntent(llmIntent)
+                || hasLlmWarning(llmIntent, "llm-compact-targeted-component-clarification-used");
+        if (explicitTarget != null
+                || llmGroundingTarget == null
+                || !scopedCompactIntent
+                || llmIntent.warnings() == null
+                || !llmIntent.warnings().contains("llm-compact-targeted-component-intent-used")) {
+            return false;
+        }
+        String selectedResourcePath = normalizePath(llmIntent.selectedResourcePath());
+        String targetResourcePath = normalizePath(llmGroundingTarget.resourcePath());
+        return !selectedResourcePath.isBlank()
+                && selectedResourcePath.equals(targetResourcePath);
     }
 
     private AgenticAuthoringSemanticRefinement visualProjectionRefinement(String prompt) {
@@ -2742,6 +2832,10 @@ public class AgenticAuthoringIntentResolverService {
                 return null;
             }
         }
+        if (hasUnconfirmedAiAuthoredResourceFocus(request, focusedCandidate)) {
+            trace.add("skipped:ai-authored-resource-focus-unconfirmed");
+            return null;
+        }
         trace.add("accepted:pre-intent-governed-evidence");
         return new AgenticAuthoringLlmIntentResolution(
                 true,
@@ -2758,11 +2852,42 @@ public class AgenticAuthoringIntentResolverService {
                         "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
                         "llm-pre-intent-resource-discovery-used"),
                 null,
-                null,
+                preIntentVisualizationDecision(semanticOrientation),
                 false,
                 "component_authoring",
                 semanticOrientation == null ? null : semanticOrientation.queryConstraints(),
                 List.of());
+    }
+
+    private AgenticAuthoringVisualizationDecision preIntentVisualizationDecision(
+            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
+        String primaryComponent = semanticOrientation == null
+                ? ""
+                : valueOrDefault(semanticOrientation.primaryComponent(), "");
+        if (primaryComponent.isBlank()) {
+            return null;
+        }
+        String layoutKind = switch (primaryComponent) {
+            case "praxis-crud" -> "resource-crud";
+            case "praxis-table" -> "single-table";
+            case "praxis-dynamic-form" -> "single-form";
+            case "praxis-chart" -> "single-chart";
+            default -> "single-component";
+        };
+        boolean detailTable = "praxis-crud".equals(primaryComponent)
+                || "praxis-table".equals(primaryComponent);
+        return new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "pre-intent-primary-component",
+                layoutKind,
+                primaryComponent,
+                List.of(),
+                false,
+                detailTable,
+                List.of(),
+                true,
+                false,
+                "llm-pre-intent-semantic-orientation");
     }
 
     private boolean requiresAdditionalIntentResolution(
@@ -2771,6 +2896,9 @@ public class AgenticAuthoringIntentResolverService {
             return false;
         }
         JsonNode constraints = semanticOrientation.queryConstraints();
+        // A governed page/table selection with explicit semantic filters is already a complete
+        // authoring decision. Other cases (notably forms and workflow actions) still need the
+        // full semantic pass even when pre-intent also recommends a component.
         return !"authoring_or_other".equals(semanticOrientation.semanticIntentClass())
                 || constraints == null
                 || !constraints.path("filters").isArray()
@@ -2856,6 +2984,12 @@ public class AgenticAuthoringIntentResolverService {
         if (!warnings.contains("llm-constrained-authoring-resource-confirmation-normalized")) {
             warnings.add("llm-constrained-authoring-resource-confirmation-normalized");
         }
+        AgenticAuthoringVisualizationDecision visualizationDecision =
+                reconcileConstrainedPrimaryComponent(resolution, semanticOrientation);
+        if (visualizationDecision != resolution.visualizationDecision()
+                && !warnings.contains("llm-pre-intent-primary-component-reconciled")) {
+            warnings.add("llm-pre-intent-primary-component-reconciled");
+        }
         return new AgenticAuthoringLlmIntentResolution(
                 true,
                 "create",
@@ -2869,10 +3003,228 @@ public class AgenticAuthoringIntentResolverService {
                 List.of(),
                 List.copyOf(warnings),
                 resolution.consultativeRetrievalPlan(),
-                resolution.visualizationDecision(),
+                visualizationDecision,
                 false,
                 "component_authoring",
                 governedConstraints,
+                resolution.providerInvocations());
+    }
+
+    private AgenticAuthoringVisualizationDecision reconcileConstrainedPrimaryComponent(
+            AgenticAuthoringLlmIntentResolution resolution,
+            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
+        if (resolution == null || semanticOrientation == null) {
+            return resolution == null ? null : resolution.visualizationDecision();
+        }
+        String orientedPrimaryComponent = valueOrDefault(semanticOrientation.primaryComponent(), "");
+        String artifactKind = constrainedOrientationArtifactKind(semanticOrientation, resolution);
+        if (orientedPrimaryComponent.isBlank()
+                || !isCompatiblePrimaryComponent(artifactKind, orientedPrimaryComponent)) {
+            return resolution.visualizationDecision();
+        }
+        AgenticAuthoringVisualizationDecision current = resolution.visualizationDecision();
+        if (current != null && orientedPrimaryComponent.equals(current.primaryComponent())) {
+            return current;
+        }
+        AgenticAuthoringVisualizationDecision oriented = preIntentVisualizationDecision(semanticOrientation);
+        if (oriented == null) {
+            return current;
+        }
+        return new AgenticAuthoringVisualizationDecision(
+                current == null ? oriented.schemaVersion() : current.schemaVersion(),
+                current == null || valueOrDefault(current.intent(), "").isBlank()
+                        ? oriented.intent()
+                        : current.intent(),
+                oriented.layoutKind(),
+                oriented.primaryComponent(),
+                List.of(),
+                oriented.includeSummary(),
+                oriented.includeDetailTable(),
+                current == null ? oriented.excludedComponentIds() : current.excludedComponentIds(),
+                oriented.includeFilters(),
+                oriented.includeKpis(),
+                "llm-pre-intent-semantic-orientation+full-intent-reconciliation");
+    }
+
+    private boolean isCompatiblePrimaryComponent(String artifactKind, String primaryComponent) {
+        return switch (valueOrDefault(artifactKind, "")) {
+            case "page" -> Set.of(
+                    "praxis-crud",
+                    "praxis-table",
+                    "praxis-dynamic-form",
+                    "praxis-list",
+                    "praxis-tabs",
+                    "praxis-expansion").contains(primaryComponent);
+            case "table" -> "praxis-table".equals(primaryComponent);
+            case "form" -> "praxis-dynamic-form".equals(primaryComponent);
+            case "chart", "dashboard" -> "praxis-chart".equals(primaryComponent);
+            default -> false;
+        };
+    }
+
+    private AgenticAuthoringLlmIntentResolution failClosedForUnconfirmedAiAuthoredResourceSelection(
+            AgenticAuthoringIntentResolutionRequest request,
+            AgenticAuthoringPreIntentToolPlan semanticOrientation,
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringLlmIntentResolution resolution) {
+        if (resolution == null
+                || !resolution.resolved()
+                || valueOrDefault(resolution.selectedResourcePath(), "").isBlank()) {
+            return resolution;
+        }
+        String selectedPath = normalizePath(resolution.selectedResourcePath());
+        AgenticAuthoringCandidate selectedCandidate = (candidates == null
+                        ? List.<AgenticAuthoringCandidate>of()
+                        : candidates)
+                .stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> selectedPath.equals(normalizePath(candidate.resourcePath())))
+                .findFirst()
+                .orElse(null);
+        if (!hasUnconfirmedAiAuthoredResourceFocus(request, selectedCandidate)) {
+            return resolution;
+        }
+        AgenticAuthoringResourceSearchFocus focus = resourceDiscoverySearchFocus(request);
+        List<String> warnings = new ArrayList<>(
+                resolution.warnings() == null ? List.of() : resolution.warnings());
+        if (!warnings.contains("llm-resource-selection-unconfirmed-by-ai-authored-focus")) {
+            warnings.add("llm-resource-selection-unconfirmed-by-ai-authored-focus");
+        }
+        List<String> questions = resolution.clarificationQuestions() == null
+                        || resolution.clarificationQuestions().isEmpty()
+                ? List.of(focus.uncertainty())
+                : resolution.clarificationQuestions();
+        return new AgenticAuthoringLlmIntentResolution(
+                false,
+                "unknown",
+                "unknown",
+                "needs_clarification",
+                null,
+                resolution.resourceSearchQuery(),
+                "none",
+                resolution.assistantMessage(),
+                resolution.quickReplies(),
+                questions,
+                List.copyOf(warnings),
+                resolution.consultativeRetrievalPlan(),
+                null,
+                resolution.requiresGovernedAuthoring(),
+                resolution.semanticIntentClass(),
+                resolution.queryConstraints(),
+                resolution.providerInvocations());
+    }
+
+    private boolean hasUnconfirmedAiAuthoredResourceFocus(
+            AgenticAuthoringIntentResolutionRequest request,
+            AgenticAuthoringCandidate candidate) {
+        AgenticAuthoringResourceSearchFocus focus = resourceDiscoverySearchFocus(request);
+        if (focus.isEmpty() || !requiresConfirmedResourceFocus(focus)) {
+            return false;
+        }
+        if (candidate == null) {
+            return true;
+        }
+        if (isCanonicalResourceIdentity(focus.primaryBusinessEntity())) {
+            if (!canonicalResourceIdentityMatchesCandidate(
+                    focus.primaryBusinessEntity(), candidate)) {
+                return true;
+            }
+            // The exact identity-to-path reconciliation is itself governed post-semantic
+            // grounding. Further confirmation is only required when the model declared a
+            // material uncertainty that remains unresolved.
+            if (focus.uncertainty().isBlank()) {
+                return false;
+            }
+        }
+        return !hasEvidence(candidate, "domain-anchor")
+                && !hasEvidence(candidate, "domain-binding-operationally-verified")
+                && !hasEvidence(candidate, "domain-binding")
+                && !hasEvidence(candidate, "explicit-source-match")
+                && !hasEvidence(candidate, "explicit-resource-path")
+                && !hasEvidence(candidate, "quick-reply-context")
+                && !hasEvidence(candidate, "current-page-target-resource");
+    }
+
+    private boolean hasUnconfirmedAiAuthoredResourceFocus(
+            AgenticAuthoringIntentResolutionRequest request,
+            List<AgenticAuthoringCandidate> candidates) {
+        AgenticAuthoringResourceSearchFocus focus = resourceDiscoverySearchFocus(request);
+        if (focus.isEmpty() || !requiresConfirmedResourceFocus(focus)) {
+            return false;
+        }
+        List<AgenticAuthoringCandidate> availableCandidates = candidates == null
+                ? List.of()
+                : candidates.stream().filter(Objects::nonNull).toList();
+        return availableCandidates.isEmpty()
+                || availableCandidates.stream()
+                        .allMatch(candidate -> hasUnconfirmedAiAuthoredResourceFocus(request, candidate));
+    }
+
+    private boolean requiresConfirmedResourceFocus(AgenticAuthoringResourceSearchFocus focus) {
+        return focus != null
+                && (!focus.uncertainty().isBlank()
+                        || isCanonicalResourceIdentity(focus.primaryBusinessEntity()));
+    }
+
+    private boolean isCanonicalResourceIdentity(String primaryBusinessEntity) {
+        if (primaryBusinessEntity == null) {
+            return false;
+        }
+        String value = primaryBusinessEntity.trim();
+        int separator = value.indexOf('.');
+        if (separator <= 0 || separator >= value.length() - 1 || value.indexOf(' ') >= 0) {
+            return false;
+        }
+        // This is post-semantic grounding of an AI-authored canonical identity, not routing from
+        // user wording. The exact identity must be backed by a governed binding before execution.
+        return value.chars().allMatch(character -> Character.isLetterOrDigit(character)
+                || character == '.'
+                || character == '-'
+                || character == '_');
+    }
+
+    private boolean canonicalResourceIdentityMatchesCandidate(
+            String primaryBusinessEntity,
+            AgenticAuthoringCandidate candidate) {
+        if (!isCanonicalResourceIdentity(primaryBusinessEntity) || candidate == null) {
+            return false;
+        }
+        String expectedPath = normalizePath(
+                "/api/" + primaryBusinessEntity.trim().replace('.', '/'));
+        String candidatePath = normalizePath(candidate.resourcePath());
+        if (expectedPath.equals(candidatePath)) {
+            return true;
+        }
+        String operation = valueOrDefault(candidate.operation(), candidate.submitMethod());
+        return candidatePath.startsWith(expectedPath + "/")
+                && isReadProjectionOperation(candidate.submitUrl(), operation);
+    }
+
+    private AgenticAuthoringLlmIntentResolution withLlmWarning(
+            AgenticAuthoringLlmIntentResolution resolution,
+            String warning) {
+        if (resolution == null || warning == null || warning.isBlank() || hasLlmWarning(resolution, warning)) {
+            return resolution;
+        }
+        List<String> warnings = new ArrayList<>(resolution.warnings() == null ? List.of() : resolution.warnings());
+        warnings.add(warning);
+        return new AgenticAuthoringLlmIntentResolution(
+                resolution.resolved(),
+                resolution.operationKind(),
+                resolution.artifactKind(),
+                resolution.changeKind(),
+                resolution.selectedResourcePath(),
+                resolution.resourceSearchQuery(),
+                resolution.followUpKind(),
+                resolution.assistantMessage(),
+                resolution.quickReplies(),
+                resolution.clarificationQuestions(),
+                List.copyOf(warnings),
+                resolution.consultativeRetrievalPlan(),
+                resolution.visualizationDecision(),
+                resolution.requiresGovernedAuthoring(),
+                resolution.semanticIntentClass(),
+                resolution.queryConstraints(),
                 resolution.providerInvocations());
     }
 
@@ -5800,8 +6152,13 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringLlmIntentResolution llmIntent,
             AgenticAuthoringGateResult gate,
             List<String> fallbackQuestions) {
+        boolean unconfirmedAiAuthoredResourceSelection = hasLlmWarning(
+                llmIntent,
+                "llm-resource-selection-unconfirmed-by-ai-authored-focus");
         if (llmIntent == null
-                || (!llmIntent.resolved() && !isLlmProviderFailure(llmIntent))
+                || (!llmIntent.resolved()
+                        && !isLlmProviderFailure(llmIntent)
+                        && !unconfirmedAiAuthoredResourceSelection)
                 || gate == null
                 || !"clarification_required".equals(gate.status())
                 || llmIntent.clarificationQuestions() == null

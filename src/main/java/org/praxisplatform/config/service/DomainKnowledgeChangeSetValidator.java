@@ -26,6 +26,7 @@ public class DomainKnowledgeChangeSetValidator {
     private static final Set<String> PROPOSED_OPERATION_TYPES = Set.of(
             "create_concept",
             "approve_concept",
+            "approve_binding",
             "update_concept_summary",
             "set_concept_visibility",
             "add_alias",
@@ -37,6 +38,7 @@ public class DomainKnowledgeChangeSetValidator {
     private static final Set<String> EXECUTABLE_OPERATION_TYPES = Set.of(
             "create_concept",
             "approve_concept",
+            "approve_binding",
             "add_alias",
             "add_binding",
             "add_relationship",
@@ -61,7 +63,8 @@ public class DomainKnowledgeChangeSetValidator {
     private static final Set<String> BINDING_TYPES = Set.of(
             "api_resource", "api_operation", "dto_class", "dto_schema", "dto_field",
             "entity_class", "entity_field", "service_method", "repository_projection",
-            "workflow_action", "ui_surface", "ui_schema_field", "option_source",
+            "workflow_action", "approval_policy", "ui_surface", "ui_schema_field", "option_source",
+            "stats_endpoint",
             "form_config", "table_config", "rule_definition", "external_reference",
             "component_capability", "event_schema");
     private static final Set<String> RELATIONSHIP_TYPES = Set.of(
@@ -296,14 +299,15 @@ public class DomainKnowledgeChangeSetValidator {
                     pointer + "/aliasType", "unsupported_alias_type", issues);
             validateClaimProvenance(
                     authorType, payload.path("provenance"), pointer + "/provenance", claimIds, issues);
-        } else if ("add_binding".equals(operationType)) {
+        } else if ("add_binding".equals(operationType)
+                || "approve_binding".equals(operationType)) {
             requireTargetConceptKey(target, pointer, operationType, issues);
             requireText(payload.path("bindingType").asText(null), pointer + "/bindingType",
-                    "binding_type_required", "add_binding operations require payload.bindingType", issues);
+                    "binding_type_required", operationType + " operations require payload.bindingType", issues);
             requireEnum(payload.path("bindingType").asText(null), BINDING_TYPES,
                     pointer + "/bindingType", "unsupported_binding_type", issues);
             requireText(payload.path("bindingKey").asText(null), pointer + "/bindingKey",
-                    "binding_key_required", "add_binding operations require payload.bindingKey", issues);
+                    "binding_key_required", operationType + " operations require payload.bindingKey", issues);
             validateClaimProvenance(
                     authorType, payload.path("provenance"), pointer + "/provenance", claimIds, issues);
         } else if ("add_relationship".equals(operationType)) {

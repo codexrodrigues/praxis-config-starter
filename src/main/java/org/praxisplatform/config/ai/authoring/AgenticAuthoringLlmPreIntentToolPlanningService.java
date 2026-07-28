@@ -38,6 +38,17 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private static final int DEFAULT_PROVIDER_ATTEMPTS = 2;
     private static final long DEFAULT_PROVIDER_RETRY_DELAY_MS = 250L;
     private static final int MIN_RETRY_BUDGET_SECONDS = 2;
+    private static final List<String> AUTHORABLE_PRIMARY_COMPONENTS = List.of(
+            "praxis-crud",
+            "praxis-table",
+            "praxis-dynamic-form",
+            "praxis-list",
+            "praxis-chart",
+            "praxis-tabs",
+            "praxis-stepper",
+            "praxis-expansion",
+            "praxis-rich-content",
+            "praxis-files-upload");
 
     private final AiProviderManagementService providerManagementService;
     private final ObjectMapper objectMapper;
@@ -372,7 +383,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     assistantMessage,
                     false,
                     result.path("queryConstraints").deepCopy(),
-                    text(result, "artifactKind")));
+                    text(result, "artifactKind"),
+                    primaryComponent(result)));
         }
         if (!result.path("shouldRetrieveGovernedResources").asBoolean(false)) {
             return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
@@ -383,7 +395,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     "",
                     result.path("requiresFullIntentResolution").asBoolean(false),
                     result.path("queryConstraints").deepCopy(),
-                    text(result, "artifactKind")));
+                    text(result, "artifactKind"),
+                    primaryComponent(result)));
         }
         String groundingProfile = text(result, "groundingProfile");
         if (!List.of("domain_context", "domain_capability", "domain_concept", "domain_binding", "operation_verification", "api_resource")
@@ -430,7 +443,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 "",
                 requiresFullIntentResolution,
                 result.path("queryConstraints").deepCopy(),
-                artifactKind));
+                artifactKind,
+                primaryComponent(result)));
     }
 
     private AgenticAuthoringToolCall progressiveToolCall(
@@ -580,12 +594,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Preserve a semantic category, such as an organizational area, as text or a text list on this first pass.
                 After resource and field grounding, live option resolution replaces it with current canonical IDs.
                 Never invent an option value or use textual contains.
-                Set requiresFullIntentResolution=true when concrete authoring includes a predicate, subset, field value,
-                grouping, ordering, aggregation or layout constraint. Resource discovery alone never resolves these.
-                Artifact kind and defaults are not constraints. A generic governed dashboard request
-                must keep the flag false. A dashboard about a specific measured business subject must set it true so the
-                governed resolver authors relevant axes and metrics instead of generic schema-order field inference.
-                Otherwise set it true only for a user-explicit choice that a later resolver must preserve.
+                Set requiresFullIntentResolution=true for an explicit predicate, value, grouping, order, aggregation,
+                layout or measured subject that needs later semantic preservation. Resource discovery, artifact kind,
+                defaults and a generic dashboard are not constraints.
                 For that class, leave assistantMessage empty and decide whether to run searchApiResources before
                 authoring. Select groundingProfile progressively: domain_context for macro business orientation,
                 domain_capability when a governed context is known but the business capability is not, domain_concept
@@ -623,6 +634,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Use artifactKind dashboard when the requested outcome depends on multiple coordinated analytical
                 regions such as filters, KPIs, multiple charts and a detail/list/table surface. Use artifactKind page
                 for general layout or content composition where analytics are not the dominant requested outcome.
+                Set primaryComponent semantically: praxis-crud for governed record, bulk or workflow actions (runtime
+                discovers them; invent none), praxis-table for read-only rows, praxis-dynamic-form for one form,
+                praxis-chart for analytics, otherwise null. Never keyword-route this choice.
                 Canonical response locale: %s
                 Context JSON: %s
                 """.formatted(responseLocale, context.toString());
@@ -1079,6 +1093,14 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         for (String value : List.of("page", "dashboard", "chart", "table", "form", "api_catalog", "unknown")) {
             artifactEnum.add(value);
         }
+        ObjectNode primaryComponent = properties.putObject("primaryComponent");
+        primaryComponent.putArray("type").add("string").add("null");
+        ArrayNode primaryComponentEnum = primaryComponent.putArray("enum");
+        AUTHORABLE_PRIMARY_COMPONENTS.forEach(primaryComponentEnum::add);
+        primaryComponentEnum.addNull();
+        primaryComponent.put(
+                "description",
+                "Semantic runtime host selected after intent classification. Use praxis-crud when governed record or workflow actions must remain available; use praxis-table for read-only tabular exploration; null when a later full intent pass must decide.");
         nullableString(properties, "retrievalQuery");
         nullableString(properties, "reason");
         ObjectNode focus = properties.putObject("resourceSearchFocus");
@@ -1113,6 +1135,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 .add("queryConstraints")
                 .add("groundingProfile")
                 .add("artifactKind")
+                .add("primaryComponent")
                 .add("retrievalQuery")
                 .add("resourceSearchFocus")
                 .add("reason");
@@ -1130,6 +1153,11 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
 
     private String text(JsonNode node, String field) {
         return node != null && node.path(field).isTextual() ? node.path(field).asText().trim() : "";
+    }
+
+    private String primaryComponent(JsonNode node) {
+        String componentId = text(node, "primaryComponent");
+        return AUTHORABLE_PRIMARY_COMPONENTS.contains(componentId) ? componentId : "";
     }
 
     private String textOrDefault(JsonNode node, String field, String fallback) {
