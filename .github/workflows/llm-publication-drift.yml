@@ -1,0 +1,113 @@
+name: LLM Publication Drift
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 9 * * 1'
+
+concurrency:
+  group: llm-publication-drift
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout praxis-config-starter
+        uses: actions/checkout@v5
+        with:
+          repository: codexrodrigues/praxis-config-starter
+          ref: main
+          path: praxis-config-starter
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Checkout praxis-metadata-starter
+        uses: actions/checkout@v5
+        with:
+          repository: codexrodrigues/praxis-metadata-starter
+          ref: main
+          path: praxis-metadata-starter
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Checkout praxis-ui-angular
+        uses: actions/checkout@v5
+        with:
+          repository: codexrodrigues/praxis-ui-angular
+          ref: main
+          path: praxis-ui-angular
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Checkout praxis-api-quickstart
+        uses: actions/checkout@v5
+        with:
+          repository: codexrodrigues/praxis-api-quickstart
+          ref: main
+          path: praxis-api-quickstart
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Checkout praxisui-http-examples
+        uses: actions/checkout@v5
+        with:
+          repository: codexrodrigues/praxisui-http-examples
+          ref: main
+          path: praxisui-http-examples
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Checkout praxis-ui-landing-page
+        uses: actions/checkout@v5
+        with:
+          repository: codexrodrigues/praxis-ui-landing-page
+          ref: main
+          path: praxis-ui-landing-page
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.x
+
+      - name: Record audited revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '## Audited revisions' >> "$GITHUB_STEP_SUMMARY"
+          for repository in \
+            praxis-metadata-starter \
+            praxis-config-starter \
+            praxis-ui-angular \
+            praxis-api-quickstart \
+            praxisui-http-examples \
+            praxis-ui-landing-page; do
+            revision="$(git -C "$repository" rev-parse HEAD)"
+            echo "- \`$repository\`: \`$revision\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Validate generated LLM projections
+        shell: bash
+        run: |
+          set -euo pipefail
+          node praxis-ui-landing-page/tools/sync-llms-short.mjs --check
+          node praxis-ui-landing-page/tools/sync-llms-full.mjs --check
+
+      - name: Audit canonical workspace evidence
+        run: node praxis-ui-landing-page/tools/validate-llm-publication.mjs
+
+      - name: Verify live publication parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          for artifact in llms.txt llms-full.txt llm-index.json; do
+            expected_hash="$(sha256sum "praxis-ui-landing-page/public/$artifact" | awk '{print $1}')"
+            published_hash="$(curl --fail --silent --show-error --retry 3 --retry-all-errors "https://praxisui.dev/$artifact" | sha256sum | awk '{print $1}')"
+            if [[ "$expected_hash" != "$published_hash" ]]; then
+              echo "Published artifact drift detected: $artifact" >&2
+              exit 1
+            fi
+          done
+          for route in llm-source-of-truth llm-operational-evidence docs/ai; do
+            curl --fail --silent --show-error --retry 3 --retry-all-errors --output /dev/null "https://praxisui.dev/$route"
+          done
