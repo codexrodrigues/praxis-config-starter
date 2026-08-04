@@ -19,13 +19,13 @@ import org.springframework.core.io.ClassPathResource;
 class AiRegistrySnapshotContractTest {
 
     private static final String EXPECTED_SNAPSHOT_HASH =
-            "772cd19e38c7cc5b01b114fca06c124b3f2c63997ab580cb174c78d06030ed53";
+            "cc7c1d6e471f5d103c63594dda60317d93aa7a156c6ea8b053b2cd26a26aad6b";
     private static final String EXPECTED_VERSION = "1.0.0";
-    private static final String EXPECTED_GENERATED_AT = "2026-08-04T03:08:37.943Z";
+    private static final String EXPECTED_GENERATED_AT = "2026-08-04T21:07:49.871Z";
     private static final int EXPECTED_COMPONENT_COUNT = 105;
     private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 95;
     private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 105;
-    private static final int EXPECTED_CHUNK_COUNT = 2443;
+    private static final int EXPECTED_CHUNK_COUNT = 2445;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -101,6 +101,25 @@ class AiRegistrySnapshotContractTest {
         }
 
         assertThat(unsupportedValidators).isEmpty();
+    }
+
+    @Test
+    void relatedResourceOutletPublishesParentIdentityAsGovernedViewContext() throws IOException {
+        JsonNode outlet = readSnapshot()
+                .path("components")
+                .path("praxis-related-resource-outlet");
+
+        JsonNode parentIdentityInput = findByName(outlet.path("inputs"), "parentIdentity");
+        assertThat(parentIdentityInput).isNotNull();
+        assertThat(parentIdentityInput.path("type").asText())
+                .isEqualTo("MaterializedResourceIdentity | null");
+
+        JsonNode parentIdentityPort = findById(outlet.path("ports"), "parentIdentity");
+        assertThat(parentIdentityPort).isNotNull();
+        assertThat(parentIdentityPort.path("semanticKind").asText()).isEqualTo("view-context");
+        assertThat(parentIdentityPort.path("exposure").path("public").asBoolean()).isTrue();
+        assertThat(parentIdentityPort.path("schema").path("ref").asText())
+                .isEqualTo("MaterializedResourceIdentity | null");
     }
 
     @Test
@@ -309,6 +328,24 @@ class AiRegistrySnapshotContractTest {
             }
         }
         return count;
+    }
+
+    private JsonNode findByName(JsonNode entries, String name) {
+        for (JsonNode entry : entries) {
+            if (name.equals(entry.path("name").asText())) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    private JsonNode findById(JsonNode entries, String id) {
+        for (JsonNode entry : entries) {
+            if (id.equals(entry.path("id").asText())) {
+                return entry;
+            }
+        }
+        return null;
     }
 
     private List<String> requiredAuthoringComponents() {
