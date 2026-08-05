@@ -9,7 +9,7 @@ param(
     [string] $Environment = "local",
     [string] $ComponentType = "praxis-dynamic-page",
     [string] $ComponentId = "agentic-authoring:e2e:operations-incident-form",
-    [string] $UserPrompt = "Crie um formulario didatico so com os campos realmente necessarios para cadastrar incidentes de missao operacionais. Use a fonte Incidentes de Missao."
+    [string] $UserPrompt = "Crie um formulario didatico so com os campos realmente necessarios para cadastrar incidentes de missao operacionais. Use o recurso canonico confirmado POST /api/operations/incidentes como fonte e gere a pre-visualizacao aplicavel."
 )
 
 $ErrorActionPreference = "Stop"
