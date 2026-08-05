@@ -78,6 +78,9 @@ Release e Gate de Authoring
 - Secrets do gate:
   - `PRAXIS_AI_OPENAI_API_KEY` para `provider=openai`;
   - `PRAXIS_AI_GEMINI_API_KEY` para `provider=gemini`;
+- O workflow deve gerar e mascarar uma chave efemera por run para
+  `PRAXIS_RESOURCE_VERSION_ETAG_SECRET`; nao adicionar segredo padrao ao
+  runtime nem exigir configuracao manual desse valor para o smoke.
 - `RELEASE_PAT` para releases com `create_tag=true` e quando o checkout do quickstart precisar de permissao adicional. O token de release deve permitir `contents:write`, pois pushes feitos com `GITHUB_TOKEN` nao disparam o workflow subsequente de publicacao por tag.
 - Se o gate falhar em GitHub Actions, trate a causa real do log antes de publicar. Nao contorne o gate com publicacao manual.
 

@@ -31,6 +31,11 @@ para o contrato canônico de snapshots do `praxis-rules-engine`.
 - `PRAXIS_AI_OPENAI_API_KEY` (necessario para o gate manual `Agentic Authoring HTTP Smoke` com `provider=openai`)
 - `PRAXIS_AI_GEMINI_API_KEY` (necessario apenas quando o gate manual for executado com `provider=gemini`)
 
+O workflow gera uma chave aleatoria e efemera para
+`PRAXIS_RESOURCE_VERSION_ETAG_SECRET` em cada execucao, mascara o valor nos logs
+e a fornece apenas ao Quickstart iniciado pelo smoke. Nao configure um valor
+padrao ou compartilhado para esse gate.
+
 ## Gate de authoring antes de publicar
 Antes de criar a tag de release, execute o smoke ponta a ponta contra o `praxis-api-quickstart`.
 Esse gate valida a integracao real entre o starter publicado/local, o host de referencia, endpoints HTTP de authoring,

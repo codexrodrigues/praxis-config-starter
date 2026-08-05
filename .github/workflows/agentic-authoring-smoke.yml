@@ -168,6 +168,15 @@ jobs:
           cache: npm
           cache-dependency-path: praxis-ui-angular/package-lock.json
 
+      - name: Prepare Quickstart runtime secret
+        shell: pwsh
+        run: |
+          $etagSecretBytes = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+          $etagSecret = [Convert]::ToHexString($etagSecretBytes)
+          Write-Output "::add-mask::$etagSecret"
+          "PRAXIS_RESOURCE_VERSION_ETAG_SECRET=$etagSecret" |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Prepare AI env file
         shell: pwsh
         working-directory: praxis-config-starter
