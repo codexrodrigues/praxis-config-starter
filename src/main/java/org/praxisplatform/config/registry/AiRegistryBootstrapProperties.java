@@ -42,6 +42,12 @@ public class AiRegistryBootstrapProperties {
 
     /**
      * Minimum template count required.
+     *
+     * <p>The classpath bootstrap snapshot publishes generated component definitions, while
+     * templates are separately authored, optional configuration candidates. A clean host is
+     * therefore ready after the component catalog is materialized even when no template has
+     * been published yet. Deployments that depend on approved templates must opt in to a
+     * positive minimum explicitly.</p>
      */
-    private long minTemplates = 1;
+    private long minTemplates = 0;
 }
