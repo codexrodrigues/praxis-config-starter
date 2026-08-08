@@ -14331,6 +14331,95 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void canonicalExplicitResourcePathRecoversFromAnUnresolvedLlmFocusAfterGovernedReconciliation() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate incidentCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/operations/incidentes",
+                        0.99d,
+                        List.of("incidentes", "missões", "operações")),
+                        "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        false,
+                        "unknown",
+                        "unknown",
+                        "needs_clarification",
+                        null,
+                        null,
+                        "none",
+                        "Preciso confirmar o recurso operacional.",
+                        List.of(),
+                        List.of("Qual recurso representa os incidentes?"),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService service = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode contextHints = resourceDiscoveryContext(
+                "form",
+                List.of(incidentCandidate),
+                new AgenticAuthoringResourceSearchFocus(
+                        "operations.incidentes",
+                        List.of("missões", "operações"),
+                        "formulário operacional",
+                        "a identidade do recurso precisa ser confirmada",
+                        "o recurso selecionado deve corresponder à identidade canônica authorada"));
+        ObjectNode orientation = contextHints.putObject("preIntentSemanticOrientation");
+        orientation.put("semanticIntentClass", "authoring_or_other");
+        orientation.put("artifactKind", "form");
+        orientation.put("primaryComponent", "praxis-dynamic-form");
+        orientation.put("requiresFullIntentResolution", true);
+        orientation.putObject("queryConstraints")
+                .put("appliesToDataSelection", false)
+                .putArray("filters");
+        AgenticAuthoringPreIntentToolPlan semanticOrientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "Create the requested governed form from the canonical incident resource.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                true,
+                orientation.path("queryConstraints"),
+                "form",
+                "praxis-dynamic-form");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(
+                requestWithContextHints(
+                        "Crie um formulário didático para incidentes de missão. "
+                                + "Use o recurso canônico confirmado POST /api/operations/incidentes como fonte.",
+                        "deterministic-smoke-disabled",
+                        contextHints),
+                "tenant",
+                "user",
+                "local",
+                semanticOrientation);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/operations/incidentes");
+        assertThat(result.warnings())
+                .contains("llm-intent-resolution-used")
+                .doesNotContain("llm-resource-selection-unconfirmed-by-ai-authored-focus");
+    }
+
+    @Test
     void fullIntentResolutionCannotBeSkippedByAComponentHintAndOneGovernedCandidate() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);

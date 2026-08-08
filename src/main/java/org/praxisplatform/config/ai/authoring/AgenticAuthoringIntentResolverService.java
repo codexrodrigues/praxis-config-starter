@@ -331,17 +331,6 @@ public class AgenticAuthoringIntentResolverService {
                 semanticOrientation,
                 llmCandidateOptions,
                 llmIntent);
-        boolean unconfirmedAiAuthoredResourceFocus = hasUnconfirmedAiAuthoredResourceFocus(
-                request,
-                llmCandidateOptions);
-        if (unconfirmedAiAuthoredResourceFocus) {
-            llmIntent = withLlmWarning(
-                    llmIntent,
-                    "llm-resource-selection-unconfirmed-by-ai-authored-focus");
-        }
-        boolean unconfirmedAiAuthoredResourceSelection = hasLlmWarning(
-                llmIntent,
-                "llm-resource-selection-unconfirmed-by-ai-authored-focus");
         if (shouldPromoteCompactTarget(llmIntent, llmGroundingTarget, target)) {
             target = llmGroundingTarget;
             AgenticAuthoringCandidate compactTargetCandidate = targetCandidate(target);
@@ -1153,6 +1142,18 @@ public class AgenticAuthoringIntentResolverService {
             artifactKind = "unknown";
             changeKind = "provider_error";
             selectedCandidate = null;
+        }
+        // Validate the AI-authored focus only after canonical candidate reconciliation.
+        // At this point the selection can include explicit source binding and governed
+        // ranking evidence that is intentionally unavailable to the initial LLM call.
+        // Applying this gate earlier would incorrectly retain a clarification state even
+        // when a canonical candidate has subsequently been verified.
+        boolean unconfirmedAiAuthoredResourceSelection = !explicitLocalUiComposition
+                && hasUnconfirmedAiAuthoredResourceFocus(request, selectedCandidate);
+        if (unconfirmedAiAuthoredResourceSelection) {
+            llmIntent = withLlmWarning(
+                    llmIntent,
+                    "llm-resource-selection-unconfirmed-by-ai-authored-focus");
         }
         if (unconfirmedAiAuthoredResourceSelection) {
             // This is a post-semantic grounding gate. It never routes intent from user text:
