@@ -454,7 +454,7 @@ $pendingMaterialization = Invoke-JsonRequest `
 $appliedCreationBlocked = Invoke-ExpectedFailure `
     -Method Patch `
     -Uri "$base/api/praxis/config/domain-rules/materializations/$($pendingMaterialization.id)/status" `
-    -Headers $reviewerHeaders `
+    -Headers $headers `
     -Body @{
         status = "applied"
         validationResult = @{
@@ -541,7 +541,7 @@ $appliedMaterialization = Invoke-JsonRequest `
 $appliedMaterialization = Invoke-JsonRequest `
     -Method Patch `
     -Uri "$base/api/praxis/config/domain-rules/materializations/$($appliedMaterialization.id)/status" `
-    -Headers $reviewerHeaders `
+    -Headers $headers `
     -Body @{
         status = "applied"
         validationResult = @{
@@ -609,7 +609,7 @@ $failedMaterialization = Invoke-JsonRequest `
 $failedMaterialization = Invoke-JsonRequest `
     -Method Patch `
     -Uri "$base/api/praxis/config/domain-rules/materializations/$($failedMaterialization.id)/status" `
-    -Headers $reviewerHeaders `
+    -Headers $headers `
     -Body @{
         status = "failed"
         validationResult = @{
