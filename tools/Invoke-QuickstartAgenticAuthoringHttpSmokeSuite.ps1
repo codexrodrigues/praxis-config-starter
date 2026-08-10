@@ -96,7 +96,7 @@ $quickstartProcess = $null
 $startedQuickstart = $false
 $logDir = Join-Path $QuickstartRoot "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-$governanceAuthorUsername = $UserId
+$governanceAuthorUsername = "$UserId-publisher"
 $governanceReviewerUsername = "$UserId-reviewer"
 $governanceAuthorPassword = [Guid]::NewGuid().ToString("N")
 $governanceReviewerPassword = [Guid]::NewGuid().ToString("N")
