@@ -192,7 +192,14 @@ Hosts that publish Java-backed RuleSet snapshots must provide a
 external supply-chain capability scoped by tenant, environment and owner host;
 it must never be derived from the snapshot being published. Customer Java
 extensions additionally require the signed/allowlisted `RuleExtensionTrust`
-contract from `praxis-rules-engine` `1.3`. See
+contract from `praxis-rules-engine` contract `1.2`.
+
+Hosts that load the currently active snapshot in-process consume the
+framework-neutral `PublishedRuleSnapshotHeadReader` from
+`praxis-config-contracts`. The Starter auto-configures its governed adapter;
+hosts may replace it with an authenticated remote adapter without importing
+Starter DTOs. Missing heads return empty, while integrity, scope and access
+failures remain explicit and never activate inferred fallback content. See
 [Rule snapshot control plane v1](docs/domain-rules/snapshot-control-plane-v1.md).
 
 ## Minimal Configuration

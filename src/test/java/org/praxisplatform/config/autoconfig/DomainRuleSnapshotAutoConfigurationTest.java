@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.praxisplatform.config.contract.PublishedRuleSnapshotHeadReader;
 import org.praxisplatform.config.controller.DomainRuleSnapshotController;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.repository.DomainRuleDefinitionApprovalRepository;
@@ -13,7 +14,6 @@ import org.praxisplatform.config.repository.DomainRuleCompositionApprovalReposit
 import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
-import org.praxisplatform.config.service.DomainRuleSnapshotReader;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.DomainRuleSnapshotService;
 import org.praxisplatform.config.service.DomainRuleImplementationCatalog;
@@ -40,7 +40,7 @@ class DomainRuleSnapshotAutoConfigurationTest {
   @Test
   void exposesPublicReaderAndHttpControllerWhenPersistenceBoundaryExists() {
     contextRunner.run(context -> {
-      assertThat(context).hasSingleBean(DomainRuleSnapshotReader.class);
+      assertThat(context).hasSingleBean(PublishedRuleSnapshotHeadReader.class);
       assertThat(context).hasSingleBean(DomainRuleSnapshotController.class);
       assertThat(context).hasSingleBean(DomainRuleImplementationCatalog.class);
       assertThat(context.getBean(DomainRuleImplementationCatalog.class)
@@ -62,5 +62,15 @@ class DomainRuleSnapshotAutoConfigurationTest {
         .withBean(DomainRuleImplementationCatalog.class, () -> hostCatalog)
         .run(context -> assertThat(context.getBean(DomainRuleImplementationCatalog.class))
             .isSameAs(hostCatalog));
+  }
+
+  @Test
+  void preservesHostOwnedPublishedHeadReader() {
+    PublishedRuleSnapshotHeadReader hostReader = scope -> java.util.Optional.empty();
+
+    contextRunner
+        .withBean(PublishedRuleSnapshotHeadReader.class, () -> hostReader)
+        .run(context -> assertThat(context.getBean(PublishedRuleSnapshotHeadReader.class))
+            .isSameAs(hostReader));
   }
 }
