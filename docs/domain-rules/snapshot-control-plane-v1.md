@@ -64,14 +64,19 @@ fail closed for an old snapshot that the current engine cannot verify.
   - must be called independently by each approver. A publication payload cannot
     declare or aggregate approver identities.
 - `GET /api/praxis/config/domain-rules/snapshots/head?ruleSetKey=...`
+  - resolves server authentication and requires `RULE_SNAPSHOT_READER`;
+  - uses tenant and environment resolved from the principal, never directly
+    from caller headers in corporate mode;
   - returns `Cache-Control: no-cache` and the mutable head ETag;
   - accepts `If-None-Match` and may return `304`.
 - `GET /api/praxis/config/domain-rules/snapshots/head/status?ruleSetKey=...`
+  - requires the same authenticated `RULE_SNAPSHOT_READER` scope;
   - returns safe head identity, immutable version/revision, readiness and the mutable head ETag;
   - never returns unverified executable content;
   - classifies preserved pre-manifest beta content as `REPUBLICATION_REQUIRED`, allowing an
     operator to publish a new immutable RuleSet version with the returned strong `If-Match`.
 - `GET /api/praxis/config/domain-rules/snapshots/{snapshotKey}`
+  - requires the same authenticated `RULE_SNAPSHOT_READER` scope;
   - returns the immutable snapshot with its canonical content hash as ETag;
   - is private-cacheable and immutable.
 - `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/rollback`
@@ -112,7 +117,8 @@ This closes both maker-checker layers. Definition creation and intake require
 `RULE_DEFINITION_AUTHOR`; draft/proposed authoring transitions use the same role;
 approval, rejection, activation and retirement require
 `RULE_DEFINITION_APPROVER`, whose authenticated actor must differ from the
-persisted author. Composition approval, publication and rollback actors also
+persisted author. Snapshot reads require `RULE_SNAPSHOT_READER`; composition
+approval, publication and rollback actors also
 come from server authentication. Corporate mode fails closed unless the request
 has the corresponding IAM role. Request payloads never supply governed actor
 identity. Migration V36 persists definition approvals append-only and binds each

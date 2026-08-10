@@ -439,8 +439,10 @@ segregated approvals by having each authenticated approver call
 a different authenticated publisher submit the unchanged candidate with that
 digest. In corporate mode the host must map the IAM roles
 `RULE_DEFINITION_AUTHOR`, `RULE_DEFINITION_APPROVER`,
-`RULE_COMPOSITION_APPROVER`, `RULE_SNAPSHOT_PUBLISHER` and
-`RULE_SNAPSHOT_OPERATOR`; actor names sent in request bodies are not accepted.
+`RULE_COMPOSITION_APPROVER`, `RULE_SNAPSHOT_PUBLISHER`,
+`RULE_SNAPSHOT_OPERATOR` and `RULE_SNAPSHOT_READER`; actor names sent in request
+bodies are not accepted. Snapshot GETs resolve tenant/environment from that
+authenticated principal before querying the store.
 The same server-side identity boundary applies to legacy publication and
 materialization endpoints: draft creation uses `RULE_DEFINITION_AUTHOR`,
 application/publication uses `RULE_SNAPSHOT_PUBLISHER`, and failure,

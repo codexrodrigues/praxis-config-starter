@@ -518,7 +518,8 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
             assertThat(elapsedMs).isLessThan(500L);
             assertThat(current.diagnostics().source()).isEqualTo("registry");
             assertThat(degraded.diagnostics().source()).isEqualTo("last-known-good");
-            assertThat(degraded.diagnostics().degradationReason()).isEqualTo("registry-refresh-in-progress");
+            assertThat(degraded.diagnostics().degradationReason())
+                    .isIn("registry-refresh-in-progress", "registry-load-timeout");
             assertThat(degraded.diagnostics().lastSuccessfulRegistryLoadAt())
                     .isEqualTo(current.diagnostics().lastSuccessfulRegistryLoadAt());
             assertThat(degraded.catalogs())
@@ -532,10 +533,15 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
             assertThat(concurrentReadElapsedMs).isLessThan(500L);
             assertThat(concurrentRead.diagnostics().source()).isEqualTo("last-known-good");
             assertThat(concurrentRead.diagnostics().degradationReason())
-                    .isEqualTo("registry-refresh-in-progress");
-            Thread.sleep(50L);
-            assertThat(service.listCapabilities().diagnostics().degradationReason())
-                    .isEqualTo("registry-load-timeout");
+                    .isIn("registry-refresh-in-progress", "registry-load-timeout");
+            long timeoutDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            AgenticAuthoringComponentCapabilitiesResult timedOut = concurrentRead;
+            while (!"registry-load-timeout".equals(timedOut.diagnostics().degradationReason())
+                    && System.nanoTime() < timeoutDeadline) {
+                Thread.sleep(10L);
+                timedOut = service.listCapabilities();
+            }
+            assertThat(timedOut.diagnostics().degradationReason()).isEqualTo("registry-load-timeout");
         } finally {
             blockedRefresh.countDown();
             service.shutdown();

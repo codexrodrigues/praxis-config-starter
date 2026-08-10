@@ -43,6 +43,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 @ConditionalOnBean({DomainRuleSnapshotRepository.class, DomainRuleSnapshotHeadRepository.class})
 public class DomainRuleSnapshotController {
+  private static final String SNAPSHOT_READER_ROLE = "RULE_SNAPSHOT_READER";
+
   private final DomainRuleSnapshotService snapshotService;
   private final DomainRuleGovernancePrincipalResolver principalResolver;
 
@@ -117,6 +119,7 @@ public class DomainRuleSnapshotController {
   @ApiResponses({
     @ApiResponse(responseCode = "200", description = "Current active snapshot and head identity"),
     @ApiResponse(responseCode = "304", description = "The caller already has the current head representation"),
+    @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_SNAPSHOT_READER"),
     @ApiResponse(responseCode = "404", description = "No snapshot has been published for this scoped RuleSet")
   })
   public ResponseEntity<DomainRuleSnapshotActivationResponse> head(
@@ -127,9 +130,12 @@ public class DomainRuleSnapshotController {
       @Parameter(description = "Governed deployment environment of the active head.", required = true)
       @RequestHeader(value = "X-Env", required = false) String environment,
       @Parameter(description = "Cached head ETag; weak comparison is accepted for conditional reads.")
-      @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
+      @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch,
+      HttpServletRequest servletRequest) {
+    DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+        servletRequest, tenantId, environment, SNAPSHOT_READER_ROLE);
     DomainRuleSnapshotActivationResponse response = snapshotService
-        .findActive(tenantId, environment, ruleSetKey)
+        .findActive(principal.tenantId(), principal.environment(), ruleSetKey)
         .orElseThrow(() -> new DomainRuleSnapshotControlPlaneException(
             HttpStatus.NOT_FOUND, "RuleSet head was not found"));
     if (matchesWeak(ifNoneMatch, response.headEtag())) {
@@ -150,15 +156,19 @@ public class DomainRuleSnapshotController {
   @ApiResponses({
     @ApiResponse(responseCode = "200", description = "Head metadata and recovery classification"),
     @ApiResponse(responseCode = "304", description = "The caller already has this head state"),
+    @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_SNAPSHOT_READER"),
     @ApiResponse(responseCode = "404", description = "No scoped RuleSet head exists")
   })
   public ResponseEntity<DomainRuleSnapshotHeadStatusResponse> headStatus(
       @RequestParam String ruleSetKey,
       @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
       @RequestHeader(value = "X-Env", required = false) String environment,
-      @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
+      @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch,
+      HttpServletRequest servletRequest) {
+    DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+        servletRequest, tenantId, environment, SNAPSHOT_READER_ROLE);
     DomainRuleSnapshotHeadStatusResponse response = snapshotService
-        .findHeadStatus(tenantId, environment, ruleSetKey)
+        .findHeadStatus(principal.tenantId(), principal.environment(), ruleSetKey)
         .orElseThrow(() -> new DomainRuleSnapshotControlPlaneException(
             HttpStatus.NOT_FOUND, "RuleSet head was not found"));
     String headEtag = response.headEtag();
@@ -180,6 +190,7 @@ public class DomainRuleSnapshotController {
   @ApiResponses({
     @ApiResponse(responseCode = "200", description = "Immutable snapshot content"),
     @ApiResponse(responseCode = "304", description = "The caller already has this immutable representation"),
+    @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_SNAPSHOT_READER"),
     @ApiResponse(responseCode = "404", description = "The snapshot does not exist in the requested tenant and environment")
   })
   public ResponseEntity<DomainRuleSnapshotStoredResponse> snapshot(
@@ -190,9 +201,12 @@ public class DomainRuleSnapshotController {
       @Parameter(description = "Governed deployment environment that owns the immutable snapshot.", required = true)
       @RequestHeader(value = "X-Env", required = false) String environment,
       @Parameter(description = "Cached canonical content hash; weak comparison is accepted for immutable reads.")
-      @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
+      @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch,
+      HttpServletRequest servletRequest) {
+    DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+        servletRequest, tenantId, environment, SNAPSHOT_READER_ROLE);
     DomainRuleSnapshotStoredResponse response = snapshotService
-        .findSnapshot(tenantId, environment, snapshotKey)
+        .findSnapshot(principal.tenantId(), principal.environment(), snapshotKey)
         .orElseThrow(() -> new DomainRuleSnapshotControlPlaneException(
             HttpStatus.NOT_FOUND, "Rule snapshot was not found in the requested scope"));
     if (matchesWeak(ifNoneMatch, response.snapshotContentHash())) {
