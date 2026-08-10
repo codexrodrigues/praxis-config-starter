@@ -126,8 +126,11 @@ flow; migration does not relabel caller-declared legacy identity as trusted.
 This contract raises the starter baseline to Java 21 because the canonical
 engine contract is Java 21. Duplicating engine DTOs or persisting an untyped JSON
 facsimile would create a second source of truth and was rejected. Hosts use the
-public `DomainRuleSnapshotReader` boundary for in-process loading, then compile
-with their executable registry before atomic activation.
+framework-neutral `PublishedRuleSnapshotHeadReader` contract from
+`praxis-config-contracts` for in-process loading, then compile with their
+executable registry before atomic activation. The Config Starter supplies the
+default adapter from its governed active head; remote hosts may supply an
+authenticated HTTP adapter without depending on Starter implementation DTOs.
 
 The admission catalog and executable registry must resolve the same exact
 coordinates. The Config Starter does not load plugins or verify signatures, and

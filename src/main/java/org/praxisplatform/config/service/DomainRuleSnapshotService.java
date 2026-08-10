@@ -51,7 +51,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /** Governed publication, activation and rollback of immutable RuleSet snapshots. */
 @RequiredArgsConstructor
-public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
+public class DomainRuleSnapshotService {
   private static final Set<String> PUBLISHABLE_STATUSES = Set.of("approved", "active");
   private static final int MINIMUM_DISTINCT_APPROVERS = 2;
   private static final String COMPOSITION_CONTRACT_VERSION = "praxis-rule-composition/1";
@@ -297,7 +297,6 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
     return activation(snapshot, target.getContentHash(), head, "ROLLED_BACK");
   }
 
-  @Override
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public Optional<DomainRuleSnapshotActivationResponse> findActive(
       String tenantId, String environment, String ruleSetKey) {
@@ -347,7 +346,6 @@ public class DomainRuleSnapshotService implements DomainRuleSnapshotReader {
         });
   }
 
-  @Override
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public Optional<DomainRuleSnapshotStoredResponse> findSnapshot(
       String tenantId, String environment, String snapshotKey) {

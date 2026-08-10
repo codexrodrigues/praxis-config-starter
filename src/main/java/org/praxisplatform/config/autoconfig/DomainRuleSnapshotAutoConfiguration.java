@@ -1,6 +1,7 @@
 package org.praxisplatform.config.autoconfig;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.praxisplatform.config.contract.PublishedRuleSnapshotHeadReader;
 import org.praxisplatform.config.controller.DomainRuleSnapshotController;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.repository.DomainRuleDefinitionApprovalRepository;
@@ -9,6 +10,7 @@ import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
 import org.praxisplatform.config.service.DomainRuleSnapshotService;
+import org.praxisplatform.config.service.DomainRuleSnapshotHeadReaderAdapter;
 import org.praxisplatform.config.service.DomainRuleDefinitionFingerprint;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
@@ -64,6 +66,13 @@ public class DomainRuleSnapshotAutoConfiguration {
         definitionFingerprint,
         objectMapper,
         implementationCatalog);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean(PublishedRuleSnapshotHeadReader.class)
+  PublishedRuleSnapshotHeadReader publishedRuleSnapshotHeadReader(
+      DomainRuleSnapshotService snapshotService) {
+    return new DomainRuleSnapshotHeadReaderAdapter(snapshotService);
   }
 
   @Bean
