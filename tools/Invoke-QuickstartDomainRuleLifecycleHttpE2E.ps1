@@ -298,6 +298,7 @@ $headers = @{
     "X-Env" = $Environment
 }
 $reviewerUserId = if ([string]::IsNullOrWhiteSpace($ReviewerUsername)) { "$UserId-reviewer" } else { $ReviewerUsername }
+$authenticatedAuthor = if ([string]::IsNullOrWhiteSpace($AuthorUsername)) { $UserId } else { $AuthorUsername }
 $reviewerHeaders = $headers.Clone()
 $reviewerHeaders["X-User-ID"] = $reviewerUserId
 
@@ -396,8 +397,8 @@ $definition = Invoke-JsonRequest `
 if ($definition.status -ne "draft") {
     throw "Expected created definition status=draft, got '$($definition.status)'."
 }
-if ($definition.createdByType -ne "authenticated" -or $definition.createdBy -ne $UserId) {
-    throw "Expected server-authenticated author '$UserId', got type='$($definition.createdByType)' actor='$($definition.createdBy)'."
+if ($definition.createdByType -ne "authenticated" -or $definition.createdBy -ne $authenticatedAuthor) {
+    throw "Expected server-authenticated author '$authenticatedAuthor', got type='$($definition.createdByType)' actor='$($definition.createdBy)'."
 }
 
 $selfApprovalExpectedMessage = if ($ExpectAuthorApprovalIamRejection) {
@@ -896,7 +897,7 @@ if ($reusedHash -ne $inactiveHash) {
     environment = $Environment
     ruleDefinitionId = $activeDefinition.id
     definitionStatus = $activeDefinition.status
-    authenticatedAuthor = $UserId
+    authenticatedAuthor = $authenticatedAuthor
     authenticatedReviewer = $reviewerUserId
     selfApprovalBlocked = [bool] $selfApprovalBlocked
     appliedCreationBlocked = [bool] $appliedCreationBlocked
