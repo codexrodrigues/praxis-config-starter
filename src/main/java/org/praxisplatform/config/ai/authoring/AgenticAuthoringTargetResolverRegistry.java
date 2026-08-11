@@ -90,6 +90,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "action-in-bulk-config",
             "action-in-context-config",
             "table-meta-config",
+            "schema-column-projection",
             "interaction-config",
             "loading-config",
             "empty-state-config",
