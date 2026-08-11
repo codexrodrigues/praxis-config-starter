@@ -428,9 +428,17 @@ class AgenticAuthoringManifestServiceTest {
 
     @Test
     void compilesDynamicFormLabelChangeFromClasspathRegistrySnapshot() throws Exception {
+        String registryPayload = payloadFromClasspathSnapshot("praxis-dynamic-form");
+        String expectedManifestVersion = objectMapper.readTree(registryPayload)
+                .path("componentDefinition")
+                .path("jsonSchema")
+                .path("authoringManifest")
+                .path("manifestVersion")
+                .asText();
+        assertThat(expectedManifestVersion).isNotBlank();
         AgenticAuthoringManifestService service = serviceWithPayload(
                 "praxis-dynamic-form",
-                payloadFromClasspathSnapshot("praxis-dynamic-form"));
+                registryPayload);
         JsonNode request = objectMapper.readTree("""
                 {
                   "config": {
@@ -452,7 +460,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(result.compiled()).isTrue();
         assertThat(result.failures()).isEmpty();
-        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("1.5.1");
+        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo(expectedManifestVersion);
         JsonNode operation = result.patch().path("compiledOperations").get(0);
         assertThat(operation.path("operationId").asText()).isEqualTo("field.label.set");
         assertThat(operation.path("op").asText()).isEqualTo("merge-object-by-key");
