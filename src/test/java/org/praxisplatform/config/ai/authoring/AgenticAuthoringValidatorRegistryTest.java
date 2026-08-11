@@ -71,6 +71,64 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldRejectSchemaColumnOverrideThatRedefinesCanonicalFieldIdentity() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-table",
+                operationWithValidators(
+                        "column.projection.configure",
+                        false,
+                        "schema-column-override-field-immutable"),
+                plan("{}", """
+                        {
+                          "source": "schema",
+                          "overrides": {
+                            "employeeId": {
+                              "field": "otherId",
+                              "header": "Identifier"
+                            }
+                          }
+                        }
+                        """),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).containsExactly(
+                "validator schema-column-override-field-immutable failed for "
+                        + "column.projection.configure: override employeeId cannot redefine canonical field identity");
+    }
+
+    @Test
+    void shouldAcceptSchemaColumnPresentationOverrideWithoutCanonicalFieldMutation() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-table",
+                operationWithValidators(
+                        "column.projection.configure",
+                        false,
+                        "schema-column-override-field-immutable"),
+                plan("{}", """
+                        {
+                          "source": "schema",
+                          "overrides": {
+                            "employeeId": {
+                              "header": "Identifier",
+                              "sticky": "start"
+                            }
+                          }
+                        }
+                        """),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+    }
+
+    @Test
     void shouldValidateFilterAndGroupingFieldsAgainstConfig() throws Exception {
         List<String> failures = new ArrayList<>();
 

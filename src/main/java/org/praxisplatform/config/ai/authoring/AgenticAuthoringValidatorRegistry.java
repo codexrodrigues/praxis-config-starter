@@ -74,6 +74,7 @@ public final class AgenticAuthoringValidatorRegistry {
             "rule-id-unique",
             "rule-target-refs-exist",
             "column-field-unique",
+            "schema-column-override-field-immutable",
             "column-width-valid",
             "computed-expression-valid",
             "computed-value-envelope-valid",
@@ -645,6 +646,8 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "renderer-compose-item-exists" ->
                         validateTableComposeItemExists(
                                 componentId, operation, planOperation, config, failures);
+                case "schema-column-override-field-immutable" ->
+                        validateSchemaColumnOverrideFieldImmutable(operationId, planOperation, failures);
                 case "conditional-surface-accessible" ->
                         validateConditionalSurfaceAccessibility(operationId, planOperation.path("input"), config, failures, warnings);
                 case "computed-value-envelope-valid" -> {
@@ -1894,6 +1897,32 @@ public final class AgenticAuthoringValidatorRegistry {
             failures.add("validator remote-resource-binding-safe failed for "
                     + text(operation, "operationId")
                     + ": absolute remote URLs are not allowed in authoring plans");
+        }
+    }
+
+    private void validateSchemaColumnOverrideFieldImmutable(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        JsonNode overrides = input.path("overrides");
+        if (overrides.isMissingNode() || overrides.isNull()) {
+            return;
+        }
+        if (!overrides.isObject()) {
+            failures.add("validator schema-column-override-field-immutable failed for "
+                    + operationId + ": overrides must be an object keyed by canonical field name");
+            return;
+        }
+        Iterator<Map.Entry<String, JsonNode>> entries = overrides.fields();
+        while (entries.hasNext()) {
+            Map.Entry<String, JsonNode> entry = entries.next();
+            JsonNode override = entry.getValue();
+            if (override != null && override.isObject() && override.has("field")) {
+                failures.add("validator schema-column-override-field-immutable failed for "
+                        + operationId + ": override " + entry.getKey()
+                        + " cannot redefine canonical field identity");
+            }
         }
     }
 
