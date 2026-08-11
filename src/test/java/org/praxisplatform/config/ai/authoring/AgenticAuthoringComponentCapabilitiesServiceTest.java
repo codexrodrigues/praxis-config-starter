@@ -53,6 +53,8 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
         try (InputStream input = getClass().getResourceAsStream("/ai-registry/registry-snapshot.json")) {
             JsonNode manifest = new ObjectMapper().readTree(input)
                     .path("components").path("praxis-table").path("authoringManifest");
+            String manifestVersion = manifest.path("manifestVersion").asText();
+            assertThat(manifestVersion).isNotBlank();
             assertThat(tableCatalog.version()).isEqualTo(manifest.path("manifestVersion").asText());
             assertThat(tableCatalog.capabilities())
                     .extracting(AgenticAuthoringComponentCapabilitiesResult.ComponentCapability::id)
@@ -63,9 +65,10 @@ class AgenticAuthoringComponentCapabilitiesServiceTest {
                                             java.util.stream.StreamSupport.stream(manifest.path("operations").spliterator(), false)
                                                     .map(operation -> operation.path("operationId").asText()))
                                     .toList());
+            assertThat(result.diagnostics().degradationReason())
+                    .contains("tableManifestVersion=" + manifestVersion);
         }
         assertThat(result.diagnostics().source()).isEqualTo("snapshot");
-        assertThat(result.diagnostics().degradationReason()).contains("tableManifestVersion=2.2.2");
     }
 
     @Test

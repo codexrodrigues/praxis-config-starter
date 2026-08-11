@@ -128,9 +128,17 @@ public final class AgenticAuthoringProviderSchemaCompiler {
         ObjectNode encoded = objectMapper.createObjectNode();
         encoded.put("type", "string");
         String description = schema.path("description").asText("");
-        String kind = isFreeFormArraySchema(schema) ? "array" : "object";
-        encoded.put("description", (description.isBlank() ? "Canonical " + kind + "." : description + " ")
-                + "Return this " + kind + " as compact JSON text for provider transport; Praxis decodes it before canonical manifest validation.");
+        String kind = declaresType(schema, "array") ? "array" : "object";
+        String transportInstruction = declaresType(schema, "string")
+                ? "Return canonical string values directly; encode " + kind
+                        + " values as compact JSON text for provider transport."
+                : "Return this " + kind + " as compact JSON text for provider transport.";
+        String canonicalDescription = declaresType(schema, "string")
+                ? "Canonical value."
+                : "Canonical " + kind + ".";
+        encoded.put("description", (description.isBlank() ? canonicalDescription + " " : description + " ")
+                + transportInstruction
+                + " Praxis decodes structured JSON text before canonical manifest validation.");
         return encoded;
     }
 
@@ -199,7 +207,10 @@ public final class AgenticAuthoringProviderSchemaCompiler {
     }
 
     private boolean requiresJsonTextEncoding(JsonNode schema) {
-        return isFreeFormObjectSchema(schema) || isFreeFormArraySchema(schema) || isUnconstrainedSchema(schema);
+        return isFreeFormObjectSchema(schema)
+                || isFreeFormArraySchema(schema)
+                || isStringOrStructuredTypeUnion(schema)
+                || isUnconstrainedSchema(schema);
     }
     private boolean expectsStructuredValue(JsonNode schema) {
         return declaresType(schema, "object") || declaresType(schema, "array");
@@ -214,6 +225,14 @@ public final class AgenticAuthoringProviderSchemaCompiler {
     }
     private boolean isFreeFormObjectSchema(JsonNode schema) { return "object".equals(schema.path("type").asText("")) && (!schema.path("properties").isObject() || schema.path("properties").isEmpty()); }
     private boolean isFreeFormArraySchema(JsonNode schema) { return "array".equals(schema.path("type").asText("")) && (!schema.path("items").isObject() || schema.path("items").isEmpty()); }
+    private boolean isStringOrStructuredTypeUnion(JsonNode schema) {
+        JsonNode types = schema.path("type");
+        if (!types.isArray() || !(declaresType(schema, "object") || declaresType(schema, "array"))) return false;
+        for (JsonNode type : types) {
+            if (!Set.of("string", "object", "array", "null").contains(type.asText(""))) return false;
+        }
+        return true;
+    }
     private boolean isUnconstrainedSchema(JsonNode schema) {
         return !schema.has("type") && !schema.has("enum") && !schema.has("const")
                 && !schema.has("properties") && !schema.has("items")

@@ -529,9 +529,17 @@ class AgenticAuthoringManifestServiceTest {
 
     @Test
     void compilesTableColumnHeaderChangeFromClasspathRegistrySnapshot() throws Exception {
+        String registryPayload = payloadFromClasspathSnapshot("praxis-table");
+        String expectedManifestVersion = objectMapper.readTree(registryPayload)
+                .path("componentDefinition")
+                .path("jsonSchema")
+                .path("authoringManifest")
+                .path("manifestVersion")
+                .asText();
+        assertThat(expectedManifestVersion).isNotBlank();
         AgenticAuthoringManifestService service = serviceWithPayload(
                 "praxis-table",
-                payloadFromClasspathSnapshot("praxis-table"));
+                registryPayload);
         JsonNode request = objectMapper.readTree("""
                 {
                   "config": {
@@ -553,7 +561,7 @@ class AgenticAuthoringManifestServiceTest {
 
         assertThat(result.compiled()).isTrue();
         assertThat(result.failures()).isEmpty();
-        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo("2.2.2");
+        assertThat(result.patch().path("manifestVersion").asText()).isEqualTo(expectedManifestVersion);
         JsonNode operation = result.patch().path("operations").get(0);
         assertThat(operation.path("operationId").asText()).isEqualTo("column.header.set");
         assertThat(operation.path("op").asText()).isEqualTo("merge-by-key");

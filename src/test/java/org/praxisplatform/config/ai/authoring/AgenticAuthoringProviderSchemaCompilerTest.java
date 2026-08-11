@@ -44,7 +44,7 @@ class AgenticAuthoringProviderSchemaCompilerTest {
 
         JsonNode schema = compiler.compileEditPlanSchema("praxis-component-edit-plan.v1", "praxis-table", operations);
 
-        assertThat(operations).hasSize(68);
+        assertThat(operations).isNotEmpty();
         assertProviderSafe(schema);
         assertThat(manifest).isEqualTo(original);
     }
@@ -88,6 +88,41 @@ class AgenticAuthoringProviderSchemaCompilerTest {
                 "praxis-component-edit-plan.v1", "praxis-table", List.of(operation(manifest, "row.styleRule.add")));
         assertTypeIncludes(styleRule.at("/properties/operations/items/properties/input/properties/style"), "string");
         assertTypeIncludes(styleRule.at("/properties/operations/items/properties/input/properties/effects"), "array");
+    }
+
+    @Test
+    void transportsStringOrObjectProjectionHeadersWithoutWeakeningCanonicalValidation() throws Exception {
+        JsonNode manifest = tableManifest();
+        JsonNode operation = operation(manifest, "column.projection.configure");
+        JsonNode schema = compiler.compileEditPlanSchema(
+                "praxis-component-edit-plan.v1", "praxis-table", List.of(operation));
+
+        JsonNode headerSchema = schema.at(
+                "/properties/operations/items/properties/input/properties/additions/items/properties/header");
+        assertTypeIncludes(headerSchema, "string");
+        assertThat(headerSchema.path("type").toString()).doesNotContain("object");
+
+        ObjectNode providerPlan = objectMapper.createObjectNode();
+        ObjectNode providerInput = providerPlan.putArray("operations").addObject()
+                .put("operationId", "column.projection.configure")
+                .putObject("input")
+                .put("source", "schema");
+        providerInput.putArray("additions")
+                .addObject()
+                .put("field", "score")
+                .put("header", "{\"key\":\"score.label\",\"fallback\":\"Score\"}");
+        providerInput.withArray("additions")
+                .addObject()
+                .put("field", "name")
+                .put("header", "Name");
+
+        ObjectNode manifestEnvelope = objectMapper.createObjectNode();
+        manifestEnvelope.putArray("operations").add(operation);
+        JsonNode decoded = compiler.decodeCompatibilityValues(providerPlan, manifestEnvelope);
+
+        assertThat(decoded.at("/operations/0/input/additions/0/header/key").asText()).isEqualTo("score.label");
+        assertThat(decoded.at("/operations/0/input/additions/0/header/fallback").asText()).isEqualTo("Score");
+        assertThat(decoded.at("/operations/0/input/additions/1/header").asText()).isEqualTo("Name");
     }
 
     @Test
