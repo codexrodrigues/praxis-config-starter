@@ -597,7 +597,7 @@ public class AgenticAuthoringTurnStreamService {
                 turnService.expireTurn(threadId, turnId);
             }
         } finally {
-            complete(streamId);
+            completeAfterProcessing(streamId);
         }
     }
 
@@ -1033,6 +1033,12 @@ public class AgenticAuthoringTurnStreamService {
         clearTerminalState(streamId);
     }
 
+    private void completeAfterProcessing(UUID streamId) {
+        processingTasks.remove(streamId);
+        completeStreamResources(streamId);
+        clearTerminalState(streamId);
+    }
+
     private void completeStreamResources(UUID streamId) {
         ScheduledFuture<?> processingTimeoutTask = processingTimeoutTasks.remove(streamId);
         if (processingTimeoutTask != null) {
@@ -1286,12 +1292,25 @@ public class AgenticAuthoringTurnStreamService {
 
     @PreDestroy
     void shutdown() {
+        processingTasks.values().forEach(task -> task.cancel(true));
+        processingTasks.clear();
+        replayTasks.values().forEach(task -> task.cancel(true));
+        replayTasks.clear();
         heartbeatTasks.values().forEach(task -> task.cancel(true));
         heartbeatTasks.clear();
+        processingTimeoutTasks.values().forEach(task -> task.cancel(true));
+        processingTimeoutTasks.clear();
+        processingProgressTasks.values().forEach(task -> task.cancel(true));
+        processingProgressTasks.clear();
         terminalCleanupTasks.values().forEach(task -> task.cancel(true));
         terminalCleanupTasks.clear();
         executor.shutdownNow();
         scheduler.shutdownNow();
+        synchronized (capacityLock) {
+            capacityOwnersByStream.clear();
+            tenantActiveCounts.clear();
+            tenantUserActiveCounts.clear();
+        }
     }
 
     private void validate(AgenticAuthoringTurnStreamRequest request) {

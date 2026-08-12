@@ -14,6 +14,9 @@ import org.springframework.stereotype.Component;
 public class RepositoryBackedProjectKnowledgeCandidateRetriever
         implements AgenticAuthoringProjectKnowledgeCandidateRetriever {
 
+    private static final int CANDIDATE_OVERSAMPLE_FACTOR = 4;
+    private static final int MAX_CANDIDATE_POOL_SIZE = 64;
+
     private final DomainKnowledgeConceptRepository conceptRepository;
 
     @Override
@@ -24,6 +27,12 @@ public class RepositoryBackedProjectKnowledgeCandidateRetriever
                 query.contextKey(),
                 query.resourceKey(),
                 query.nodeType(),
-                PageRequest.of(0, query.limit()));
+                PageRequest.of(0, candidatePoolSize(query.limit())));
+    }
+
+    private int candidatePoolSize(int requestedLimit) {
+        return Math.min(
+                MAX_CANDIDATE_POOL_SIZE,
+                Math.max(requestedLimit, 1) * CANDIDATE_OVERSAMPLE_FACTOR);
     }
 }

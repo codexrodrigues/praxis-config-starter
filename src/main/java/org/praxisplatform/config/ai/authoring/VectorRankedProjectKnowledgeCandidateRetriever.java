@@ -32,6 +32,8 @@ public class VectorRankedProjectKnowledgeCandidateRetriever
         implements AgenticAuthoringProjectKnowledgeCandidateRetriever {
 
     private static final int VECTOR_OVERSAMPLE_FACTOR = 3;
+    private static final int CANONICAL_POOL_OVERSAMPLE_FACTOR = 4;
+    private static final int MAX_CANONICAL_POOL_SIZE = 64;
 
     private final RagVectorStoreService ragVectorStoreService;
     private final DomainKnowledgeConceptRepository conceptRepository;
@@ -60,8 +62,8 @@ public class VectorRankedProjectKnowledgeCandidateRetriever
                 query.tenantId(),
                 query.environment(),
                 conceptKeys);
-        List<DomainKnowledgeConcept> ranked = rankedConcepts(conceptKeys, concepts, query.limit());
-        return ranked.isEmpty() ? repositoryFallback(query) : ranked;
+        List<DomainKnowledgeConcept> ranked = rankedConcepts(conceptKeys, concepts);
+        return mergeWithCanonicalPool(ranked, repositoryFallback(query));
     }
 
     /**
@@ -86,7 +88,7 @@ public class VectorRankedProjectKnowledgeCandidateRetriever
                 query.contextKey(),
                 query.resourceKey(),
                 query.nodeType(),
-                PageRequest.of(0, query.limit()));
+                PageRequest.of(0, canonicalPoolSize(query.limit())));
     }
 
     private org.springframework.ai.vectorstore.filter.Filter.Expression filter(
@@ -135,8 +137,7 @@ public class VectorRankedProjectKnowledgeCandidateRetriever
 
     private List<DomainKnowledgeConcept> rankedConcepts(
             List<String> rankedKeys,
-            List<DomainKnowledgeConcept> concepts,
-            int limit) {
+            List<DomainKnowledgeConcept> concepts) {
         if (concepts == null || concepts.isEmpty()) {
             return List.of();
         }
@@ -152,11 +153,42 @@ public class VectorRankedProjectKnowledgeCandidateRetriever
             if (concept != null) {
                 ranked.add(concept);
             }
-            if (ranked.size() >= limit) {
-                break;
-            }
         }
         return List.copyOf(ranked);
+    }
+
+    /**
+     * Vector ranking is derived and cannot consume the final query limit before canonical
+     * lifecycle, visibility, scope, kind and active-evidence checks run in the owning service.
+     * The bounded repository pool guarantees that stale or off-scope vector hits do not hide a
+     * valid canonical candidate.
+     */
+    private List<DomainKnowledgeConcept> mergeWithCanonicalPool(
+            List<DomainKnowledgeConcept> ranked,
+            List<DomainKnowledgeConcept> canonicalPool) {
+        Map<String, DomainKnowledgeConcept> merged = new LinkedHashMap<>();
+        addByConceptKey(merged, ranked);
+        addByConceptKey(merged, canonicalPool);
+        return List.copyOf(merged.values());
+    }
+
+    private void addByConceptKey(
+            Map<String, DomainKnowledgeConcept> target,
+            List<DomainKnowledgeConcept> concepts) {
+        if (concepts == null) {
+            return;
+        }
+        for (DomainKnowledgeConcept concept : concepts) {
+            if (concept != null && StringUtils.hasText(concept.getConceptKey())) {
+                target.putIfAbsent(concept.getConceptKey(), concept);
+            }
+        }
+    }
+
+    private int canonicalPoolSize(int requestedLimit) {
+        return Math.min(
+                MAX_CANONICAL_POOL_SIZE,
+                Math.max(requestedLimit, 1) * CANONICAL_POOL_OVERSAMPLE_FACTOR);
     }
 
     private void add(List<String> tokens, String value) {

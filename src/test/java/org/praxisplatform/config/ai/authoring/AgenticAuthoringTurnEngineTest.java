@@ -11932,6 +11932,112 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void auditsCandidateScopedProjectKnowledgeWhenGovernedResourceClarificationStopsBeforePreview()
+            throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringIntentResolverService resolver =
+                Mockito.mock(AgenticAuthoringIntentResolverService.class);
+        AgenticAuthoringPreviewService preview = Mockito.mock(AgenticAuthoringPreviewService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringProjectKnowledgeService projectKnowledgeService = Mockito.mock(
+                AgenticAuthoringProjectKnowledgeService.class);
+        AgenticAuthoringCandidate employeeCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios&operation=post&schemaType=request",
+                "/api/human-resources/funcionarios",
+                "post",
+                0.91d,
+                "domain catalog grounded resource selection",
+                List.of("api-metadata", "domain-catalog-grounding"),
+                AgenticAuthoringEvidenceBundle.of("domain_catalog", List.of()));
+        when(candidateCatalog.discover(anyString(), anyString(), any(), any(), any()))
+                .thenReturn(List.of(employeeCandidate));
+        AgenticAuthoringPreIntentToolPlanningService planningService = (request, principal) ->
+                AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
+                        "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                        "O pedido precisa consultar o catalogo governado antes de decidir a fonte.",
+                        List.of(new AgenticAuthoringToolCall(
+                                AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                                "pre_intent_resource_discovery",
+                                new AgenticAuthoringResourceCandidatesRequest(
+                                        "human resources funcionarios cadastro",
+                                        request.userPrompt(),
+                                        "form",
+                                        6)))));
+        AgenticAuthoringProjectKnowledgeProjection projection =
+                new AgenticAuthoringProjectKnowledgeProjection(
+                        "knowledge-employee-card",
+                        "page-builder.e2e.project-knowledge.identity-card",
+                        "project_preference",
+                        new AgenticAuthoringProjectKnowledgeProjection.Scope(
+                                "tenant",
+                                "local",
+                                "human-resources",
+                                "human-resources.funcionarios"),
+                        new AgenticAuthoringProjectKnowledgeProjection.Status("active", "approved"),
+                        "allow",
+                        "page-builder-e2e-fixture",
+                        "layout_preference",
+                        "Prefer compact employee identity cards.",
+                        List.of("domain-knowledge:concept:page-builder.e2e.project-knowledge.identity-card"));
+        when(projectKnowledgeService.retrieve(any())).thenAnswer(invocation -> {
+            AgenticAuthoringProjectKnowledgeQuery query = invocation.getArgument(0);
+            return "human-resources.funcionarios".equals(query.resourceKey())
+                    ? List.of(projection)
+                    : List.of();
+        });
+        when(resolver.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(resourceDiscoveryNeedsClarificationIntent());
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(candidateCatalog, objectMapper));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                resolver,
+                preview,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                projectKnowledgeService,
+                new AgenticAuthoringOrchestrator(new AgenticAuthoringToolLoopExecutor(
+                        registry,
+                        new AgenticAuthoringDefaultToolLoopPlanner())),
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                Mockito.mock(AgenticAuthoringConsultativeAnswerService.class),
+                planningService);
+        AgenticAuthoringTurnStreamRequest request = requestWithContextHintsOnEmptyPage(
+                "preciso monta uma ficha pra cadastra funsionario",
+                domainDiscoveryContext());
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(request, principalContext, sink);
+
+        org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        verify(preview, never()).preview(any(), eq("tenant"), eq("user"), eq("local"));
+        ArgumentCaptor<AgenticAuthoringIntentResolutionRequest> intentRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringIntentResolutionRequest.class);
+        verify(resolver, Mockito.atLeastOnce()).resolve(intentRequest.capture(), eq("tenant"), eq("user"), eq("local"));
+        org.assertj.core.api.Assertions.assertThat(intentRequest.getAllValues())
+                .anySatisfy(captured -> org.assertj.core.api.Assertions.assertThat(
+                                captured.contextHints()
+                                        .path("projectKnowledge")
+                                        .path("entries")
+                                        .path(0)
+                                        .path("conceptKey")
+                                        .asText())
+                        .isEqualTo("page-builder.e2e.project-knowledge.identity-card"));
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        JsonNode audit = result.path("preview").path("diagnostics").path("projectKnowledgeAudit");
+        org.assertj.core.api.Assertions.assertThat(audit.path("influenceCount").asInt()).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(audit.path("citedCount").asInt()).isZero();
+        org.assertj.core.api.Assertions.assertThat(audit.path("entries").path(0).path("conceptKey").asText())
+                .isEqualTo("page-builder.e2e.project-knowledge.identity-card");
+        org.assertj.core.api.Assertions.assertThat(audit.path("entries").path(0).path("cited").asBoolean())
+                .isFalse();
+    }
+
+    @Test
     void suppressesResourceQuickRepliesWhenAiAuthoredFocusRemainsUnconfirmed() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();

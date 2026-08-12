@@ -213,6 +213,23 @@ Implementation result:
 - no vector search, vector publication or prompt injection from vector hits was
   introduced.
 
+Hardening result (2026-08-12):
+
+- o retriever vetorial preserva a ordem derivada, mas mescla um pool estruturado
+  limitado antes de devolver candidatos ao servico canonico;
+- o retriever estruturado tambem usa oversampling limitado, pois `kind` e
+  evidencia ativa sao revalidados depois da consulta e nao podem perder
+  candidatos apenas por truncamento prematuro;
+- o limite publico da query continua sendo o limite final de projecoes, aplicado
+  por `AgenticAuthoringProjectKnowledgeService` somente apos todas as checagens
+  canonicas;
+- descoberta governada de recursos dispara retrieval progressivo por escopo de
+  candidato sem forjar selecao, permitindo auditar Project Knowledge mesmo em
+  turnos que terminam corretamente em clarificacao;
+- `projectKnowledgeAudit` foi centralizado e agora acompanha terminais sem
+  materializacao com `cited=false`; citacao continua exigindo `sourceRefs`
+  emitidos por plano ou patch.
+
 ### Slice 4 - Lifecycle Invalidation
 
 Objective:

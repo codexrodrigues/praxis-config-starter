@@ -156,6 +156,45 @@ class VectorRankedProjectKnowledgeCandidateRetrieverTest {
         assertThat(result).containsExactly(concept);
     }
 
+    @Test
+    void keepsCanonicalPoolAfterVectorHitsSoDerivedRankingCannotConsumeFinalLimit() {
+        AgenticAuthoringProjectKnowledgeQuery query = query(1);
+        DomainKnowledgeConcept offScope = concept("knowledge:off-scope");
+        offScope.setResourceKey("human-resources.departamentos");
+        DomainKnowledgeConcept relevant = concept("knowledge:relevant");
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.search(any(), eq(3), any()))
+                .thenReturn(List.of(document("knowledge:off-scope")));
+        when(conceptRepository.findWithSourceReleaseByTenantIdAndEnvironmentAndConceptKeyIn(
+                eq("tenant-a"),
+                eq("dev"),
+                eq(List.of("knowledge:off-scope"))))
+                .thenReturn(List.of(offScope));
+        when(conceptRepository.findGovernedProjectKnowledgeCandidates(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("human-resources"),
+                eq("human-resources.funcionarios"),
+                eq("concept"),
+                any(Pageable.class)))
+                .thenReturn(List.of(relevant));
+
+        List<DomainKnowledgeConcept> result = retriever.retrieve(query);
+
+        assertThat(result)
+                .extracting(DomainKnowledgeConcept::getConceptKey)
+                .containsExactly("knowledge:off-scope", "knowledge:relevant");
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(conceptRepository).findGovernedProjectKnowledgeCandidates(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("human-resources"),
+                eq("human-resources.funcionarios"),
+                eq("concept"),
+                pageable.capture());
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(4);
+    }
+
     private AgenticAuthoringProjectKnowledgeQuery query(int limit) {
         return new AgenticAuthoringProjectKnowledgeQuery(
                 "tenant-a",

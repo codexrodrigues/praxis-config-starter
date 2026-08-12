@@ -849,30 +849,36 @@ class AgenticAuthoringTurnStreamServiceTest {
         ReflectionTestUtils.setField(service, "processingTimeoutSeconds", 60L);
         stubSuccessfulStreamStart(threadId, principalContext);
 
-        AgenticAuthoringTurnStreamService.StartResult first =
-                service.start(requestWithClientTurnId("turn-client-1"), "http://localhost", principalContext);
-        org.assertj.core.api.Assertions.assertThat(first.created()).isTrue();
-        org.assertj.core.api.Assertions.assertThat(firstExecutionStarted.await(2, TimeUnit.SECONDS)).isTrue();
+        try {
+            AgenticAuthoringTurnStreamService.StartResult first =
+                    service.start(requestWithClientTurnId("turn-client-1"), "http://localhost", principalContext);
+            org.assertj.core.api.Assertions.assertThat(first.created()).isTrue();
+            org.assertj.core.api.Assertions.assertThat(firstExecutionStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            Future<?> firstProcessingTask = processingTask(service, first.response().getStreamId());
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(
-                        () -> service.start(requestWithClientTurnId("turn-client-2"), "http://localhost", principalContext))
-                .isInstanceOf(ResponseStatusException.class)
-                .satisfies(ex -> {
-                    ResponseStatusException response = (ResponseStatusException) ex;
-                    org.assertj.core.api.Assertions.assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
-                    org.assertj.core.api.Assertions.assertThat(response.getReason())
-                            .isEqualTo("agentic-authoring-stream-capacity-exceeded");
-                });
-        verify(turnService, times(1)).reserveTurnForStreaming(eq(threadId), any(UUID.class));
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> service.start(requestWithClientTurnId("turn-client-2"), "http://localhost", principalContext))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .satisfies(ex -> {
+                        ResponseStatusException response = (ResponseStatusException) ex;
+                        org.assertj.core.api.Assertions.assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+                        org.assertj.core.api.Assertions.assertThat(response.getReason())
+                                .isEqualTo("agentic-authoring-stream-capacity-exceeded");
+                    });
+            verify(turnService, times(1)).reserveTurnForStreaming(eq(threadId), any(UUID.class));
 
-        releaseFirstExecution.countDown();
-        org.assertj.core.api.Assertions.assertThat(firstExecutionFinished.await(2, TimeUnit.SECONDS)).isTrue();
-        AgenticAuthoringTurnStreamService.StartResult afterCleanup =
-                service.start(requestWithClientTurnId("turn-client-3"), "http://localhost", principalContext);
-        service.shutdown();
+            releaseFirstExecution.countDown();
+            org.assertj.core.api.Assertions.assertThat(firstExecutionFinished.await(2, TimeUnit.SECONDS)).isTrue();
+            firstProcessingTask.get(2, TimeUnit.SECONDS);
+            AgenticAuthoringTurnStreamService.StartResult afterCleanup =
+                    service.start(requestWithClientTurnId("turn-client-3"), "http://localhost", principalContext);
 
-        org.assertj.core.api.Assertions.assertThat(afterCleanup.created()).isTrue();
-        verify(turnService, times(2)).reserveTurnForStreaming(eq(threadId), any(UUID.class));
+            org.assertj.core.api.Assertions.assertThat(afterCleanup.created()).isTrue();
+            verify(turnService, times(2)).reserveTurnForStreaming(eq(threadId), any(UUID.class));
+        } finally {
+            releaseFirstExecution.countDown();
+            service.shutdown();
+        }
     }
 
     @Test
@@ -1954,6 +1960,17 @@ class AgenticAuthoringTurnStreamServiceTest {
                                     null));
                 });
         return turnEngine;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Future<?> processingTask(AgenticAuthoringTurnStreamService service, UUID streamId) {
+        Map<UUID, Future<?>> processingTasks =
+                (Map<UUID, Future<?>>) ReflectionTestUtils.getField(service, "processingTasks");
+        org.assertj.core.api.Assertions.assertThat(processingTasks)
+                .as("processing task registry")
+                .isNotNull()
+                .containsKey(streamId);
+        return processingTasks.get(streamId);
     }
 
     private AgenticAuthoringTurnStreamService service(AgenticAuthoringTurnEngine turnEngine) {

@@ -533,6 +533,23 @@ estado generico. As fases canonicas atuais de `thought.step` incluem:
 - `preview.plan`: planejamento da materializacao governada.
 - `preview.compile`: compilacao ou reparo da preview materializada.
 
+Project Knowledge segue uma sequencia progressiva. O pack macro pode ser lido
+antes da orientacao semantica; depois que `resource.discovery` retorna candidatos
+governados, o backend consulta Project Knowledge separadamente para os escopos
+canonicos desses candidatos, sem promover nenhum deles a `selectedCandidate`.
+Se a decisao terminar em clarificacao antes de materializar preview, o resultado
+terminal ainda inclui `preview.diagnostics.projectKnowledgeAudit` para auditar o
+conhecimento consultado. Nesse caso as entradas sao `cited=false`, porque consulta
+nao equivale a influencia materializada. Somente `sourceRefs=projectKnowledge:*`
+emitidos pelo plano ou patch podem marcar uma entrada como citada.
+
+O ranking vetorial permanece derivado: hits vetoriais e o pool estruturado sao
+mesclados antes do limite final. O limite de projecoes e aplicado apenas depois
+que `AgenticAuthoringProjectKnowledgeService` revalida lifecycle, curation,
+`aiVisibility`, tenant, environment, escopo, kind e evidencia ativa. Portanto,
+um hit stale, fora de escopo ou sem evidencia ativa nao pode consumir sozinho a
+janela final nem ocultar um candidato canonico valido.
+
 `heartbeat` e out-of-band, nao persistido no event log, e deve carregar pelo
 menos `state=alive`, `phase`, `summary` e `lastEventType`. O `phase` deve
 refletir o ultimo evento nao terminal conhecido, permitindo que clientes mostrem

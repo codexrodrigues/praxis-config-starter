@@ -35,6 +35,9 @@ public class AgenticAuthoringTurnEngine {
 
     private static final int MAX_TOOL_CALLS_PER_TURN = 1;
     private static final int MAX_REPAIR_ATTEMPTS_PER_PHASE = 1;
+    private static final int MAX_PROJECT_KNOWLEDGE_RESOURCE_SCOPES = 6;
+    private static final int MAX_PROJECT_KNOWLEDGE_INFLUENCES = 8;
+    private static final int PROJECT_KNOWLEDGE_PER_RESOURCE_LIMIT = 4;
     private static final long DEFAULT_COMPONENT_CAPABILITIES_PRELOAD_TIMEOUT_MS = 35_000L;
 
     private final AgenticAuthoringIntentResolverService intentResolverService;
@@ -313,6 +316,11 @@ public class AgenticAuthoringTurnEngine {
                     && plannedResourceDiscovery.candidates() != null
                     && !plannedResourceDiscovery.candidates().isEmpty()) {
                 request = withResourceDiscoveryContext(request, plannedResourceDiscovery);
+                request = withResourceCandidateProjectKnowledgeContext(
+                        request,
+                        principalContext,
+                        eventSink,
+                        plannedResourceDiscovery);
             }
             boolean resourceDiscoveryContextPresent = hasResourceDiscoveryContext(request);
             boolean compactIntentProgress = compactPlatformGuidanceOpportunity
@@ -432,6 +440,11 @@ public class AgenticAuthoringTurnEngine {
                                 "candidateCount", resourceDiscovery.candidates().size())));
                 AgenticAuthoringTurnStreamRequest refinedIntentRequest =
                         withResourceDiscoveryContext(request, resourceDiscovery);
+                refinedIntentRequest = withResourceCandidateProjectKnowledgeContext(
+                        refinedIntentRequest,
+                        principalContext,
+                        eventSink,
+                        resourceDiscovery);
                 intentResolution = intentResolverService.resolve(
                         toIntentRequest(refinedIntentRequest),
                         principalContext.tenantId(),
@@ -1193,7 +1206,7 @@ public class AgenticAuthoringTurnEngine {
         decisionDiagnostics.put("consultativePostIntent", true);
         Map<String, Object> resultPayload = new LinkedHashMap<>();
         resultPayload.put("intentResolution", consultativeIntentResolution);
-        resultPayload.put("preview", objectMapper.createObjectNode());
+        resultPayload.put("preview", nonMaterializedPreview(request));
         resultPayload.put("assistantMessage", publicAssistantMessage(answer.assistantMessage()));
         resultPayload.put("assistantContent",
                 AgenticAuthoringAssistantContentFactory.fromConsultativeProjection(answer.apiCatalogProjection()));
@@ -1259,7 +1272,7 @@ public class AgenticAuthoringTurnEngine {
         decisionDiagnostics.put("secondInferenceSkipped", true);
         Map<String, Object> resultPayload = new LinkedHashMap<>();
         resultPayload.put("intentResolution", intentResolution);
-        resultPayload.put("preview", objectMapper.createObjectNode());
+        resultPayload.put("preview", nonMaterializedPreview(request));
         resultPayload.put("assistantMessage", publicAssistantMessage(assistantMessage, request));
         resultPayload.put("assistantContent", intentResolution.assistantContent());
         resultPayload.put("quickReplies", intentResolution.quickReplies() == null
@@ -1421,7 +1434,7 @@ public class AgenticAuthoringTurnEngine {
         decisionDiagnostics.put("secondInferenceSkipped", true);
         Map<String, Object> resultPayload = new LinkedHashMap<>();
         resultPayload.put("intentResolution", intentResolution);
-        resultPayload.put("preview", objectMapper.createObjectNode());
+        resultPayload.put("preview", nonMaterializedPreview(request));
         resultPayload.put("assistantMessage", publicAssistantMessage(intentResolution.assistantMessage(), request));
         resultPayload.put("assistantContent", intentResolution.assistantContent());
         resultPayload.put("quickReplies", intentResolution.quickReplies() == null
@@ -1483,7 +1496,7 @@ public class AgenticAuthoringTurnEngine {
 
         Map<String, Object> resultPayload = new LinkedHashMap<>();
         resultPayload.put("intentResolution", intentResolution);
-        resultPayload.put("preview", objectMapper.createObjectNode());
+        resultPayload.put("preview", nonMaterializedPreview(request));
         resultPayload.put("assistantMessage", publicAssistantMessage(assistantMessage, request));
         resultPayload.put("quickReplies", List.of());
         resultPayload.put("canApply", false);
@@ -1587,7 +1600,7 @@ public class AgenticAuthoringTurnEngine {
         }
         Map<String, Object> resultPayload = new LinkedHashMap<>();
         resultPayload.put("intentResolution", intentResolution);
-        resultPayload.put("preview", objectMapper.createObjectNode());
+        resultPayload.put("preview", nonMaterializedPreview(request));
         resultPayload.put("assistantMessage", publicAssistantMessage(assistantMessage, request));
         resultPayload.put("assistantContent", intentResolution.assistantContent());
         resultPayload.put("quickReplies", intentResolution.quickReplies() == null
@@ -1663,7 +1676,7 @@ public class AgenticAuthoringTurnEngine {
         decisionDiagnostics.put("domainDiscoveryGroundedClarification", true);
         Map<String, Object> resultPayload = new LinkedHashMap<>();
         resultPayload.put("intentResolution", intentResolution);
-        resultPayload.put("preview", objectMapper.createObjectNode());
+        resultPayload.put("preview", nonMaterializedPreview(request));
         resultPayload.put("assistantMessage", publicAssistantMessage(assistantMessage));
         resultPayload.put("assistantContent", objectMapper.createObjectNode());
         resultPayload.put("quickReplies", domainDiscoveryQuickReplies(resources));
@@ -1820,7 +1833,7 @@ public class AgenticAuthoringTurnEngine {
         decisionDiagnostics.put("resourceDiscoveryGroundedClarification", true);
         Map<String, Object> resultPayload = new LinkedHashMap<>();
         resultPayload.put("intentResolution", intentResolution);
-        resultPayload.put("preview", objectMapper.createObjectNode());
+        resultPayload.put("preview", nonMaterializedPreview(request));
         resultPayload.put("assistantMessage", publicAssistantMessage(assistantMessage));
         resultPayload.put("assistantContent", projection == null
                 ? objectMapper.createObjectNode()
@@ -5728,6 +5741,93 @@ public class AgenticAuthoringTurnEngine {
                 request.runtimeComponentObservationTrustBoundary());
     }
 
+    /**
+     * Retrieves safe Project Knowledge after governed resource discovery, without treating any
+     * candidate as selected. This closes the gap where a clarification turn could consult the API
+     * catalog but terminate before the selected-candidate retrieval stage, leaving no audit of the
+     * knowledge that was available for those governed resource scopes.
+     */
+    private AgenticAuthoringTurnStreamRequest withResourceCandidateProjectKnowledgeContext(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringResourceCandidatesResult resourceDiscovery) {
+        if (projectKnowledgeService == null
+                || eventSink.terminalReached()
+                || resourceDiscovery == null
+                || resourceDiscovery.candidates() == null
+                || resourceDiscovery.candidates().isEmpty()) {
+            return request;
+        }
+        LinkedHashMap<String, AgenticAuthoringProjectKnowledgeProjection> projectionsByKey =
+                new LinkedHashMap<>();
+        LinkedHashSet<String> resourceKeys = new LinkedHashSet<>();
+        for (AgenticAuthoringCandidate candidate : resourceDiscovery.candidates()) {
+            String resourceKey = resourceKeyFromPath(candidate == null ? null : candidate.resourcePath());
+            if (!StringUtils.hasText(resourceKey) || resourceKeys.contains(resourceKey)) {
+                continue;
+            }
+            if (resourceKeys.size() >= MAX_PROJECT_KNOWLEDGE_RESOURCE_SCOPES) {
+                break;
+            }
+            resourceKeys.add(resourceKey);
+        }
+        if (resourceKeys.isEmpty()) {
+            return request;
+        }
+        emitStatus(
+                eventSink,
+                "projectKnowledge.retrieve",
+                "Estou buscando conhecimento governado do projeto para os recursos recuperados.");
+        for (String resourceKey : resourceKeys) {
+            AgenticAuthoringProjectKnowledgeQuery query = new AgenticAuthoringProjectKnowledgeQuery(
+                    principalContext.tenantId(),
+                    principalContext.environment(),
+                    contextKeyFromResourceKey(resourceKey),
+                    resourceKey,
+                    scopedProjectKnowledgeKinds(),
+                    null,
+                    PROJECT_KNOWLEDGE_PER_RESOURCE_LIMIT);
+            for (AgenticAuthoringProjectKnowledgeProjection projection : projectKnowledgeService.retrieve(query)) {
+                if (projection == null) {
+                    continue;
+                }
+                String projectionKey = firstText(projection.knowledgeId(), projection.conceptKey());
+                if (StringUtils.hasText(projectionKey)) {
+                    projectionsByKey.putIfAbsent(projectionKey, projection);
+                }
+                if (projectionsByKey.size() >= MAX_PROJECT_KNOWLEDGE_INFLUENCES) {
+                    break;
+                }
+            }
+            if (projectionsByKey.size() >= MAX_PROJECT_KNOWLEDGE_INFLUENCES) {
+                break;
+            }
+        }
+        List<AgenticAuthoringProjectKnowledgeProjection> projections =
+                List.copyOf(projectionsByKey.values());
+        Map<String, Object> diagnostics = new LinkedHashMap<>(projectKnowledgeDiagnostics(projections));
+        diagnostics.put("resourceScopeCount", resourceKeys.size());
+        diagnostics.put("retrievalStage", "governed-resource-candidates");
+        if (projections.isEmpty()) {
+            diagnostics.put("result", "empty");
+            eventSink.append("thought.step", safeToolProjection(
+                    "projectKnowledge.result",
+                    "Nao encontrei conhecimento governado adicional para os recursos recuperados.",
+                    diagnostics));
+            return request;
+        }
+        eventSink.append("thought.step", safeToolProjection(
+                "projectKnowledge.retrieve",
+                "Conhecimento governado do projeto recuperado para os recursos candidatos.",
+                diagnostics));
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        contextHints.set("projectKnowledge", projectKnowledgeContext(projections));
+        return copyWithContextHints(request, contextHints);
+    }
+
     private AgenticAuthoringTurnStreamRequest withImplicitChartDetailModalActionContext(
             AgenticAuthoringTurnStreamRequest request,
             AgenticAuthoringIntentResolutionResult intentResolution) {
@@ -5913,23 +6013,27 @@ public class AgenticAuthoringTurnEngine {
                 resourceKey,
                 macroPack
                         ? List.of("context")
-                        : List.of(
-                                "context",
-                                "business_capability",
-                                "process",
-                                "business_event",
-                                "policy",
-                                "metric",
-                                "actor",
-                                "concept",
-                                "project_preference",
-                                "domain_decision_hint",
-                                "component_authoring_pattern",
-                                "resource_selection_rationale",
-                                "governance_constraint",
-                                "integration_note"),
+                        : scopedProjectKnowledgeKinds(),
                 macroPack ? "context" : null,
                 macroPack ? 4 : 8);
+    }
+
+    private List<String> scopedProjectKnowledgeKinds() {
+        return List.of(
+                "context",
+                "business_capability",
+                "process",
+                "business_event",
+                "policy",
+                "metric",
+                "actor",
+                "concept",
+                "project_preference",
+                "domain_decision_hint",
+                "component_authoring_pattern",
+                "resource_selection_rationale",
+                "governance_constraint",
+                "integration_note");
     }
 
     private boolean hasProjectKnowledgeScope(AgenticAuthoringProjectKnowledgeQuery query) {
@@ -5994,6 +6098,19 @@ public class AgenticAuthoringTurnEngine {
                 .distinct()
                 .toList());
         return diagnostics;
+    }
+
+    private ObjectNode nonMaterializedPreview(AgenticAuthoringTurnStreamRequest request) {
+        ObjectNode preview = objectMapper.createObjectNode();
+        JsonNode audit = AgenticAuthoringProjectKnowledgeAuditFactory.create(
+                objectMapper,
+                request == null ? null : request.contextHints(),
+                null,
+                null);
+        if (audit != null) {
+            preview.putObject("diagnostics").set("projectKnowledgeAudit", audit);
+        }
+        return preview;
     }
 
     private Map<String, Object> decisionDiagnostics(
@@ -6684,6 +6801,15 @@ public class AgenticAuthoringTurnEngine {
 
     private String contextKeyFromCandidate(AgenticAuthoringIntentResolutionResult intentResolution) {
         String resourceKey = resourceKeyFromCandidate(intentResolution);
+        return contextKeyFromResourceKey(resourceKey);
+    }
+
+    private String resourceKeyFromCandidate(AgenticAuthoringIntentResolutionResult intentResolution) {
+        AgenticAuthoringCandidate candidate = intentResolution == null ? null : intentResolution.selectedCandidate();
+        return resourceKeyFromPath(candidate == null ? null : candidate.resourcePath());
+    }
+
+    private String contextKeyFromResourceKey(String resourceKey) {
         if (!StringUtils.hasText(resourceKey)) {
             return null;
         }
@@ -6691,12 +6817,11 @@ public class AgenticAuthoringTurnEngine {
         return firstDot > 0 ? resourceKey.substring(0, firstDot) : null;
     }
 
-    private String resourceKeyFromCandidate(AgenticAuthoringIntentResolutionResult intentResolution) {
-        AgenticAuthoringCandidate candidate = intentResolution == null ? null : intentResolution.selectedCandidate();
-        if (candidate == null || !StringUtils.hasText(candidate.resourcePath())) {
+    private String resourceKeyFromPath(String resourcePath) {
+        if (!StringUtils.hasText(resourcePath)) {
             return null;
         }
-        String path = candidate.resourcePath().trim();
+        String path = resourcePath.trim();
         if (path.startsWith("/api/")) {
             path = path.substring(5);
         } else if (path.startsWith("/")) {
