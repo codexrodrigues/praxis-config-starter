@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainRuleCompositionApprovalResponse;
@@ -15,6 +16,7 @@ import org.praxisplatform.config.dto.DomainRuleSnapshotActivationResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotHeadStatusResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotPublicationRequest;
 import org.praxisplatform.config.dto.DomainRuleSnapshotStoredResponse;
+import org.praxisplatform.config.dto.DomainRuleSnapshotVersionResponse;
 import org.praxisplatform.config.exception.DomainRuleSnapshotControlPlaneException;
 import org.praxisplatform.config.http.HttpEntityTagCondition;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
@@ -44,6 +46,7 @@ import org.springframework.web.bind.annotation.RestController;
 @ConditionalOnBean({DomainRuleSnapshotRepository.class, DomainRuleSnapshotHeadRepository.class})
 public class DomainRuleSnapshotController {
   private static final String SNAPSHOT_READER_ROLE = "RULE_SNAPSHOT_READER";
+  private static final String SNAPSHOT_OPERATOR_ROLE = "RULE_SNAPSHOT_OPERATOR";
 
   private final DomainRuleSnapshotService snapshotService;
   private final DomainRuleGovernancePrincipalResolver principalResolver;
@@ -221,6 +224,28 @@ public class DomainRuleSnapshotController {
         .body(response);
   }
 
+  @GetMapping
+  @Operation(summary = "List published RuleSet versions",
+      description = "Returns a bounded, newest-first catalog of safe immutable-version metadata. Executable content is never included in this projection.")
+  @ApiResponses({
+    @ApiResponse(responseCode = "200", description = "Published versions in newest-first order"),
+    @ApiResponse(responseCode = "400", description = "RuleSet key or limit is invalid"),
+    @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_SNAPSHOT_READER")
+  })
+  public ResponseEntity<List<DomainRuleSnapshotVersionResponse>> versions(
+      @RequestParam String ruleSetKey,
+      @RequestParam(defaultValue = "50") int limit,
+      @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+      @RequestHeader(value = "X-Env", required = false) String environment,
+      HttpServletRequest servletRequest) {
+    DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+        servletRequest, tenantId, environment, SNAPSHOT_READER_ROLE);
+    return ResponseEntity.ok()
+        .cacheControl(CacheControl.noCache())
+        .body(snapshotService.listVersions(
+            principal.tenantId(), principal.environment(), ruleSetKey, limit));
+  }
+
   @PostMapping("/{snapshotKey}/rollback")
   @Operation(summary = "Reactivate a previously published snapshot",
       description = "Moves the mutable head to existing immutable content, rotates the head ETag and appends an audit event. Snapshot content is never rewritten.")
@@ -242,8 +267,38 @@ public class DomainRuleSnapshotController {
       @RequestHeader(value = "If-Match", required = false) String ifMatch,
       HttpServletRequest servletRequest) {
     DomainRuleGovernancePrincipal principal = principalResolver.resolve(
-        servletRequest, tenantId, environment, "RULE_SNAPSHOT_OPERATOR");
+        servletRequest, tenantId, environment, SNAPSHOT_OPERATOR_ROLE);
     DomainRuleSnapshotActivationResponse response = snapshotService.rollback(
+        snapshotKey,
+        principal.actorRef(),
+        principal.tenantId(),
+        principal.environment(),
+        ifMatch);
+    return ResponseEntity.ok()
+        .eTag(quoted(response.headEtag()))
+        .cacheControl(CacheControl.noCache())
+        .body(response);
+  }
+
+  @PostMapping("/{snapshotKey}/activate")
+  @Operation(summary = "Activate a newer published snapshot",
+      description = "Moves the mutable head forward to newer verified immutable content, rotates the head ETag and appends an activation event. Older content must use the rollback operation.")
+  @ApiResponses({
+    @ApiResponse(responseCode = "200", description = "Newer published snapshot selected and a new head identity issued"),
+    @ApiResponse(responseCode = "404", description = "The target snapshot or RuleSet head does not exist"),
+    @ApiResponse(responseCode = "409", description = "The target is active, older than the head or outside its validity interval"),
+    @ApiResponse(responseCode = "412", description = "The supplied head ETag is stale"),
+    @ApiResponse(responseCode = "428", description = "If-Match was not supplied")
+  })
+  public ResponseEntity<DomainRuleSnapshotActivationResponse> activate(
+      @PathVariable String snapshotKey,
+      @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+      @RequestHeader(value = "X-Env", required = false) String environment,
+      @RequestHeader(value = "If-Match", required = false) String ifMatch,
+      HttpServletRequest servletRequest) {
+    DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+        servletRequest, tenantId, environment, SNAPSHOT_OPERATOR_ROLE);
+    DomainRuleSnapshotActivationResponse response = snapshotService.activatePublished(
         snapshotKey,
         principal.actorRef(),
         principal.tenantId(),

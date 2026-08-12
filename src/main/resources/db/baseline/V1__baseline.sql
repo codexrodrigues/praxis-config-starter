@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS domain_rule_snapshot_event (
     tenant_id VARCHAR(128) NOT NULL,
     environment VARCHAR(128) NOT NULL,
     rule_set_key VARCHAR(512) NOT NULL,
-    event_type VARCHAR(32) NOT NULL CHECK (event_type IN ('PUBLISHED', 'ROLLED_BACK')),
+    event_type VARCHAR(32) NOT NULL CHECK (event_type IN ('PUBLISHED', 'ACTIVATED', 'ROLLED_BACK')),
     from_snapshot_id UUID,
     to_snapshot_id UUID NOT NULL,
     activation_revision BIGINT NOT NULL CHECK (activation_revision > 0),

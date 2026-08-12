@@ -435,7 +435,10 @@ vector similarity score or decide user intent. Queries without lexical evidence 
 | `/api/praxis/config/ai-context/**` | Build AI context from component metadata, runtime state, templates, and schema hints. |
 | `/api/praxis/config/ai/patch` | Generate structured configuration patches from governed AI context. |
 | `/api/praxis/config/ai/authoring/**` | Validate, compile, preview, apply, stream, replay, and cancel agentic authoring turns. |
-| `/api/praxis/config/domain-rules/**` | Govern shared business rules and semantic decisions, including immutable RuleSet snapshots, conditional head publication and rollback-by-selection. |
+| `/api/praxis/config/domain-rules/**` | Govern shared business rules and semantic decisions, including immutable RuleSet snapshots, conditional head publication, forward activation and rollback-by-selection. |
+| `GET /api/praxis/config/domain-rules/snapshots` | List a bounded safe version catalog for one scoped RuleSet, without exposing executable content. |
+| `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/activate` | Move the scoped head to a newer verified publication with strong `If-Match`. |
+| `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/rollback` | Move the scoped head to an older verified publication with strong `If-Match`. |
 | `GET /api/praxis/config/domain-rules/snapshots/head/status` | Expose safe readiness and the concurrency ETag for a scoped RuleSet head, including governed recovery of preserved pre-manifest beta snapshots without returning unverified content. |
 | `/api/praxis/config/domain-knowledge/**` | Govern domain knowledge change sets and evidence lifecycle. |
 | `GET /api/praxis/runtime/context` | Return a safe, host-neutral enterprise runtime context projection. Private auth and authorization internals remain host-owned. |
