@@ -5924,9 +5924,10 @@ public class AgenticAuthoringIntentResolverService {
                             .toList(),
                     candidate.evidenceBundle());
         }
+        String canonicalResourcePath = normalizePath(resourcePath);
         return candidate(
-                resourcePath,
-                submitUrl.isBlank() ? "post" : normalizePath(submitUrl),
+                canonicalResourcePath,
+                submitUrl.isBlank() ? canonicalResourcePath : normalizePath(submitUrl),
                 "post",
                 0.99d,
                 "resource path explicitly provided by the user prompt",
@@ -5940,7 +5941,7 @@ public class AgenticAuthoringIntentResolverService {
         java.util.regex.Matcher matcher = java.util.regex.Pattern
                 .compile("(?i)(/api/[a-z0-9][a-z0-9_./-]*)")
                 .matcher(prompt);
-        return matcher.find() ? matcher.group(1).replaceAll("/+$", "") : "";
+        return matcher.find() ? normalizeExplicitApiPath(matcher.group(1)) : "";
     }
 
     private String explicitSubmitUrl(String prompt, String resourcePath) {
@@ -5953,11 +5954,18 @@ public class AgenticAuthoringIntentResolverService {
         if (!matcher.find()) {
             return "";
         }
-        String submitUrl = normalizePath(matcher.group(1));
+        String submitUrl = normalizeExplicitApiPath(matcher.group(1));
         String normalizedResourcePath = normalizePath(resourcePath);
         return !normalizedResourcePath.isBlank() && submitUrl.startsWith(normalizedResourcePath + "/")
                 ? submitUrl
                 : "";
+    }
+
+    private String normalizeExplicitApiPath(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return normalizePath(value.replaceAll("[.,;:!?]+$", ""));
     }
 
     private AgenticAuthoringCandidate selectFormWriteCandidate(

@@ -50,13 +50,18 @@ class AgenticAuthoringLlmShadowIntegrationTest {
 
         String providerName = normalize(envOrDefault("PRAXIS_AGENTIC_AUTHORING_SHADOW_PROVIDER", "openai"));
         AiProvider provider = createProvider(providerName);
-        String schema = Files.readString(contractsDir().resolve("minimal-form-plan.v1.schema.json"));
+        JsonNode canonicalSchema = objectMapper.readTree(
+                Files.readString(contractsDir().resolve("minimal-form-plan.v1.schema.json")));
+        AgenticAuthoringProviderSchemaCompiler schemaCompiler =
+                new AgenticAuthoringProviderSchemaCompiler(objectMapper);
+        JsonNode providerSchema = schemaCompiler.compileDocumentSchema(canonicalSchema);
 
         JsonNode plan = provider.generateJson(
                 shadowPrompt(providerName),
-                AiJsonSchema.ofSchema(schema),
+                AiJsonSchema.ofSchema(objectMapper.writeValueAsString(providerSchema)),
                 callConfig(providerName)
         );
+        plan = schemaCompiler.decodeDocumentCompatibilityValues(plan, canonicalSchema);
 
         assertMinimalFormPlan(plan);
 
@@ -222,19 +227,19 @@ class AgenticAuthoringLlmShadowIntegrationTest {
     }
 
     private Path contractsDir() {
-        Path fromModuleDir = Path.of("..", "docs", "ai", "agentic-authoring", "contracts");
-        if (Files.exists(fromModuleDir)) {
-            return fromModuleDir;
+        Path moduleDocs = Path.of("docs", "ai", "agentic-authoring", "contracts");
+        if (Files.exists(moduleDocs.resolve("minimal-form-plan.v1.schema.json"))) {
+            return moduleDocs;
         }
-        return Path.of("docs", "ai", "agentic-authoring", "contracts");
+        return Path.of("..", "docs", "ai", "agentic-authoring", "contracts");
     }
 
     private Path proofsDir() {
-        Path fromModuleDir = Path.of("..", "docs", "ai", "agentic-authoring", "proofs");
-        if (Files.exists(fromModuleDir)) {
-            return fromModuleDir;
+        Path moduleDocs = Path.of("docs", "ai", "agentic-authoring", "proofs");
+        if (Files.isDirectory(moduleDocs)) {
+            return moduleDocs;
         }
-        return Path.of("docs", "ai", "agentic-authoring", "proofs");
+        return Path.of("..", "docs", "ai", "agentic-authoring", "proofs");
     }
 
     private String requireEnv(String name) {

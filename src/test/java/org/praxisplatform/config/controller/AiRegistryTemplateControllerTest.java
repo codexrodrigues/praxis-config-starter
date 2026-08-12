@@ -26,6 +26,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.dto.AiRegistryTemplateSearchResult;
+import org.praxisplatform.config.dto.AiRegistryTemplateRecord;
+import org.praxisplatform.config.dto.AiRegistryTemplateRevision;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.service.AiRegistryTemplateService;
 import org.praxisplatform.config.service.AiIntelligenceReleaseService;
@@ -56,27 +58,41 @@ class AiRegistryTemplateControllerTest {
 
   @Test
   void getTemplateReturnsMappedPayloadAndNotFoundWhenMissing() throws Exception {
+    var etag = "123e4567-e89b-12d3-a456-426614174000";
     AiRegistry config =
-        AiRegistry.builder().registryKey("praxis-table").payload("{\"unused\":true}").build();
-    JsonNode payload =
-        objectMapper.readTree(
-            """
-            {
-              "aiDescription": "Tabela operacional",
-              "configJson": { "columns": [{ "field": "name" }] },
-              "templateMeta": { "source": "recipe" }
-            }
-            """);
+        AiRegistry.builder()
+            .registryKey("praxis-table")
+            .version(7L)
+            .etag(java.util.UUID.fromString(etag))
+            .payload("{\"unused\":true}")
+            .build();
     when(service.getTemplate("praxis-table")).thenReturn(Optional.of(config));
-    when(service.parsePayload(config)).thenReturn(payload);
+    when(service.toRecord(config))
+        .thenReturn(
+            AiRegistryTemplateRecord.builder()
+                .componentId("praxis-table")
+                .aiDescription("Tabela operacional")
+                .configJson(objectMapper.readTree("{\"columns\":[{\"field\":\"name\"}]}"))
+                .templateMeta(objectMapper.readTree("{\"source\":\"recipe\"}"))
+                .revision(
+                    AiRegistryTemplateRevision.builder()
+                        .version(7L)
+                        .etag(etag)
+                        .configSha256("a".repeat(64))
+                        .build())
+                .build());
 
     mockMvc
         .perform(get("/api/praxis/config/ai-registry/templates/praxis-table"))
         .andExpect(status().isOk())
+        .andExpect(header().string("ETag", '"' + etag + '"'))
         .andExpect(jsonPath("$.componentId").value("praxis-table"))
         .andExpect(jsonPath("$.aiDescription").value("Tabela operacional"))
         .andExpect(jsonPath("$.configJson.columns[0].field").value("name"))
-        .andExpect(jsonPath("$.templateMeta.source").value("recipe"));
+        .andExpect(jsonPath("$.templateMeta.source").value("recipe"))
+        .andExpect(jsonPath("$.revision.version").value(7))
+        .andExpect(jsonPath("$.revision.etag").value(etag))
+        .andExpect(jsonPath("$.revision.configSha256").value("a".repeat(64)));
 
     when(service.getTemplate("missing-component")).thenReturn(Optional.empty());
 
@@ -90,7 +106,8 @@ class AiRegistryTemplateControllerTest {
     AiRegistry malformed =
         AiRegistry.builder().registryKey("broken-template").payload("{not-json").build();
     when(service.getTemplate("broken-template")).thenReturn(Optional.of(malformed));
-    when(service.parsePayload(malformed)).thenReturn(null);
+    when(service.toRecord(malformed))
+        .thenReturn(AiRegistryTemplateRecord.builder().componentId("broken-template").build());
 
     mockMvc
         .perform(get("/api/praxis/config/ai-registry/templates/broken-template"))
@@ -115,7 +132,20 @@ class AiRegistryTemplateControllerTest {
     AiRegistry saved = AiRegistry.builder().registryKey("praxis-table").payload("{}").build();
     when(service.upsertTemplate(eq("praxis-table"), any(), eq("Tabela compacta"), any()))
         .thenReturn(saved);
-    when(service.parsePayload(saved)).thenReturn(payload);
+    when(service.toRecord(saved))
+        .thenReturn(
+            AiRegistryTemplateRecord.builder()
+                .componentId("praxis-table")
+                .aiDescription("Tabela compacta")
+                .configJson(payload.get("configJson"))
+                .templateMeta(payload.get("templateMeta"))
+                .revision(
+                    AiRegistryTemplateRevision.builder()
+                        .version(2L)
+                        .etag("123e4567-e89b-12d3-a456-426614174002")
+                        .configSha256("b".repeat(64))
+                        .build())
+                .build());
 
     mockMvc
         .perform(
@@ -134,6 +164,8 @@ class AiRegistryTemplateControllerTest {
         .andExpect(jsonPath("$.aiDescription").value("Tabela compacta"))
         .andExpect(jsonPath("$.configJson.columns[0].field").value("id"))
         .andExpect(jsonPath("$.templateMeta.rank").value(1))
+        .andExpect(jsonPath("$.revision.version").value(2))
+        .andExpect(jsonPath("$.revision.configSha256").value("b".repeat(64)))
         .andExpect(jsonPath("$.status").value("upserted"));
 
     doThrow(new ConfigurationIngestionException("configJson must be a JSON object"))
@@ -249,8 +281,13 @@ class AiRegistryTemplateControllerTest {
 
     AiRegistry saved = AiRegistry.builder().registryKey("praxis-table").payload("{}").build();
     when(service.upsertTemplate(eq("praxis-table"), any(), eq("Tabela"), any())).thenReturn(saved);
-    when(service.parsePayload(saved))
-        .thenReturn(objectMapper.readTree("{\"aiDescription\":\"Tabela\",\"configJson\":{\"columns\":[]}}"));
+    when(service.toRecord(saved))
+        .thenReturn(
+            AiRegistryTemplateRecord.builder()
+                .componentId("praxis-table")
+                .aiDescription("Tabela")
+                .configJson(objectMapper.readTree("{\"columns\":[]}"))
+                .build());
 
     mockMvc
         .perform(

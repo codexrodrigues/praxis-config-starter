@@ -18,4 +18,5 @@ public class AiRegistryTemplateRecord {
     private String aiDescription;
     private JsonNode configJson;
     private JsonNode templateMeta;
+    private AiRegistryTemplateRevision revision;
 }

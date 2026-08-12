@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.domain.Scope;
 import org.praxisplatform.config.dto.AiRegistryTemplateRecord;
+import org.praxisplatform.config.dto.AiRegistryTemplateRevision;
 import org.praxisplatform.config.dto.AiRegistryTemplateSearchResult;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.projection.AiRegistryTemplateSearchProjection;
@@ -44,6 +45,7 @@ public class AiRegistryTemplateService {
   private final AiRegistryRepository repository;
   private final ObjectMapper objectMapper;
   private final EmbeddingService embeddingService;
+  private final CanonicalJsonHashService hashService;
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public Optional<AiRegistry> getTemplate(String componentId) {
@@ -158,6 +160,26 @@ public class AiRegistryTemplateService {
         .aiDescription(safeText(payload, "aiDescription"))
         .configJson(configJson)
         .templateMeta(templateMeta)
+        .revision(toRevision(config, configJson))
+        .build();
+  }
+
+  private AiRegistryTemplateRevision toRevision(AiRegistry config, JsonNode configJson) {
+    if (config == null) {
+      return null;
+    }
+    Long version = config.getVersion() > 0 ? config.getVersion() : null;
+    String etag = config.getEtag() != null ? config.getEtag().toString() : null;
+    String configSha256 = configJson != null && !configJson.isNull()
+        ? hashService.sha256(configJson)
+        : null;
+    if (version == null && etag == null && configSha256 == null) {
+      return null;
+    }
+    return AiRegistryTemplateRevision.builder()
+        .version(version)
+        .etag(etag)
+        .configSha256(configSha256)
         .build();
   }
 

@@ -6,8 +6,10 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -52,7 +54,7 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
         putDefault(compiledFormPatch, "version", "1.0.0");
         putDefault(compiledFormPatch, "profileId", "ui-composition-plan");
         putDefault(compiledFormPatch, "targetComponentId", "praxis-dynamic-page-builder");
-        putDefault(compiledFormPatch, "builderVersion", "config-ui-composition-plan-compiler@1.0.0");
+        putDefault(compiledFormPatch, "builderVersion", "config-ui-composition-plan-compiler@1.1.0");
         ObjectNode compatibility = compiledFormPatch.path("compatibility") instanceof ObjectNode existing
                 ? existing
                 : compiledFormPatch.putObject("compatibility");
@@ -118,6 +120,7 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
                 }
                 validateOptionalObject(widget, "inputs", "ui-composition-plan-widget-inputs-object-required", failures);
                 validateOptionalObject(widget, "outputs", "ui-composition-plan-widget-outputs-object-required", failures);
+                validateOptionalObject(widget, "shell", "ui-composition-plan-widget-shell-object-required", failures);
                 if (widget.has("bindingOrder") && !isTextArray(widget.path("bindingOrder"))) {
                     failures.add("ui-composition-plan-widget-binding-order-invalid");
                 }
@@ -154,6 +157,19 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
         validateOptionalObject(plan, "deviceLayouts", "ui-composition-plan-device-layouts-object-required", failures);
         validateOptionalObject(plan, "slotAssignments", "ui-composition-plan-slot-assignments-object-required", failures);
         validateOptionalObject(plan, "state", "ui-composition-plan-state-object-required", failures);
+        validateOptionalObject(plan, "i18n", "ui-composition-plan-i18n-object-required", failures);
+        validateOptionalObject(plan, "context", "ui-composition-plan-context-object-required", failures);
+        validateOptionalObject(plan, "layout", "ui-composition-plan-layout-object-required", failures);
+        validateOptionalArray(
+                plan,
+                "selectionSyncs",
+                "ui-composition-plan-selection-syncs-array-required",
+                failures);
+        validateOptionalArray(
+                plan,
+                "contextScopes",
+                "ui-composition-plan-context-scopes-array-required",
+                failures);
         validateOptionalObject(
                 plan,
                 "layoutPresetOptions",
@@ -165,7 +181,166 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
         validateGrouping(plan.path("grouping"), widgetKeys, failures);
         validateDeviceLayouts(plan.path("deviceLayouts"), widgetKeys, failures);
         validateSlotAssignments(plan.path("slotAssignments"), widgetKeys, failures);
+        validateSelectionSyncs(plan.path("selectionSyncs"), widgetKeys, failures);
+        validateContextScopes(plan.path("contextScopes"), plan.path("widgets"), widgetKeys, failures);
         return failures;
+    }
+
+    private void validateSelectionSyncs(
+            JsonNode selectionSyncs,
+            Set<String> widgetKeys,
+            List<String> failures) {
+        if (!selectionSyncs.isArray()) {
+            return;
+        }
+        for (JsonNode selectionSync : selectionSyncs) {
+            if (!selectionSync.isObject()) {
+                failures.add("ui-composition-plan-selection-sync-object-required");
+                continue;
+            }
+            if (!isNonBlankText(selectionSync.get("id"))) {
+                failures.add("ui-composition-plan-selection-sync-id-required");
+            }
+            if (!"selection-sync".equals(selectionSync.path("intent").asText(""))) {
+                failures.add("ui-composition-plan-selection-sync-intent-invalid");
+            }
+            JsonNode sources = selectionSync.path("sources");
+            if (!sources.isArray() || sources.isEmpty()) {
+                failures.add("ui-composition-plan-selection-sync-source-required");
+            } else {
+                for (JsonNode source : sources) {
+                    validateEndpoint(source, widgetKeys, false, failures);
+                    if (!"component-port".equals(source.path("kind").asText(""))) {
+                        failures.add("ui-composition-plan-selection-sync-source-component-port-required");
+                    } else if (!"output".equals(source.path("direction").asText(""))) {
+                        failures.add("ui-composition-plan-selection-sync-source-direction-invalid");
+                    }
+                }
+            }
+            JsonNode target = selectionSync.path("target");
+            if (!"state".equals(target.path("kind").asText(""))) {
+                failures.add("ui-composition-plan-selection-sync-target-state-required");
+            } else {
+                validateEndpoint(target, widgetKeys, false, failures);
+            }
+            JsonNode mapping = selectionSync.path("mapping");
+            if (!mapping.isObject() || mapping.isEmpty()) {
+                failures.add("ui-composition-plan-selection-sync-mapping-required");
+                continue;
+            }
+            mapping.fields().forEachRemaining(entry -> validateSelectionMapping(entry, failures));
+        }
+    }
+
+    private void validateSelectionMapping(
+            Map.Entry<String, JsonNode> entry,
+            List<String> failures) {
+        if (entry.getKey().trim().isBlank()) {
+            failures.add("ui-composition-plan-selection-sync-target-key-required");
+        }
+        JsonNode mapping = entry.getValue();
+        if (mapping.isTextual()) {
+            if (mapping.textValue().trim().isBlank()) {
+                failures.add("ui-composition-plan-selection-sync-source-path-required");
+            }
+            return;
+        }
+        if (!mapping.isObject() || !isNonBlankText(mapping.get("path"))) {
+            failures.add("ui-composition-plan-selection-sync-source-path-required");
+            return;
+        }
+        validateTransformInputSource(mapping, failures);
+    }
+
+    private void validateContextScopes(
+            JsonNode contextScopes,
+            JsonNode widgets,
+            Set<String> widgetKeys,
+            List<String> failures) {
+        if (!contextScopes.isArray()) {
+            return;
+        }
+        for (JsonNode contextScope : contextScopes) {
+            if (!contextScope.isObject()) {
+                failures.add("ui-composition-plan-context-scope-object-required");
+                continue;
+            }
+            if (!isNonBlankText(contextScope.get("id"))) {
+                failures.add("ui-composition-plan-context-scope-id-required");
+            }
+            JsonNode context = contextScope.path("context");
+            if (!context.isObject() || context.isEmpty()) {
+                failures.add("ui-composition-plan-context-scope-context-required");
+            } else {
+                context.fields().forEachRemaining(entry -> validateContextValue(entry, failures));
+            }
+            JsonNode targets = contextScope.path("targets");
+            if (!targets.isArray() || targets.isEmpty()) {
+                failures.add("ui-composition-plan-context-scope-target-required");
+                continue;
+            }
+            for (JsonNode target : targets) {
+                validateContextTarget(target, context, widgets, widgetKeys, failures);
+            }
+        }
+    }
+
+    private void validateContextValue(
+            Map.Entry<String, JsonNode> entry,
+            List<String> failures) {
+        if (entry.getKey().trim().isBlank()) {
+            failures.add("ui-composition-plan-context-scope-key-required");
+        }
+        JsonNode contextValue = entry.getValue();
+        String kind = contextValue.path("kind").asText("");
+        if ("state".equals(kind)) {
+            if (!isNonBlankText(contextValue.get("path"))) {
+                failures.add("ui-composition-plan-context-scope-state-path-required");
+            }
+            return;
+        }
+        if ("constant".equals(kind)) {
+            if (!contextValue.has("value")) {
+                failures.add("ui-composition-plan-context-scope-constant-value-required");
+            }
+            return;
+        }
+        failures.add("ui-composition-plan-context-scope-value-kind-invalid");
+    }
+
+    private void validateContextTarget(
+            JsonNode target,
+            JsonNode context,
+            JsonNode widgets,
+            Set<String> widgetKeys,
+            List<String> failures) {
+        if (!target.isObject()) {
+            failures.add("ui-composition-plan-context-scope-target-object-required");
+            return;
+        }
+        String widgetKey = target.path("widget").asText("").trim();
+        if (widgetKey.isBlank() || !widgetKeys.contains(widgetKey)) {
+            failures.add("ui-composition-plan-context-scope-target-widget-not-found");
+            return;
+        }
+        JsonNode nestedPath = target.path("nestedPath");
+        validateNestedPath(nestedPath, failures);
+        if (nestedPath.isArray() && !nestedPath.isEmpty()) {
+            ObjectNode ownerDefinition = plannedWidgetDefinition(findPlannedWidget(widgets, widgetKey));
+            if (ownerDefinition == null || resolveNestedWidgetDefinition(ownerDefinition, nestedPath, 0) == null) {
+                failures.add("ui-composition-plan-context-scope-nested-target-not-found");
+            }
+        }
+        JsonNode inherit = target.path("inherit");
+        if (!inherit.isMissingNode() && !isTextArray(inherit)) {
+            failures.add("ui-composition-plan-context-scope-inherit-invalid");
+            return;
+        }
+        for (JsonNode inheritedKey : inherit) {
+            if (!context.has(inheritedKey.asText())) {
+                failures.add("ui-composition-plan-context-scope-inherited-key-not-found");
+            }
+        }
     }
 
     private void validateOptionalObject(
@@ -450,11 +625,14 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
 
     private ObjectNode compilePage(JsonNode plan) {
         ObjectNode page = objectMapper.createObjectNode();
+        copyIfPresent(plan, page, "i18n");
+        copyIfPresent(plan, page, "context");
+        copyIfPresent(plan, page, "layout");
         copyIfPresent(plan, page, "layoutPreset");
         copyIfPresent(plan, page, "layoutPresetOptions");
         if (plan.path("canvas").isObject()) {
             page.set("canvas", plan.path("canvas").deepCopy());
-        } else {
+        } else if (shouldMaterializeDefaultCanvas(plan)) {
             page.set("canvas", defaultCanvas(plan));
         }
         copyIfPresent(plan, page, "deviceLayouts");
@@ -464,11 +642,12 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
         copyIfPresent(plan, page, "themePreset");
 
         ArrayNode widgets = page.putArray("widgets");
-        JsonNode bindings = plan.path("bindings");
+        ArrayNode bindings = expandedBindings(plan);
         for (JsonNode plannedWidget : plan.path("widgets")) {
             ObjectNode widget = widgets.addObject();
             String widgetKey = plannedWidget.path("key").asText();
             widget.put("key", widgetKey);
+            copyIfPresent(plannedWidget, widget, "shell");
             ObjectNode definition = widget.putObject("definition");
             definition.put("id", plannedWidget.path("componentId").asText());
             copyIfPresent(plannedWidget, definition, "bindingOrder");
@@ -477,17 +656,395 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
                     : objectMapper.createObjectNode());
             definition.set("outputs", linkedOutputs(plannedWidget, widgetKey, bindings));
         }
+        materializeContextScopeInputs(plan.path("contextScopes"), widgets);
 
         ObjectNode composition = page.putObject("composition");
         composition.put("version", "1.0.0");
         ArrayNode links = composition.putArray("links");
-        if (bindings.isArray()) {
-            for (JsonNode binding : bindings) {
-                links.add(compileBinding(binding));
-            }
+        for (JsonNode binding : bindings) {
+            links.add(compileBinding(binding));
         }
+        materializeLocalizedFallbacks(page);
         return page;
     }
+
+    /**
+     * Expands compact authoring descriptors such as {@code {"key":"copy.key"}}
+     * with the page-owned fallback-locale dictionary. This keeps the plan terse
+     * while the persisted runtime page remains portable and self-describing.
+     */
+    private void materializeLocalizedFallbacks(ObjectNode page) {
+        JsonNode i18n = page.path("i18n");
+        String fallbackLocale = i18n.path("fallbackLocale").asText("pt-BR").trim();
+        if (fallbackLocale.isBlank()) {
+            fallbackLocale = "pt-BR";
+        }
+        JsonNode dictionary = i18n.path("dictionaries").path(fallbackLocale);
+        if (!dictionary.isObject()) {
+            return;
+        }
+        materializeLocalizedFallbacks(page, dictionary);
+    }
+
+    private void materializeLocalizedFallbacks(JsonNode value, JsonNode dictionary) {
+        if (value instanceof ArrayNode array) {
+            array.forEach(item -> materializeLocalizedFallbacks(item, dictionary));
+            return;
+        }
+        if (!(value instanceof ObjectNode object)) {
+            return;
+        }
+
+        String key = object.path("key").asText("").trim();
+        if (!key.isBlank()
+                && !object.has("text")
+                && hasOnlyLocalizedDescriptorFields(object)
+                && dictionary.path(key).isTextual()) {
+            object.put("text", dictionary.path(key).textValue());
+        }
+        object.elements().forEachRemaining(item -> materializeLocalizedFallbacks(item, dictionary));
+    }
+
+    private boolean hasOnlyLocalizedDescriptorFields(ObjectNode object) {
+        Iterator<String> fields = object.fieldNames();
+        while (fields.hasNext()) {
+            if (!Set.of("key", "text", "params").contains(fields.next())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean shouldMaterializeDefaultCanvas(JsonNode plan) {
+        boolean hasExplicitLayout = plan.path("layout").isObject();
+        boolean hasLayoutPreset = !plan.path("layoutPreset").asText("").trim().isBlank();
+        boolean hasMasterDetailRoles = hasRole(plan.path("widgets"), "master")
+                && hasRole(plan.path("widgets"), "detail");
+        return !hasExplicitLayout || hasLayoutPreset || hasMasterDetailRoles;
+    }
+
+    private ArrayNode expandedBindings(JsonNode plan) {
+        ArrayNode bindings = objectMapper.createArrayNode();
+        if (plan.path("bindings").isArray()) {
+            plan.path("bindings").forEach(binding -> bindings.add(binding.deepCopy()));
+        }
+        expandSelectionSyncs(plan.path("selectionSyncs"), bindings);
+        expandContextScopeBindings(plan.path("contextScopes"), bindings);
+        return bindings;
+    }
+
+    private void expandSelectionSyncs(JsonNode selectionSyncs, ArrayNode bindings) {
+        if (!selectionSyncs.isArray()) {
+            return;
+        }
+        for (JsonNode selectionSync : selectionSyncs) {
+            String syncId = selectionSync.path("id").asText();
+            String basePath = stripTrailingDots(selectionSync.path("target").path("path").asText());
+            for (JsonNode source : selectionSync.path("sources")) {
+                Iterator<Map.Entry<String, JsonNode>> mappings = selectionSync.path("mapping").fields();
+                while (mappings.hasNext()) {
+                    Map.Entry<String, JsonNode> mappingEntry = mappings.next();
+                    String targetKey = mappingEntry.getKey();
+                    JsonNode mapping = mappingEntry.getValue();
+                    String sourcePath = mapping.isTextual()
+                            ? mapping.asText()
+                            : mapping.path("path").asText();
+                    String targetPath = basePath.isBlank() ? targetKey : basePath + "." + targetKey;
+                    ObjectNode binding = bindings.addObject();
+                    binding.put(
+                            "id",
+                            syncId + ":" + source.path("widget").asText() + "."
+                                    + source.path("port").asText() + "->state." + targetPath);
+                    binding.set("from", source.deepCopy());
+                    ObjectNode target = binding.putObject("to");
+                    target.put("kind", "state");
+                    target.put("path", targetPath);
+                    copyIfPresent(selectionSync.path("target"), target, "layer");
+                    binding.put("intent", "selection-sync");
+                    if (mapping.isObject()) {
+                        copyIfPresent(mapping, binding, "condition");
+                    }
+                    ObjectNode transform = binding.putObject("transform");
+                    transform.put("kind", "pick-path");
+                    transform.put(
+                            "id",
+                            syncId + ":" + source.path("widget").asText() + "."
+                                    + source.path("port").asText() + ":pick-" + targetKey);
+                    transform.put("path", sourcePath);
+                    if (mapping.isObject()) {
+                        copyIfPresent(mapping, transform, "inputSource");
+                    }
+                    copyIfPresent(selectionSync, binding, "policy");
+                    copyIfPresent(selectionSync, binding, "metadata");
+                }
+            }
+        }
+    }
+
+    private void expandContextScopeBindings(JsonNode contextScopes, ArrayNode bindings) {
+        if (!contextScopes.isArray()) {
+            return;
+        }
+        for (JsonNode contextScope : contextScopes) {
+            JsonNode context = contextScope.path("context");
+            for (JsonNode target : contextScope.path("targets")) {
+                for (String contextKey : inheritedContextKeys(target, context)) {
+                    JsonNode contextValue = context.path(contextKey);
+                    if (!"state".equals(contextValue.path("kind").asText(""))) {
+                        continue;
+                    }
+                    ObjectNode binding = bindings.addObject();
+                    binding.put(
+                            "id",
+                            contextScope.path("id").asText() + ":state."
+                                    + contextValue.path("path").asText() + "->"
+                                    + target.path("widget").asText() + "." + contextKey
+                                    + nestedTargetIdentity(target.path("nestedPath")));
+                    ObjectNode from = binding.putObject("from");
+                    from.put("kind", "state");
+                    from.put("path", contextValue.path("path").asText());
+                    copyIfPresent(contextValue, from, "layer");
+                    ObjectNode to = binding.putObject("to");
+                    to.put("kind", "component-port");
+                    to.put("widget", target.path("widget").asText());
+                    to.put("port", contextKey);
+                    to.put("direction", "input");
+                    if (target.path("nestedPath").isArray() && !target.path("nestedPath").isEmpty()) {
+                        to.set("nestedPath", target.path("nestedPath").deepCopy());
+                    }
+                    binding.put("intent", "state-read");
+                    copyIfPresent(contextValue, binding, "condition");
+                    copyIfPresent(contextScope, binding, "policy");
+                    copyIfPresent(contextScope, binding, "metadata");
+                }
+            }
+        }
+    }
+
+    private void materializeContextScopeInputs(JsonNode contextScopes, ArrayNode widgets) {
+        if (!contextScopes.isArray()) {
+            return;
+        }
+        for (JsonNode contextScope : contextScopes) {
+            JsonNode context = contextScope.path("context");
+            for (JsonNode target : contextScope.path("targets")) {
+                ObjectNode widget = findCompiledWidget(widgets, target.path("widget").asText());
+                if (widget == null || !(widget.path("definition") instanceof ObjectNode definition)) {
+                    continue;
+                }
+                for (String contextKey : inheritedContextKeys(target, context)) {
+                    JsonNode contextValue = context.path(contextKey);
+                    boolean constant = "constant".equals(contextValue.path("kind").asText(""));
+                    boolean stateInitial = "state".equals(contextValue.path("kind").asText(""))
+                            && contextValue.has("initial");
+                    if (!constant && !stateInitial) {
+                        continue;
+                    }
+                    ObjectNode targetDefinition = definition;
+                    if (target.path("nestedPath").isArray() && !target.path("nestedPath").isEmpty()) {
+                        targetDefinition = resolveNestedWidgetDefinition(
+                                definition,
+                                target.path("nestedPath"),
+                                0);
+                    }
+                    if (targetDefinition == null) {
+                        continue;
+                    }
+                    ObjectNode inputs = targetDefinition.path("inputs") instanceof ObjectNode existingInputs
+                            ? existingInputs
+                            : targetDefinition.putObject("inputs");
+                    inputs.set(
+                            contextKey,
+                            (constant ? contextValue.path("value") : contextValue.path("initial")).deepCopy());
+                }
+            }
+        }
+    }
+
+    private List<String> inheritedContextKeys(JsonNode target, JsonNode context) {
+        List<String> keys = new ArrayList<>();
+        JsonNode inherit = target.path("inherit");
+        if (inherit.isArray() && !inherit.isEmpty()) {
+            inherit.forEach(value -> keys.add(value.asText()));
+            return keys;
+        }
+        context.fieldNames().forEachRemaining(keys::add);
+        return keys;
+    }
+
+    private String nestedTargetIdentity(JsonNode nestedPath) {
+        if (!nestedPath.isArray() || nestedPath.isEmpty()) {
+            return "";
+        }
+        JsonNode terminal = nestedPath.path(nestedPath.size() - 1);
+        String key = terminal.path("key").asText("").trim();
+        return "widget".equals(terminal.path("kind").asText("")) && !key.isBlank()
+                ? "#" + key
+                : "";
+    }
+
+    private String stripTrailingDots(String value) {
+        int end = value.length();
+        while (end > 0 && value.charAt(end - 1) == '.') {
+            end--;
+        }
+        return value.substring(0, end);
+    }
+
+    private JsonNode findPlannedWidget(JsonNode widgets, String widgetKey) {
+        if (!widgets.isArray()) {
+            return null;
+        }
+        for (JsonNode widget : widgets) {
+            if (widgetKey.equals(widget.path("key").asText())) {
+                return widget;
+            }
+        }
+        return null;
+    }
+
+    private ObjectNode plannedWidgetDefinition(JsonNode plannedWidget) {
+        if (plannedWidget == null || !plannedWidget.isObject()) {
+            return null;
+        }
+        ObjectNode definition = objectMapper.createObjectNode();
+        definition.put("id", plannedWidget.path("componentId").asText());
+        definition.set(
+                "inputs",
+                plannedWidget.path("inputs").isObject()
+                        ? plannedWidget.path("inputs").deepCopy()
+                        : objectMapper.createObjectNode());
+        return definition;
+    }
+
+    private ObjectNode findCompiledWidget(ArrayNode widgets, String widgetKey) {
+        for (JsonNode widget : widgets) {
+            if (widgetKey.equals(widget.path("key").asText()) && widget instanceof ObjectNode objectWidget) {
+                return objectWidget;
+            }
+        }
+        return null;
+    }
+
+    private ObjectNode resolveNestedWidgetDefinition(
+            ObjectNode definition,
+            JsonNode nestedPath,
+            int offset) {
+        NestedWidgetArrayLocation location = resolveNestedWidgetArrayLocation(definition, nestedPath, offset);
+        if (location == null) {
+            return null;
+        }
+        JsonNode widgetSegment = nestedPath.path(location.nextSegmentIndex());
+        if (!"widget".equals(widgetSegment.path("kind").asText(""))
+                || !isNonBlankText(widgetSegment.get("key"))) {
+            return null;
+        }
+        ObjectNode child = findChildWidget(location.widgets(), widgetSegment.path("key").asText());
+        if (child == null) {
+            return null;
+        }
+        int remainingOffset = location.nextSegmentIndex() + 1;
+        if (remainingOffset >= nestedPath.size()) {
+            return child;
+        }
+        return resolveNestedWidgetDefinition(child, nestedPath, remainingOffset);
+    }
+
+    private NestedWidgetArrayLocation resolveNestedWidgetArrayLocation(
+            ObjectNode definition,
+            JsonNode nestedPath,
+            int offset) {
+        JsonNode config = definition.path("inputs").path("config");
+        if (!config.isObject() || !nestedPath.isArray() || offset >= nestedPath.size()) {
+            return null;
+        }
+        String componentId = definition.path("id").asText();
+        if ("praxis-tabs".equals(componentId)) {
+            return resolveTabsWidgetArray(config, nestedPath, offset);
+        }
+        if ("praxis-expansion".equals(componentId)) {
+            return resolveExpansionWidgetArray(config, nestedPath, offset);
+        }
+        return null;
+    }
+
+    private NestedWidgetArrayLocation resolveTabsWidgetArray(
+            JsonNode config,
+            JsonNode nestedPath,
+            int offset) {
+        JsonNode first = nestedPath.path(offset);
+        if ("tab".equals(first.path("kind").asText(""))) {
+            JsonNode tab = findBySegment(config.path("tabs"), first);
+            ArrayNode widgets = childWidgets(tab);
+            return widgets == null ? null : new NestedWidgetArrayLocation(widgets, offset + 1);
+        }
+        JsonNode linkSegment = "nav".equals(first.path("kind").asText(""))
+                ? nestedPath.path(offset + 1)
+                : first;
+        if (!"link".equals(linkSegment.path("kind").asText(""))) {
+            return null;
+        }
+        JsonNode link = findBySegment(config.path("nav").path("links"), linkSegment);
+        ArrayNode widgets = childWidgets(link);
+        if (widgets == null) {
+            return null;
+        }
+        return new NestedWidgetArrayLocation(
+                widgets,
+                "nav".equals(first.path("kind").asText("")) ? offset + 2 : offset + 1);
+    }
+
+    private NestedWidgetArrayLocation resolveExpansionWidgetArray(
+            JsonNode config,
+            JsonNode nestedPath,
+            int offset) {
+        JsonNode panelSegment = nestedPath.path(offset);
+        if (!"panel".equals(panelSegment.path("kind").asText(""))) {
+            return null;
+        }
+        JsonNode panel = findBySegment(config.path("panels"), panelSegment);
+        ArrayNode widgets = childWidgets(panel);
+        return widgets == null ? null : new NestedWidgetArrayLocation(widgets, offset + 1);
+    }
+
+    private JsonNode findBySegment(JsonNode items, JsonNode segment) {
+        if (!items.isArray()) {
+            return null;
+        }
+        if (isNonBlankText(segment.get("id"))) {
+            String id = segment.path("id").asText();
+            for (JsonNode item : items) {
+                if (id.equals(item.path("id").asText())) {
+                    return item;
+                }
+            }
+        }
+        if (segment.path("index").canConvertToInt()) {
+            int index = segment.path("index").asInt();
+            if (index >= 0 && index < items.size()) {
+                return items.path(index);
+            }
+        }
+        return null;
+    }
+
+    private ArrayNode childWidgets(JsonNode container) {
+        return container != null && container.path("widgets") instanceof ArrayNode widgets
+                ? widgets
+                : null;
+    }
+
+    private ObjectNode findChildWidget(ArrayNode widgets, String childWidgetKey) {
+        for (JsonNode widget : widgets) {
+            if (childWidgetKey.equals(widget.path("childWidgetKey").asText())
+                    && widget instanceof ObjectNode definition) {
+                return definition;
+            }
+        }
+        return null;
+    }
+
+    private record NestedWidgetArrayLocation(ArrayNode widgets, int nextSegmentIndex) {}
 
     private ObjectNode defaultCanvas(JsonNode plan) {
         ObjectNode canvas = objectMapper.createObjectNode();

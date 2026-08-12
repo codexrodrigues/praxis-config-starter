@@ -45,7 +45,12 @@ class AiRegistryTemplateServiceTest {
 
   @BeforeEach
   void setUp() {
-    service = new AiRegistryTemplateService(repository, objectMapper, embeddingService);
+    service =
+        new AiRegistryTemplateService(
+            repository,
+            objectMapper,
+            embeddingService,
+            new CanonicalJsonHashService(objectMapper));
   }
 
   @Test
@@ -171,6 +176,8 @@ class AiRegistryTemplateServiceTest {
     AiRegistry valid =
         AiRegistry.builder()
             .registryKey("praxis-dynamic-form")
+            .version(4L)
+            .etag(UUID.fromString("123e4567-e89b-12d3-a456-426614174004"))
             .payload(
                 """
                 {
@@ -189,6 +196,10 @@ class AiRegistryTemplateServiceTest {
     assertThat(record.getConfigJson().path("fields").get(0).path("name").asText())
         .isEqualTo("email");
     assertThat(record.getTemplateMeta().path("source").asText()).isEqualTo("recipe");
+    assertThat(record.getRevision().getVersion()).isEqualTo(4L);
+    assertThat(record.getRevision().getEtag())
+        .isEqualTo("123e4567-e89b-12d3-a456-426614174004");
+    assertThat(record.getRevision().getConfigSha256()).matches("[0-9a-f]{64}");
 
     AiRegistry malformed =
         AiRegistry.builder().registryKey("broken-template").payload("{not-json").build();
@@ -199,6 +210,39 @@ class AiRegistryTemplateServiceTest {
     assertThat(malformedRecord.getAiDescription()).isNull();
     assertThat(malformedRecord.getConfigJson()).isNull();
     assertThat(malformedRecord.getTemplateMeta()).isNull();
+    assertThat(malformedRecord.getRevision()).isNull();
+  }
+
+  @Test
+  void templateConfigHashIsCanonicalAndIgnoresFieldsOutsideConfigJson() throws Exception {
+    AiRegistry first =
+        AiRegistry.builder()
+            .registryKey("praxis-page-builder:employee")
+            .version(2L)
+            .etag(UUID.randomUUID())
+            .payload(
+                "{\"aiDescription\":\"Primeira\",\"configJson\":{\"widgets\":[],\"version\":\"1.0\"}}")
+            .build();
+    AiRegistry reordered =
+        AiRegistry.builder()
+            .registryKey("praxis-page-builder:employee")
+            .version(3L)
+            .etag(UUID.randomUUID())
+            .payload(
+                "{\"aiDescription\":\"Descricao alterada\",\"configJson\":{\"version\":\"1.0\",\"widgets\":[]}}")
+            .build();
+    AiRegistry changed =
+        AiRegistry.builder()
+            .registryKey("praxis-page-builder:employee")
+            .version(4L)
+            .etag(UUID.randomUUID())
+            .payload(
+                "{\"configJson\":{\"version\":\"1.0\",\"widgets\":[{\"key\":\"summary\"}]}}")
+            .build();
+
+    assertThat(service.toRecord(first).getRevision().getConfigSha256())
+        .isEqualTo(service.toRecord(reordered).getRevision().getConfigSha256())
+        .isNotEqualTo(service.toRecord(changed).getRevision().getConfigSha256());
   }
 
   @Test

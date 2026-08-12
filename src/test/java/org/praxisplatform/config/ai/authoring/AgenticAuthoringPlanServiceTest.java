@@ -59,7 +59,7 @@ class AgenticAuthoringPlanServiceTest {
 
         assertThat(result.valid()).isTrue();
         assertThat(result.failureCodes()).isEmpty();
-        assertThat(result.minimalFormPlan()).isSameAs(plan);
+        assertThat(result.minimalFormPlan()).isEqualTo(plan);
         assertThat(result.providerInvocations()).singleElement().satisfies(invocation -> {
             assertThat(invocation.phase()).isEqualTo("minimal_form_plan");
             assertThat(invocation.status()).isEqualTo("success");
@@ -755,7 +755,45 @@ class AgenticAuthoringPlanServiceTest {
                 .generateMinimalFormPlan(new AgenticAuthoringPlanRequest("Crie um formulario", null, null, null), null, null, null);
 
         assertThat(result.valid()).isTrue();
-        assertThat(schemaCaptor.getValue().jsonSchema()).contains("\"title\": \"MinimalFormPlan v1\"");
+        JsonNode providerSchema = objectMapper.readTree(schemaCaptor.getValue().jsonSchema());
+        assertThat(providerSchema.has("$schema")).isFalse();
+        assertThat(providerSchema.has("$id")).isFalse();
+        assertThat(providerSchema.has("title")).isFalse();
+        assertThat(providerSchema.path("required"))
+                .extracting(JsonNode::asText)
+                .contains("defaults", "clarificationNeed", "validationExpectations");
+        assertThat(providerSchema.at("/properties/fields/items/required"))
+                .extracting(JsonNode::asText)
+                .contains("defaultValue", "optionSource", "schemaPointer");
+    }
+
+    @Test
+    void generateMinimalFormPlanDecodesProviderTransportBeforeCanonicalValidation() throws Exception {
+        AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
+        ObjectNode providerPlan = minimalPlan();
+        ObjectNode field = (ObjectNode) providerPlan.path("fields").path(0);
+        field.put("defaultValue", "{\"severity\":\"medium\"}");
+        field.putNull("optionSource");
+        field.putNull("schemaPointer");
+        providerPlan.put("defaults", "{\"tenant\":\"acme\"}");
+        ((ObjectNode) providerPlan.path("clarificationNeed")).putNull("question");
+        providerPlan.putNull("validationExpectations");
+        when(providerManagementService.generateJson(any(), any(), any(), any(), any(), any()))
+                .thenReturn(providerPlan);
+
+        AgenticAuthoringPlanResult result = service(properties)
+                .generateMinimalFormPlan(
+                        new AgenticAuthoringPlanRequest("Crie um formulario", "openai", "gpt-5.4-mini", "test-key"),
+                        "tenant",
+                        "user",
+                        "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.minimalFormPlan().at("/fields/0/defaultValue/severity").asText()).isEqualTo("medium");
+        assertThat(result.minimalFormPlan().at("/fields/0/optionSource").isMissingNode()).isTrue();
+        assertThat(result.minimalFormPlan().at("/fields/0/schemaPointer").isMissingNode()).isTrue();
+        assertThat(result.minimalFormPlan().at("/defaults/tenant").asText()).isEqualTo("acme");
+        assertThat(result.minimalFormPlan().path("validationExpectations").isMissingNode()).isTrue();
     }
 
     private AgenticAuthoringPlanService service(AgenticAuthoringArtifactProperties properties) {

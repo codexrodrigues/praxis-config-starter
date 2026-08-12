@@ -9353,7 +9353,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     void explicitResourcePathInPromptRoutesToSharedRuleAuthoringWhenLlmMarksGovernedIntent() {
         AgenticAuthoringIntentResolverService llmFirstService = serviceWithGovernedAuthoringLlmIntent();
         AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
-                "Crie uma regra de validacao governada para chamados em /api/helpdesk/chamados: prioridade e titulo obrigatorios antes de salvar, mesmo citando funcionarios no texto.",
+                "Crie uma regra de validacao governada para chamados em /api/helpdesk/chamados. Prioridade e titulo devem ser obrigatorios antes de salvar, mesmo citando funcionarios no texto.",
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
                 "/page-builder-ia",
@@ -9368,6 +9368,10 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/helpdesk/chamados");
+        assertThat(result.selectedCandidate().operation()).isEqualTo("post");
+        assertThat(result.selectedCandidate().schemaUrl())
+                .isEqualTo("/schemas/filtered?path=/api/helpdesk/chamados&operation=post&schemaType=request");
+        assertThat(result.selectedCandidate().submitUrl()).isEqualTo("/api/helpdesk/chamados");
         assertThat(result.selectedCandidate().evidence()).contains("explicit-resource-path");
         assertThat(result.assistantMessage())
                 .contains("regra compartilhada")

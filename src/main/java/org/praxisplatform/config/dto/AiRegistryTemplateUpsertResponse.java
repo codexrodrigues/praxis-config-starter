@@ -18,5 +18,6 @@ public class AiRegistryTemplateUpsertResponse {
     private String aiDescription;
     private JsonNode configJson;
     private JsonNode templateMeta;
+    private AiRegistryTemplateRevision revision;
     private String status;
 }

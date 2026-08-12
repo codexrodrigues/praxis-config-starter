@@ -1,6 +1,5 @@
 package org.praxisplatform.config.controller;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,7 +49,12 @@ public class AiRegistryTemplateController {
             return ResponseEntity.notFound().build();
         }
 
-        return ResponseEntity.ok(mapToRecord(found.get()));
+        AiRegistry config = found.get();
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok();
+        if (config.getEtag() != null) {
+            response.eTag('"' + config.getEtag().toString() + '"');
+        }
+        return response.body(service.toRecord(config));
     }
 
     @PutMapping("/{componentId}")
@@ -64,14 +68,14 @@ public class AiRegistryTemplateController {
                 request.getAiDescription(),
                 request.getTemplateMeta());
 
-        JsonNode payload = service.parsePayload(saved);
-        String resolvedDescription = safeText(payload, "aiDescription");
+        AiRegistryTemplateRecord record = service.toRecord(saved);
 
         AiRegistryTemplateUpsertResponse response = AiRegistryTemplateUpsertResponse.builder()
                 .componentId(componentId)
-                .aiDescription(resolvedDescription)
-                .configJson(request.getConfigJson())
-                .templateMeta(request.getTemplateMeta())
+                .aiDescription(record.getAiDescription())
+                .configJson(record.getConfigJson())
+                .templateMeta(record.getTemplateMeta())
+                .revision(record.getRevision())
                 .status("upserted")
                 .build();
 
@@ -141,21 +145,4 @@ public class AiRegistryTemplateController {
         return ResponseEntity.ok(results);
     }
 
-    private AiRegistryTemplateRecord mapToRecord(AiRegistry config) {
-        JsonNode payload = service.parsePayload(config);
-        JsonNode configJson = payload != null ? payload.get("configJson") : null;
-        JsonNode templateMeta = payload != null ? payload.get("templateMeta") : null;
-        return AiRegistryTemplateRecord.builder()
-                .componentId(config.getRegistryKey())
-                .aiDescription(safeText(payload, "aiDescription"))
-                .configJson(configJson)
-                .templateMeta(templateMeta)
-                .build();
-    }
-
-    private String safeText(JsonNode payload, String field) {
-        if (payload == null) return null;
-        JsonNode value = payload.get(field);
-        return value != null && !value.isNull() ? value.asText() : null;
-    }
 }

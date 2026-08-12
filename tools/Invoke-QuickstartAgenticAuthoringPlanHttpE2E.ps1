@@ -7,7 +7,7 @@ param(
     [string] $TenantId = "agentic-authoring-e2e",
     [string] $UserId = "codex-local",
     [string] $Environment = "local",
-    [string] $UserPrompt = "Crie um formulario didatico so com os campos realmente necessarios para cadastrar incidentes de missao operacionais. Use a fonte Incidentes de Missao."
+    [string] $UserPrompt = "Crie um formulario didatico so com os campos realmente necessarios para cadastrar incidentes de missao operacionais. Use a fonte canonica /api/operations/incidentes."
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,13 +55,31 @@ $body = @{
     apiKey = $apiKey
 } | ConvertTo-Json -Compress
 
+$artifactDir = Join-Path $root "target/agentic-authoring/minimal-form-plan-http-e2e"
+New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+
 $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
+if ($health.status -ne "UP") {
+    throw "Quickstart health is not UP."
+}
 $intent = Invoke-RestMethod `
     -Method Post `
     -Uri "$base/api/praxis/config/ai/authoring/intent-resolution" `
     -Headers $headers `
     -Body $body `
     -TimeoutSec 90
+$intent | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath (Join-Path $artifactDir "intent-resolution.json") -Encoding UTF8
+
+if (-not [bool] $intent.valid) {
+    throw "Intent resolution is not valid: $($intent.failureCodes -join ', ')"
+}
+if ($intent.operationKind -ne "create" -or $intent.artifactKind -ne "form" -or $intent.changeKind -ne "create_artifact") {
+    throw "Intent resolution did not select the canonical create/form/create_artifact route. Actual: $($intent.operationKind)/$($intent.artifactKind)/$($intent.changeKind)"
+}
+if ($intent.selectedCandidate.resourcePath -ne "/api/operations/incidentes") {
+    throw "Intent resolution did not select the canonical operations incident resource. Actual: $($intent.selectedCandidate.resourcePath)"
+}
+
 $planRequest = $body | ConvertFrom-Json
 $planRequest | Add-Member -NotePropertyName intentResolution -NotePropertyValue $intent
 $bodyWithIntent = $planRequest | ConvertTo-Json -Depth 40 -Compress
@@ -72,9 +90,6 @@ $plan = Invoke-RestMethod `
     -Body $bodyWithIntent `
     -TimeoutSec 90
 
-$artifactDir = Join-Path $root "target/agentic-authoring/minimal-form-plan-http-e2e"
-New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
-$intent | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath (Join-Path $artifactDir "intent-resolution.json") -Encoding UTF8
 $plan | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath (Join-Path $artifactDir "minimal-form-plan.json") -Encoding UTF8
 
 $fields = @($plan.minimalFormPlan.fields)
@@ -91,17 +106,8 @@ $result = [pscustomobject]@{
 }
 $result | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $artifactDir "result.json") -Encoding UTF8
 
-if ($result.health -ne "UP") {
-    throw "Quickstart health is not UP."
-}
-if (-not $result.intentValid) {
-    throw "Intent resolution is not valid: $($intent.failureCodes -join ', ')"
-}
 if (-not $result.valid) {
     throw "Agentic authoring MinimalFormPlan is not valid: $($result.failureCodes -join ', ')"
-}
-if ($result.selectedResourcePath -ne "/api/operations/incidentes") {
-    throw "MinimalFormPlan did not resolve the canonical operations incident create endpoint."
 }
 if ($result.fields -notcontains "descricao" -or $result.fields -notcontains "ocorridoEm") {
     throw "MinimalFormPlan did not include the required incident fields descricao and ocorridoEm. Actual fields: $($result.fields -join ', ')"
