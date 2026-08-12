@@ -129,6 +129,84 @@ class AgenticAuthoringComponentOperationSelectionServiceTest {
     }
 
     @Test
+    void projectsTheMostRelevantCanonicalExamplesInsteadOfTheFirstCatalogEntries() throws Exception {
+        when(provider.generateJson(anyString(), any(), any(), anyString(), anyString(), anyString()))
+                .thenReturn(selection("column.renderer.composeItem.set"));
+        var service = new AgenticAuthoringComponentOperationSelectionService(provider, objectMapper, 9);
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "operations": [
+                    {
+                      "operationId": "column.renderer.composeItem.set",
+                      "title": "Refinar item composto",
+                      "description": "Altera somente um item já materializado na célula composta.",
+                      "targetKind": "renderer",
+                      "affectedPaths": ["columns[].renderer.compose.items[]"]
+                    }
+                  ],
+                  "examples": [
+                    {
+                      "request": "Aumente um pouco somente a foto dessa célula composta.",
+                      "operationId": "column.renderer.composeItem.set",
+                      "target": "codigo",
+                      "isPositive": true
+                    },
+                    {
+                      "request": "Diminua só essa foto e preserve o restante.",
+                      "operationId": "column.renderer.composeItem.set",
+                      "target": "codigo",
+                      "isPositive": true
+                    },
+                    {
+                      "request": "Deixe somente a foto dessa célula composta circular.",
+                      "operationId": "column.renderer.composeItem.set",
+                      "target": "codigo",
+                      "isPositive": true
+                    },
+                    {
+                      "request": "Deixe a foto circular... não, cancela essa parte: quero quadrada com cantos arredondados",
+                      "operationId": "column.renderer.composeItem.set",
+                      "target": "codigo",
+                      "isPositive": true
+                    }
+                  ]
+                }
+                """);
+
+        var result = service.select(
+                new AgenticAuthoringPlanRequest(
+                        "Deixe a foto circular... não, cancela essa parte: quero quadrada com cantos arredondados",
+                        "openai",
+                        "gpt",
+                        "key",
+                        null,
+                        intentForOperation("column.renderer.composeItem.set"),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        objectMapper.createObjectNode()),
+                "praxis-table",
+                objectMapper.createObjectNode(),
+                manifest,
+                "t",
+                "u",
+                "e");
+
+        assertThat(result.operationIds()).containsExactly("column.renderer.composeItem.set");
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(provider).generateJson(prompt.capture(), any(), any(), anyString(), anyString(), anyString());
+        assertThat(prompt.getValue())
+                .contains(
+                        "Deixe a foto circular... não, cancela essa parte: quero quadrada com cantos arredondados",
+                        "Deixe somente a foto dessa célula composta circular.")
+                .doesNotContain(
+                        "Aumente um pouco somente a foto dessa célula composta.",
+                        "Diminua só essa foto e preserve o restante.");
+    }
+
+    @Test
     void keepsPromptGroundedAlternativesWhenTheResolvedRefinementRequiresMissingState() throws Exception {
         when(provider.generateJson(anyString(), any(), any(), anyString(), anyString(), anyString()))
                 .thenReturn(selection("column.renderer.set", "column.visibility.set"));
