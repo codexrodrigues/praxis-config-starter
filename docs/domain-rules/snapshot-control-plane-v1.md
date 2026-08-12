@@ -23,16 +23,18 @@ Each scoped RuleSet has three independent records:
 - immutable snapshot content, addressed by `snapshotKey` and canonical
   `snapshotContentHash`;
 - one mutable active head, protected by an opaque `headEtag`;
-- append-only publication/rollback events with monotonic `activationRevision`.
+- append-only publication/activation/rollback events with monotonic
+  `activationRevision`.
 
 The content hash is deliberately not the head ETag. Every activation, including
 rollback from v2 to v1, rotates the opaque head ETag. This prevents an ABA race
-where a stale client could mistake the reactivated v1 head for the original v1
+where a stale client could mistake the reselected v1 head for the original v1
 head.
 
 `RuleSetRef.version` is immutable and unique inside the tenant, environment and
 RuleSet key. Changed content must use a new RuleSet version. Reusing prior
-content is an activation/rollback operation, not a second publication.
+content is a head-selection operation (`activate` forward or `rollback`
+backward), not a second publication.
 
 Publication of a higher immutable version may supersede a snapshot produced by
 an older engine compatibility baseline. The control plane verifies the prior
@@ -69,6 +71,16 @@ fail closed for an old snapshot that the current engine cannot verify.
     from caller headers in corporate mode;
   - returns `Cache-Control: no-cache` and the mutable head ETag;
   - accepts `If-None-Match` and may return `304`.
+- `GET /api/praxis/config/domain-rules/snapshots?ruleSetKey=...&limit=50`
+  - requires the authenticated `RULE_SNAPSHOT_READER` scope;
+  - returns a bounded, newest-first version catalog with immutable identity,
+    publication metadata, active-state marker and safe governance state;
+  - never returns executable snapshot content or approval evidence;
+  - classifies each entry as `READY`, `REPUBLICATION_REQUIRED` or `INVALID` and
+    publishes its relative `availableAction`: `ACTIVE`, `ACTIVATE`, `ROLLBACK`
+    or `UNAVAILABLE`;
+  - lets policy studios expose only the server-authorized direction instead of
+    inferring lifecycle semantics from revision numbers.
 - `GET /api/praxis/config/domain-rules/snapshots/head/status?ruleSetKey=...`
   - requires the same authenticated `RULE_SNAPSHOT_READER` scope;
   - returns safe head identity, immutable version/revision, readiness and the mutable head ETag;
@@ -87,9 +99,17 @@ fail closed for an old snapshot that the current engine cannot verify.
     ETag and appends an audit event. It never rewrites or republishes the target
     snapshot. Selecting a newer publication is a roll-forward and is rejected by
     this rollback endpoint.
+- `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/activate`
+  - requires a strong current-head `If-Match`;
+  - resolves the actor from server authentication and requires
+    `RULE_SNAPSHOT_OPERATOR`;
+  - selects a newer, currently valid immutable publication, rotates the head
+    ETag and appends an `ACTIVATED` audit event;
+  - rejects an active or older publication. Older content must use the explicit
+    rollback operation.
 
 Read operations require explicit `X-Tenant-ID` and `X-Env`. In corporate mode,
-approval, publication and rollback derive tenant, environment and actor from the
+approval, publication, activation and rollback derive tenant, environment and actor from the
 server principal; header values are only hints and cannot replace authenticated
 scope. Publication requires approved source definitions with append-only
 approval evidence for each definition's current canonical hash and at least two
@@ -118,7 +138,7 @@ This closes both maker-checker layers. Definition creation and intake require
 approval, rejection, activation and retirement require
 `RULE_DEFINITION_APPROVER`, whose authenticated actor must differ from the
 persisted author. Snapshot reads require `RULE_SNAPSHOT_READER`; composition
-approval, publication and rollback actors also
+approval, publication, activation and rollback actors also
 come from server authentication. Corporate mode fails closed unless the request
 has the corresponding IAM role. Request payloads never supply governed actor
 identity. Migration V36 persists definition approvals append-only and binds each

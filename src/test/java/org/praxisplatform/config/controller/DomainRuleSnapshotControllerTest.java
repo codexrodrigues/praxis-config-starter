@@ -5,12 +5,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.DomainRuleSnapshotActivationResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotHeadStatusResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotStoredResponse;
+import org.praxisplatform.config.dto.DomainRuleSnapshotVersionResponse;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestRequest;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestResponse;
 import org.praxisplatform.config.service.DomainRuleSnapshotService;
@@ -60,6 +62,48 @@ class DomainRuleSnapshotControllerTest {
         .contains("private")
         .contains("immutable")
         .contains("max-age=31536000");
+  }
+
+  @Test
+  void versionCatalogUsesAuthenticatedScopeAndNoCache() {
+    MockHttpServletRequest request = readerRequest("tenant-a", "prod");
+    var versions = List.of(new DomainRuleSnapshotVersionResponse(
+        "snapshot-2", "grant-rules", 2, 2, "B".repeat(64),
+        "publisher", "2026-07-14T10:00:00Z", true, "READY", "ACTIVE"));
+    when(service.listVersions("tenant-a", "prod", "grant-rules", 25))
+        .thenReturn(versions);
+
+    var response = controller.versions(
+        "grant-rules", 25, "tenant-a", "prod", request);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-cache");
+    assertThat(response.getBody()).isSameAs(versions);
+    verify(service).listVersions("tenant-a", "prod", "grant-rules", 25);
+  }
+
+  @Test
+  void explicitActivationUsesAuthenticatedOperatorAndStrongHeadEtag() {
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    when(principalResolver.resolve(
+        request, "tenant-caller", "test", "RULE_SNAPSHOT_OPERATOR"))
+        .thenReturn(new DomainRuleGovernancePrincipal(
+            "tenant-server", "operator-a", "prod"));
+    var activated = new DomainRuleSnapshotActivationResponse(
+        null, "A".repeat(64), "head-9", 9, "ACTIVATED");
+    when(service.activatePublished(
+        "snapshot-3", "operator-a", "tenant-server", "prod", "\"head-8\""))
+        .thenReturn(activated);
+
+    var response = controller.activate(
+        "snapshot-3", "tenant-caller", "test", "\"head-8\"", request);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(response.getHeaders().getETag()).isEqualTo("\"head-9\"");
+    assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-cache");
+    assertThat(response.getBody()).isSameAs(activated);
+    verify(service).activatePublished(
+        "snapshot-3", "operator-a", "tenant-server", "prod", "\"head-8\"");
   }
 
   @Test

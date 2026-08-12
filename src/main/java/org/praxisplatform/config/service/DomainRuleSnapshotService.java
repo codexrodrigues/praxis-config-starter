@@ -26,6 +26,7 @@ import org.praxisplatform.config.dto.DomainRuleSnapshotActivationResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotHeadStatusResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotPublicationRequest;
 import org.praxisplatform.config.dto.DomainRuleSnapshotStoredResponse;
+import org.praxisplatform.config.dto.DomainRuleSnapshotVersionResponse;
 import org.praxisplatform.config.exception.DomainRuleSnapshotControlPlaneException;
 import org.praxisplatform.config.http.HttpEntityTagCondition;
 import org.praxisplatform.config.repository.DomainRuleCompositionApprovalRepository;
@@ -46,6 +47,7 @@ import org.praxisplatform.rules.plan.RulePlanException;
 import org.praxisplatform.rules.snapshot.CompiledRuleSnapshot;
 import org.praxisplatform.rules.snapshot.PraxisRuleSnapshotCompiler;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -281,20 +283,35 @@ public class DomainRuleSnapshotService {
     if (target.getPublicationRevision() >= active.getPublicationRevision()) {
       throw conflict("Rollback requires a snapshot older than the current active publication");
     }
-    PublishedRuleSnapshot snapshot = readVerifiedSnapshot(target);
-    Instant now = Instant.now();
-    Instant validFrom = Instant.parse(snapshot.validFromUtc());
-    Instant validUntil = snapshot.validUntilUtc() == null
-        ? null
-        : Instant.parse(snapshot.validUntilUtc());
-    if (now.isBefore(validFrom) || (validUntil != null && !now.isBefore(validUntil))) {
-      throw conflict("Rollback target is outside its governed validity interval");
+    return selectExistingSnapshot(target, head, activatedBy, "ROLLED_BACK");
+  }
+
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+  public DomainRuleSnapshotActivationResponse activatePublished(
+      String snapshotKey,
+      String activatedBy,
+      String tenantId,
+      String environment,
+      String ifMatch) {
+    String tenant = requireText(tenantId, "X-Tenant-ID");
+    String env = requireText(environment, "X-Env");
+    DomainRuleSnapshot target = snapshotRepository
+        .findByTenantIdAndEnvironmentAndSnapshotKey(tenant, env, requireText(snapshotKey, "snapshotKey"))
+        .orElseThrow(() -> notFound("Rule snapshot was not found in the requested scope"));
+    DomainRuleSnapshotHead head = headRepository
+        .findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(tenant, env, target.getRuleSetKey())
+        .orElseThrow(() -> notFound("RuleSet head was not found"));
+    verifyStrongMatch(ifMatch, head.getHeadEtag().toString());
+    if (target.getId().equals(head.getActiveSnapshotId())) {
+      throw conflict("The requested snapshot is already active");
     }
-    UUID fromSnapshotId = head.getActiveSnapshotId();
-    activate(head, target.getId(), now);
-    headRepository.save(head);
-    appendEvent("ROLLED_BACK", head, fromSnapshotId, target.getId(), activatedBy, now);
-    return activation(snapshot, target.getContentHash(), head, "ROLLED_BACK");
+    DomainRuleSnapshot active = snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
+            head.getActiveSnapshotId(), tenant, env, target.getRuleSetKey())
+        .orElseThrow(() -> new IllegalStateException("Snapshot head references missing immutable content"));
+    if (target.getPublicationRevision() <= active.getPublicationRevision()) {
+      throw conflict("Activation requires a snapshot newer than the current active publication; use rollback for an older version");
+    }
+    return selectExistingSnapshot(target, head, activatedBy, "ACTIVATED");
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -354,6 +371,89 @@ public class DomainRuleSnapshotService {
             requireText(environment, "X-Env"),
             requireText(snapshotKey, "snapshotKey"))
         .map(stored -> new DomainRuleSnapshotStoredResponse(readVerifiedSnapshot(stored), stored.getContentHash()));
+  }
+
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+  public List<DomainRuleSnapshotVersionResponse> listVersions(
+      String tenantId, String environment, String ruleSetKey, int limit) {
+    String tenant = requireText(tenantId, "X-Tenant-ID");
+    String env = requireText(environment, "X-Env");
+    String key = requireText(ruleSetKey, "ruleSetKey");
+    if (limit < 1 || limit > 100) {
+      throw badRequest("limit must be between 1 and 100");
+    }
+    DomainRuleSnapshotHead activeHead = headRepository
+        .findByTenantIdAndEnvironmentAndRuleSetKey(tenant, env, key)
+        .orElse(null);
+    UUID activeSnapshotId = activeHead == null ? null : activeHead.getActiveSnapshotId();
+    Integer activePublicationRevision = activeHead == null
+        ? null
+        : snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
+            activeSnapshotId, tenant, env, key)
+            .map(DomainRuleSnapshot::getPublicationRevision)
+            .orElseThrow(() -> new IllegalStateException(
+                "Snapshot head references missing immutable content"));
+    return snapshotRepository
+        .findByTenantIdAndEnvironmentAndRuleSetKeyOrderByPublicationRevisionDesc(
+            tenant, env, key, PageRequest.of(0, limit))
+        .stream()
+        .map(snapshot -> versionResponse(snapshot, activeSnapshotId, activePublicationRevision))
+        .toList();
+  }
+
+  private DomainRuleSnapshotVersionResponse versionResponse(
+      DomainRuleSnapshot snapshot, UUID activeSnapshotId, Integer activePublicationRevision) {
+    String governanceState;
+    if (isPreManifestSnapshot(snapshot)) {
+      governanceState = "REPUBLICATION_REQUIRED";
+    } else {
+      try {
+        readVerifiedSnapshot(snapshot);
+        governanceState = "READY";
+      } catch (IllegalStateException invalid) {
+        governanceState = "INVALID";
+      }
+    }
+    boolean active = snapshot.getId().equals(activeSnapshotId);
+    String availableAction;
+    if (active) {
+      availableAction = "ACTIVE";
+    } else if (!"READY".equals(governanceState) || activePublicationRevision == null) {
+      availableAction = "UNAVAILABLE";
+    } else if (snapshot.getPublicationRevision() < activePublicationRevision) {
+      availableAction = "ROLLBACK";
+    } else {
+      availableAction = "ACTIVATE";
+    }
+    return new DomainRuleSnapshotVersionResponse(
+        snapshot.getSnapshotKey(),
+        snapshot.getRuleSetKey(),
+        snapshot.getRuleSetVersion(),
+        snapshot.getPublicationRevision(),
+        snapshot.getContentHash(),
+        snapshot.getPublishedBy(),
+        snapshot.getPublishedAt().toString(), active, governanceState, availableAction);
+  }
+
+  private DomainRuleSnapshotActivationResponse selectExistingSnapshot(
+      DomainRuleSnapshot target,
+      DomainRuleSnapshotHead head,
+      String activatedBy,
+      String operation) {
+    PublishedRuleSnapshot snapshot = readVerifiedSnapshot(target);
+    Instant now = Instant.now();
+    Instant validFrom = Instant.parse(snapshot.validFromUtc());
+    Instant validUntil = snapshot.validUntilUtc() == null
+        ? null
+        : Instant.parse(snapshot.validUntilUtc());
+    if (now.isBefore(validFrom) || (validUntil != null && !now.isBefore(validUntil))) {
+      throw conflict(operation + " target is outside its governed validity interval");
+    }
+    UUID fromSnapshotId = head.getActiveSnapshotId();
+    activate(head, target.getId(), now);
+    headRepository.save(head);
+    appendEvent(operation, head, fromSnapshotId, target.getId(), activatedBy, now);
+    return activation(snapshot, target.getContentHash(), head, operation);
   }
 
   private void requireRequest(DomainRuleSnapshotPublicationRequest request) {

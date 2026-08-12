@@ -75,6 +75,16 @@ class DomainRuleMigrationConstraintTest {
         assertThat(baseline).contains("uq_domain_rule_snapshot_head");
         assertThat(baseline).contains("fk_domain_rule_snapshot_head_active_scope");
         assertThat(baseline).contains("fk_domain_rule_snapshot_event_to_scope");
+        assertThat(baseline).contains("'PUBLISHED', 'ACTIVATED', 'ROLLED_BACK'");
+    }
+
+    @Test
+    void explicitActivationMigrationExpandsTheAppendOnlyEventVocabulary() throws IOException {
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/V44__allow_explicit_rule_snapshot_activation.sql"));
+
+        assertThat(migration).contains("DROP CONSTRAINT IF EXISTS domain_rule_snapshot_event_event_type_check");
+        assertThat(migration).contains("'PUBLISHED', 'ACTIVATED', 'ROLLED_BACK'");
     }
 
     @Test
