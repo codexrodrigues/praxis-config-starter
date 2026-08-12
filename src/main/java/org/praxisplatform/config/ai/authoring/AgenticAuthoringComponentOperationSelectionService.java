@@ -155,6 +155,11 @@ public class AgenticAuthoringComponentOperationSelectionService {
             JsonNode config,
             JsonNode manifest,
             Set<String> candidateOperationIds) throws Exception {
+        String rawPrompt = normalizeSearchText(request == null ? null : request.userPrompt());
+        String effectivePrompt = normalizeSearchText(
+                request == null || request.intentResolution() == null
+                        ? null
+                        : request.intentResolution().effectivePrompt());
         ObjectNode input = objectMapper.createObjectNode();
         input.put("schemaVersion", SCHEMA_VERSION);
         input.put("componentId", componentId);
@@ -190,22 +195,13 @@ public class AgenticAuthoringComponentOperationSelectionService {
 
             ArrayNode semanticExamples = card.putArray("semanticExamples");
             ArrayNode semanticCounterExamples = card.putArray("semanticCounterExamples");
-            for (JsonNode example : manifest.path("examples")) {
-                if (!operationId.equals(example.path("operationId").asText(""))) {
-                    continue;
-                }
-                String exampleRequest = boundedText(example.path("request").asText(""));
-                if (exampleRequest.isBlank()) {
-                    continue;
-                }
-                boolean positive = example.path("isPositive").asBoolean(false);
-                ArrayNode targetExamples = positive ? semanticExamples : semanticCounterExamples;
-                if (targetExamples.size() >= MAX_OPERATION_EXAMPLES) {
-                    continue;
-                }
-                ObjectNode projected = targetExamples.addObject();
-                projected.put("request", exampleRequest);
-                projected.put("targetConcept", boundedText(example.path("target").asText("")));
+            for (JsonNode example : relevantOperationExamples(
+                    manifest.path("examples"), operationId, true, rawPrompt, effectivePrompt)) {
+                projectOperationExample(semanticExamples, example);
+            }
+            for (JsonNode example : relevantOperationExamples(
+                    manifest.path("examples"), operationId, false, rawPrompt, effectivePrompt)) {
+                projectOperationExample(semanticCounterExamples, example);
             }
         }
         input.set("operationBundles", operationBundles(manifest, candidateOperationIds));
@@ -243,6 +239,52 @@ public class AgenticAuthoringComponentOperationSelectionService {
                 %s
                 </operation-selection-input-json>
                 """.formatted(objectMapper.writeValueAsString(input));
+    }
+
+    private void projectOperationExample(ArrayNode targetExamples, JsonNode example) {
+        String exampleRequest = boundedText(example.path("request").asText(""));
+        if (exampleRequest.isBlank()) {
+            return;
+        }
+        ObjectNode projected = targetExamples.addObject();
+        projected.put("request", exampleRequest);
+        projected.put("targetConcept", boundedText(example.path("target").asText("")));
+    }
+
+    /**
+     * Ranks examples only inside an already selected canonical operation card. This projection
+     * cannot introduce or select operations and therefore is not a primary intent router.
+     */
+    private List<JsonNode> relevantOperationExamples(
+            JsonNode examples,
+            String operationId,
+            boolean positive,
+            String rawPrompt,
+            String effectivePrompt) {
+        List<ScoredExample> scored = new ArrayList<>();
+        int index = 0;
+        for (JsonNode example : examples) {
+            if (operationId.equals(example.path("operationId").asText(""))
+                    && positive == example.path("isPositive").asBoolean(false)
+                    && !example.path("request").asText("").isBlank()) {
+                String exampleRequest = normalizeSearchText(example.path("request").asText(""));
+                int exactScore = exampleRequest.equals(rawPrompt) || exampleRequest.equals(effectivePrompt)
+                        ? 1_000
+                        : 0;
+                int tokenScore = Math.max(
+                        tokenMatchScore(rawPrompt, exampleRequest, 8),
+                        tokenMatchScore(effectivePrompt, exampleRequest, 8));
+                scored.add(new ScoredExample(example, exactScore + tokenScore, index));
+            }
+            index++;
+        }
+        return scored.stream()
+                .sorted(Comparator
+                        .comparingInt(ScoredExample::score).reversed()
+                        .thenComparingInt(ScoredExample::index))
+                .limit(MAX_OPERATION_EXAMPLES)
+                .map(ScoredExample::example)
+                .toList();
     }
 
     private ArrayNode operationBundles(JsonNode manifest, Set<String> candidateOperationIds) {
@@ -629,6 +671,9 @@ public class AgenticAuthoringComponentOperationSelectionService {
     }
 
     private record ScoredOperation(String operationId, int score, int index) {
+    }
+
+    private record ScoredExample(JsonNode example, int score, int index) {
     }
 
     private List<JsonNode> candidateOperations(JsonNode manifest, Set<String> candidateOperationIds) {
