@@ -10,9 +10,9 @@ public record DomainRuleSnapshotActivationResponse(
     PublishedRuleSnapshot snapshot,
     @Schema(description = "Canonical uppercase SHA-256 digest of normalized immutable snapshot content.", requiredMode = Schema.RequiredMode.REQUIRED)
     String snapshotContentHash,
-    @Schema(description = "Opaque mutable-head validator rotated on every publication or rollback to prevent ABA concurrency errors.", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "Opaque mutable-head validator rotated on every publication, forward activation or rollback to prevent ABA concurrency errors.", requiredMode = Schema.RequiredMode.REQUIRED)
     String headEtag,
     @Schema(description = "Monotonic count of head activations, including rollbacks.", minimum = "1", requiredMode = Schema.RequiredMode.REQUIRED)
     long activationRevision,
-    @Schema(description = "Reason the head has this state: PUBLISHED, ROLLED_BACK or ACTIVE.", allowableValues = {"PUBLISHED", "ROLLED_BACK", "ACTIVE"}, requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "Reason the head has this state: newly PUBLISHED, explicitly ACTIVATED forward, ROLLED_BACK, or read as currently ACTIVE.", allowableValues = {"PUBLISHED", "ACTIVATED", "ROLLED_BACK", "ACTIVE"}, requiredMode = Schema.RequiredMode.REQUIRED)
     String activationType) {}
