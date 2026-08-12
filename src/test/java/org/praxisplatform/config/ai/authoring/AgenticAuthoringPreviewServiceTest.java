@@ -17,8 +17,14 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import org.praxisplatform.config.domain.AiRegistry;
+import org.praxisplatform.config.dto.AiRegistryTemplateRecord;
+import org.praxisplatform.config.dto.AiRegistryTemplateRevision;
 import org.praxisplatform.config.dto.AiSchemaContext;
+import org.praxisplatform.config.service.AiRegistryTemplateService;
 import org.praxisplatform.config.service.ResourceCapabilitiesFetchResult;
 import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
 import org.praxisplatform.config.service.ResourceSurfaceCatalogFetchResult;
@@ -55,6 +61,9 @@ class AgenticAuthoringPreviewServiceTest {
 
     @Mock
     private AgenticAuthoringComponentEditPlanService componentEditPlanService;
+
+    @Mock
+    private AiRegistryTemplateService aiRegistryTemplateService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -263,6 +272,28 @@ class AgenticAuthoringPreviewServiceTest {
         verify(planService).materializeCreateFormPlanFromCanonicalSchema(any(), eq(schema));
         verify(planService, never()).generateMinimalFormPlan(any(), any(), any(), any());
         verifyNoInteractions(patchCompilerService);
+    }
+
+    @Test
+    void minimalFormPlanEndpointRejectsInvalidGroundedIntentBeforePlanProvider() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma regra LGPD para CPF",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                sharedRuleRouteIntent());
+
+        AgenticAuthoringPlanResult result = service()
+                .generateMinimalFormPlan(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains(
+                "intent-resolution-invalid",
+                "intent-resolution-shared-rule-route-required");
+        assertThat(result.warnings()).contains("minimal-form-plan-skipped-invalid-intent-resolution");
+        assertThat(result.minimalFormPlan().isMissingNode()).isTrue();
+        verifyNoInteractions(planService, patchCompilerService);
     }
 
     @Test
@@ -4595,6 +4626,125 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.warnings()).contains(
                 "ui-composition-plan-provider:selected-resource-master-detail",
                 "ui-composition-plan-compiled-by-config");
+    }
+
+    @Test
+    void previewResolvesPinnedGovernedTemplateBeforeCompilingThePlan() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma tela com lista de funcionarios e detalhe lateral",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                selectedMasterDetailIntent());
+        JsonNode expandedPlan = new AgenticAuthoringReferenceUiCompositionPlanProvider(objectMapper)
+                .plan(request)
+                .orElseThrow()
+                .uiCompositionPlan();
+        String registryKey = "praxis-dynamic-page:employee-operations-casework";
+        String configSha256 = "a".repeat(64);
+        AiRegistry registry = AiRegistry.builder()
+                .id(UUID.randomUUID())
+                .registryKey(registryKey)
+                .status("active")
+                .build();
+        JsonNode configJson = objectMapper.createObjectNode().set("authoringPlan", expandedPlan);
+        when(aiRegistryTemplateService.getTemplate(registryKey)).thenReturn(Optional.of(registry));
+        when(aiRegistryTemplateService.toRecord(registry)).thenReturn(AiRegistryTemplateRecord.builder()
+                .componentId(registryKey)
+                .configJson(configJson)
+                .revision(AiRegistryTemplateRevision.builder()
+                        .version(9L)
+                        .etag("123e4567-e89b-12d3-a456-426614174000")
+                        .configSha256(configSha256)
+                        .build())
+                .build());
+        JsonNode reference = objectMapper.readTree("""
+                {
+                  "version": "1.0",
+                  "kind": "praxis.ui-composition-plan",
+                  "templateRef": {
+                    "registryKey": "%s",
+                    "configSha256": "%s"
+                  },
+                  "overrides": {}
+                }
+                """.formatted(registryKey, configSha256));
+        AgenticAuthoringUiCompositionPlanProvider provider = ignored -> Optional.of(
+                new AgenticAuthoringUiCompositionPlanResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        reference,
+                        objectMapper.createObjectNode()));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(provider),
+                null,
+                null,
+                null,
+                null,
+                null,
+                new AgenticAuthoringUiCompositionTemplateResolver(aiRegistryTemplateService))
+                .preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid())
+                .withFailMessage("Preview failure codes: %s", result.failureCodes())
+                .isTrue();
+        assertThat(result.warnings()).contains(
+                "ui-composition-template-reference-resolved",
+                "ui-composition-plan-compiled-by-config");
+        assertThat(result.uiCompositionPlan().path("widgets")).hasSize(2);
+        assertThat(result.uiCompositionPlan()
+                        .at("/diagnostics/templateResolution/configSha256")
+                        .asText())
+                .isEqualTo(configSha256);
+        assertThat(result.compiledFormPatch().at("/patch/page/widgets")).hasSize(2);
+    }
+
+    @Test
+    void previewFailsClosedWhenACompactReferenceHasNoGovernedResolver() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma tela com lista de funcionarios e detalhe lateral",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                selectedMasterDetailIntent());
+        JsonNode reference = objectMapper.readTree("""
+                {
+                  "version": "1.0",
+                  "kind": "praxis.ui-composition-plan",
+                  "templateRef": {
+                    "registryKey": "praxis-dynamic-page:employee-operations-casework",
+                    "configSha256": "%s"
+                  }
+                }
+                """.formatted("a".repeat(64)));
+        AgenticAuthoringUiCompositionPlanProvider provider = ignored -> Optional.of(
+                new AgenticAuthoringUiCompositionPlanResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        reference,
+                        objectMapper.createObjectNode()));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(provider))
+                .preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes())
+                .containsExactly("ui-composition-template-resolver-unavailable");
+        assertThat(result.warnings())
+                .contains("ui-composition-plan-post-processing-skipped-invalid-provider-result");
+        assertThat(result.compiledFormPatch().path("patch").path("page").isMissingNode()).isTrue();
     }
 
     @Test

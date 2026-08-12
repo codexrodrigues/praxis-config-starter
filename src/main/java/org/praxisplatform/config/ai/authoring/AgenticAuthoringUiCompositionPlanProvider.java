@@ -6,8 +6,9 @@ import java.util.Optional;
  * Host extension point for page-level agentic authoring plans.
  *
  * <p>The config starter owns the HTTP envelope, but hosts own their concrete business APIs and
- * demo domains. Providers let a host contribute a validated {@code UiCompositionPlan} without
- * hardcoding host-specific resources into the starter.</p>
+ * demo domains. Providers let a host contribute either a validated {@code UiCompositionPlan} or
+ * an exact, content-pinned template reference that the starter resolves before compilation,
+ * without hardcoding host-specific resources into the starter.</p>
  */
 public interface AgenticAuthoringUiCompositionPlanProvider {
 

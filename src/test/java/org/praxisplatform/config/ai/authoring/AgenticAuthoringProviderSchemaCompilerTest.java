@@ -50,6 +50,64 @@ class AgenticAuthoringProviderSchemaCompilerTest {
     }
 
     @Test
+    void compilesBundledMinimalFormPlanIntoStrictProviderProjectionWithoutMutatingCanonicalSchema() throws Exception {
+        JsonNode canonicalSchema = minimalFormPlanSchema();
+        JsonNode original = canonicalSchema.deepCopy();
+
+        JsonNode providerSchema = compiler.compileDocumentSchema(canonicalSchema);
+
+        assertProviderSafe(providerSchema);
+        assertThat(providerSchema.has("$schema")).isFalse();
+        assertThat(providerSchema.has("$id")).isFalse();
+        assertThat(providerSchema.path("required"))
+                .extracting(JsonNode::asText)
+                .contains("defaults", "clarificationNeed", "validationExpectations");
+        assertTypeIncludes(providerSchema.at("/properties/defaults"), "string");
+        assertTypeIncludes(providerSchema.at("/properties/defaults"), "null");
+        assertTypeIncludes(providerSchema.at("/properties/fields/items/properties/defaultValue"), "string");
+        assertTypeIncludes(providerSchema.at("/properties/fields/items/properties/defaultValue"), "null");
+        assertThat(canonicalSchema).isEqualTo(original);
+    }
+
+    @Test
+    void decodesMinimalFormPlanTransportProjectionBeforeCanonicalValidation() throws Exception {
+        JsonNode canonicalSchema = minimalFormPlanSchema();
+        JsonNode providerDocument = objectMapper.readTree("""
+                {
+                  "version":"1.0.0",
+                  "profileId":"create-minimal-form",
+                  "targetApp":"praxis-ui-angular",
+                  "targetComponentId":"praxis-dynamic-page-builder",
+                  "apiUseCaseResolutionRef":"/api/operations/incidentes",
+                  "fieldSelectionPlanRef":"/schemas/filtered",
+                  "submitActionRef":"POST /api/operations/incidentes",
+                  "fields":[{
+                    "name":"severidade",
+                    "label":"Severidade",
+                    "controlType":"select",
+                    "required":true,
+                    "defaultValue":"{\\\"code\\\":\\\"medium\\\"}",
+                    "optionSource":null,
+                    "schemaPointer":null
+                  }],
+                  "defaults":"{\\\"tenant\\\":\\\"acme\\\"}",
+                  "clarificationNeed":null,
+                  "validationExpectations":null,
+                  "sourceRefs":["intent-resolution:create"]
+                }
+                """);
+
+        JsonNode decoded = compiler.decodeDocumentCompatibilityValues(providerDocument, canonicalSchema);
+
+        assertThat(decoded.at("/fields/0/defaultValue/code").asText()).isEqualTo("medium");
+        assertThat(decoded.at("/fields/0/optionSource").isMissingNode()).isTrue();
+        assertThat(decoded.at("/fields/0/schemaPointer").isMissingNode()).isTrue();
+        assertThat(decoded.at("/defaults/tenant").asText()).isEqualTo("acme");
+        assertThat(decoded.path("clarificationNeed").isMissingNode()).isTrue();
+        assertThat(decoded.path("validationExpectations").isMissingNode()).isTrue();
+    }
+
+    @Test
     void compilesComplexRendererOperationsWithoutUnsupportedConditionalSchemas() throws Exception {
         JsonNode manifest = tableManifest();
         for (String operationId : List.of("column.renderer.set", "column.conditionalRenderer.add")) {
@@ -238,6 +296,14 @@ class AgenticAuthoringProviderSchemaCompilerTest {
             JsonNode manifest = objectMapper.readTree(input).path("components").path("praxis-table").path("authoringManifest");
             assertThat(manifest.isObject()).isTrue();
             return manifest;
+        }
+    }
+
+    private JsonNode minimalFormPlanSchema() throws Exception {
+        try (InputStream input = getClass().getResourceAsStream(
+                "/ai-authoring/contracts/minimal-form-plan.v1.schema.json")) {
+            assertThat(input).isNotNull();
+            return objectMapper.readTree(input);
         }
     }
 

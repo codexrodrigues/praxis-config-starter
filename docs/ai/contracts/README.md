@@ -63,6 +63,22 @@ Importante:
   `/api/praxis/config/domain-rules/**`, que já concentra intake governado,
   definição versionada, simulation e materialização por target.
 
+Revisão governada de templates:
+
+- `GET /api/praxis/config/ai-registry/templates/{componentId}` e a resposta de upsert expõem
+  `revision.version`, `revision.etag` e `revision.configSha256`.
+- `version` e `etag` identificam a revisão material persistida no AI Registry. O GET publica o mesmo
+  token também no header HTTP `ETag`.
+- `configSha256` é o SHA-256 canônico somente de `configJson`: reordenar chaves ou alterar os campos
+  externos `aiDescription`/`templateMeta` não muda o hash; qualquer mudança dentro do documento
+  configurado muda. Ele não deve ser apresentado como hash exclusivo de um artefato executável.
+- Essa evidência autoriza um `templateRef` apenas quando `registryKey + configSha256` correspondem
+  exatamente ao template ativo e `configJson.authoringPlan` contém o plano canônico. A resolução
+  ocorre antes do compilador, sem busca fuzzy ou fallback para a revisão mais recente.
+- A primeira versão rejeita overrides não vazios e persiste somente a página expandida. Política
+  fail-closed, diagnósticos e gates de paridade estão documentados em
+  [`../agentic-authoring/implementation/43-governed-page-template-reference.md`](../agentic-authoring/implementation/43-governed-page-template-reference.md).
+
 Contexto conversacional de authoring:
 
 - `intent-resolution` e `page-preview` compartilham `AgenticAuthoringConversationContext`.
@@ -140,6 +156,7 @@ Streaming de authoring:
 
 - O contrato `v1.1` ja cobre stream canonico para `/api/praxis/config/ai/patch/stream/**`, baseado em `AiTurnEventEnvelope`, `eventSchemaVersion=v1`, replay, heartbeat, cancelamento e event log.
 - Em authoring de pagina, somente o evento terminal `result` pode autorizar persistencia. Quando `canApply=true`, o mesmo payload deve conter o `compiledFormPatch.patch.page` final e `applyTarget`; `page-apply` exige igualdade exata de patch, decisao, destino, escopo, ambiente e precondicao de ETag. Previews recompiladas localmente permanecem somente para revisao e precisam de um novo resultado terminal para se tornarem aplicaveis.
+- `uiCompositionPlan` e o artefato compacto de autoria, enquanto `compiledFormPatch.patch.page` e a materializacao executavel e auditavel. O compilador servidor preserva `i18n`, `context`, `layout` e `widgets[].shell`; expande `selectionSyncs` em links `selection-sync`; materializa constantes e `state.initial` explicito de `contextScopes` como inputs; e expande valores de estado desses escopos em links `state-read`, inclusive para alvos aninhados canônicos de tabs, nav e expansion. `state.initial` representa somente o input anterior a primeira propagacao, como `null` antes de selecionar um parent, e nao cria outro state store. Descriptors de texto declarados apenas como `{ key }` recebem `text` do dicionario de `i18n.fallbackLocale` durante a compilacao, preservando um patch portavel sem repetir fallback no plano; `text` explicito nunca e sobrescrito e chave desconhecida permanece intacta. Quando `layout` e explicito e nao ha `canvas`, preset ou papeis master-detail, o compilador preserva essa decisao espacial sem sintetizar um canvas concorrente. O patch persistido nao carrega heranca ambiente nem macros ocultas: ele contem somente inputs e `composition.links` concretos, com proveniencia `metadata.source=ui-composition-plan` quando declarada pelo plano.
 - `/api/praxis/config/ai/patch` e `/api/praxis/config/ai/patch/stream/**` executam a policy canonica de admissao antes de chamar provider LLM. Rejeicoes funcionais usam `AiOrchestratorResponse.type=info` com `code=AI_TURN_POLICY_REJECTED` para segredos, prompt interno, bypass, logging oculto ou execucao destrutiva externa; e `code=AI_TURN_OUT_OF_SCOPE` quando o pedido publico nao puder ser aterrado no componente, contrato, manifest ou capabilities atuais. Quando a idempotencia de turno detectar processamento concorrente, o backend usa `code=TURN_IN_PROGRESS`; clientes devem manter estado transitório de processamento e não renderizar esse retorno como resposta final da IA.
 - `AiOrchestratorResponse`, `AiPatchStreamStartResponse` e `AgenticAuthoringTurnStreamStartResponse` podem incluir `observationId`. Clientes publicos devem usar esse identificador para feedback write-only em `/api/praxis/config/ai/triage/observations/{observationId}/feedback`; consultas de triagem permanecem administrativas e retornam apenas dados redigidos.
 - O fluxo `/api/praxis/config/ai/authoring/turn/stream/**` reutiliza `AiTurnEventEnvelope`, replay, cancelamento e event log, mas usa payloads de authoring como `thought.step`, `intent.resolved`, `result`, `error` e `cancelled`.

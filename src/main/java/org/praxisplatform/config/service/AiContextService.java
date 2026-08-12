@@ -79,10 +79,7 @@ public class AiContextService {
 
     private AiRegistryTemplateRecord resolveTemplateRecord(String componentId) {
         Optional<AiRegistry> systemTemplate = templateService.getTemplate(componentId);
-        if (systemTemplate.isPresent()) {
-            return mapTemplate(systemTemplate.get());
-        }
-        return null;
+        return systemTemplate.map(templateService::toRecord).orElse(null);
     }
 
     private JsonNode resolveComponentDefinition(String componentId) {
@@ -126,24 +123,6 @@ public class AiContextService {
         return null;
     }
 
-    private AiRegistryTemplateRecord mapTemplate(AiRegistry config) {
-        JsonNode payload = templateService.parsePayload(config);
-        JsonNode configJson = payload != null ? payload.get("configJson") : null;
-        JsonNode templateMeta = payload != null ? payload.get("templateMeta") : null;
-        return AiRegistryTemplateRecord.builder()
-                .componentId(config.getRegistryKey())
-                .aiDescription(safeText(payload, "aiDescription"))
-                .configJson(configJson)
-                .templateMeta(templateMeta)
-                .build();
-    }
-
-    private String safeText(JsonNode payload, String field) {
-        if (payload == null) return null;
-        JsonNode value = payload.get(field);
-        return value != null && !value.isNull() ? value.asText() : null;
-    }
-
     private String extractDescription(JsonNode componentDefinition, AiRegistryTemplateRecord templateRecord) {
         if (componentDefinition != null) {
             JsonNode descriptionNode = componentDefinition.get("description");
@@ -161,4 +140,3 @@ public class AiContextService {
         return "Dynamic Component";
     }
 }
-

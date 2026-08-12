@@ -702,7 +702,11 @@ final class AgenticAuthoringCompiledPagePatchValidator {
             return "compiled-page-composition-link-metadata-deprecated-invalid";
         }
         if (metadata.has("source")
-                && !Set.of("legacy-widget-connection", "persisted-composition-link", "native-composition-link")
+                && !Set.of(
+                                "legacy-widget-connection",
+                                "persisted-composition-link",
+                                "native-composition-link",
+                                "ui-composition-plan")
                         .contains(text(metadata.get("source")))) {
             return "compiled-page-composition-link-metadata-source-invalid";
         }

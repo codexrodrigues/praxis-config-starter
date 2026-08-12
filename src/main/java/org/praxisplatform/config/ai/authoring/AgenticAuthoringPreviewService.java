@@ -53,6 +53,7 @@ public class AgenticAuthoringPreviewService {
     private final ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService;
     private final ResourceSurfaceCatalogRetrievalService resourceSurfaceCatalogRetrievalService;
     private final AgenticAuthoringComponentEditPlanService componentEditPlanService;
+    private final AgenticAuthoringUiCompositionTemplateResolver uiCompositionTemplateResolver;
 
     public AgenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
@@ -173,6 +174,30 @@ public class AgenticAuthoringPreviewService {
             ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService,
             ResourceSurfaceCatalogRetrievalService resourceSurfaceCatalogRetrievalService,
             AgenticAuthoringComponentEditPlanService componentEditPlanService) {
+        this(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                uiCompositionPlanProviders,
+                messageSynthesizer,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService,
+                resourceSurfaceCatalogRetrievalService,
+                componentEditPlanService,
+                null);
+    }
+
+    public AgenticAuthoringPreviewService(
+            AgenticAuthoringPlanService planService,
+            AgenticAuthoringPatchCompilerService patchCompilerService,
+            ObjectMapper objectMapper,
+            List<AgenticAuthoringUiCompositionPlanProvider> uiCompositionPlanProviders,
+            AgenticAuthoringPreviewMessageSynthesizerService messageSynthesizer,
+            SchemaRetrievalService schemaRetrievalService,
+            ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService,
+            ResourceSurfaceCatalogRetrievalService resourceSurfaceCatalogRetrievalService,
+            AgenticAuthoringComponentEditPlanService componentEditPlanService,
+            AgenticAuthoringUiCompositionTemplateResolver uiCompositionTemplateResolver) {
         this.planService = Objects.requireNonNull(planService, "planService must not be null");
         this.patchCompilerService = Objects.requireNonNull(patchCompilerService, "patchCompilerService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
@@ -186,6 +211,7 @@ public class AgenticAuthoringPreviewService {
         this.resourceCapabilitiesRetrievalService = resourceCapabilitiesRetrievalService;
         this.resourceSurfaceCatalogRetrievalService = resourceSurfaceCatalogRetrievalService;
         this.componentEditPlanService = componentEditPlanService;
+        this.uiCompositionTemplateResolver = uiCompositionTemplateResolver;
     }
 
     public AgenticAuthoringPreviewResult preview(
@@ -334,8 +360,24 @@ public class AgenticAuthoringPreviewService {
             String userId,
             String environment,
             String schemaBaseUrl) throws IOException {
+        AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
+        AgenticAuthoringIntentResolutionResult intentResolution =
+                effectiveRequest == null ? null : effectiveRequest.intentResolution();
+        List<String> intentFailures = validateIntentResolution(intentResolution);
+        if (!intentFailures.isEmpty()) {
+            List<String> warnings = new ArrayList<>();
+            if (intentResolution != null && intentResolution.warnings() != null) {
+                warnings.addAll(intentResolution.warnings());
+            }
+            warnings.add("minimal-form-plan-skipped-invalid-intent-resolution");
+            return new AgenticAuthoringPlanResult(
+                    false,
+                    List.copyOf(intentFailures),
+                    List.copyOf(warnings),
+                    MissingNode.getInstance());
+        }
         return resolveMinimalFormPlan(
-                enrichRequest(request),
+                effectiveRequest,
                 tenantId,
                 userId,
                 environment,
@@ -906,9 +948,30 @@ public class AgenticAuthoringPreviewService {
                         userId,
                         environment));
             }
+            AgenticAuthoringUiCompositionTemplateResolver.Resolution templateResolution =
+                    resolveUiCompositionTemplateReference(planResult.uiCompositionPlan());
+            addAllOnce(failureCodes, templateResolution.failureCodes());
+            addAllOnce(warnings, templateResolution.warnings());
+            if (!templateResolution.valid()) {
+                AgenticAuthoringUiCompositionPlanResult invalidReference =
+                        new AgenticAuthoringUiCompositionPlanResult(
+                                false,
+                                List.copyOf(failureCodes),
+                                List.copyOf(warnings),
+                                templateResolution.uiCompositionPlan(),
+                                planResult.compiledFormPatch());
+                return Optional.of(invalidUiCompositionPlanPreview(
+                        request,
+                        invalidReference,
+                        failureCodes,
+                        warnings,
+                        tenantId,
+                        userId,
+                        environment));
+            }
             boolean technicallyValid = planResult.valid();
             boolean semanticallyValid = planResult.valid();
-            JsonNode uiCompositionPlan = prepareCanonicalChartsForPreview(planResult.uiCompositionPlan());
+            JsonNode uiCompositionPlan = prepareCanonicalChartsForPreview(templateResolution.uiCompositionPlan());
             uiCompositionPlan = normalizeCountMetricBindings(uiCompositionPlan, warnings);
             uiCompositionPlan = verifySemanticAxesWithSchema(
                     request,
@@ -1054,6 +1117,21 @@ public class AgenticAuthoringPreviewService {
             ));
         }
         return Optional.empty();
+    }
+
+    private AgenticAuthoringUiCompositionTemplateResolver.Resolution resolveUiCompositionTemplateReference(
+            JsonNode uiCompositionPlan) {
+        if (uiCompositionPlan == null
+                || !uiCompositionPlan.isObject()
+                || !uiCompositionPlan.has("templateRef")) {
+            return AgenticAuthoringUiCompositionTemplateResolver.Resolution.notReferenced(uiCompositionPlan);
+        }
+        if (uiCompositionTemplateResolver == null) {
+            return AgenticAuthoringUiCompositionTemplateResolver.Resolution.invalid(
+                    uiCompositionPlan,
+                    List.of("ui-composition-template-resolver-unavailable"));
+        }
+        return uiCompositionTemplateResolver.resolve(uiCompositionPlan);
     }
 
     private boolean governedAnalyticsGroundingBlocksMaterialization(AgenticAuthoringPlanRequest request) {

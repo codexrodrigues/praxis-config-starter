@@ -44,10 +44,12 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringToolLoopExecutor;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringToolLoopPlanner;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanProvider;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
 import org.praxisplatform.config.controller.AgenticAuthoringManifestController;
-import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
+import org.praxisplatform.config.service.AiProviderManagementService;
+import org.praxisplatform.config.service.AiRegistryTemplateService;
 import org.praxisplatform.config.service.AiStreamAccessTokenService;
 import org.praxisplatform.config.service.AiThreadService;
 import org.praxisplatform.config.service.AiTurnEventService;
@@ -519,6 +521,14 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    @ConditionalOnBean(AiRegistryTemplateService.class)
+    public AgenticAuthoringUiCompositionTemplateResolver agenticAuthoringUiCompositionTemplateResolver(
+            AiRegistryTemplateService templateService) {
+        return new AgenticAuthoringUiCompositionTemplateResolver(templateService);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     @ConditionalOnBean({AgenticAuthoringPlanService.class, AgenticAuthoringPatchCompilerService.class})
     public AgenticAuthoringPreviewService agenticAuthoringPreviewService(
             AgenticAuthoringPlanService planService,
@@ -529,7 +539,8 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectProvider<SchemaRetrievalService> schemaRetrievalService,
             ObjectProvider<ResourceCapabilitiesRetrievalService> resourceCapabilitiesRetrievalService,
             ObjectProvider<ResourceSurfaceCatalogRetrievalService> resourceSurfaceCatalogRetrievalService,
-            ObjectProvider<AgenticAuthoringComponentEditPlanService> componentEditPlanService) {
+            ObjectProvider<AgenticAuthoringComponentEditPlanService> componentEditPlanService,
+            ObjectProvider<AgenticAuthoringUiCompositionTemplateResolver> uiCompositionTemplateResolver) {
         return new AgenticAuthoringPreviewService(
                 planService,
                 patchCompilerService,
@@ -539,7 +550,8 @@ public class AgenticAuthoringAutoConfiguration {
                 schemaRetrievalService.getIfAvailable(),
                 resourceCapabilitiesRetrievalService.getIfAvailable(),
                 resourceSurfaceCatalogRetrievalService.getIfAvailable(),
-                componentEditPlanService.getIfAvailable());
+                componentEditPlanService.getIfAvailable(),
+                uiCompositionTemplateResolver.getIfAvailable());
     }
 
     @Bean

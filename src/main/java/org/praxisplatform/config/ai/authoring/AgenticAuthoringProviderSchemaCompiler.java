@@ -29,6 +29,17 @@ public final class AgenticAuthoringProviderSchemaCompiler {
         return compileSchema(source, false);
     }
 
+    /**
+     * Compiles a complete canonical document schema into the strict provider subset.
+     *
+     * <p>The returned schema is a transport projection only. Callers must decode the provider
+     * response with {@link #decodeDocumentCompatibilityValues(JsonNode, JsonNode)} and validate
+     * the decoded document against the original canonical contract.
+     */
+    public ObjectNode compileDocumentSchema(JsonNode source) {
+        return compileSchema(source, false);
+    }
+
     public ObjectNode compileOperationSchema(JsonNode operation) {
         ObjectNode variant = objectMapper.createObjectNode();
         variant.put("type", "object");
@@ -85,10 +96,24 @@ public final class AgenticAuthoringProviderSchemaCompiler {
         return canonical;
     }
 
+    /**
+     * Removes nullable transport placeholders and restores JSON-text encoded values before
+     * canonical validation of a complete document.
+     */
+    public JsonNode decodeDocumentCompatibilityValues(JsonNode document, JsonNode canonicalSchema) {
+        if (!(document instanceof ObjectNode)) return document;
+        ObjectNode canonical = document.deepCopy();
+        removeCompatibilityValues(canonical, canonicalSchema);
+        return canonical;
+    }
+
     private ObjectNode compileSchema(JsonNode source, boolean encodeFreeFormValue) {
         ObjectNode schema = source != null && source.isObject() ? source.deepCopy() : objectMapper.createObjectNode();
-        for (String unsupported : List.of("$schema", "default", "examples", "allOf", "not", "dependentRequired",
-                "dependentSchemas", "if", "then", "else", "patternProperties", "minProperties", "maxProperties")) {
+        for (String unsupported : List.of("$schema", "$id", "title", "default", "examples", "allOf", "not",
+                "dependentRequired", "dependentSchemas", "if", "then", "else", "patternProperties",
+                "minProperties", "maxProperties", "minLength", "maxLength", "pattern", "format",
+                "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "uniqueItems",
+                "minItems", "maxItems", "contains", "minContains", "maxContains")) {
             schema.remove(unsupported);
         }
         if (encodeFreeFormValue && requiresJsonTextEncoding(schema)) return encodedJsonTextSchema(schema);
@@ -128,11 +153,14 @@ public final class AgenticAuthoringProviderSchemaCompiler {
         ObjectNode encoded = objectMapper.createObjectNode();
         encoded.put("type", "string");
         String description = schema.path("description").asText("");
-        String kind = declaresType(schema, "array") ? "array" : "object";
+        String kind = isUnconstrainedSchema(schema)
+                ? "JSON value"
+                : declaresType(schema, "array") ? "array" : "object";
         String transportInstruction = declaresType(schema, "string")
                 ? "Return canonical string values directly; encode " + kind
                         + " values as compact JSON text for provider transport."
-                : "Return this " + kind + " as compact JSON text for provider transport.";
+                : "Return this " + kind + " as compact JSON text for provider transport. "
+                        + "Canonical string values must include their JSON quotes.";
         String canonicalDescription = declaresType(schema, "string")
                 ? "Canonical value."
                 : "Canonical " + kind + ".";
@@ -170,7 +198,7 @@ public final class AgenticAuthoringProviderSchemaCompiler {
             JsonNode child = value.path(field);
             JsonNode childSchema = schema.path("properties").path(field);
             if (child.isNull() && !required.contains(field)) value.remove(field);
-            else if (child.isTextual() && expectsStructuredValue(childSchema)) decodeJsonText(child.asText(""), childSchema).ifPresent(decoded -> value.set(field, decoded));
+            else if (child.isTextual() && expectsJsonTextTransport(childSchema)) decodeJsonText(child.asText(""), childSchema).ifPresent(decoded -> value.set(field, decoded));
             else if (child instanceof ObjectNode childObject && childSchema.isObject()) {
                 removeCompatibilityValues(childObject, childSchema);
                 if (childObject.isEmpty() && !required.contains(field)) {
@@ -186,7 +214,7 @@ public final class AgenticAuthoringProviderSchemaCompiler {
                 JsonNode itemSchema = childSchema.path("items");
                 for (int i = 0; i < array.size(); i++) {
                     JsonNode item = array.get(i);
-                    if (item.isTextual() && expectsStructuredValue(itemSchema)) {
+                    if (item.isTextual() && expectsJsonTextTransport(itemSchema)) {
                         java.util.Optional<JsonNode> decoded = decodeJsonText(item.asText(""), itemSchema);
                         if (decoded.isPresent()) array.set(i, decoded.get());
                     }
@@ -200,6 +228,7 @@ public final class AgenticAuthoringProviderSchemaCompiler {
         if (value == null || value.isBlank()) return java.util.Optional.empty();
         try {
             JsonNode decoded = objectMapper.readTree(value);
+            if (isUnconstrainedSchema(canonicalSchema)) return java.util.Optional.of(decoded);
             return (declaresType(canonicalSchema, "object") && decoded.isObject())
                     || (declaresType(canonicalSchema, "array") && decoded.isArray())
                     ? java.util.Optional.of(decoded) : java.util.Optional.empty();
@@ -212,8 +241,10 @@ public final class AgenticAuthoringProviderSchemaCompiler {
                 || isStringOrStructuredTypeUnion(schema)
                 || isUnconstrainedSchema(schema);
     }
-    private boolean expectsStructuredValue(JsonNode schema) {
-        return declaresType(schema, "object") || declaresType(schema, "array");
+    private boolean expectsJsonTextTransport(JsonNode schema) {
+        return requiresJsonTextEncoding(schema)
+                || declaresType(schema, "object")
+                || declaresType(schema, "array");
     }
     private boolean declaresType(JsonNode schema, String expected) {
         JsonNode type = schema.path("type");

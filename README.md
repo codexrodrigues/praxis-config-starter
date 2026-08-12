@@ -332,15 +332,29 @@ headers, including unquoted raw tokens, return `400 Bad Request`.
 
 ## AI Registry Revision Semantics
 
-`ai_registry.version` and `ai_registry.etag` are internal freshness tokens for governed registry
-records. Inserts start at `version=1` with a generated `etag`. Component definitions, templates and
-snapshot metadata increment `version` and rotate `etag` only when persisted material state changes:
-payload, embedding, tags, source, source reference or status. Reingesting identical material keeps
-the stable registry identity tuple and preserves both tokens.
+`ai_registry.version` and `ai_registry.etag` are freshness tokens for governed registry records.
+Inserts start at `version=1` with a generated `etag`. Component definitions, templates and snapshot
+metadata increment `version` and rotate `etag` only when persisted material state changes: payload,
+embedding, tags, source, source reference or status. Reingesting identical material keeps the stable
+registry identity tuple and preserves both tokens.
 
-These fields are not exposed as public HTTP conditional request semantics for
-`/api/praxis/config/ai-registry/**` in this release. HTTP ETag behavior remains owned by the
-surfaces that explicitly publish it, such as `ui_user_config`.
+Template reads and upserts expose this existing evidence as `revision.version` and `revision.etag`.
+They also expose `revision.configSha256`, computed from canonical `configJson` only, so callers can
+distinguish a registry metadata revision from a change to the configured template document. A
+recipe may materialize executable artifacts and retain editorial evidence inside that document, so
+`configSha256` must not be presented as an artifact-only digest. Template GET responses publish the
+registry token in the HTTP `ETag` header. Other AI Registry endpoints do not implicitly acquire
+conditional-request semantics from this template-specific contract.
+
+An intermediate `praxis.ui-composition-plan` may now carry an exact `templateRef` with
+`registryKey + configSha256`. The authoring preview resolves only the active exact template,
+validates `configJson.authoringPlan`, records revision evidence, and expands it before the existing
+pure compiler. Non-empty overrides, missing or stale content, inactive records and malformed
+references fail closed. The persisted runtime artifact remains the expanded
+`WidgetPageDefinition`; registry access is not required to render an already compiled page.
+
+See the governed reference design and phase gates in
+[`docs/ai/agentic-authoring/implementation/43-governed-page-template-reference.md`](docs/ai/agentic-authoring/implementation/43-governed-page-template-reference.md).
 
 ## API Metadata Scope Semantics
 
@@ -364,6 +378,13 @@ empty database and exercises the canonical ingestion endpoint instead of relying
 For a resolved canonical create-form intent, both `/minimal-form-plan` and `/page-preview` retrieve the
 selected `/schemas/filtered` request schema and materialize fields deterministically. If that schema is
 unavailable, planning fails closed; an LLM response must not substitute invented host fields.
+
+When an authoring path still requires provider-generated `MinimalFormPlan`, the bundled JSON Schema
+remains the canonical validation contract. The starter derives an in-memory strict Structured Outputs
+projection for the provider, represents optional properties as nullable transport values and encodes
+free-form JSON values as JSON text. The response is decoded back to the canonical document before
+deterministic completion and validation. Provider restrictions therefore never redefine the public
+contract. A supplied invalid or ineligible intent is rejected before this provider call.
 
 API catalog ingestion persists the canonical `api_metadata` rows before publishing the derived RAG
 corpus. RAG publication is scheduled after the database commit and can be replayed from canonical
@@ -410,7 +431,7 @@ vector similarity score or decide user intent. Queries without lexical evidence 
 | --- | --- |
 | `/api/praxis/config/ui` | Read, write, and delete tenant/user scoped UI configuration. Hosts can register `UiConfigWriteAuthorizer` to authorize governed writes from server-side identity and capability policy. |
 | `/api/praxis/config/api-catalog/**` | Ingest and search API metadata for grounding and retrieval. |
-| `/api/praxis/config/ai-registry/**` | Manage component definitions, templates, and authoring manifest projections. |
+| `/api/praxis/config/ai-registry/**` | Manage component definitions, templates, and authoring manifest projections. Template reads/upserts expose governed revision evidence; template GET also publishes the matching HTTP `ETag`. |
 | `/api/praxis/config/ai-context/**` | Build AI context from component metadata, runtime state, templates, and schema hints. |
 | `/api/praxis/config/ai/patch` | Generate structured configuration patches from governed AI context. |
 | `/api/praxis/config/ai/authoring/**` | Validate, compile, preview, apply, stream, replay, and cancel agentic authoring turns. |

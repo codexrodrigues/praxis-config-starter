@@ -32,6 +32,7 @@ public class AgenticAuthoringPlanService {
     private final AgenticAuthoringMinimalFormPlanValidator validator;
     private final AgenticAuthoringIntentResolutionContext intentResolutionContext;
     private final AgenticAuthoringConversationTurnOrchestrator conversationTurnOrchestrator;
+    private final AgenticAuthoringProviderSchemaCompiler providerSchemaCompiler;
     private final ObjectMapper objectMapper;
 
     public AgenticAuthoringPlanService(
@@ -50,6 +51,7 @@ public class AgenticAuthoringPlanService {
         this.validator = new AgenticAuthoringMinimalFormPlanValidator();
         this.intentResolutionContext = new AgenticAuthoringIntentResolutionContext(objectMapper);
         this.conversationTurnOrchestrator = new AgenticAuthoringConversationTurnOrchestrator();
+        this.providerSchemaCompiler = new AgenticAuthoringProviderSchemaCompiler(objectMapper);
     }
 
     public AgenticAuthoringPlanResult generateMinimalFormPlan(
@@ -62,13 +64,15 @@ public class AgenticAuthoringPlanService {
         }
         AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
         effectiveRequest = withEffectivePrompt(effectiveRequest);
+        JsonNode canonicalSchema = objectMapper.readTree(readMinimalFormPlanSchema());
+        JsonNode providerSchema = providerSchemaCompiler.compileDocumentSchema(canonicalSchema);
         AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
                 "minimal_form_plan", 1, effectiveRequest.provider(), effectiveRequest.model());
         JsonNode plan;
         try {
             plan = providerManagementService.generateJson(
                     minimalFormPlanPrompt(effectiveRequest),
-                    AiJsonSchema.ofSchema(readMinimalFormPlanSchema()),
+                    AiJsonSchema.ofSchema(objectMapper.writeValueAsString(providerSchema)),
                     AiCallConfig.agenticAuthoringBuilder()
                             .provider(effectiveRequest.provider())
                             .model(effectiveRequest.model())
@@ -88,6 +92,7 @@ public class AgenticAuthoringPlanService {
         } finally {
             AiProviderInvocationMetrics.record(trace.snapshot());
         }
+        plan = providerSchemaCompiler.decodeDocumentCompatibilityValues(plan, canonicalSchema);
         plan = completeDeterministicEditPlan(plan, effectiveRequest);
         List<String> failures = validator.validate(plan, effectiveRequest.intentResolution());
         return new AgenticAuthoringPlanResult(

@@ -25,10 +25,12 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReplayAuditService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTargetResolverRegistry;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanProvider;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiProviderManagementService;
+import org.praxisplatform.config.service.AiRegistryTemplateService;
 import org.praxisplatform.config.service.AiTurnEventService;
 import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.boot.ApplicationRunner;
@@ -66,6 +68,16 @@ class AgenticAuthoringAutoConfigurationTest {
             assertThat(context).doesNotHaveBean(AgenticAuthoringReplayAuditService.class);
             assertThat(context).doesNotHaveBean(ApplicationRunner.class);
         });
+    }
+
+    @Test
+    void shouldRegisterExactUiCompositionTemplateResolverWhenRegistryTemplatesAreAvailable() {
+        AiRegistryTemplateService templateService = org.mockito.Mockito.mock(AiRegistryTemplateService.class);
+
+        contextRunner
+                .withBean(AiRegistryTemplateService.class, () -> templateService)
+                .run(context -> assertThat(context)
+                        .hasSingleBean(AgenticAuthoringUiCompositionTemplateResolver.class));
     }
 
     @Test
