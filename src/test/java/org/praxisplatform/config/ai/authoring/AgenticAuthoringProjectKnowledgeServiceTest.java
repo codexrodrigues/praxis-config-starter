@@ -204,7 +204,7 @@ class AgenticAuthoringProjectKnowledgeServiceTest {
                 eq("human-resources.funcionarios"),
                 eq("concept"),
                 pageableCaptor.capture());
-        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(5);
+        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(20);
     }
 
     @Test
@@ -298,7 +298,7 @@ class AgenticAuthoringProjectKnowledgeServiceTest {
                 eq("human-resources.funcionarios"),
                 eq(null),
                 pageableCaptor.capture());
-        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(20);
+        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(64);
     }
 
     @Test

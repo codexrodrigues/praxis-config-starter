@@ -6527,84 +6527,11 @@ public class AgenticAuthoringPreviewService {
             AgenticAuthoringPlanRequest request,
             JsonNode minimalFormPlan,
             JsonNode compiledFormPatch) {
-        JsonNode projectKnowledge = request == null || request.contextHints() == null
-                ? MissingNode.getInstance()
-                : request.contextHints().path("projectKnowledge");
-        JsonNode entries = projectKnowledge.path("entries");
-        if (!projectKnowledge.isObject() || !entries.isArray() || entries.isEmpty()) {
-            return null;
-        }
-        Set<String> sourceRefs = sourceRefs(minimalFormPlan, compiledFormPatch);
-        ObjectNode audit = objectMapper.createObjectNode();
-        audit.put("schemaVersion", "praxis-agentic-authoring-project-knowledge-audit.v1");
-        audit.put("source", safeText(projectKnowledge.path("source").asText("domain_knowledge_concept")));
-        ArrayNode safeEntries = audit.putArray("entries");
-        int citedCount = 0;
-        for (JsonNode entry : entries) {
-            if (!entry.isObject()) {
-                continue;
-            }
-            String knowledgeId = safeText(entry.path("knowledgeId").asText(""));
-            String conceptKey = safeText(entry.path("conceptKey").asText(""));
-            List<String> matchedRefs = matchingProjectKnowledgeRefs(sourceRefs, knowledgeId, conceptKey);
-            if (!matchedRefs.isEmpty()) {
-                citedCount++;
-            }
-            ObjectNode safeEntry = safeEntries.addObject();
-            safeEntry.put("knowledgeId", knowledgeId);
-            safeEntry.put("conceptKey", conceptKey);
-            safeEntry.put("kind", safeText(entry.path("kind").asText("")));
-            safeEntry.put("visibility", safeText(entry.path("visibility").asText("")));
-            safeEntry.put("influence", safeText(entry.path("influence").asText("")));
-            safeEntry.put("sourceSummary", safeText(entry.path("sourceSummary").asText("")));
-            safeEntry.put("cited", !matchedRefs.isEmpty());
-            safeEntry.set("sourceRefs", objectMapper.valueToTree(matchedRefs));
-        }
-        audit.put("influenceCount", safeEntries.size());
-        audit.put("citedCount", citedCount);
-        audit.put("uncitedCount", Math.max(0, safeEntries.size() - citedCount));
-        audit.put("citationPolicy", "sourceRefs must cite projectKnowledge entries when they materially influence the plan.");
-        return audit;
-    }
-
-    private Set<String> sourceRefs(JsonNode minimalFormPlan, JsonNode compiledFormPatch) {
-        Set<String> refs = new LinkedHashSet<>();
-        collectSourceRefs(minimalFormPlan, refs);
-        collectSourceRefs(compiledFormPatch, refs);
-        return refs;
-    }
-
-    private void collectSourceRefs(JsonNode node, Set<String> refs) {
-        JsonNode sourceRefs = node == null ? MissingNode.getInstance() : node.path("sourceRefs");
-        if (!sourceRefs.isArray()) {
-            return;
-        }
-        for (JsonNode sourceRef : sourceRefs) {
-            if (sourceRef.isTextual() && !sourceRef.asText("").isBlank()) {
-                refs.add(sourceRef.asText());
-            }
-        }
-    }
-
-    private List<String> matchingProjectKnowledgeRefs(
-            Set<String> sourceRefs,
-            String knowledgeId,
-            String conceptKey) {
-        if (sourceRefs == null || sourceRefs.isEmpty()) {
-            return List.of();
-        }
-        List<String> matches = new ArrayList<>();
-        for (String sourceRef : sourceRefs) {
-            if (!sourceRef.startsWith("projectKnowledge:")) {
-                continue;
-            }
-            String ref = sourceRef.substring("projectKnowledge:".length());
-            if ((!knowledgeId.isBlank() && knowledgeId.equals(ref))
-                    || (!conceptKey.isBlank() && conceptKey.equals(ref))) {
-                matches.add(sourceRef);
-            }
-        }
-        return List.copyOf(matches);
+        return AgenticAuthoringProjectKnowledgeAuditFactory.create(
+                objectMapper,
+                request == null ? null : request.contextHints(),
+                minimalFormPlan,
+                compiledFormPatch);
     }
 
     private String fieldScopeDecision(AgenticAuthoringIntentResolutionResult intentResolution, List<String> failureCodes) {
