@@ -3623,6 +3623,132 @@ class DomainRuleServiceTest {
         verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
     }
 
+    @Test
+    void applyingANewVersionSupersedesThePreviousExactTargetHead() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        DomainRuleDefinition previousDefinition = activeDefinition("sales.orders.rule.total", 1);
+        DomainRuleDefinition nextDefinition = activeDefinition("sales.orders.rule.total", 2);
+        DomainRuleMaterialization previous = targetMaterialization(previousDefinition, "applied");
+        DomainRuleMaterialization next = targetMaterialization(nextDefinition, "pending_review");
+        when(materializationRepository.findById(next.getId())).thenReturn(Optional.of(next));
+        when(materializationRepository.findAppliedForUpdateByExactTarget(
+                "tenant-a", "dev", "backend_determination",
+                "resource-reactive-determination", "sales.orders:total"))
+                .thenReturn(List.of(previous));
+        when(materializationRepository.save(any(DomainRuleMaterialization.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.transitionMaterializationStatus(
+                next.getId(),
+                new DomainRuleStatusTransitionRequest("applied", objectMapper.createObjectNode()),
+                principal("sales-owner"));
+
+        assertThat(previous.getStatus()).isEqualTo("superseded");
+        assertThat(response.status()).isEqualTo("applied");
+        assertThat(response.ruleVersion()).isEqualTo(2);
+    }
+
+    @Test
+    void deprecatingDefinitionSupersedesItsAppliedMaterializations() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        DomainRuleDefinition definition = activeDefinition("sales.orders.rule.total", 1);
+        DomainRuleMaterialization applied = targetMaterialization(definition, "applied");
+        when(definitionRepository.findById(definition.getId())).thenReturn(Optional.of(definition));
+        when(definitionRepository.save(any(DomainRuleDefinition.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(materializationRepository.findForUpdateByDefinition(
+                "tenant-a", "dev", definition.getId())).thenReturn(List.of(applied));
+        when(materializationRepository.save(any(DomainRuleMaterialization.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.transitionDefinitionStatus(
+                definition.getId(),
+                new DomainRuleDefinitionStatusTransitionRequest("deprecated", null),
+                principal("sales-owner"));
+
+        assertThat(definition.getStatus()).isEqualTo("deprecated");
+        assertThat(applied.getStatus()).isEqualTo("superseded");
+    }
+
+    @Test
+    void appliedRuntimeLookupIgnoresMaterializationWhoseDefinitionIsNotActive() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        DomainRuleDefinition definition = activeDefinition("sales.orders.rule.total", 1);
+        definition.setStatus("deprecated");
+        DomainRuleMaterialization stale = targetMaterialization(definition, "applied");
+        when(materializationRepository
+                .findByTenantIdAndEnvironmentAndTargetLayerAndTargetArtifactTypeAndTargetArtifactKey(
+                        "tenant-a", "dev", "backend_determination",
+                        "resource-reactive-determination", "sales.orders:total"))
+                .thenReturn(List.of(stale));
+
+        var response = service.materializations(
+                "tenant-a", "dev", null,
+                "backend_determination", "resource-reactive-determination", "sales.orders:total", "applied");
+
+        assertThat(response).isEmpty();
+    }
+
+    @Test
+    void governedRollbackCanReapplyASupersededVersionAsTheOnlyHead() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        DomainRuleMaterialization previous = targetMaterialization(
+                activeDefinition("sales.orders.rule.total", 1), "superseded");
+        DomainRuleMaterialization current = targetMaterialization(
+                activeDefinition("sales.orders.rule.total", 2), "applied");
+        when(materializationRepository.findById(previous.getId())).thenReturn(Optional.of(previous));
+        when(materializationRepository.findAppliedForUpdateByExactTarget(
+                "tenant-a", "dev", "backend_determination",
+                "resource-reactive-determination", "sales.orders:total"))
+                .thenReturn(List.of(current));
+        when(materializationRepository.save(any(DomainRuleMaterialization.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.transitionMaterializationStatus(
+                previous.getId(),
+                new DomainRuleStatusTransitionRequest("pending_review", null),
+                principal("sales-owner"));
+        service.transitionMaterializationStatus(
+                previous.getId(),
+                new DomainRuleStatusTransitionRequest("applied", null),
+                principal("sales-owner"));
+
+        assertThat(previous.getStatus()).isEqualTo("applied");
+        assertThat(current.getStatus()).isEqualTo("superseded");
+    }
+
+    @Test
+    void identicalAppliedTransitionDoesNotSupersedeItsOwnHead() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        DomainRuleMaterialization current = targetMaterialization(
+                activeDefinition("sales.orders.rule.total", 2), "applied");
+        when(materializationRepository.findById(current.getId())).thenReturn(Optional.of(current));
+        when(materializationRepository.findAppliedForUpdateByExactTarget(
+                "tenant-a", "dev", "backend_determination",
+                "resource-reactive-determination", "sales.orders:total"))
+                .thenReturn(List.of(current));
+        when(materializationRepository.save(any(DomainRuleMaterialization.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.transitionMaterializationStatus(
+                current.getId(),
+                new DomainRuleStatusTransitionRequest("applied", null),
+                principal("sales-owner"));
+
+        assertThat(current.getStatus()).isEqualTo("applied");
+        verify(materializationRepository, org.mockito.Mockito.never()).flush();
+    }
+
     private String sourceHashFor(
             org.praxisplatform.config.dto.DomainRulePublicationResponse response,
             String targetLayer) {
@@ -3703,6 +3829,44 @@ class DomainRuleServiceTest {
                         }
                         """)
                 .governance("{}")
+                .build();
+    }
+
+    private DomainRuleDefinition activeDefinition(String ruleKey, int version) {
+        return DomainRuleDefinition.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey(ruleKey)
+                .version(version)
+                .ruleType("calculation")
+                .status("active")
+                .resourceKey("sales.orders")
+                .definition("{}")
+                .parameters("{}")
+                .governance("{}")
+                .build();
+    }
+
+    private DomainRuleMaterialization targetMaterialization(
+            DomainRuleDefinition definition,
+            String status) {
+        return DomainRuleMaterialization.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(definition)
+                .materializationKey(definition.getRuleKey()
+                        + ":backend_determination:sales.orders:total")
+                .targetLayer("backend_determination")
+                .targetArtifactType("resource-reactive-determination")
+                .targetArtifactKey("sales.orders:total")
+                .targetPointer("/determination")
+                .materializedRuleId("backend-reactive-determination")
+                .status(status)
+                .materializedPayload("{}")
+                .sourceHash("derived:sha256:" + definition.getVersion())
+                .appliedAt("applied".equals(status) ? Instant.now() : null)
                 .build();
     }
 
