@@ -3,6 +3,7 @@ package org.praxisplatform.config.dto;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.List;
 
 public record DomainRuleTestScenarioResponse(
     UUID id,
@@ -12,6 +13,8 @@ public record DomainRuleTestScenarioResponse(
     JsonNode facts,
     String expectedDecision,
     JsonNode expectedOutput,
+    List<String> expectedReasonCodes,
+    List<String> expectedEffectIntents,
     String status,
     Long revision,
     String etag,

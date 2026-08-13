@@ -12,15 +12,14 @@ canonical fingerprint of one persisted `domain_rule_definition`.
   `ja-suportado-mal-nomeado-ou-mal-materializado`; o contrato, suas ações e
   blockers por principal estão implementados, mas a seleção canônica entre
   workspaces concorrentes ainda não é publicada.
-- Reusable facts, expected five-state outcome and immutable Test Run:
-  `suportado-parcialmente`; `expectedOutput` é persistido, mas ainda não participa
-  do resultado/gate do host de referência.
+- Reusable facts, expected decision, output, reason codes, planned effect intents
+  and immutable Test Run: `ja-suportado-mal-nomeado-ou-mal-materializado`; o
+  contrato e o gate estão implementados e aguardam prova HTTP/Neon do corte.
 - Candidate/active evaluation: `suportado-parcialmente` por adapter host-owned; o
   Config armazena evidência redigida e não executa regras.
 - Candidate/legacy evidence and comparison: `lacuna-real-de-contrato`; requer
   provenance, status HTTP/campo, before/after, effects, no-mutation e cleanup.
-- Output, reason codes and planned effects as acceptance gates:
-  `lacuna-real-de-contrato` no Test Run atual.
+- Execution of effects remains host-owned and is never performed by a Test Run.
 
 The Config Starter owns workspace and scenario persistence. The Rules Engine owns deterministic
 evaluation semantics. The host owns fact resolution, executable registries and sandbox execution.
@@ -90,12 +89,16 @@ fingerprints, plan/facts digests and comparison classification. It never stores 
 snapshot content, executes effects or promotes a candidate. Config receives safe host evidence,
 but it does not receive Java executors or become the evaluation runtime.
 
-The current record proves only the canonical five-state decision against the
-scenario expectation. Although a scenario stores `expectedOutput`, the Test Run
-does not carry `candidateOutput`, `outputMatchesExpected`, expected reason codes
-or expected planned effects. A corporate submission gate must add those fields at
-the canonical Config contract and require the host to derive them from the same
-frozen evaluation. A browser-only comparison is not acceptable.
+The immutable record preserves expected/candidate/active output, normalized
+reason codes and planned effect-intent identifiers. Config recomputes every match
+flag from the persisted scenario instead of trusting booleans sent by the host.
+Submission fails closed when any candidate assertion differs. Absence of
+`expectedOutput` means output is not asserted; empty reason/effect lists explicitly
+expect none. The sandbox never executes an effect.
+
+Migration `V56` gives existing scenarios empty reason/effect expectations. Existing
+DENY scenarios that omitted expected reason codes can become blocked until an
+author records the intended assertions; this is deliberate fail-closed beta behavior.
 
 Workspace actions and blockers are exposed through the dedicated capabilities
 read and the public `@praxisui/core` client. Clients must not infer review,

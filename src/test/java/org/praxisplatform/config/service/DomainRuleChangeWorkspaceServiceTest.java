@@ -134,7 +134,7 @@ class DomainRuleChangeWorkspaceServiceTest {
         workspaceId,
         new DomainRuleTestScenarioRequest(
             "boundary-null", "Null guard", objectMapper.readTree("{\"amount\":null}"),
-            "INCONCLUSIVE", null, null),
+            "INCONCLUSIVE", null, List.of(), List.of(), null),
         PRINCIPAL);
 
     assertThat(response.expectedDecision()).isEqualTo("INCONCLUSIVE");
@@ -146,7 +146,7 @@ class DomainRuleChangeWorkspaceServiceTest {
     assertThatThrownBy(() -> service.createScenario(
         workspaceId,
         new DomainRuleTestScenarioRequest(
-            "bad", "Bad", objectMapper.createObjectNode(), "PASS", null, "ACTIVE"),
+            "bad", "Bad", objectMapper.createObjectNode(), "PASS", null, List.of(), List.of(), "ACTIVE"),
         PRINCIPAL))
         .isInstanceOf(ResponseStatusException.class)
         .hasMessageContaining("five-state");
@@ -167,6 +167,8 @@ class DomainRuleChangeWorkspaceServiceTest {
             .baseDefinitionHash("B".repeat(64)).build()));
     when(runResults.findByTestRunIdOrderByScenarioKey(runId)).thenReturn(List.of(
         DomainRuleTestRunResult.builder().scenarioId(scenarioId).candidateMatchesExpected(true)
+            .candidateOutputMatchesExpected(true).candidateReasonCodesMatchExpected(true)
+            .candidateEffectsMatchExpected(true)
             .comparison("MATCH").build()));
 
     var submitted = service.submit(id, "\"" + workspace.getEtag() + "\"", PRINCIPAL);
@@ -190,6 +192,8 @@ class DomainRuleChangeWorkspaceServiceTest {
             .baseDefinitionHash("B".repeat(64)).build()));
     when(runResults.findByTestRunIdOrderByScenarioKey(runId)).thenReturn(List.of(
         DomainRuleTestRunResult.builder().scenarioId(scenarioId).candidateMatchesExpected(true)
+            .candidateOutputMatchesExpected(true).candidateReasonCodesMatchExpected(true)
+            .candidateEffectsMatchExpected(true)
             .comparison("TECHNICAL_ERROR").build()));
 
     assertThatThrownBy(() -> service.submit(id, "\"" + workspace.getEtag() + "\"", PRINCIPAL))
@@ -214,6 +218,8 @@ class DomainRuleChangeWorkspaceServiceTest {
             .baseDefinitionHash("B".repeat(64)).build()));
     when(runResults.findByTestRunIdOrderByScenarioKey(runId)).thenReturn(List.of(
         DomainRuleTestRunResult.builder().scenarioId(coveredScenarioId).candidateMatchesExpected(true)
+            .candidateOutputMatchesExpected(true).candidateReasonCodesMatchExpected(true)
+            .candidateEffectsMatchExpected(true)
             .comparison("MATCH").build()));
 
     assertThatThrownBy(() -> service.submit(id, "\"" + workspace.getEtag() + "\"", PRINCIPAL))
@@ -247,6 +253,8 @@ class DomainRuleChangeWorkspaceServiceTest {
             .status("ACTIVE").build()));
     when(runResults.findByTestRunIdOrderByScenarioKey(runId)).thenReturn(List.of(
         DomainRuleTestRunResult.builder().scenarioId(scenarioId).candidateMatchesExpected(true)
+            .candidateOutputMatchesExpected(true).candidateReasonCodesMatchExpected(true)
+            .candidateEffectsMatchExpected(true)
             .comparison("MATCH").build()));
 
     var ready = service.capabilities(id, PRINCIPAL, true, false);

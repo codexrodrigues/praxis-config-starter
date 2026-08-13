@@ -180,6 +180,8 @@ public class DomainRuleChangeWorkspaceService {
         .facts(json(valid.facts()))
         .expectedDecision(valid.expectedDecision())
         .expectedOutput(json(valid.expectedOutput()))
+        .expectedReasonCodes(jsonValue(valid.expectedReasonCodes()))
+        .expectedEffectIntents(jsonValue(valid.expectedEffectIntents()))
         .status(valid.status())
         .etag(UUID.randomUUID())
         .revision(1L)
@@ -280,6 +282,9 @@ public class DomainRuleChangeWorkspaceService {
           "The latest Test Run must cover every active scenario"));
     }
     if (evidence.stream().anyMatch(item -> !Boolean.TRUE.equals(item.getCandidateMatchesExpected())
+        || !Boolean.TRUE.equals(item.getCandidateOutputMatchesExpected())
+        || !Boolean.TRUE.equals(item.getCandidateReasonCodesMatchExpected())
+        || !Boolean.TRUE.equals(item.getCandidateEffectsMatchExpected())
         || "INCONCLUSIVE".equals(item.getComparison())
         || "TECHNICAL_ERROR".equals(item.getComparison()))) {
       return List.of(new DomainRuleWorkspaceBlocker(
@@ -453,10 +458,15 @@ public class DomainRuleChangeWorkspaceService {
     if (!SCENARIO_STATUSES.contains(status)) {
       throw badRequest("status must be ACTIVE or DISABLED");
     }
+    if (request.expectedOutput() != null && request.expectedOutput().toString().length() > 16384) {
+      throw badRequest("expectedOutput exceeds 16384 characters");
+    }
     return new ValidScenario(
         requireText(request.scenarioKey(), "scenarioKey", 255),
         requireText(request.name(), "name", 255),
-        request.facts(), decision, request.expectedOutput(), status);
+        request.facts(), decision, request.expectedOutput(),
+        normalizedAssertions(request.expectedReasonCodes(), "expectedReasonCodes"),
+        normalizedAssertions(request.expectedEffectIntents(), "expectedEffectIntents"), status);
   }
 
   private void rotate(DomainRuleChangeWorkspace workspace, DomainRuleGovernancePrincipal principal) {
@@ -477,7 +487,8 @@ public class DomainRuleChangeWorkspaceService {
   private DomainRuleTestScenarioResponse scenarioResponse(DomainRuleTestScenario source) {
     return new DomainRuleTestScenarioResponse(
         source.getId(), source.getWorkspaceId(), source.getScenarioKey(), source.getName(), tree(source.getFacts()),
-        source.getExpectedDecision(), tree(source.getExpectedOutput()), source.getStatus(), source.getRevision(),
+        source.getExpectedDecision(), tree(source.getExpectedOutput()), strings(source.getExpectedReasonCodes()),
+        strings(source.getExpectedEffectIntents()), source.getStatus(), source.getRevision(),
         source.getEtag().toString(), source.getCreatedBy(), source.getUpdatedBy(), source.getCreatedAt(), source.getUpdatedAt());
   }
 
@@ -490,12 +501,36 @@ public class DomainRuleChangeWorkspaceService {
     }
   }
 
+  private String jsonValue(Object value) {
+    try {
+      return objectMapper.writeValueAsString(value);
+    } catch (JsonProcessingException exception) {
+      throw badRequest("JSON payload is invalid");
+    }
+  }
+
   private JsonNode tree(String value) {
     if (value == null) return null;
     try {
       return objectMapper.readTree(value);
     } catch (JsonProcessingException exception) {
       throw new IllegalStateException("Persisted governed JSON is invalid", exception);
+    }
+  }
+
+  private List<String> normalizedAssertions(List<String> values, String field) {
+    if (values == null) return List.of();
+    if (values.size() > 100) throw badRequest(field + " exceeds 100 entries");
+    return values.stream().map(value -> requireText(value, field, 255))
+        .distinct().sorted().toList();
+  }
+
+  private List<String> strings(String value) {
+    if (value == null) return List.of();
+    try {
+      return objectMapper.readerForListOf(String.class).readValue(value);
+    } catch (JsonProcessingException exception) {
+      throw new IllegalStateException("Persisted scenario assertions are invalid", exception);
     }
   }
 
@@ -522,5 +557,6 @@ public class DomainRuleChangeWorkspaceService {
   private ResponseStatusException conflict(String message) { return new ResponseStatusException(HttpStatus.CONFLICT, message); }
 
   private record ValidScenario(
-      String key, String name, JsonNode facts, String expectedDecision, JsonNode expectedOutput, String status) {}
+      String key, String name, JsonNode facts, String expectedDecision, JsonNode expectedOutput,
+      List<String> expectedReasonCodes, List<String> expectedEffectIntents, String status) {}
 }

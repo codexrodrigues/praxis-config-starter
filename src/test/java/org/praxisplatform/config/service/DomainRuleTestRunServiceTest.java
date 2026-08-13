@@ -45,7 +45,9 @@ class DomainRuleTestRunServiceTest {
     service=new DomainRuleTestRunService(runs,results,workspaces,scenarios,new ObjectMapper());
     when(workspaces.findById(WORKSPACE)).thenReturn(Optional.of(workspace("tenant-a",2L)));
     when(scenarios.findById(SCENARIO)).thenReturn(Optional.of(DomainRuleTestScenario.builder()
-        .id(SCENARIO).workspaceId(WORKSPACE).scenarioKey("happy").build()));
+        .id(SCENARIO).workspaceId(WORKSPACE).scenarioKey("happy").expectedDecision("ALLOW")
+        .expectedOutput("{\"amount\":500}").expectedReasonCodes("[]")
+        .expectedEffectIntents("[\"REGISTER_EXTRAORDINARY_GRANT\"]").build()));
   }
 
   @Test void recordsOnlySafeImmutableEvidence() {
@@ -53,6 +55,9 @@ class DomainRuleTestRunServiceTest {
     assertThat(response.results()).singleElement().satisfies(item -> {
       assertThat(item.candidateDecision()).isEqualTo("ALLOW");
       assertThat(item.factsDigest()).isEqualTo("C".repeat(64));
+      assertThat(item.candidateOutputMatchesExpected()).isTrue();
+      assertThat(item.candidateReasonCodesMatchExpected()).isTrue();
+      assertThat(item.candidateEffectsMatchExpected()).isTrue();
     });
     ArgumentCaptor<DomainRuleTestRun> run=ArgumentCaptor.forClass(DomainRuleTestRun.class);
     verify(runs).save(run.capture());
@@ -70,10 +75,28 @@ class DomainRuleTestRunServiceTest {
         .isInstanceOf(ResponseStatusException.class).hasMessageContaining("NOT_FOUND");
   }
 
+  @Test void recomputesSemanticMatchesFromPersistedScenarioExpectations() {
+    when(scenarios.findById(SCENARIO)).thenReturn(Optional.of(DomainRuleTestScenario.builder()
+        .id(SCENARIO).workspaceId(WORKSPACE).scenarioKey("happy").expectedDecision("ALLOW")
+        .expectedOutput("{\"amount\":600}").expectedReasonCodes("[\"APPROVED\"]")
+        .expectedEffectIntents("[\"REGISTER_EXTRAORDINARY_GRANT\"]").build()));
+
+    var result = service.record(WORKSPACE, request(2L, "A".repeat(64)), PRINCIPAL)
+        .results().getFirst();
+
+    assertThat(result.candidateMatchesExpected()).isTrue();
+    assertThat(result.candidateOutputMatchesExpected()).isFalse();
+    assertThat(result.candidateReasonCodesMatchExpected()).isFalse();
+    assertThat(result.candidateEffectsMatchExpected()).isTrue();
+  }
+
   private DomainRuleTestRunRecordRequest request(long revision,String hash) {
     return new DomainRuleTestRunRecordRequest(revision,hash,Instant.parse("2026-08-13T12:00:00Z"),"UTC",null,null,0,
-        List.of(new DomainRuleTestRunResultRequest(SCENARIO,"happy","ALLOW","ALLOW","TECHNICAL_ERROR","TECHNICAL_ERROR",
-            true,false,List.of(),List.of("ACTIVE_SNAPSHOT_UNAVAILABLE"),"B".repeat(64),"0".repeat(64),"C".repeat(64))));
+        List.of(new DomainRuleTestRunResultRequest(SCENARIO,"happy","ALLOW","TECHNICAL_ERROR",
+            new ObjectMapper().createObjectNode().put("amount",500),null,
+            List.of(),List.of("ACTIVE_SNAPSHOT_UNAVAILABLE"),
+            List.of("REGISTER_EXTRAORDINARY_GRANT"),List.of(),
+            "B".repeat(64),"0".repeat(64),"C".repeat(64))));
   }
   private DomainRuleChangeWorkspace workspace(String tenant,long revision){return DomainRuleChangeWorkspace.builder()
       .id(WORKSPACE).tenantId(tenant).environment("dev").revision(revision).baseDefinitionHash("A".repeat(64)).build();}
