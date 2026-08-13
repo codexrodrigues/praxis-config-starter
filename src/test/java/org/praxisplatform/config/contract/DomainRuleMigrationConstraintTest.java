@@ -163,4 +163,38 @@ class DomainRuleMigrationConstraintTest {
         assertThat(migration).contains("'authenticated'");
         assertThat(migration).contains("applied_by_type IS NULL");
     }
+
+    @Test
+    void backendReactiveDeterminationMigrationUsesOneTypedCanonicalTarget() throws IOException {
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/V45__add_backend_reactive_determination_materialization.sql"));
+
+        assertThat(migration).contains("target_layer = 'frontend_adapter'");
+        assertThat(migration).contains("RAISE EXCEPTION");
+        assertThat(migration).contains("'backend_determination'");
+        assertThat(migration).contains("'resource-reactive-determination'");
+        assertThat(migration).contains("ck_domain_rule_materialization_backend_determination_type");
+        assertThat(migration).contains("ck_domain_rule_materialization_backend_determination_key");
+        assertThat(migration).contains("ck_domain_rule_materialization_backend_determination_payload");
+        assertThat(migration).contains("jsonb_array_length(materialized_payload -> 'inputs')");
+        assertThat(migration).contains("<= 64");
+        assertThat(migration).doesNotContain("'frontend_adapter',");
+    }
+
+    @Test
+    void openApiKeepsExistingMaterializationTargetsExtensible() throws IOException {
+        String contract = Files.readString(Path.of(
+                "docs/ai/contracts/praxis-ai-api-contract-v1.1.openapi.yaml"));
+        String targetSchemas = contract.substring(
+                contract.indexOf("    DomainRuleTargetLayer:"),
+                contract.indexOf("    DomainRuleReactiveDeterminationSpec:"));
+
+        assertThat(targetSchemas).contains("backend_determination");
+        assertThat(targetSchemas).contains("resource-reactive-determination");
+        assertThat(targetSchemas).contains("policy_engine");
+        assertThat(targetSchemas).contains("spring-service");
+        assertThat(targetSchemas).contains("opa-policy");
+        assertThat(targetSchemas).doesNotContain("enum:");
+    }
+
 }

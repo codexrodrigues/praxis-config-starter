@@ -299,10 +299,11 @@ Recommended fields:
   definition/target should reuse the existing materialization, while attempts
   to bind the same key to another definition or incompatible target must be
   rejected before creating duplicate runtime projections.
-- `target_layer`: `form_config`, `option_source`, `frontend_adapter`, `backend_validation`,
+- `target_layer`: `form_config`, `option_source`, `backend_determination`, `backend_validation`,
   `workflow_action`, `approval_policy`, `policy_engine`, `notification`, `reporting`, `external_system`
 - `target_artifact_type`: for example `praxis-dynamic-form`,
   `resource-option-source`,
+  `resource-reactive-determination`,
   `resource-workflow-action`, `resource-action-approval`, `spring-service`, `opa-policy`
 - `target_artifact_key`: form id, endpoint key, workflow key or policy key
 - `target_pointer`: JSON pointer/path inside the artifact
@@ -324,6 +325,26 @@ For today's Dynamic Form flow, the shared rule would live in
 `domain_rule_definition`; the reviewed `visualBlockGuidance` rule applied to
 `FormConfig.formRules[]` would be one `domain_rule_materialization` row with
 `target_layer=form_config` and `target_artifact_type=praxis-dynamic-form`.
+
+For a backend-owned calculation that may be requested reactively by a client,
+the canonical target is `target_layer=backend_determination` with
+`target_artifact_type=resource-reactive-determination`. The author must declare
+that target explicitly in `definition.materializationTargets[]` and provide the
+closed `parameters.reactiveDetermination` contract. `rule_type=calculation`
+alone is intentionally insufficient: calculations also cover non-reactive and
+save-time semantics. The compiled payload contains a governed `operationId`,
+RFC 6901 input/output bindings, `idempotent=true`, `persistence=none` and
+`finalCommandRevalidation=true`; it never contains an HTTP path, method or
+headers. The materialization remains tenant/environment scoped in Config and
+is not copied into `/schemas/filtered`. A host endpoint may consume only an
+`applied` decision server-side, within the authenticated tenant/environment,
+and bind its `operationId` to a governed host implementation. Metadata remains
+an independent structural source: it may publish only a statically declared,
+tenant-neutral determination binding or capability, never this stored tenant
+payload or a projection derived from it. The Config read boundary supports the
+required lookup through
+`GET /api/praxis/config/domain-rules/materializations?targetLayer=backend_determination&targetArtifactType=resource-reactive-determination&targetArtifactKey={key}&status=applied`;
+the host must not omit `status=applied` in its server-side integration.
 
 For resource actions exposed by a host, such as approving payroll events or
 marking a payroll as paid, the canonical materialization target is

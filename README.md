@@ -476,6 +476,19 @@ application/publication uses `RULE_SNAPSHOT_PUBLISHER`, and failure,
 supersession or reversion uses `RULE_SNAPSHOT_OPERATOR`. Creating a
 materialization accepts only `draft` or `pending_review`; this technical draft
 step neither requires nor claims business homologation.
+Backend-owned reactive calculations are materialized explicitly as
+`backend_determination/resource-reactive-determination`. The Config Starter
+compiles their closed, idempotent, non-persisting operation contract and keeps
+the payload tenant scoped; it does not publish that payload in
+`/schemas/filtered` or accept raw HTTP coordinates from authoring clients. Host
+endpoints consume only `applied` decisions server-side; Metadata may publish a
+separate static, tenant-neutral structural binding, never the Config payload.
+Hosts resolve the decision by exact target coordinates through
+`GET /api/praxis/config/domain-rules/materializations` with `status=applied`.
+Existing-coverage admission for this artifact is scoped to that same exact
+`targetLayer + targetArtifactType + targetArtifactKey` coordinate: distinct
+reactive determinations may coexist on one resource, while a duplicate target
+remains blocked for governance review.
 Definition approval is append-only, rejects self-approval and is tied to the
 exact canonical definition hash. The Config Starter rejects source, composition
 or catalog drift and never treats
