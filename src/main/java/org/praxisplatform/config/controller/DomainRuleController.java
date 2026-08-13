@@ -146,6 +146,17 @@ public class DomainRuleController {
                 principal));
     }
 
+    @GetMapping("/definitions/{definitionId}")
+    public ResponseEntity<DomainRuleDefinitionResponse> definition(
+            @PathVariable UUID definitionId,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, RULE_READER_ROLE);
+        return ResponseEntity.ok(domainRuleService.definition(definitionId, principal));
+    }
+
     @GetMapping("/definitions/{definitionId}/timeline")
     @Operation(summary = "Read a safe governed-rule timeline",
             description = "Returns persisted safe lifecycle evidence only when the definition belongs to the authenticated reader's server-resolved scope.")
@@ -169,8 +180,12 @@ public class DomainRuleController {
     public ResponseEntity<DomainRuleSimulationResponse> simulate(
             @RequestBody DomainRuleSimulationRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-Env", required = false) String environment) {
-        return ResponseEntity.ok(domainRuleService.simulate(request, tenantId, environment));
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, "RULE_DEFINITION_AUTHOR");
+        return ResponseEntity.ok(domainRuleService.simulate(
+                request, principal.tenantId(), principal.environment()));
     }
 
     @PostMapping("/publications")

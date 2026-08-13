@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.Optional;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -91,19 +92,20 @@ class DomainRuleSnapshotControllerTest {
             "tenant-server", "operator-a", "prod"));
     var activated = new DomainRuleSnapshotActivationResponse(
         null, "A".repeat(64), "head-9", 9, "ACTIVATED");
+    UUID rolloutId = UUID.randomUUID();
     when(service.activatePublished(
-        "snapshot-3", "operator-a", "tenant-server", "prod", "\"head-8\""))
+        "snapshot-3", "operator-a", "tenant-server", "prod", "\"head-8\"", rolloutId))
         .thenReturn(activated);
 
     var response = controller.activate(
-        "snapshot-3", "tenant-caller", "test", "\"head-8\"", request);
+        "snapshot-3", "tenant-caller", "test", "\"head-8\"", rolloutId, request);
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(response.getHeaders().getETag()).isEqualTo("\"head-9\"");
     assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-cache");
     assertThat(response.getBody()).isSameAs(activated);
     verify(service).activatePublished(
-        "snapshot-3", "operator-a", "tenant-server", "prod", "\"head-8\"");
+        "snapshot-3", "operator-a", "tenant-server", "prod", "\"head-8\"", rolloutId);
   }
 
   @Test

@@ -1563,6 +1563,11 @@ class DomainRuleServiceTest {
                 .build();
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
 
+        assertThatThrownBy(() -> service.validateDefinitionApprovalAuthority(
+                definitionId, principal("procurement-owner")))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("must be different from its author");
+
         assertThatThrownBy(() -> service.transitionDefinitionStatus(
                 definitionId,
                 new DomainRuleDefinitionStatusTransitionRequest(
@@ -1607,6 +1612,25 @@ class DomainRuleServiceTest {
 
         assertThat(definition.getStatus()).isEqualTo("retired");
         verify(definitionRepository, org.mockito.Mockito.never()).save(any(DomainRuleDefinition.class));
+    }
+
+    @Test
+    void readsOneDefinitionByServerOwnedScopeIncludingItsCondition() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId).tenantId("tenant-a").environment("dev").ruleKey("rule-a")
+                .version(2).ruleType("validation").status("approved").definition("{}")
+                .parameters("{}").condition("{\"==\":[1,1]}").governance("{}")
+                .createdByType("authenticated").createdBy("author-a").build();
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+
+        var response = service.definition(definitionId, principal("reader-a"));
+
+        assertThat(response.id()).isEqualTo(definitionId);
+        assertThat(response.condition()).isEqualTo(objectMapper.readTree("{\"==\":[1,1]}"));
     }
 
     @Test

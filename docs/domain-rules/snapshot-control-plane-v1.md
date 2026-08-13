@@ -1,5 +1,13 @@
 # Rule snapshot control plane v1
 
+Operational host alignment with the current active head is exposed through the aggregate contract
+in `host-status-v1.md`. Drift remains server-derived; host identities and runtime payloads are not
+exposed to browser consumers.
+
+Active-head alignment is not a pre-activation quorum. Candidate promotion requires the separate
+two-phase preload contract in `staged-activation-readiness-v1.md`; using current-head heartbeats to
+gate a newer snapshot is explicitly invalid.
+
 ## Decision
 
 `praxis-config-starter` persists immutable `PublishedRuleSnapshot` envelopes from
@@ -107,6 +115,9 @@ fail closed for an old snapshot that the current engine cannot verify.
     ETag and appends an `ACTIVATED` audit event;
   - rejects an active or older publication. Older content must use the explicit
     rollback operation.
+  - accepts optional `X-Rule-Rollout-ID`; under an active `REQUIRED` rollout policy it becomes
+    mandatory and is revalidated while both head and rollout are locked. Under `OBSERVE_ONLY`,
+    omission preserves the beta activation behavior.
 
 Read operations require explicit `X-Tenant-ID` and `X-Env`. In corporate mode,
 approval, publication, activation and rollback derive tenant, environment and actor from the
@@ -133,8 +144,10 @@ itself is never promoted, rewritten or accepted as governed content. Supersessio
 preserved envelope identity but does not require the current engine to compile an obsolete runtime
 baseline; complete compilation, composition and hash checks apply to the new candidate.
 
-This closes both maker-checker layers. Definition creation and intake require
-`RULE_DEFINITION_AUTHOR`; draft/proposed authoring transitions use the same role;
+This closes both maker-checker layers. Definition and materialization reads,
+including safe timelines, require `RULE_DEFINITION_READER` and use the
+server-resolved tenant/environment. Definition creation, intake and structural
+simulation require `RULE_DEFINITION_AUTHOR`; draft/proposed authoring transitions use the same role;
 approval, rejection, activation and retirement require
 `RULE_DEFINITION_APPROVER`, whose authenticated actor must differ from the
 persisted author. Snapshot reads require `RULE_SNAPSHOT_READER`; composition

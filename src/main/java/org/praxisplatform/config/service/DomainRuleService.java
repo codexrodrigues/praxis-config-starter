@@ -310,6 +310,21 @@ public class DomainRuleService {
                 .toList();
     }
 
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public DomainRuleDefinitionResponse definition(
+            UUID definitionId, DomainRuleGovernancePrincipal principal) {
+        if (definitionId == null) {
+            throw new ConfigurationIngestionException("definitionId is required");
+        }
+        requirePrincipal(principal);
+        DomainRuleDefinition definition = definitionRepository.findById(definitionId)
+                .orElseThrow(() -> new ConfigurationIngestionException(
+                        "Rule definition not found: " + definitionId));
+        requireScope(definition.getTenantId(), principal.tenantId(), "tenantId");
+        requireScope(definition.getEnvironment(), principal.environment(), "environment");
+        return toResponse(definition);
+    }
+
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleDefinitionResponse transitionDefinitionStatus(
             UUID definitionId,
@@ -385,6 +400,22 @@ public class DomainRuleService {
                     saved.getStatus());
         }
         return toResponse(saved);
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public void validateDefinitionApprovalAuthority(
+            UUID definitionId, DomainRuleGovernancePrincipal principal) {
+        if (definitionId == null) {
+            throw new ConfigurationIngestionException("definitionId is required");
+        }
+        requirePrincipal(principal);
+        DomainRuleDefinition definition = definitionRepository.findById(definitionId)
+                .orElseThrow(() -> new ConfigurationIngestionException(
+                        "Rule definition not found: " + definitionId));
+        requireScope(definition.getTenantId(), principal.tenantId(), "tenantId");
+        requireScope(definition.getEnvironment(), principal.environment(), "environment");
+        requireAuthenticatedAuthorEvidence(definition);
+        requireDefinitionApproverAuthorization(definition, principal.actorRef(), "approval");
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)

@@ -458,7 +458,7 @@ class DomainRuleControllerTest {
                 java.time.Instant.now());
         when(service.simulate(request, "tenant-a", "dev")).thenReturn(response);
 
-        var entity = controller.simulate(request, "tenant-a", "dev");
+        var entity = controller.simulate(request, "tenant-a", "dev", servletRequest());
 
         assertThat(entity.getBody()).isSameAs(response);
         verify(service).simulate(request, "tenant-a", "dev");
@@ -591,6 +591,32 @@ class DomainRuleControllerTest {
         verify(service).publish(publication, PRINCIPAL);
         verify(service).transitionMaterializationStatus(materializationId, applied, PRINCIPAL);
         verify(service).transitionMaterializationStatus(materializationId, failed, PRINCIPAL);
+    }
+
+    @Test
+    void readBoundariesUseServerResolvedScopeInsteadOfCallerHints() {
+        DomainRuleService service = mock(DomainRuleService.class);
+        DomainRuleGovernancePrincipalResolver resolver = mock(DomainRuleGovernancePrincipalResolver.class);
+        DomainRuleController controller = new DomainRuleController(service, resolver);
+        HttpServletRequest servletRequest = servletRequest();
+        UUID definitionId = UUID.randomUUID();
+        when(resolver.resolve(servletRequest, "caller-tenant", "caller-env", "RULE_SNAPSHOT_READER"))
+                .thenReturn(PRINCIPAL);
+
+        controller.definitions(
+                "caller-tenant", "caller-env", null, null, null, null, servletRequest);
+        controller.definition(definitionId, "caller-tenant", "caller-env", servletRequest);
+        controller.definitionTimeline(
+                definitionId, "caller-tenant", "caller-env", servletRequest);
+        controller.materializations(
+                "caller-tenant", "caller-env", null, null, null, null, null, servletRequest);
+
+        verify(resolver, org.mockito.Mockito.times(4)).resolve(
+                servletRequest, "caller-tenant", "caller-env", "RULE_SNAPSHOT_READER");
+        verify(service).definitions("tenant-a", "dev", null, null, null, null);
+        verify(service).definition(definitionId, PRINCIPAL);
+        verify(service).definitionTimeline(definitionId, "tenant-a", "dev");
+        verify(service).materializations("tenant-a", "dev", null, null, null, null, null);
     }
 
     private DomainRuleController controller(DomainRuleService service) {

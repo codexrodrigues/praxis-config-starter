@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainRuleCompositionApprovalResponse;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestRequest;
@@ -295,6 +296,7 @@ public class DomainRuleSnapshotController {
       @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
       @RequestHeader(value = "X-Env", required = false) String environment,
       @RequestHeader(value = "If-Match", required = false) String ifMatch,
+      @RequestHeader(value = "X-Rule-Rollout-ID", required = false) UUID rolloutId,
       HttpServletRequest servletRequest) {
     DomainRuleGovernancePrincipal principal = principalResolver.resolve(
         servletRequest, tenantId, environment, SNAPSHOT_OPERATOR_ROLE);
@@ -303,7 +305,8 @@ public class DomainRuleSnapshotController {
         principal.actorRef(),
         principal.tenantId(),
         principal.environment(),
-        ifMatch);
+        ifMatch,
+        rolloutId);
     return ResponseEntity.ok()
         .eTag(quoted(response.headEtag()))
         .cacheControl(CacheControl.noCache())
