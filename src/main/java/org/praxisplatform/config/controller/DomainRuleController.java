@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
+import org.praxisplatform.config.dto.DomainRuleDefinitionCapability;
+import org.praxisplatform.config.dto.DomainRuleDefinitionCapabilitiesResponse;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
 import org.praxisplatform.config.dto.DomainRuleDefinitionStatusTransitionRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
@@ -97,6 +99,33 @@ public class DomainRuleController {
                 status,
                 ruleType,
                 ruleKey));
+    }
+
+    @GetMapping("/definitions/capabilities")
+    @Operation(summary = "Read server-owned definition capabilities",
+            description = "Returns actions authorized by the server for each governed definition in the authenticated reader's tenant and environment.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Capabilities in the server-resolved scope"),
+            @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_SNAPSHOT_READER")
+    })
+    public ResponseEntity<DomainRuleDefinitionCapabilitiesResponse> definitionCapabilities(
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, RULE_READER_ROLE);
+        boolean canCreateVersion = principalResolver.hasRole(servletRequest, "RULE_DEFINITION_AUTHOR");
+        List<DomainRuleDefinitionCapability> capabilities = domainRuleService.definitions(
+                        principal.tenantId(), principal.environment(), null, null, null, null)
+                .stream()
+                .map(definition -> new DomainRuleDefinitionCapability(
+                        definition.id(),
+                        definition.ruleKey(),
+                        definition.version(),
+                        canCreateVersion ? List.of("CREATE_NEW_VERSION") : List.of()))
+                .toList();
+        return ResponseEntity.ok(new DomainRuleDefinitionCapabilitiesResponse(
+                principal.tenantId(), principal.environment(), capabilities));
     }
 
     @PatchMapping("/definitions/{definitionId}/status")

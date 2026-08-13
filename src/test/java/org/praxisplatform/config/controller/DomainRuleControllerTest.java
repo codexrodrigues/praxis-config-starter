@@ -11,6 +11,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
+import org.praxisplatform.config.dto.DomainRuleDefinitionCapabilitiesResponse;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
 import org.praxisplatform.config.dto.DomainRuleDefinitionStatusTransitionRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
@@ -276,6 +277,55 @@ class DomainRuleControllerTest {
         verify(service).definitions("tenant-a", "dev", null, null, null, null);
         verify(service).definitionTimeline(definitionId, "tenant-a", "dev");
         verify(service).materializations("tenant-a", "dev", null, null, null, null, null);
+    }
+
+    @Test
+    void definitionCapabilitiesAreScopedAndAuthorizedByTheServer() {
+        DomainRuleService service = mock(DomainRuleService.class);
+        DomainRuleGovernancePrincipalResolver resolver = mock(DomainRuleGovernancePrincipalResolver.class);
+        DomainRuleController controller = new DomainRuleController(service, resolver);
+        HttpServletRequest servletRequest = servletRequest();
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinitionResponse definition = definitionResponse(definitionId, "rule-a", 3);
+
+        when(resolver.resolve(
+                servletRequest, "spoofed-tenant", "spoofed-env", "RULE_SNAPSHOT_READER"))
+                .thenReturn(PRINCIPAL);
+        when(resolver.hasRole(servletRequest, "RULE_DEFINITION_AUTHOR")).thenReturn(true);
+        when(service.definitions("tenant-a", "dev", null, null, null, null))
+                .thenReturn(List.of(definition));
+
+        DomainRuleDefinitionCapabilitiesResponse response = controller.definitionCapabilities(
+                "spoofed-tenant", "spoofed-env", servletRequest).getBody();
+
+        assertThat(response).isNotNull();
+        assertThat(response.tenantId()).isEqualTo("tenant-a");
+        assertThat(response.environment()).isEqualTo("dev");
+        assertThat(response.definitions()).singleElement().satisfies(capability -> {
+            assertThat(capability.definitionId()).isEqualTo(definitionId);
+            assertThat(capability.ruleKey()).isEqualTo("rule-a");
+            assertThat(capability.version()).isEqualTo(3);
+            assertThat(capability.availableActions()).containsExactly("CREATE_NEW_VERSION");
+        });
+        verify(service).definitions("tenant-a", "dev", null, null, null, null);
+    }
+
+    @Test
+    void readerWithoutAuthorRoleReceivesNoCreateVersionAction() {
+        DomainRuleService service = mock(DomainRuleService.class);
+        DomainRuleGovernancePrincipalResolver resolver = mock(DomainRuleGovernancePrincipalResolver.class);
+        DomainRuleController controller = new DomainRuleController(service, resolver);
+        HttpServletRequest servletRequest = servletRequest();
+        DomainRuleDefinitionResponse definition = definitionResponse(UUID.randomUUID(), "rule-a", 3);
+        when(resolver.resolve(servletRequest, null, null, "RULE_SNAPSHOT_READER")).thenReturn(PRINCIPAL);
+        when(resolver.hasRole(servletRequest, "RULE_DEFINITION_AUTHOR")).thenReturn(false);
+        when(service.definitions("tenant-a", "dev", null, null, null, null)).thenReturn(List.of(definition));
+
+        var response = controller.definitionCapabilities(null, null, servletRequest).getBody();
+
+        assertThat(response).isNotNull();
+        assertThat(response.definitions()).singleElement()
+                .satisfies(capability -> assertThat(capability.availableActions()).isEmpty());
     }
 
     @Test
@@ -555,5 +605,12 @@ class DomainRuleControllerTest {
 
     private HttpServletRequest servletRequest() {
         return mock(HttpServletRequest.class);
+    }
+
+    private DomainRuleDefinitionResponse definitionResponse(UUID id, String ruleKey, int version) {
+        return new DomainRuleDefinitionResponse(
+                id, "tenant-a", "dev", ruleKey, version, "validation", "draft",
+                null, null, null, null, null, null, null, null, null, null, null, null,
+                "authenticated", "agent", null, null, null, null, null);
     }
 }

@@ -40,4 +40,22 @@ class DomainRuleGovernancePrincipalResolverTest {
         .isInstanceOf(ResponseStatusException.class)
         .hasMessageContaining("RULE_SNAPSHOT_PUBLISHER");
   }
+
+  @Test
+  void capabilitiesReflectOnlyServerAuthenticatedRolesInCorporateMode() {
+    when(request.isUserInRole("RULE_DEFINITION_AUTHOR")).thenReturn(true);
+    DomainRuleGovernancePrincipalResolver resolver =
+        new DomainRuleGovernancePrincipalResolver(contextResolver, true);
+
+    assertThat(resolver.hasRole(request, "RULE_DEFINITION_AUTHOR")).isTrue();
+    assertThat(resolver.hasRole(request, "RULE_DEFINITION_APPROVER")).isFalse();
+    assertThat(resolver.hasRole(null, "RULE_DEFINITION_AUTHOR")).isFalse();
+  }
+
+  @Test
+  void developmentModeExposesTheSameActionsThatItsMutationEndpointsAllow() {
+    DomainRuleGovernancePrincipalResolver resolver =
+        new DomainRuleGovernancePrincipalResolver(contextResolver, false);
+    assertThat(resolver.hasRole(request, "RULE_DEFINITION_AUTHOR")).isTrue();
+  }
 }

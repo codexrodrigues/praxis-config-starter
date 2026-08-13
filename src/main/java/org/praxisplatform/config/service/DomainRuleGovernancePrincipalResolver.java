@@ -30,4 +30,9 @@ public class DomainRuleGovernancePrincipalResolver {
     return new DomainRuleGovernancePrincipal(
         context.tenantId(), context.userId(), context.environment());
   }
+
+  /** Returns whether the server-authenticated principal owns the requested IAM role. */
+  public boolean hasRole(HttpServletRequest request, String role) {
+    return !corporateMode || (request != null && request.isUserInRole(role));
+  }
 }

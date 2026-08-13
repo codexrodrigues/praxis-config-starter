@@ -499,6 +499,11 @@ For changes that affect AI authoring, streaming, release gates, or quickstart in
 
 Local AI credential files such as `.env.openai.local.ps1` are intentionally ignored by Git. Keep real provider keys out of commits and rotate any key that was copied outside the local development environment.
 
+`GET /api/praxis/config/domain-rules/definitions/capabilities` projeta, por definição,
+somente as ações autorizadas pelo principal e pelo escopo resolvidos no servidor. O primeiro
+contrato aditivo é `CREATE_NEW_VERSION`; consumidores não devem inferir essa autorização a
+partir do status, de headers do browser ou de configuração local.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
