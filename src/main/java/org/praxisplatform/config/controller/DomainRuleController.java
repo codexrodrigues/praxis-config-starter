@@ -153,7 +153,7 @@ public class DomainRuleController {
             @RequestHeader(value = "X-Env", required = false) String environment,
             HttpServletRequest servletRequest) {
         DomainRuleGovernancePrincipal principal = principalResolver.resolve(
-                servletRequest, tenantId, environment, "RULE_DEFINITION_READER");
+                servletRequest, tenantId, environment, RULE_READER_ROLE);
         return ResponseEntity.ok(domainRuleService.definition(definitionId, principal));
     }
 
