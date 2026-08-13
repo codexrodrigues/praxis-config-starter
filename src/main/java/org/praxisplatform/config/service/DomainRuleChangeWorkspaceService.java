@@ -15,6 +15,8 @@ import org.praxisplatform.config.domain.DomainRuleTestScenario;
 import org.praxisplatform.config.domain.DomainRuleWorkspaceReview;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceCreateRequest;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceResponse;
+import org.praxisplatform.config.dto.DomainRuleWorkspaceBlocker;
+import org.praxisplatform.config.dto.DomainRuleWorkspaceCapabilityResponse;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceUpdateRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionStatusTransitionRequest;
@@ -92,6 +94,45 @@ public class DomainRuleChangeWorkspaceService {
             principal.tenantId(), principal.environment()).stream()
         .map(this::response)
         .toList();
+  }
+
+  @Transactional(readOnly = true)
+  public DomainRuleWorkspaceCapabilityResponse capabilities(
+      UUID id,
+      DomainRuleGovernancePrincipal principal,
+      boolean canAuthor,
+      boolean canApprove) {
+    DomainRuleChangeWorkspace workspace = scopedWorkspace(id, principal);
+    List<String> actions = new java.util.ArrayList<>();
+    List<DomainRuleWorkspaceBlocker> blockers = new java.util.ArrayList<>();
+    actions.add("VIEW");
+    switch (workspace.getStatus()) {
+      case "OPEN" -> {
+        if (canAuthor) {
+          actions.add("UPDATE_DRAFT");
+          actions.add("MANAGE_SCENARIOS");
+          actions.add("RECORD_TEST_RUN");
+          blockers.addAll(submissionBlockers(workspace, principal));
+          if (blockers.isEmpty()) actions.add("SUBMIT");
+        }
+      }
+      case "SUBMITTED" -> {
+        if (canApprove && !requireActor(principal).equals(workspace.getCreatedBy())) {
+          actions.add("REVIEW");
+        } else if (canApprove) {
+          blockers.add(new DomainRuleWorkspaceBlocker(
+              "REVIEWER_MUST_DIFFER_FROM_AUTHOR", "REVIEW",
+              "Workspace reviewer must be different from its author"));
+        }
+      }
+      case "APPROVED" -> {
+        if (canAuthor) actions.add("PROMOTE");
+      }
+      default -> { }
+    }
+    return new DomainRuleWorkspaceCapabilityResponse(
+        workspace.getId(), workspace.getRuleKey(), workspace.getStatus(), workspace.getRevision(),
+        workspace.getEtag().toString(), actions, blockers);
   }
 
   @Transactional
@@ -197,15 +238,30 @@ public class DomainRuleChangeWorkspaceService {
     DomainRuleChangeWorkspace workspace = scopedWorkspace(id, principal);
     requireOpen(workspace);
     requireStrongMatch(ifMatch, workspace.getEtag().toString());
+    List<DomainRuleWorkspaceBlocker> blockers = submissionBlockers(workspace, principal);
+    if (!blockers.isEmpty()) throw conflict(blockers.getFirst().message());
+    workspace.setStatus("SUBMITTED");
+    rotate(workspace, principal);
+    return response(workspaceRepository.save(workspace));
+  }
+
+  private List<DomainRuleWorkspaceBlocker> submissionBlockers(
+      DomainRuleChangeWorkspace workspace, DomainRuleGovernancePrincipal principal) {
     var run = runRepository.findFirstByTenantIdAndEnvironmentAndWorkspaceIdOrderByRecordedAtDesc(
-            principal.tenantId(), principal.environment(), id)
-        .orElseThrow(() -> conflict("A current passing Test Run is required before submission"));
-    if (!workspace.getRevision().equals(run.getWorkspaceRevision())
-        || !workspace.getBaseDefinitionHash().equals(run.getBaseDefinitionHash())) {
-      throw conflict("The latest Test Run does not prove the current workspace revision");
+        principal.tenantId(), principal.environment(), workspace.getId());
+    if (run.isEmpty()) {
+      return List.of(new DomainRuleWorkspaceBlocker(
+          "CURRENT_PASSING_TEST_RUN_REQUIRED", "SUBMIT",
+          "A current passing Test Run is required before submission"));
     }
-    var evidence = runResultRepository.findByTestRunIdOrderByScenarioKey(run.getId());
-    Set<UUID> activeScenarioIds = scenarioRepository.findByWorkspaceIdOrderByScenarioKey(id).stream()
+    if (!workspace.getRevision().equals(run.get().getWorkspaceRevision())
+        || !workspace.getBaseDefinitionHash().equals(run.get().getBaseDefinitionHash())) {
+      return List.of(new DomainRuleWorkspaceBlocker(
+          "TEST_RUN_DOES_NOT_PROVE_CURRENT_REVISION", "SUBMIT",
+          "The latest Test Run does not prove the current workspace revision"));
+    }
+    var evidence = runResultRepository.findByTestRunIdOrderByScenarioKey(run.get().getId());
+    Set<UUID> activeScenarioIds = scenarioRepository.findByWorkspaceIdOrderByScenarioKey(workspace.getId()).stream()
         .filter(item -> sameScope(item.getTenantId(), item.getEnvironment(), principal))
         .filter(item -> "ACTIVE".equals(item.getStatus()))
         .map(DomainRuleTestScenario::getId)
@@ -213,16 +269,24 @@ public class DomainRuleChangeWorkspaceService {
     Set<UUID> evidencedScenarioIds = evidence.stream()
         .map(item -> item.getScenarioId())
         .collect(java.util.stream.Collectors.toSet());
-    if (activeScenarioIds.isEmpty()
-        || !activeScenarioIds.equals(evidencedScenarioIds)
-        || evidence.stream().anyMatch(item -> !Boolean.TRUE.equals(item.getCandidateMatchesExpected())
-            || "INCONCLUSIVE".equals(item.getComparison())
-            || "TECHNICAL_ERROR".equals(item.getComparison()))) {
-      throw conflict("The latest Test Run must cover and pass every active scenario without inconclusive or technical results");
+    if (activeScenarioIds.isEmpty()) {
+      return List.of(new DomainRuleWorkspaceBlocker(
+          "ACTIVE_SCENARIO_REQUIRED", "SUBMIT",
+          "At least one active scenario is required before submission"));
     }
-    workspace.setStatus("SUBMITTED");
-    rotate(workspace, principal);
-    return response(workspaceRepository.save(workspace));
+    if (!activeScenarioIds.equals(evidencedScenarioIds)) {
+      return List.of(new DomainRuleWorkspaceBlocker(
+          "ACTIVE_SCENARIO_COVERAGE_INCOMPLETE", "SUBMIT",
+          "The latest Test Run must cover every active scenario"));
+    }
+    if (evidence.stream().anyMatch(item -> !Boolean.TRUE.equals(item.getCandidateMatchesExpected())
+        || "INCONCLUSIVE".equals(item.getComparison())
+        || "TECHNICAL_ERROR".equals(item.getComparison()))) {
+      return List.of(new DomainRuleWorkspaceBlocker(
+          "TEST_RUN_NOT_PASSING", "SUBMIT",
+          "The latest Test Run must pass every active scenario without inconclusive or technical results"));
+    }
+    return List.of();
   }
 
   @Transactional

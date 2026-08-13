@@ -9,8 +9,9 @@ canonical fingerprint of one persisted `domain_rule_definition`.
 - Definition lifecycle, approvals, publication and immutable snapshots: `ja-suportado-so-ux`.
 - Structural readiness currently named simulation: `ja-suportado-mal-nomeado-ou-mal-materializado`.
 - Collaborative draft with base fingerprint and optimistic concurrency:
-  `ja-suportado-mal-nomeado-ou-mal-materializado`; o contrato está implementado,
-  mas discovery/actions/blockers do workspace ainda não são server-owned.
+  `ja-suportado-mal-nomeado-ou-mal-materializado`; o contrato, suas ações e
+  blockers por principal estão implementados, mas a seleção canônica entre
+  workspaces concorrentes ainda não é publicada.
 - Reusable facts, expected five-state outcome and immutable Test Run:
   `suportado-parcialmente`; `expectedOutput` é persistido, mas ainda não participa
   do resultado/gate do host de referência.
@@ -38,6 +39,10 @@ hints only in explicitly configured local mode.
   definition SHA-256.
 - `GET /api/praxis/config/domain-rules/workspaces` lists only the effective tenant/environment.
 - `GET /api/praxis/config/domain-rules/workspaces/{id}` supports private revalidation with ETag.
+- `GET /api/praxis/config/domain-rules/workspaces/{id}/capabilities` publishes the authenticated
+  principal's `availableActions` plus stable, action-scoped business blockers. `SUBMIT` reuses the
+  same current-revision, active-scenario coverage and passing Test Run invariants as the command;
+  `REVIEW` also enforces maker-checker identity, and `PROMOTE` is role- and lifecycle-owned.
 - `PUT /api/praxis/config/domain-rules/workspaces/{id}/draft` requires a strong `If-Match`, verifies
   that the base fingerprint has not changed, increments `revision` and rotates the ETag.
 - `POST /api/praxis/config/domain-rules/workspaces/{id}/scenarios` persists reusable typed facts and
@@ -92,7 +97,8 @@ or expected planned effects. A corporate submission gate must add those fields a
 the canonical Config contract and require the host to derive them from the same
 frozen evaluation. A browser-only comparison is not acceptable.
 
-Workspace responses also do not yet expose `availableActions` and `blockers` for
-the authenticated principal. Clients must not infer review, promotion, submission
-or publication authority from `status`; this remains a pre-production contract
-gap shared with the public `@praxisui/core` client.
+Workspace actions and blockers are exposed through the dedicated capabilities
+read and the public `@praxisui/core` client. Clients must not infer review,
+promotion or submission authority from `status`. Publication, rollout creation
+and rollout-policy commands still require their own server-owned action catalogs;
+one capability must never be reused to authorize a different operation.
