@@ -465,8 +465,11 @@ digest. In corporate mode the host must map the IAM roles
 `RULE_DEFINITION_AUTHOR`, `RULE_DEFINITION_APPROVER`,
 `RULE_COMPOSITION_APPROVER`, `RULE_SNAPSHOT_PUBLISHER`,
 `RULE_SNAPSHOT_OPERATOR` and `RULE_SNAPSHOT_READER`; actor names sent in request
-bodies are not accepted. Snapshot GETs resolve tenant/environment from that
-authenticated principal before querying the store.
+bodies are not accepted. All domain-rule catalog GETs (definitions, safe
+timeline, materializations and snapshots) require `RULE_SNAPSHOT_READER` and
+resolve tenant/environment from that authenticated principal before querying
+the store. `X-Tenant-ID` and `X-Env` remain optional routing hints; in corporate
+mode they never replace or expand the server-resolved scope.
 The same server-side identity boundary applies to legacy publication and
 materialization endpoints: draft creation uses `RULE_DEFINITION_AUTHOR`,
 application/publication uses `RULE_SNAPSHOT_PUBLISHER`, and failure,
