@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.domain.DomainRuleCompositionApproval;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
 import org.praxisplatform.config.domain.DomainRuleDefinitionApproval;
@@ -52,7 +51,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Governed publication, activation and rollback of immutable RuleSet snapshots. */
-@RequiredArgsConstructor
 public class DomainRuleSnapshotService {
   private static final Set<String> PUBLISHABLE_STATUSES = Set.of("approved", "active");
   private static final int MINIMUM_DISTINCT_APPROVERS = 2;
@@ -67,6 +65,45 @@ public class DomainRuleSnapshotService {
   private final DomainRuleDefinitionFingerprint definitionFingerprint;
   private final ObjectMapper objectMapper;
   private final DomainRuleImplementationCatalog implementationCatalog;
+  private final DomainRuleSnapshotActivationGate activationGate;
+
+  public DomainRuleSnapshotService(
+      DomainRuleDefinitionRepository definitionRepository,
+      DomainRuleSnapshotRepository snapshotRepository,
+      DomainRuleSnapshotHeadRepository headRepository,
+      DomainRuleSnapshotEventRepository eventRepository,
+      DomainRuleCompositionApprovalRepository compositionApprovalRepository,
+      DomainRuleDefinitionApprovalRepository definitionApprovalRepository,
+      DomainRuleDefinitionFingerprint definitionFingerprint,
+      ObjectMapper objectMapper,
+      DomainRuleImplementationCatalog implementationCatalog) {
+    this(definitionRepository, snapshotRepository, headRepository, eventRepository,
+        compositionApprovalRepository, definitionApprovalRepository, definitionFingerprint,
+        objectMapper, implementationCatalog, DomainRuleSnapshotActivationGate.allowAll());
+  }
+
+  public DomainRuleSnapshotService(
+      DomainRuleDefinitionRepository definitionRepository,
+      DomainRuleSnapshotRepository snapshotRepository,
+      DomainRuleSnapshotHeadRepository headRepository,
+      DomainRuleSnapshotEventRepository eventRepository,
+      DomainRuleCompositionApprovalRepository compositionApprovalRepository,
+      DomainRuleDefinitionApprovalRepository definitionApprovalRepository,
+      DomainRuleDefinitionFingerprint definitionFingerprint,
+      ObjectMapper objectMapper,
+      DomainRuleImplementationCatalog implementationCatalog,
+      DomainRuleSnapshotActivationGate activationGate) {
+    this.definitionRepository = definitionRepository;
+    this.snapshotRepository = snapshotRepository;
+    this.headRepository = headRepository;
+    this.eventRepository = eventRepository;
+    this.compositionApprovalRepository = compositionApprovalRepository;
+    this.definitionApprovalRepository = definitionApprovalRepository;
+    this.definitionFingerprint = definitionFingerprint;
+    this.objectMapper = objectMapper;
+    this.implementationCatalog = implementationCatalog;
+    this.activationGate = activationGate;
+  }
 
   /**
    * Source-compatible constructor with a fail-closed Java implementation catalog.
@@ -92,7 +129,8 @@ public class DomainRuleSnapshotService {
         definitionApprovalRepository,
         definitionFingerprint,
         objectMapper,
-        DomainRuleImplementationCatalog.denyAll());
+        DomainRuleImplementationCatalog.denyAll(),
+        DomainRuleSnapshotActivationGate.allowAll());
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -293,6 +331,17 @@ public class DomainRuleSnapshotService {
       String tenantId,
       String environment,
       String ifMatch) {
+    return activatePublished(snapshotKey, activatedBy, tenantId, environment, ifMatch, null);
+  }
+
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+  public DomainRuleSnapshotActivationResponse activatePublished(
+      String snapshotKey,
+      String activatedBy,
+      String tenantId,
+      String environment,
+      String ifMatch,
+      UUID rolloutId) {
     String tenant = requireText(tenantId, "X-Tenant-ID");
     String env = requireText(environment, "X-Env");
     DomainRuleSnapshot target = snapshotRepository
@@ -311,7 +360,11 @@ public class DomainRuleSnapshotService {
     if (target.getPublicationRevision() <= active.getPublicationRevision()) {
       throw conflict("Activation requires a snapshot newer than the current active publication; use rollback for an older version");
     }
-    return selectExistingSnapshot(target, head, activatedBy, "ACTIVATED");
+    activationGate.requireAllowed(rolloutId, target, head, activatedBy);
+    DomainRuleSnapshotActivationResponse response =
+        selectExistingSnapshot(target, head, activatedBy, "ACTIVATED");
+    activationGate.activationCompleted(rolloutId, target, activatedBy);
+    return response;
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -524,7 +577,8 @@ public class DomainRuleSnapshotService {
     catalog.put("environment", environment);
     catalog.put("ownerServiceKey", ownerServiceKey);
     catalog.set("implementations", objectMapper.valueToTree(implementations));
-    String catalogDigest = PraxisCanonicalJson.sha256(catalog);
+    String catalogDigest = DomainRuleImplementationCatalogFingerprint.sha256(
+        objectMapper, new DomainRuleImplementationScope(tenant, environment, ownerServiceKey), implementations);
     ObjectNode manifest = objectMapper.createObjectNode();
     manifest.put("compositionContractVersion", COMPOSITION_CONTRACT_VERSION);
     manifest.put("snapshotContractVersion", PublishedRuleSnapshot.SNAPSHOT_CONTRACT_VERSION);
