@@ -1,5 +1,6 @@
 package org.praxisplatform.config.service;
 
+import com.fasterxml.jackson.core.JsonPointer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -10,9 +11,12 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
 import org.praxisplatform.config.domain.DomainKnowledgeChangeSet;
@@ -28,6 +32,7 @@ import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
 import org.praxisplatform.config.dto.DomainRulePublicationRequest;
 import org.praxisplatform.config.dto.DomainRulePublicationResponse;
+import org.praxisplatform.config.dto.DomainRuleReactiveDeterminationSpec;
 import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
@@ -58,6 +63,17 @@ public class DomainRuleService {
             "draft", "pending_review", "applied", "failed", "superseded", "reverted");
     private static final List<String> INITIAL_MATERIALIZATION_STATUSES = List.of("draft", "pending_review");
     private static final List<String> COVERAGE_STATUSES = List.of("approved", "active");
+    private static final String BACKEND_DETERMINATION_TARGET_LAYER = "backend_determination";
+    private static final String REACTIVE_DETERMINATION_ARTIFACT_TYPE = "resource-reactive-determination";
+    private static final String REACTIVE_DETERMINATION_TARGET_POINTER = "/determination";
+    private static final String REACTIVE_DETERMINATION_RULE_ID = "backend-reactive-determination";
+    private static final String REACTIVE_DETERMINATION_SCHEMA_VERSION =
+            "praxis.backend-reactive-determination.v1";
+    private static final int MAX_REACTIVE_DETERMINATION_BINDINGS = 64;
+    private static final Pattern STABLE_OPERATION_ID =
+            Pattern.compile("^[A-Za-z][A-Za-z0-9._:-]{0,254}$");
+    private static final Pattern STABLE_DETERMINATION_KEY =
+            Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$");
 
     private final DomainRuleDefinitionRepository definitionRepository;
     private final DomainRuleMaterializationRepository materializationRepository;
@@ -125,18 +141,19 @@ public class DomainRuleService {
         if (StringUtils.hasText(persisted.serviceKey())) {
             grounding.put("serviceKey", persisted.serviceKey());
         }
+        ArrayNode predictedMaterializations = buildPredictedMaterializations(
+                persisted.resourceKey(),
+                persisted.ruleType(),
+                persisted.definition(),
+                persisted.parameters());
         ArrayNode existingCoverage = buildExistingCoverage(
                 persisted.tenantId(),
                 persisted.environment(),
                 persisted.resourceKey(),
                 persisted.ruleType(),
                 persisted.id(),
-                persisted.ruleKey());
-        ArrayNode predictedMaterializations = buildPredictedMaterializations(
-                persisted.resourceKey(),
-                persisted.ruleType(),
-                persisted.definition(),
-                persisted.parameters());
+                persisted.ruleKey(),
+                predictedMaterializations);
         ArrayNode requiredApprovals = buildRequiredApprovals(persisted.governance());
         ArrayNode warnings = buildWarnings(
                 persisted.ruleType(),
@@ -293,6 +310,21 @@ public class DomainRuleService {
                 .toList();
     }
 
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public DomainRuleDefinitionResponse definition(
+            UUID definitionId, DomainRuleGovernancePrincipal principal) {
+        if (definitionId == null) {
+            throw new ConfigurationIngestionException("definitionId is required");
+        }
+        requirePrincipal(principal);
+        DomainRuleDefinition definition = definitionRepository.findById(definitionId)
+                .orElseThrow(() -> new ConfigurationIngestionException(
+                        "Rule definition not found: " + definitionId));
+        requireScope(definition.getTenantId(), principal.tenantId(), "tenantId");
+        requireScope(definition.getEnvironment(), principal.environment(), "environment");
+        return toResponse(definition);
+    }
+
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleDefinitionResponse transitionDefinitionStatus(
             UUID definitionId,
@@ -370,6 +402,22 @@ public class DomainRuleService {
         return toResponse(saved);
     }
 
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public void validateDefinitionApprovalAuthority(
+            UUID definitionId, DomainRuleGovernancePrincipal principal) {
+        if (definitionId == null) {
+            throw new ConfigurationIngestionException("definitionId is required");
+        }
+        requirePrincipal(principal);
+        DomainRuleDefinition definition = definitionRepository.findById(definitionId)
+                .orElseThrow(() -> new ConfigurationIngestionException(
+                        "Rule definition not found: " + definitionId));
+        requireScope(definition.getTenantId(), principal.tenantId(), "tenantId");
+        requireScope(definition.getEnvironment(), principal.environment(), "environment");
+        requireAuthenticatedAuthorEvidence(definition);
+        requireDefinitionApproverAuthorization(definition, principal.actorRef(), "approval");
+    }
+
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleSimulationResponse simulate(
             DomainRuleSimulationRequest request,
@@ -406,18 +454,19 @@ public class DomainRuleService {
             recordSimulationRequestedEvent(persistedDefinition, simulationRequestedAt);
         }
 
+        ArrayNode predictedMaterializations = buildPredictedMaterializations(
+                resourceKey,
+                ruleType,
+                definition,
+                parameters);
         ArrayNode existingCoverage = buildExistingCoverage(
                 resolvedTenant,
                 resolvedEnvironment,
                 resourceKey,
                 ruleType,
                 ruleDefinitionId,
-                ruleKey);
-        ArrayNode predictedMaterializations = buildPredictedMaterializations(
-                resourceKey,
-                ruleType,
-                definition,
-                parameters);
+                ruleKey,
+                predictedMaterializations);
         ArrayNode requiredApprovals = buildRequiredApprovals(governance);
         if (persistedDefinition != null && isApprovalSatisfiedDefinitionStatus(persistedDefinition.getStatus())) {
             requiredApprovals = objectMapper.createArrayNode();
@@ -630,11 +679,58 @@ public class DomainRuleService {
                 .orElseThrow(() -> new ConfigurationIngestionException("Rule definition not found: " + request.ruleDefinitionId()));
         requireScope(definition.getTenantId(), tenantId, "tenantId");
         requireScope(definition.getEnvironment(), environment, "environment");
+        requireReactiveDeterminationTargetContract(
+                definition,
+                request.targetLayer(),
+                request.targetArtifactType(),
+                request.targetArtifactKey());
         String status = requireAllowedStatus(
                 normalizeOrDefault(request.status(), "draft"),
                 "status",
                 INITIAL_MATERIALIZATION_STATUSES);
         String materializationKey = request.materializationKey().trim();
+        JsonNode materializedPayload = deriveMaterializedPayload(definition, request);
+        boolean reactiveDetermination = isReactiveDeterminationTarget(
+                request.targetLayer(),
+                request.targetArtifactType());
+        if (reactiveDetermination) {
+            String canonicalMaterializationKey = derivedMaterializationKey(
+                    definition,
+                    request.targetLayer().trim(),
+                    request.targetArtifactKey().trim());
+            if (!canonicalMaterializationKey.equals(materializationKey)) {
+                throw new ConfigurationIngestionException(
+                        "Reactive determination materializationKey must be " + canonicalMaterializationKey);
+            }
+        }
+        String targetPointer = reactiveDetermination
+                ? requireCanonicalProjectionCoordinate(
+                        request.targetPointer(),
+                        REACTIVE_DETERMINATION_TARGET_POINTER,
+                        "targetPointer")
+                : normalize(request.targetPointer());
+        String materializedRuleId = reactiveDetermination
+                ? requireCanonicalProjectionCoordinate(
+                        request.materializedRuleId(),
+                        REACTIVE_DETERMINATION_RULE_ID,
+                        "materializedRuleId")
+                : normalize(request.materializedRuleId());
+        String sourceHash = normalize(request.sourceHash());
+        if (reactiveDetermination) {
+            String derivedSourceHash = derivedSourceHash(
+                    definition,
+                    request.targetLayer().trim(),
+                    request.targetArtifactType().trim(),
+                    request.targetArtifactKey().trim(),
+                    targetPointer,
+                    materializedRuleId,
+                    materializedPayload);
+            if (StringUtils.hasText(sourceHash) && !derivedSourceHash.equals(sourceHash)) {
+                throw new ConfigurationIngestionException(
+                        "Reactive determination sourceHash must match the canonical derived projection");
+            }
+            sourceHash = derivedSourceHash;
+        }
         DomainRuleMaterialization existing = materializationRepository
                 .findByTenantIdAndEnvironmentAndMaterializationKey(
                         normalize(tenantId),
@@ -642,7 +738,13 @@ public class DomainRuleService {
                         materializationKey)
                 .orElse(null);
         if (existing != null) {
-            requireReusableMaterialization(existing, definition, request);
+            requireReusableMaterialization(
+                    existing,
+                    definition,
+                    request.targetLayer(),
+                    request.targetArtifactType(),
+                    request.targetArtifactKey(),
+                    sourceHash);
             return toResponse(existing);
         }
         DomainRuleMaterialization materialization = new DomainRuleMaterialization();
@@ -653,12 +755,12 @@ public class DomainRuleService {
         materialization.setTargetLayer(request.targetLayer().trim());
         materialization.setTargetArtifactType(request.targetArtifactType().trim());
         materialization.setTargetArtifactKey(request.targetArtifactKey().trim());
-        materialization.setTargetPointer(normalize(request.targetPointer()));
+        materialization.setTargetPointer(targetPointer);
         materialization.setTargetReleaseKey(normalize(request.targetReleaseKey()));
-        materialization.setMaterializedRuleId(normalize(request.materializedRuleId()));
+        materialization.setMaterializedRuleId(materializedRuleId);
         materialization.setStatus(status);
-        materialization.setMaterializedPayload(write(deriveMaterializedPayload(definition, request)));
-        materialization.setSourceHash(normalize(request.sourceHash()));
+        materialization.setMaterializedPayload(write(materializedPayload));
+        materialization.setSourceHash(sourceHash);
         if (request.validationResult() != null && !request.validationResult().isNull()) {
             materialization.setValidationResult(write(request.validationResult()));
         }
@@ -752,7 +854,8 @@ public class DomainRuleService {
             String resourceKey,
             String ruleType,
             UUID currentDefinitionId,
-            String currentRuleKey) {
+            String currentRuleKey,
+            ArrayNode predictedMaterializations) {
         ArrayNode coverage = objectMapper.createArrayNode();
         List<DomainRuleDefinition> candidates = findCoverageCandidates(tenantId, environment, resourceKey);
         for (DomainRuleDefinition candidate : candidates) {
@@ -765,6 +868,12 @@ public class DomainRuleService {
             if (currentDefinitionId == null
                     && StringUtils.hasText(currentRuleKey)
                     && currentRuleKey.equals(candidate.getRuleKey())) {
+                continue;
+            }
+            if (usesOnlyReactiveDeterminationTargets(predictedMaterializations)
+                    && hasDisjointReactiveDeterminationTargets(
+                            predictedMaterializations,
+                            candidate)) {
                 continue;
             }
             ObjectNode item = coverage.addObject();
@@ -786,6 +895,54 @@ public class DomainRuleService {
             }
         }
         return coverage;
+    }
+
+    private boolean hasDisjointReactiveDeterminationTargets(
+            ArrayNode requestedTargets,
+            DomainRuleDefinition candidate) {
+        try {
+            ArrayNode candidateTargets = buildPredictedMaterializations(
+                    candidate.getResourceKey(),
+                    candidate.getRuleType(),
+                    read(candidate.getDefinition()),
+                    read(candidate.getParameters()));
+            return usesOnlyReactiveDeterminationTargets(candidateTargets)
+                    && !hasExactReactiveDeterminationTargetOverlap(requestedTargets, candidateTargets);
+        } catch (ConfigurationIngestionException ex) {
+            return false;
+        }
+    }
+
+    private boolean usesOnlyReactiveDeterminationTargets(ArrayNode targets) {
+        if (targets == null || targets.isEmpty()) {
+            return false;
+        }
+        for (JsonNode target : targets) {
+            if (!isReactiveDeterminationTarget(
+                    normalize(target.path("targetLayer").asText(null)),
+                    normalize(target.path("targetArtifactType").asText(null)))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean hasExactReactiveDeterminationTargetOverlap(
+            ArrayNode requestedTargets,
+            ArrayNode candidateTargets) {
+        for (JsonNode requested : requestedTargets) {
+            String requestedKey = normalize(requested.path("targetArtifactKey").asText(null));
+            for (JsonNode candidate : candidateTargets) {
+                if (normalize(requested.path("targetLayer").asText(null))
+                        .equals(normalize(candidate.path("targetLayer").asText(null)))
+                        && normalize(requested.path("targetArtifactType").asText(null))
+                        .equals(normalize(candidate.path("targetArtifactType").asText(null)))
+                        && requestedKey.equals(normalize(candidate.path("targetArtifactKey").asText(null)))) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private List<DomainRuleDefinition> findCoverageCandidates(
@@ -817,6 +974,7 @@ public class DomainRuleService {
         JsonNode params = parameters == null || parameters.isNull() ? null : parameters;
 
         appendExplicitMaterializationTargets(targets, definition);
+        validateReactiveDeterminationTargets(ruleType, params, targets);
 
         if (!containsMaterializationTarget(targets, "option_source", "resource-option-source")
                 && shouldDeriveOptionSourceTarget(ruleType, params)) {
@@ -890,6 +1048,17 @@ public class DomainRuleService {
             String targetLayer = normalize(candidate.path("targetLayer").asText(null));
             String targetArtifactType = normalize(candidate.path("targetArtifactType").asText(null));
             String targetArtifactKey = normalize(candidate.path("targetArtifactKey").asText(null));
+            if (isReactiveDeterminationCoordinate(targetLayer, targetArtifactType)) {
+                requireOnlyFields(
+                        candidate,
+                        Set.of("targetLayer", "targetArtifactType", "targetArtifactKey", "operation"),
+                        "definition.materializationTargets[] backend determination target");
+                requireReactiveDeterminationTargetPair(targetLayer, targetArtifactType);
+                requireStableIdentifier(
+                        targetArtifactKey,
+                        STABLE_DETERMINATION_KEY,
+                        "backend determination targetArtifactKey");
+            }
             if (!StringUtils.hasText(targetLayer)
                     || !StringUtils.hasText(targetArtifactType)
                     || !StringUtils.hasText(targetArtifactKey)) {
@@ -938,6 +1107,7 @@ public class DomainRuleService {
             case "backend_validation" -> "validation_rule.review";
             case "workflow_action" -> "workflow_action_policy.review";
             case "approval_policy" -> "approval_policy.review";
+            case BACKEND_DETERMINATION_TARGET_LAYER -> "reactive_determination.review";
             case "form_config" -> "rule.review";
             default -> "governance.review";
         };
@@ -976,6 +1146,13 @@ public class DomainRuleService {
     private JsonNode deriveMaterializedPayload(
             DomainRuleDefinition definition,
             DomainRuleMaterializationRequest request) {
+        if (isReactiveDeterminationTarget(request.targetLayer(), request.targetArtifactType())) {
+            if (request.materializedPayload() != null && !request.materializedPayload().isNull()) {
+                throw new ConfigurationIngestionException(
+                        "Reactive determination payload is compiled from parameters.reactiveDetermination and cannot be supplied directly");
+            }
+            return buildReactiveDeterminationMaterializedPayload(definition, request.targetArtifactKey());
+        }
         if (request.materializedPayload() != null && !request.materializedPayload().isNull()) {
             return request.materializedPayload();
         }
@@ -1004,6 +1181,343 @@ public class DomainRuleService {
             return buildApprovalPolicyMaterializedPayload(definition, request.targetArtifactKey());
         }
         return objectMapper.createObjectNode();
+    }
+
+    private ObjectNode buildReactiveDeterminationMaterializedPayload(
+            DomainRuleDefinition definition,
+            String targetArtifactKey) {
+        DomainRuleReactiveDeterminationSpec spec = readReactiveDeterminationSpec(
+                read(definition.getParameters()));
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("schemaVersion", REACTIVE_DETERMINATION_SCHEMA_VERSION);
+        payload.put("kind", "backend_reactive_determination");
+        payload.put("determinationKey", targetArtifactKey);
+
+        ObjectNode metadata = payload.putObject("metadata");
+        metadata.put("origin", "domain_rule_definition");
+        metadata.put("ruleType", definition.getRuleType());
+        metadata.put("reviewStatus", "pending");
+
+        ObjectNode decisionRef = payload.putObject("decisionRef");
+        decisionRef.put("ruleKey", definition.getRuleKey());
+        decisionRef.put("ruleVersion", definition.getVersion());
+
+        ObjectNode scope = payload.putObject("scope");
+        scope.put("resourceKey", definition.getResourceKey());
+        if (StringUtils.hasText(definition.getServiceKey())) {
+            scope.put("serviceKey", definition.getServiceKey());
+        }
+        if (StringUtils.hasText(definition.getContextKey())) {
+            scope.put("contextKey", definition.getContextKey());
+        }
+
+        ObjectNode operationRef = payload.putObject("operationRef");
+        operationRef.put("operationId", spec.operationId().trim());
+
+        ObjectNode execution = payload.putObject("executionContract");
+        execution.put("idempotent", true);
+        execution.put("persistence", spec.persistence().value());
+        execution.put("finalCommandRevalidation", true);
+
+        ArrayNode inputs = payload.putArray("inputs");
+        spec.inputs().forEach(binding -> {
+            ObjectNode item = inputs.addObject();
+            item.put("resourcePointer", binding.resourcePointer().trim());
+            item.put("requestPointer", binding.requestPointer().trim());
+        });
+        ArrayNode outputs = payload.putArray("outputs");
+        spec.outputs().forEach(binding -> {
+            ObjectNode item = outputs.addObject();
+            item.put("responsePointer", binding.responsePointer().trim());
+            item.put("resourcePointer", binding.resourcePointer().trim());
+        });
+
+        JsonNode condition = read(definition.getCondition());
+        if (condition != null && !condition.isNull()) {
+            payload.set("activationCondition", condition);
+        }
+        return payload;
+    }
+
+    private void validateReactiveDeterminationTargets(
+            String ruleType,
+            JsonNode parameters,
+            ArrayNode targets) {
+        for (JsonNode target : targets) {
+            String targetLayer = normalize(target.path("targetLayer").asText(null));
+            String targetArtifactType = normalize(target.path("targetArtifactType").asText(null));
+            String targetArtifactKey = normalize(target.path("targetArtifactKey").asText(null));
+            if (!isReactiveDeterminationCoordinate(targetLayer, targetArtifactType)) {
+                continue;
+            }
+            requireReactiveDeterminationTargetPair(targetLayer, targetArtifactType);
+            requireStableIdentifier(
+                    targetArtifactKey,
+                    STABLE_DETERMINATION_KEY,
+                    "backend determination targetArtifactKey");
+            if (!"calculation".equals(ruleType)) {
+                throw new ConfigurationIngestionException(
+                        "Backend reactive determination materialization requires ruleType=calculation");
+            }
+            readReactiveDeterminationSpec(parameters);
+        }
+    }
+
+    private void requireReactiveDeterminationTargetContract(
+            DomainRuleDefinition definition,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey) {
+        if (!isReactiveDeterminationCoordinate(targetLayer, targetArtifactType)) {
+            return;
+        }
+        requireReactiveDeterminationTargetPair(targetLayer, targetArtifactType);
+        requireStableIdentifier(
+                normalize(targetArtifactKey),
+                STABLE_DETERMINATION_KEY,
+                "backend determination targetArtifactKey");
+        if (definition == null || !"calculation".equals(definition.getRuleType())) {
+            throw new ConfigurationIngestionException(
+                    "Backend reactive determination materialization requires ruleType=calculation");
+        }
+        requireText(definition.getResourceKey(), "resourceKey");
+        readReactiveDeterminationSpec(read(definition.getParameters()));
+    }
+
+    private void requireReactiveDeterminationTargetPair(
+            String targetLayer,
+            String targetArtifactType) {
+        if (!isReactiveDeterminationTarget(targetLayer, targetArtifactType)) {
+            throw new ConfigurationIngestionException(
+                    "backend_determination must use targetArtifactType=resource-reactive-determination");
+        }
+    }
+
+    private boolean isReactiveDeterminationCoordinate(
+            String targetLayer,
+            String targetArtifactType) {
+        return BACKEND_DETERMINATION_TARGET_LAYER.equals(normalize(targetLayer))
+                || REACTIVE_DETERMINATION_ARTIFACT_TYPE.equals(normalize(targetArtifactType));
+    }
+
+    private boolean isReactiveDeterminationTarget(
+            String targetLayer,
+            String targetArtifactType) {
+        return BACKEND_DETERMINATION_TARGET_LAYER.equals(normalize(targetLayer))
+                && REACTIVE_DETERMINATION_ARTIFACT_TYPE.equals(normalize(targetArtifactType));
+    }
+
+    private DomainRuleReactiveDeterminationSpec readReactiveDeterminationSpec(JsonNode parameters) {
+        if (parameters == null || !parameters.isObject()) {
+            throw new ConfigurationIngestionException(
+                    "parameters.reactiveDetermination is required for backend reactive determination materialization");
+        }
+        JsonNode candidate = parameters.get("reactiveDetermination");
+        if (candidate == null || !candidate.isObject()) {
+            throw new ConfigurationIngestionException(
+                    "parameters.reactiveDetermination is required for backend reactive determination materialization");
+        }
+        requireOnlyFields(
+                candidate,
+                Set.of(
+                        "operationId",
+                        "idempotent",
+                        "persistence",
+                        "finalCommandRevalidation",
+                        "inputs",
+                        "outputs"),
+                "parameters.reactiveDetermination");
+        try {
+            DomainRuleReactiveDeterminationSpec spec = objectMapper.treeToValue(
+                    candidate,
+                    DomainRuleReactiveDeterminationSpec.class);
+            validateReactiveDeterminationSpec(spec, candidate);
+            return spec;
+        } catch (ConfigurationIngestionException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new ConfigurationIngestionException(
+                    "parameters.reactiveDetermination does not match the canonical contract",
+                    ex);
+        }
+    }
+
+    private void validateReactiveDeterminationSpec(
+            DomainRuleReactiveDeterminationSpec spec,
+            JsonNode source) {
+        if (spec == null) {
+            throw new ConfigurationIngestionException("Reactive determination contract is required");
+        }
+        requireText(spec.operationId(), "parameters.reactiveDetermination.operationId");
+        requireStableIdentifier(
+                spec.operationId().trim(),
+                STABLE_OPERATION_ID,
+                "parameters.reactiveDetermination.operationId");
+        if (!Boolean.TRUE.equals(spec.idempotent())) {
+            throw new ConfigurationIngestionException(
+                    "parameters.reactiveDetermination.idempotent must be true");
+        }
+        if (spec.persistence() != DomainRuleReactiveDeterminationSpec.Persistence.NONE) {
+            throw new ConfigurationIngestionException(
+                    "parameters.reactiveDetermination.persistence must be none");
+        }
+        if (!Boolean.TRUE.equals(spec.finalCommandRevalidation())) {
+            throw new ConfigurationIngestionException(
+                    "parameters.reactiveDetermination.finalCommandRevalidation must be true");
+        }
+        if (spec.inputs() == null || spec.inputs().isEmpty()) {
+            throw new ConfigurationIngestionException(
+                    "parameters.reactiveDetermination.inputs must not be empty");
+        }
+        if (spec.outputs() == null || spec.outputs().isEmpty()) {
+            throw new ConfigurationIngestionException(
+                    "parameters.reactiveDetermination.outputs must not be empty");
+        }
+        if ((long) spec.inputs().size() + spec.outputs().size()
+                > MAX_REACTIVE_DETERMINATION_BINDINGS) {
+            throw new ConfigurationIngestionException(
+                    "parameters.reactiveDetermination supports at most 64 input and output bindings in total");
+        }
+
+        Set<String> sourcePointers = new HashSet<>();
+        Set<String> requestPointers = new HashSet<>();
+        for (int index = 0; index < spec.inputs().size(); index++) {
+            JsonNode bindingNode = source.path("inputs").path(index);
+            requireOnlyFields(
+                    bindingNode,
+                    Set.of("resourcePointer", "requestPointer"),
+                    "parameters.reactiveDetermination.inputs[" + index + "]");
+            DomainRuleReactiveDeterminationSpec.InputBinding binding = spec.inputs().get(index);
+            String resourcePointer = requireJsonPointer(
+                    binding.resourcePointer(),
+                    "parameters.reactiveDetermination.inputs[" + index + "].resourcePointer");
+            String requestPointer = requireJsonPointer(
+                    binding.requestPointer(),
+                    "parameters.reactiveDetermination.inputs[" + index + "].requestPointer");
+            requireNonOverlappingPointer(
+                    sourcePointers,
+                    resourcePointer,
+                    "Reactive determination input resourcePointer values");
+            requireNonOverlappingPointer(
+                    requestPointers,
+                    requestPointer,
+                    "Reactive determination requestPointer values");
+        }
+
+        Set<String> targetPointers = new HashSet<>();
+        Set<String> responsePointers = new HashSet<>();
+        for (int index = 0; index < spec.outputs().size(); index++) {
+            JsonNode bindingNode = source.path("outputs").path(index);
+            requireOnlyFields(
+                    bindingNode,
+                    Set.of("responsePointer", "resourcePointer"),
+                    "parameters.reactiveDetermination.outputs[" + index + "]");
+            DomainRuleReactiveDeterminationSpec.OutputBinding binding = spec.outputs().get(index);
+            String responsePointer = requireJsonPointer(
+                    binding.responsePointer(),
+                    "parameters.reactiveDetermination.outputs[" + index + "].responsePointer");
+            String targetPointer = requireJsonPointer(
+                    binding.resourcePointer(),
+                    "parameters.reactiveDetermination.outputs[" + index + "].resourcePointer");
+            requireNonOverlappingPointer(
+                    responsePointers,
+                    responsePointer,
+                    "Reactive determination responsePointer values");
+            requireNonOverlappingPointer(
+                    targetPointers,
+                    targetPointer,
+                    "Reactive determination output resourcePointer values");
+        }
+        for (String sourcePointer : sourcePointers) {
+            for (String targetPointer : targetPointers) {
+                if (pointersOverlap(sourcePointer, targetPointer)) {
+                    throw new ConfigurationIngestionException(
+                            "Reactive determination input and output resourcePointer values must not overlap");
+                }
+            }
+        }
+    }
+
+    private void requireOnlyFields(JsonNode node, Set<String> allowed, String field) {
+        if (node == null || !node.isObject()) {
+            throw new ConfigurationIngestionException(field + " must be an object");
+        }
+        node.fieldNames().forEachRemaining(name -> {
+            if (!allowed.contains(name)) {
+                throw new ConfigurationIngestionException(field + " contains unsupported field: " + name);
+            }
+        });
+    }
+
+    private String requireJsonPointer(String value, String field) {
+        requireText(value, field);
+        String pointer = value.trim();
+        if (!pointer.startsWith("/") || pointer.length() == 1) {
+            throw new ConfigurationIngestionException(field + " must be a non-root RFC 6901 JSON Pointer");
+        }
+        String[] segments = pointer.substring(1).split("/", -1);
+        for (String segment : segments) {
+            if (segment.isEmpty()) {
+                throw new ConfigurationIngestionException(field + " must not contain empty JSON Pointer segments");
+            }
+            if (segment.indexOf('*') >= 0) {
+                throw new ConfigurationIngestionException(field + " must not contain JSON Pointer wildcards");
+            }
+            for (int index = 0; index < segment.length(); index++) {
+                if (segment.charAt(index) == '~'
+                        && (index + 1 >= segment.length()
+                        || (segment.charAt(index + 1) != '0' && segment.charAt(index + 1) != '1'))) {
+                    throw new ConfigurationIngestionException(
+                            field + " contains an invalid RFC 6901 escape sequence");
+                }
+            }
+        }
+        try {
+            JsonPointer.compile(pointer);
+        } catch (IllegalArgumentException ex) {
+            throw new ConfigurationIngestionException(field + " must be a valid RFC 6901 JSON Pointer", ex);
+        }
+        return pointer;
+    }
+
+    private void requireNonOverlappingPointer(
+            Set<String> pointers,
+            String candidate,
+            String field) {
+        for (String existing : pointers) {
+            if (pointersOverlap(existing, candidate)) {
+                throw new ConfigurationIngestionException(field + " must be unique and non-overlapping");
+            }
+        }
+        pointers.add(candidate);
+    }
+
+    private boolean pointersOverlap(String left, String right) {
+        return left.equals(right)
+                || left.startsWith(right + "/")
+                || right.startsWith(left + "/");
+    }
+
+    private void requireStableIdentifier(
+            String value,
+            Pattern pattern,
+            String field) {
+        if (!StringUtils.hasText(value) || !pattern.matcher(value).matches()) {
+            throw new ConfigurationIngestionException(
+                    field + " must be a stable identifier with at most 255 characters");
+        }
+    }
+
+    private String requireCanonicalProjectionCoordinate(
+            String requested,
+            String canonical,
+            String field) {
+        String normalized = normalize(requested);
+        if (normalized != null && !canonical.equals(normalized)) {
+            throw new ConfigurationIngestionException(
+                    "Reactive determination " + field + " must be " + canonical);
+        }
+        return canonical;
     }
 
     private ObjectNode buildOptionSourceMaterializedPayload(
@@ -1786,6 +2300,7 @@ public class DomainRuleService {
         return switch (targetLayer != null ? targetLayer : "") {
             case "option_source" -> 10;
             case "backend_validation" -> 20;
+            case BACKEND_DETERMINATION_TARGET_LAYER -> 25;
             case "workflow_action" -> 30;
             case "approval_policy" -> 40;
             default -> 100;
@@ -1858,6 +2373,21 @@ public class DomainRuleService {
                 && "resource-action-approval".equals(targetArtifactType)
                 && isApprovalPolicyRuleType(definition.getRuleType())) {
             return createApprovalPolicyMaterialization(
+                    definition,
+                    targetLayer,
+                    targetArtifactType,
+                    targetArtifactKey,
+                    tenantId,
+                    environment,
+                    materializationOutcomes);
+        }
+        if (isReactiveDeterminationCoordinate(targetLayer, targetArtifactType)) {
+            requireReactiveDeterminationTargetContract(
+                    definition,
+                    targetLayer,
+                    targetArtifactType,
+                    targetArtifactKey);
+            return createReactiveDeterminationMaterialization(
                     definition,
                     targetLayer,
                     targetArtifactType,
@@ -1965,6 +2495,30 @@ public class DomainRuleService {
                 materializationOutcomes);
     }
 
+    private DomainRuleMaterialization createReactiveDeterminationMaterialization(
+            DomainRuleDefinition definition,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey,
+            String tenantId,
+            String environment,
+            ArrayNode materializationOutcomes) {
+        ObjectNode payload = buildReactiveDeterminationMaterializedPayload(
+                definition,
+                targetArtifactKey);
+        return createOrReuseDerivedMaterialization(
+                definition,
+                targetLayer,
+                targetArtifactType,
+                targetArtifactKey,
+                REACTIVE_DETERMINATION_TARGET_POINTER,
+                REACTIVE_DETERMINATION_RULE_ID,
+                payload,
+                tenantId,
+                environment,
+                materializationOutcomes);
+    }
+
     private DomainRuleMaterialization createOrReuseDerivedMaterialization(
             DomainRuleDefinition definition,
             String targetLayer,
@@ -1976,7 +2530,7 @@ public class DomainRuleService {
             String tenantId,
             String environment,
             ArrayNode materializationOutcomes) {
-        String materializationKey = definition.getRuleKey() + ":" + targetLayer + ":" + targetArtifactKey;
+        String materializationKey = derivedMaterializationKey(definition, targetLayer, targetArtifactKey);
         String sourceHash = derivedSourceHash(
                 definition,
                 targetLayer,
@@ -2023,6 +2577,13 @@ public class DomainRuleService {
                 "Decision materialization created");
         addMaterializationOutcome(materializationOutcomes, saved, "created", null);
         return saved;
+    }
+
+    private String derivedMaterializationKey(
+            DomainRuleDefinition definition,
+            String targetLayer,
+            String targetArtifactKey) {
+        return definition.getRuleKey() + ":" + targetLayer + ":" + targetArtifactKey;
     }
 
     private void requireReusableDerivedMaterialization(

@@ -75,10 +75,13 @@ public class DomainRuleController {
             @RequestParam(required = false) String resourceKey,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String ruleType,
-            @RequestParam(required = false) String ruleKey) {
+            @RequestParam(required = false) String ruleKey,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, "RULE_DEFINITION_READER");
         return ResponseEntity.ok(domainRuleService.definitions(
-                tenantId,
-                environment,
+                principal.tenantId(),
+                principal.environment(),
                 resourceKey,
                 status,
                 ruleType,
@@ -103,20 +106,39 @@ public class DomainRuleController {
                 principal));
     }
 
+    @GetMapping("/definitions/{definitionId}")
+    public ResponseEntity<DomainRuleDefinitionResponse> definition(
+            @PathVariable UUID definitionId,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, "RULE_DEFINITION_READER");
+        return ResponseEntity.ok(domainRuleService.definition(definitionId, principal));
+    }
+
     @GetMapping("/definitions/{definitionId}/timeline")
     public ResponseEntity<DomainRuleTimelineResponse> definitionTimeline(
             @PathVariable UUID definitionId,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-Env", required = false) String environment) {
-        return ResponseEntity.ok(domainRuleService.definitionTimeline(definitionId, tenantId, environment));
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, "RULE_DEFINITION_READER");
+        return ResponseEntity.ok(domainRuleService.definitionTimeline(
+                definitionId, principal.tenantId(), principal.environment()));
     }
 
     @PostMapping("/simulations")
     public ResponseEntity<DomainRuleSimulationResponse> simulate(
             @RequestBody DomainRuleSimulationRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
-            @RequestHeader(value = "X-Env", required = false) String environment) {
-        return ResponseEntity.ok(domainRuleService.simulate(request, tenantId, environment));
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, "RULE_DEFINITION_AUTHOR");
+        return ResponseEntity.ok(domainRuleService.simulate(
+                request, principal.tenantId(), principal.environment()));
     }
 
     @PostMapping("/publications")
@@ -149,10 +171,13 @@ public class DomainRuleController {
             @RequestParam(required = false) String targetLayer,
             @RequestParam(required = false) String targetArtifactType,
             @RequestParam(required = false) String targetArtifactKey,
-            @RequestParam(required = false) String status) {
+            @RequestParam(required = false) String status,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, "RULE_DEFINITION_READER");
         return ResponseEntity.ok(domainRuleService.materializations(
-                tenantId,
-                environment,
+                principal.tenantId(),
+                principal.environment(),
                 ruleDefinitionId,
                 targetLayer,
                 targetArtifactType,

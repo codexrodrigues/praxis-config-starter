@@ -1305,6 +1305,7 @@ paths:
       tags: [domain-rules]
       operationId: listDomainRuleMaterializations
       summary: Lista materializacoes derivadas por coordenadas semanticas/runtime
+      description: Integracoes runtime de host devem consultar o alvo por coordenadas exatas e exigir `status=applied`. Respostas draft/pending_review existem para cockpit de governanca e nao podem ser executadas pelo host.
       parameters:
         - $ref: '#/components/parameters/TenantIdHeader'
         - $ref: '#/components/parameters/EnvHeader'
@@ -1332,6 +1333,7 @@ paths:
         - name: status
           in: query
           required: false
+          description: Hosts que consomem decisoes runtime devem enviar `applied`; a omissao e reservada a discovery/cockpit governado.
           schema:
             type: string
       responses:
@@ -4146,8 +4148,7 @@ components:
         targetLayer:
           $ref: '#/components/schemas/DomainRuleTargetLayer'
         targetArtifactType:
-          type: string
-          description: Tipo de artefato runtime derivado, por exemplo resource-option-source, resource-validation, resource-workflow-action ou resource-action-approval.
+          $ref: '#/components/schemas/DomainRuleTargetArtifactType'
         targetArtifactKey:
           type: string
           description: Identidade canonica do artefato alvo ja resolvido semanticamente.
@@ -4171,8 +4172,85 @@ components:
 
     DomainRuleTargetLayer:
       type: string
-      description: Camada runtime derivada. A regra de negocio permanece na definicao governada.
-      enum: [option_source, backend_validation, workflow_action, approval_policy, form_config, shared_rule_review]
+      description: Camada runtime derivada e extensivel. `backend_determination` aceita exclusivamente `resource-reactive-determination`; camadas existentes incluem option_source, backend_validation, workflow, workflow_action, approval_policy, form_config, shared_rule_review, policy_engine, notification, reporting e external_system. A regra de negocio permanece na definicao governada.
+      example: backend_determination
+
+    DomainRuleTargetArtifactType:
+      type: string
+      description: Tipo extensivel da projecao runtime governada. `resource-reactive-determination` pertence exclusivamente a `backend_determination`; tipos existentes incluem resource-option-source, resource-validation, resource-workflow-action, resource-action-approval, praxis-dynamic-form, domain-rule-definition, spring-service e opa-policy.
+      example: resource-reactive-determination
+
+    DomainRuleReactiveDeterminationSpec:
+      type: object
+      description: Contrato explicito em `parameters.reactiveDetermination`. E compilado pelo Config; nao aceita path, metodo, headers ou payload runtime livre.
+      properties:
+        operationId:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[A-Za-z][A-Za-z0-9._:-]{0,254}$'
+          description: Identidade canonica de uma operacao backend resolvivel no catalogo governado.
+        idempotent:
+          type: boolean
+          enum: [true]
+        persistence:
+          type: string
+          enum: [none]
+        finalCommandRevalidation:
+          type: boolean
+          enum: [true]
+        inputs:
+          type: array
+          minItems: 1
+          maxItems: 64
+          description: Bindings de entrada. A soma de inputs e outputs nao pode exceder 64; pointers duplicados ou sobrepostos sao rejeitados.
+          items:
+            $ref: '#/components/schemas/DomainRuleReactiveDeterminationInputBinding'
+        outputs:
+          type: array
+          minItems: 1
+          maxItems: 64
+          description: Bindings de saida. A soma de inputs e outputs nao pode exceder 64; pointers duplicados ou sobrepostos sao rejeitados.
+          items:
+            $ref: '#/components/schemas/DomainRuleReactiveDeterminationOutputBinding'
+      required: [operationId, idempotent, persistence, finalCommandRevalidation, inputs, outputs]
+      additionalProperties: false
+
+    DomainRuleReactiveDeterminationInputBinding:
+      type: object
+      properties:
+        resourcePointer:
+          type: string
+          pattern: '^/(?:[^/~*]|~[01])+(?:/(?:[^/~*]|~[01])+)*$'
+          description: RFC 6901 JSON Pointer nao-root no input canonico do recurso; segmentos vazios, wildcards e escapes invalidos sao rejeitados.
+        requestPointer:
+          type: string
+          pattern: '^/(?:[^/~*]|~[01])+(?:/(?:[^/~*]|~[01])+)*$'
+          description: RFC 6901 JSON Pointer nao-root no request schema da operacao; segmentos vazios, wildcards e escapes invalidos sao rejeitados.
+      required: [resourcePointer, requestPointer]
+      additionalProperties: false
+
+    DomainRuleReactiveDeterminationOutputBinding:
+      type: object
+      properties:
+        responsePointer:
+          type: string
+          pattern: '^/(?:[^/~*]|~[01])+(?:/(?:[^/~*]|~[01])+)*$'
+          description: RFC 6901 JSON Pointer nao-root no response schema da operacao; segmentos vazios, wildcards e escapes invalidos sao rejeitados.
+        resourcePointer:
+          type: string
+          pattern: '^/(?:[^/~*]|~[01])+(?:/(?:[^/~*]|~[01])+)*$'
+          description: RFC 6901 JSON Pointer nao-root no recurso canonico afetado; segmentos vazios, wildcards e escapes invalidos sao rejeitados.
+      required: [responsePointer, resourcePointer]
+      additionalProperties: false
+
+    DomainRuleParameters:
+      type: object
+      description: Parametros extensíveis de uma decisao governada. A propriedade `reactiveDetermination` e fechada quando o alvo explicito for `backend_determination/resource-reactive-determination`; outros tipos de regra continuam podendo publicar seus parametros canonicos.
+      properties:
+        reactiveDetermination:
+          $ref: '#/components/schemas/DomainRuleReactiveDeterminationSpec'
+      additionalProperties: true
 
     DomainRuleActorType:
       type: string
@@ -4219,7 +4297,8 @@ components:
           allOf:
             - $ref: '#/components/schemas/DomainRuleJsonObject'
         parameters:
-          $ref: '#/components/schemas/DomainRuleJsonObject'
+          description: Parametros governados da decisao. Para `backend_determination`, deve conter `reactiveDetermination` conforme `DomainRuleReactiveDeterminationSpec`; `calculation` sem alvo explicito nao e promovido automaticamente.
+          $ref: '#/components/schemas/DomainRuleParameters'
         condition:
           $ref: '#/components/schemas/DomainRuleJsonObject'
         governance:
@@ -4330,7 +4409,7 @@ components:
           type: string
           nullable: true
         targetArtifactType:
-          type: string
+          $ref: '#/components/schemas/DomainRuleTargetArtifactType'
           nullable: true
         targetArtifactKey:
           type: string

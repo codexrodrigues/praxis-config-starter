@@ -13,6 +13,7 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.inOrder;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
@@ -436,6 +437,12 @@ class DomainRuleSnapshotServiceTest {
 
   @Test
   void explicitActivationSelectsANewerVerifiedSnapshotAndRotatesHeadEtag() throws Exception {
+    DomainRuleSnapshotActivationGate activationGate = mock(DomainRuleSnapshotActivationGate.class);
+    service = new DomainRuleSnapshotService(
+        definitionRepository, snapshotRepository, headRepository, eventRepository,
+        compositionApprovalRepository, definitionApprovalRepository,
+        new DomainRuleDefinitionFingerprint(objectMapper), objectMapper, implementationCatalog,
+        activationGate);
     UUID activeId = UUID.randomUUID();
     UUID targetId = UUID.randomUUID();
     UUID oldEtag = UUID.randomUUID();
@@ -464,14 +471,21 @@ class DomainRuleSnapshotServiceTest {
         activeId, "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.of(
         DomainRuleSnapshot.builder().id(activeId).publicationRevision(2).build()));
 
+    UUID rolloutId = UUID.randomUUID();
     var response = service.activatePublished(
-        target.getSnapshotKey(), "operator-a", "tenant-a", "prod", "\"" + oldEtag + "\"");
+        target.getSnapshotKey(), "operator-a", "tenant-a", "prod", "\"" + oldEtag + "\"",
+        rolloutId);
 
     assertThat(response.activationType()).isEqualTo("ACTIVATED");
     assertThat(response.activationRevision()).isEqualTo(3);
     assertThat(response.headEtag()).isNotEqualTo(oldEtag.toString());
     verify(snapshotRepository, never()).save(any());
     verify(eventRepository).save(argThat(argThatEvent("ACTIVATED", 3L)));
+    var order = inOrder(activationGate, headRepository, eventRepository);
+    order.verify(activationGate).requireAllowed(rolloutId, target, head, "operator-a");
+    order.verify(headRepository).save(head);
+    order.verify(eventRepository).save(any());
+    order.verify(activationGate).activationCompleted(rolloutId, target, "operator-a");
   }
 
   @Test

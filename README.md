@@ -75,6 +75,8 @@ CodeWiki is complementary navigation for code reading; the repository docs and s
 - AI registry definitions, authoring manifests, templates, and diagnostics;
 - signed or cookie-based stream access for browser-compatible authoring flows;
 - governed domain decisions and materialization workflows under `/api/praxis/config/**`.
+- Policy Studio change workspaces with strong ETag concurrency and reusable five-state outcome
+  scenarios, documented in [`docs/domain-rules/change-workspaces-v1.md`](docs/domain-rules/change-workspaces-v1.md).
 
 In a typical host, `praxis-metadata-starter` explains what backend resources are and which UI/schema capabilities they expose. `praxis-config-starter` stores how a tenant or user configures those capabilities, how AI tools reason over them, and how governed authoring changes are validated before they become runtime configuration.
 
@@ -437,9 +439,23 @@ vector similarity score or decide user intent. Queries without lexical evidence 
 | `/api/praxis/config/ai/authoring/**` | Validate, compile, preview, apply, stream, replay, and cancel agentic authoring turns. |
 | `/api/praxis/config/domain-rules/**` | Govern shared business rules and semantic decisions, including immutable RuleSet snapshots, conditional head publication, forward activation and rollback-by-selection. |
 | `GET /api/praxis/config/domain-rules/snapshots` | List a bounded safe version catalog for one scoped RuleSet, without exposing executable content. |
-| `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/activate` | Move the scoped head to a newer verified publication with strong `If-Match`. |
+| `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/activate` | Move the scoped head to a newer verified publication with strong `If-Match`; `REQUIRED` rollout policy also requires a ready `X-Rule-Rollout-ID`. |
 | `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/rollback` | Move the scoped head to an older verified publication with strong `If-Match`. |
 | `GET /api/praxis/config/domain-rules/snapshots/head/status` | Expose safe readiness and the concurrency ETag for a scoped RuleSet head, including governed recovery of preserved pre-manifest beta snapshots without returning unverified content. |
+| `POST /api/praxis/config/domain-rules/snapshots/execution-observations` | Ingest a bounded idempotent batch of redacted evidence from an authenticated runtime host. |
+| `GET /api/praxis/config/domain-rules/snapshots/{snapshotKey}/execution-summary` | Read safe outcome/host-count/time aggregates without facts, payloads or individual host identities. |
+| `POST /api/praxis/config/domain-rules/snapshots/host-status` | Replace the authenticated host's latest redacted heartbeat without accepting scope or host identity in the body. |
+| `GET /api/praxis/config/domain-rules/snapshots/head/host-status-summary` | Compare fresh host reports with the active head and its approved runtime coordinates, returning only aligned/snapshot-drifted/incompatible/unavailable/stale aggregates. |
+| `POST /api/praxis/config/domain-rules/snapshots/rollouts` | Create an observational candidate-preload rollout bound to the current strong head ETag. |
+| `POST /api/praxis/config/domain-rules/snapshots/rollouts/{rolloutId}/probes` | Replace the authenticated host's monotonic redacted candidate probe without changing its active runtime heartbeat. |
+| `GET /api/praxis/config/domain-rules/snapshots/rollouts/pending?ruleSetKey=...` | Let an authenticated execution observer discover the newest non-expired candidate still bound to the unchanged active head. |
+| `GET /api/praxis/config/domain-rules/snapshots/rollouts/{rolloutId}/readiness` | Return server-derived candidate quorum counts without host identities. |
+| `POST /api/praxis/config/domain-rules/snapshots/rollouts/{rolloutId}/cancel` | Close an observational rollout without mutating the active RuleSet head. |
+| `POST /api/praxis/config/domain-rules/snapshots/rollout-policies` | Author the next immutable `DRAFT` policy version as `RULE_DEFINITION_AUTHOR`. |
+| `GET /api/praxis/config/domain-rules/snapshots/rollout-policies?ruleSetKey=...` | Read the active policy, version catalog and independent policy-head ETag as `RULE_SNAPSHOT_READER`. |
+| `POST /api/praxis/config/domain-rules/snapshots/rollout-policies/{policyId}/approve` | Approve one exact draft through a distinct `RULE_DEFINITION_APPROVER`. |
+| `POST /api/praxis/config/domain-rules/snapshots/rollout-policies/{policyId}/activate` | Select an approved policy with `RULE_SNAPSHOT_OPERATOR` and strong policy-head `If-Match`; open rollouts block the transition. |
+| `GET /api/praxis/config/domain-rules/snapshots/rollout-policies/timeline?ruleSetKey=...` | Read the safe append-only policy lifecycle without policy payload duplication. |
 | `/api/praxis/config/domain-knowledge/**` | Govern domain knowledge change sets and evidence lifecycle. |
 | `GET /api/praxis/runtime/context` | Return a safe, host-neutral enterprise runtime context projection. Private auth and authorization internals remain host-owned. |
 | `PUT /api/praxis/runtime/context` | Request a host-authorized context switch. The response returns the effective context and safe propagation headers; the default provider never switches to a different tenant without a host-owned provider. |
@@ -455,6 +471,10 @@ Start with these repository documents:
 - [Agentic authoring streaming](docs/ai/agentic-authoring-streaming.md)
 - [Memory and PII guidance](docs/ai/memory-and-pii.md)
 - [Rule snapshot control plane v1](docs/domain-rules/snapshot-control-plane-v1.md)
+- [Rule execution observations v1](docs/domain-rules/execution-observations-v1.md)
+- [Domain-rule host status v1](docs/domain-rules/host-status-v1.md)
+- [Staged activation readiness v1](docs/domain-rules/staged-activation-readiness-v1.md)
+- [Policy Studio change workspaces v1](docs/domain-rules/change-workspaces-v1.md)
 
 RuleSet publication is a governed maker-checker flow: first request
 `POST /api/praxis/config/domain-rules/snapshots/composition-manifest`, obtain two
@@ -462,17 +482,35 @@ segregated approvals by having each authenticated approver call
 `POST /api/praxis/config/domain-rules/snapshots/composition-approvals`, then have
 a different authenticated publisher submit the unchanged candidate with that
 digest. In corporate mode the host must map the IAM roles
-`RULE_DEFINITION_AUTHOR`, `RULE_DEFINITION_APPROVER`,
+`RULE_DEFINITION_READER`, `RULE_DEFINITION_AUTHOR`, `RULE_DEFINITION_APPROVER`,
 `RULE_COMPOSITION_APPROVER`, `RULE_SNAPSHOT_PUBLISHER`,
-`RULE_SNAPSHOT_OPERATOR` and `RULE_SNAPSHOT_READER`; actor names sent in request
-bodies are not accepted. Snapshot GETs resolve tenant/environment from that
-authenticated principal before querying the store.
+`RULE_SNAPSHOT_OPERATOR`, `RULE_SNAPSHOT_READER` and `RULE_EXECUTION_OBSERVER`; actor names sent in request
+bodies are not accepted. Snapshot and definition/materialization GETs resolve
+tenant/environment from that authenticated principal before querying the store.
+Structural simulation requires `RULE_DEFINITION_AUTHOR`; caller hints never
+widen the resolved scope.
+Policy Studio workspaces require a current, fully passing Test Run before submission. A different
+authenticated `RULE_DEFINITION_APPROVER` then appends an immutable review for that exact workspace
+revision; this review does not publish or activate the underlying rule.
 The same server-side identity boundary applies to legacy publication and
 materialization endpoints: draft creation uses `RULE_DEFINITION_AUTHOR`,
 application/publication uses `RULE_SNAPSHOT_PUBLISHER`, and failure,
 supersession or reversion uses `RULE_SNAPSHOT_OPERATOR`. Creating a
 materialization accepts only `draft` or `pending_review`; this technical draft
 step neither requires nor claims business homologation.
+Backend-owned reactive calculations are materialized explicitly as
+`backend_determination/resource-reactive-determination`. The Config Starter
+compiles their closed, idempotent, non-persisting operation contract and keeps
+the payload tenant scoped; it does not publish that payload in
+`/schemas/filtered` or accept raw HTTP coordinates from authoring clients. Host
+endpoints consume only `applied` decisions server-side; Metadata may publish a
+separate static, tenant-neutral structural binding, never the Config payload.
+Hosts resolve the decision by exact target coordinates through
+`GET /api/praxis/config/domain-rules/materializations` with `status=applied`.
+Existing-coverage admission for this artifact is scoped to that same exact
+`targetLayer + targetArtifactType + targetArtifactKey` coordinate: distinct
+reactive determinations may coexist on one resource, while a duplicate target
+remains blocked for governance review.
 Definition approval is append-only, rejects self-approval and is tied to the
 exact canonical definition hash. The Config Starter rejects source, composition
 or catalog drift and never treats
