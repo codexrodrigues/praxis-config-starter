@@ -31,6 +31,7 @@ import org.praxisplatform.config.repository.DomainRuleTestScenarioRepository;
 import org.praxisplatform.config.repository.DomainRuleTestRunRepository;
 import org.praxisplatform.config.repository.DomainRuleTestRunResultRepository;
 import org.praxisplatform.config.repository.DomainRuleWorkspaceReviewRepository;
+import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -52,7 +53,7 @@ public class DomainRuleChangeWorkspaceService {
   private final DomainRuleWorkspaceReviewRepository reviewRepository;
   private final DomainRuleService domainRuleService;
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleChangeWorkspaceResponse create(
       DomainRuleChangeWorkspaceCreateRequest request,
       DomainRuleGovernancePrincipal principal) {
@@ -83,12 +84,12 @@ public class DomainRuleChangeWorkspaceService {
     return response(workspaceRepository.save(workspace));
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public DomainRuleChangeWorkspaceResponse get(UUID id, DomainRuleGovernancePrincipal principal) {
     return response(scopedWorkspace(id, principal));
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public List<DomainRuleChangeWorkspaceResponse> list(DomainRuleGovernancePrincipal principal) {
     return workspaceRepository.findByTenantIdAndEnvironmentOrderByUpdatedAtDesc(
             principal.tenantId(), principal.environment()).stream()
@@ -96,7 +97,7 @@ public class DomainRuleChangeWorkspaceService {
         .toList();
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public DomainRuleWorkspaceCapabilityResponse capabilities(
       UUID id,
       DomainRuleGovernancePrincipal principal,
@@ -135,7 +136,7 @@ public class DomainRuleChangeWorkspaceService {
         workspace.getEtag().toString(), actions, blockers);
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleChangeWorkspaceResponse updateDraft(
       UUID id,
       DomainRuleChangeWorkspaceUpdateRequest request,
@@ -158,7 +159,7 @@ public class DomainRuleChangeWorkspaceService {
     return response(workspaceRepository.save(workspace));
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleTestScenarioResponse createScenario(
       UUID workspaceId,
       DomainRuleTestScenarioRequest request,
@@ -193,7 +194,7 @@ public class DomainRuleChangeWorkspaceService {
     return scenarioResponse(scenarioRepository.save(scenario));
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public List<DomainRuleTestScenarioResponse> scenarios(
       UUID workspaceId, DomainRuleGovernancePrincipal principal) {
     scopedWorkspace(workspaceId, principal);
@@ -203,7 +204,7 @@ public class DomainRuleChangeWorkspaceService {
         .toList();
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleTestScenarioResponse updateScenario(
       UUID workspaceId,
       UUID scenarioId,
@@ -234,7 +235,7 @@ public class DomainRuleChangeWorkspaceService {
     return scenarioResponse(scenarioRepository.save(scenario));
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleChangeWorkspaceResponse submit(
       UUID id, String ifMatch, DomainRuleGovernancePrincipal principal) {
     DomainRuleChangeWorkspace workspace = scopedWorkspace(id, principal);
@@ -294,7 +295,7 @@ public class DomainRuleChangeWorkspaceService {
     return List.of();
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleWorkspaceReviewResponse review(
       UUID id, DomainRuleWorkspaceReviewRequest request, String ifMatch,
       DomainRuleGovernancePrincipal principal) {
@@ -327,7 +328,7 @@ public class DomainRuleChangeWorkspaceService {
     return reviewResponse(review);
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public List<DomainRuleWorkspaceReviewResponse> reviews(
       UUID id, DomainRuleGovernancePrincipal principal) {
     scopedWorkspace(id, principal);
@@ -337,7 +338,7 @@ public class DomainRuleChangeWorkspaceService {
         .toList();
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleChangeWorkspaceResponse promote(
       UUID id, String ifMatch, DomainRuleGovernancePrincipal principal) {
     DomainRuleChangeWorkspace workspace = scopedWorkspace(id, principal);
