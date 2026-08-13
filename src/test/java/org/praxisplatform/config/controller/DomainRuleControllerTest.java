@@ -199,7 +199,8 @@ class DomainRuleControllerTest {
                 "form_config",
                 "praxis-dynamic-form",
                 "funcionarios-form-demo",
-                "pending_review");
+                "pending_review",
+                servletRequest());
 
         assertThat(entity.getBody()).containsExactly(response);
         verify(service).materializations(
@@ -229,10 +230,52 @@ class DomainRuleControllerTest {
                 List.of());
         when(service.definitionTimeline(definitionId, "tenant-a", "dev")).thenReturn(response);
 
-        var entity = controller.definitionTimeline(definitionId, "tenant-a", "dev");
+        var entity = controller.definitionTimeline(definitionId, "tenant-a", "dev", servletRequest());
 
         assertThat(entity.getBody()).isSameAs(response);
         verify(service).definitionTimeline(definitionId, "tenant-a", "dev");
+    }
+
+    @Test
+    void readPlaneUsesServerResolvedScopeInsteadOfCallerHeaders() {
+        DomainRuleService service = mock(DomainRuleService.class);
+        DomainRuleGovernancePrincipalResolver resolver = mock(DomainRuleGovernancePrincipalResolver.class);
+        DomainRuleController controller = new DomainRuleController(service, resolver);
+        HttpServletRequest servletRequest = servletRequest();
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleTimelineResponse timeline = new DomainRuleTimelineResponse(
+                definitionId,
+                "tenant-a",
+                "dev",
+                "operations.missoes.rule.pause",
+                1,
+                "workflow_action_policy",
+                "operations.missoes",
+                "praxis-api-quickstart",
+                List.of());
+
+        when(resolver.resolve(
+                servletRequest, "spoofed-tenant", "spoofed-env", "RULE_SNAPSHOT_READER"))
+                .thenReturn(PRINCIPAL);
+        when(service.definitions("tenant-a", "dev", null, null, null, null))
+                .thenReturn(List.of());
+        when(service.definitionTimeline(definitionId, "tenant-a", "dev"))
+                .thenReturn(timeline);
+        when(service.materializations("tenant-a", "dev", null, null, null, null, null))
+                .thenReturn(List.of());
+
+        controller.definitions(
+                "spoofed-tenant", "spoofed-env", null, null, null, null, servletRequest);
+        controller.definitionTimeline(
+                definitionId, "spoofed-tenant", "spoofed-env", servletRequest);
+        controller.materializations(
+                "spoofed-tenant", "spoofed-env", null, null, null, null, null, servletRequest);
+
+        verify(resolver, org.mockito.Mockito.times(3)).resolve(
+                servletRequest, "spoofed-tenant", "spoofed-env", "RULE_SNAPSHOT_READER");
+        verify(service).definitions("tenant-a", "dev", null, null, null, null);
+        verify(service).definitionTimeline(definitionId, "tenant-a", "dev");
+        verify(service).materializations("tenant-a", "dev", null, null, null, null, null);
     }
 
     @Test
