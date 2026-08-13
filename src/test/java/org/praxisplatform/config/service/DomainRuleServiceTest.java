@@ -1810,6 +1810,424 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void calculationRequiresExplicitReactiveDeterminationTarget() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "sales.orders",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+
+        var response = service.simulate(
+                new DomainRuleSimulationRequest(
+                        null,
+                        "sales.orders.rule.total",
+                        "calculation",
+                        "sales",
+                        "sales.orders",
+                        "orders-api",
+                        objectMapper.readTree("""
+                                {
+                                  "summary": "Calculate the authoritative total after quantity changes."
+                                }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "reactiveDetermination": {
+                                    "operationId": "determineOrderTotal",
+                                    "idempotent": true,
+                                    "persistence": "none",
+                                    "finalCommandRevalidation": true,
+                                    "inputs": [
+                                      {"resourcePointer": "/quantity", "requestPointer": "/quantity"}
+                                    ],
+                                    "outputs": [
+                                      {"responsePointer": "/total", "resourcePointer": "/total"}
+                                    ]
+                                  }
+                                }
+                                """),
+                        null,
+                        objectMapper.readTree("{}")),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.predictedMaterializations()).hasSize(1);
+        assertThat(response.predictedMaterializations().get(0).path("targetLayer").asText())
+                .isEqualTo("shared_rule_review");
+        assertThat(response.predictedMaterializations().get(0).path("targetArtifactType").asText())
+                .isEqualTo("domain-rule-definition");
+    }
+
+    @Test
+    void reactiveDeterminationCoverageIsScopedToTheExactTargetCoordinate() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        DomainRuleDefinition existingDifferentTarget = reactiveDeterminationDefinition(
+                "sales.orders.rule.tax",
+                "sales.orders:tax");
+        DomainRuleDefinition existingExactTarget = reactiveDeterminationDefinition(
+                "sales.orders.rule.total.previous",
+                "sales.orders:total");
+        DomainRuleDefinition unresolvedLegacyTarget = reactiveDeterminationDefinition(
+                "sales.orders.rule.legacy",
+                "sales.orders:legacy");
+        unresolvedLegacyTarget.setParameters("{}");
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "sales.orders",
+                List.of("approved", "active")))
+                .thenReturn(
+                        List.of(existingDifferentTarget),
+                        List.of(existingExactTarget),
+                        List.of(unresolvedLegacyTarget));
+        var inputs = objectMapper.createArrayNode();
+        inputs.addObject().put("resourcePointer", "/quantity").put("requestPointer", "/quantity");
+        var outputs = objectMapper.createArrayNode();
+        outputs.addObject().put("responsePointer", "/total").put("resourcePointer", "/total");
+
+        var distinctTarget = service.simulate(
+                reactiveDeterminationSimulation(
+                        "determineOrderTotal",
+                        "sales.orders:total",
+                        inputs,
+                        outputs),
+                "tenant-a",
+                "dev");
+        var duplicateTarget = service.simulate(
+                reactiveDeterminationSimulation(
+                        "determineOrderTotal",
+                        "sales.orders:total",
+                        inputs,
+                        outputs),
+                "tenant-a",
+                "dev");
+        var unresolvedTarget = service.simulate(
+                reactiveDeterminationSimulation(
+                        "determineOrderTotal",
+                        "sales.orders:total",
+                        inputs,
+                        outputs),
+                "tenant-a",
+                "dev");
+
+        assertThat(distinctTarget.existingCoverage()).isEmpty();
+        assertThat(distinctTarget.result()).isEqualTo("pass");
+        assertThat(duplicateTarget.existingCoverage()).hasSize(1);
+        assertThat(duplicateTarget.existingCoverage().get(0).path("ruleKey").asText())
+                .isEqualTo("sales.orders.rule.total.previous");
+        assertThat(duplicateTarget.explainability().path("publicationReadiness").asText())
+                .isEqualTo("blocked_by_existing_coverage");
+        assertThat(unresolvedTarget.existingCoverage()).hasSize(1);
+        assertThat(unresolvedTarget.existingCoverage().get(0).path("ruleKey").asText())
+                .isEqualTo("sales.orders.rule.legacy");
+    }
+
+    @Test
+    void publishesExplicitCalculationAsCompiledBackendReactiveDetermination() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("sales.orders.rule.total")
+                .version(3)
+                .ruleType("calculation")
+                .status("approved")
+                .contextKey("sales")
+                .resourceKey("sales.orders")
+                .serviceKey("orders-api")
+                .definition("""
+                        {
+                          "summary": "Calculate the authoritative order total.",
+                          "materializationTargets": [
+                            {
+                              "targetLayer": "backend_determination",
+                              "targetArtifactType": "resource-reactive-determination",
+                              "targetArtifactKey": "sales.orders:total"
+                            }
+                          ]
+                        }
+                        """)
+                .parameters("""
+                        {
+                          "reactiveDetermination": {
+                            "operationId": "determineOrderTotal",
+                            "idempotent": true,
+                            "persistence": "none",
+                            "finalCommandRevalidation": true,
+                            "inputs": [
+                              {"resourcePointer": "/items", "requestPointer": "/items"},
+                              {"resourcePointer": "/currency", "requestPointer": "/currency"}
+                            ],
+                            "outputs": [
+                              {"responsePointer": "/netAmount", "resourcePointer": "/netAmount"},
+                              {"responsePointer": "/taxAmount", "resourcePointer": "/taxAmount"},
+                              {"responsePointer": "/totalAmount", "resourcePointer": "/totalAmount"}
+                            ]
+                          }
+                        }
+                        """)
+                .condition("{\"var\":\"items\"}")
+                .governance("{\"requiredApprovals\":[\"sales-owner\"]}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "sales.orders",
+                List.of("approved", "active")))
+                .thenReturn(List.of(reactiveDeterminationDefinition(
+                        "sales.orders.rule.tax",
+                        "sales.orders:tax")));
+        when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                "tenant-a",
+                "dev",
+                definitionId))
+                .thenReturn(List.of());
+        when(materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(
+                "tenant-a",
+                "dev",
+                "sales.orders.rule.total:backend_determination:sales.orders:total"))
+                .thenReturn(Optional.empty());
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
+            DomainRuleMaterialization materialization = invocation.getArgument(0);
+            materialization.onInsert();
+            return materialization;
+        });
+
+        var response = service.publish(
+                new DomainRulePublicationRequest(definitionId, null, true, null),
+                principal("sales-owner"));
+
+        assertThat(response.publicationStatus()).isEqualTo("published");
+        assertThat(response.materializations()).hasSize(1).first().satisfies(materialization -> {
+            JsonNode payload = materialization.materializedPayload();
+            assertThat(materialization.targetLayer()).isEqualTo("backend_determination");
+            assertThat(materialization.targetArtifactType()).isEqualTo("resource-reactive-determination");
+            assertThat(materialization.targetArtifactKey()).isEqualTo("sales.orders:total");
+            assertThat(materialization.targetPointer()).isEqualTo("/determination");
+            assertThat(materialization.materializedRuleId()).isEqualTo("backend-reactive-determination");
+            assertThat(materialization.status()).isEqualTo("applied");
+            assertThat(materialization.sourceHash()).startsWith("derived:sha256:");
+            assertThat(payload.path("schemaVersion").asText())
+                    .isEqualTo("praxis.backend-reactive-determination.v1");
+            assertThat(payload.path("kind").asText()).isEqualTo("backend_reactive_determination");
+            assertThat(payload.path("operationRef").path("operationId").asText())
+                    .isEqualTo("determineOrderTotal");
+            assertThat(payload.path("executionContract").path("idempotent").asBoolean()).isTrue();
+            assertThat(payload.path("executionContract").path("persistence").asText()).isEqualTo("none");
+            assertThat(payload.path("executionContract").path("finalCommandRevalidation").asBoolean()).isTrue();
+            assertThat(payload.path("inputs")).hasSize(2);
+            assertThat(payload.path("outputs")).hasSize(3);
+            assertThat(payload.path("activationCondition").path("var").asText()).isEqualTo("items");
+            assertThat(payload.has("tenantId")).isFalse();
+            assertThat(payload.has("environment")).isFalse();
+            assertThat(payload.path("operationRef").has("path")).isFalse();
+        });
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes")
+                .get(0)
+                .path("sourceHash")
+                .asText()).startsWith("derived:sha256:");
+    }
+
+    @Test
+    void rejectsReactiveDeterminationThatIsNotIdempotent() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "sales.orders",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.simulate(
+                new DomainRuleSimulationRequest(
+                        null,
+                        "sales.orders.rule.total",
+                        "calculation",
+                        "sales",
+                        "sales.orders",
+                        "orders-api",
+                        objectMapper.readTree("""
+                                {
+                                  "materializationTargets": [
+                                    {
+                                      "targetLayer": "backend_determination",
+                                      "targetArtifactType": "resource-reactive-determination",
+                                      "targetArtifactKey": "sales.orders:total"
+                                    }
+                                  ]
+                                }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "reactiveDetermination": {
+                                    "operationId": "determineOrderTotal",
+                                    "idempotent": false,
+                                    "persistence": "none",
+                                    "finalCommandRevalidation": true,
+                                    "inputs": [
+                                      {"resourcePointer": "/quantity", "requestPointer": "/quantity"}
+                                    ],
+                                    "outputs": [
+                                      {"responsePointer": "/total", "resourcePointer": "/total"}
+                                    ]
+                                  }
+                                }
+                                """),
+                        null,
+                        objectMapper.readTree("{}")),
+                "tenant-a",
+                "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("idempotent must be true");
+    }
+
+    @Test
+    void rejectsUnsafeReactiveDeterminationJsonPointers() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        for (String unsafePointer : List.of("/", "/customer//id", "/customer/", "/items/*", "/items/~2id")) {
+            var inputs = objectMapper.createArrayNode();
+            inputs.addObject()
+                    .put("resourcePointer", unsafePointer)
+                    .put("requestPointer", "/input");
+            var outputs = objectMapper.createArrayNode();
+            outputs.addObject()
+                    .put("responsePointer", "/total")
+                    .put("resourcePointer", "/calculatedTotal");
+
+            assertThatThrownBy(() -> service.simulate(
+                    reactiveDeterminationSimulation(
+                            "determineOrderTotal",
+                            "sales.orders:total",
+                            inputs,
+                            outputs),
+                    "tenant-a",
+                    "dev"))
+                    .as("unsafe pointer %s", unsafePointer)
+                    .isInstanceOf(ConfigurationIngestionException.class);
+        }
+    }
+
+    @Test
+    void rejectsDuplicateOrOverlappingReactiveDeterminationBindings() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        var duplicateRequests = objectMapper.createArrayNode();
+        duplicateRequests.addObject()
+                .put("resourcePointer", "/quantity")
+                .put("requestPointer", "/value");
+        duplicateRequests.addObject()
+                .put("resourcePointer", "/unitPrice")
+                .put("requestPointer", "/value");
+        var output = objectMapper.createArrayNode();
+        output.addObject()
+                .put("responsePointer", "/total")
+                .put("resourcePointer", "/calculatedTotal");
+
+        assertThatThrownBy(() -> service.simulate(
+                reactiveDeterminationSimulation(
+                        "determineOrderTotal",
+                        "sales.orders:total",
+                        duplicateRequests,
+                        output),
+                "tenant-a",
+                "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("requestPointer values must be unique and non-overlapping");
+
+        var input = objectMapper.createArrayNode();
+        input.addObject()
+                .put("resourcePointer", "/pricing")
+                .put("requestPointer", "/pricing");
+        var overlappingResourceOutput = objectMapper.createArrayNode();
+        overlappingResourceOutput.addObject()
+                .put("responsePointer", "/total")
+                .put("resourcePointer", "/pricing/total");
+
+        assertThatThrownBy(() -> service.simulate(
+                reactiveDeterminationSimulation(
+                        "determineOrderTotal",
+                        "sales.orders:total",
+                        input,
+                        overlappingResourceOutput),
+                "tenant-a",
+                "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("input and output resourcePointer values must not overlap");
+    }
+
+    @Test
+    void rejectsUnstableIdentifiersAndMoreThanSixtyFourReactiveBindings() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        var oneInput = objectMapper.createArrayNode();
+        oneInput.addObject().put("resourcePointer", "/quantity").put("requestPointer", "/quantity");
+        var oneOutput = objectMapper.createArrayNode();
+        oneOutput.addObject().put("responsePointer", "/total").put("resourcePointer", "/total");
+
+        assertThatThrownBy(() -> service.simulate(
+                reactiveDeterminationSimulation(
+                        "POST /orders/determine",
+                        "sales.orders:total",
+                        oneInput,
+                        oneOutput),
+                "tenant-a",
+                "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("operationId must be a stable identifier");
+
+        assertThatThrownBy(() -> service.simulate(
+                reactiveDeterminationSimulation(
+                        "determineOrderTotal",
+                        "sales/orders/total",
+                        oneInput,
+                        oneOutput),
+                "tenant-a",
+                "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("targetArtifactKey must be a stable identifier");
+
+        var tooManyInputs = objectMapper.createArrayNode();
+        for (int index = 0; index < 64; index++) {
+            tooManyInputs.addObject()
+                    .put("resourcePointer", "/source" + index)
+                    .put("requestPointer", "/input" + index);
+        }
+        assertThatThrownBy(() -> service.simulate(
+                reactiveDeterminationSimulation(
+                        "determineOrderTotal",
+                        "sales.orders:total",
+                        tooManyInputs,
+                        oneOutput),
+                "tenant-a",
+                "dev"))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("at most 64 input and output bindings in total");
+    }
+
+    @Test
     void doesNotPromotePolicyReferenceToOptionSourceFromResourceOrSummaryText() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
@@ -3185,6 +3603,83 @@ class DomainRuleServiceTest {
             org.praxisplatform.config.dto.DomainRulePublicationResponse response,
             String targetLayer) {
         return materializationFor(response, targetLayer).sourceHash();
+    }
+
+    private DomainRuleSimulationRequest reactiveDeterminationSimulation(
+            String operationId,
+            String targetArtifactKey,
+            JsonNode inputs,
+            JsonNode outputs) {
+        var definition = objectMapper.createObjectNode();
+        definition.putArray("materializationTargets")
+                .addObject()
+                .put("targetLayer", "backend_determination")
+                .put("targetArtifactType", "resource-reactive-determination")
+                .put("targetArtifactKey", targetArtifactKey);
+        var parameters = objectMapper.createObjectNode();
+        var determination = parameters.putObject("reactiveDetermination");
+        determination.put("operationId", operationId);
+        determination.put("idempotent", true);
+        determination.put("persistence", "none");
+        determination.put("finalCommandRevalidation", true);
+        determination.set("inputs", inputs);
+        determination.set("outputs", outputs);
+        return new DomainRuleSimulationRequest(
+                null,
+                "sales.orders.rule.total",
+                "calculation",
+                "sales",
+                "sales.orders",
+                "orders-api",
+                definition,
+                parameters,
+                null,
+                objectMapper.createObjectNode());
+    }
+
+    private DomainRuleDefinition reactiveDeterminationDefinition(
+            String ruleKey,
+            String targetArtifactKey) {
+        return DomainRuleDefinition.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey(ruleKey)
+                .version(1)
+                .ruleType("calculation")
+                .status("approved")
+                .contextKey("sales")
+                .resourceKey("sales.orders")
+                .serviceKey("orders-api")
+                .definition("""
+                        {
+                          "materializationTargets": [
+                            {
+                              "targetLayer": "backend_determination",
+                              "targetArtifactType": "resource-reactive-determination",
+                              "targetArtifactKey": "%s"
+                            }
+                          ]
+                        }
+                        """.formatted(targetArtifactKey))
+                .parameters("""
+                        {
+                          "reactiveDetermination": {
+                            "operationId": "determineOrderTotal",
+                            "idempotent": true,
+                            "persistence": "none",
+                            "finalCommandRevalidation": true,
+                            "inputs": [
+                              {"resourcePointer": "/quantity", "requestPointer": "/quantity"}
+                            ],
+                            "outputs": [
+                              {"responsePointer": "/total", "resourcePointer": "/total"}
+                            ]
+                          }
+                        }
+                        """)
+                .governance("{}")
+                .build();
     }
 
     private org.praxisplatform.config.dto.DomainRuleMaterializationResponse materializationFor(
