@@ -149,9 +149,43 @@ class DomainRuleSnapshotServiceTest {
     assertThat(response.snapshotContentHash()).matches("[A-F0-9]{64}");
     assertThat(response.headEtag()).isNotEqualTo(response.snapshotContentHash());
     verify(snapshotRepository).save(any(DomainRuleSnapshot.class));
+    verify(headRepository).saveAndFlush(argThat(head -> head.getRowVersion() == null));
     verify(eventRepository).save(argThat(argThatEvent("PUBLISHED", 1L)));
     verify(implementationCatalog, times(1)).allowedImplementations(
         new DomainRuleImplementationScope("tenant-a", "prod", "quickstart"));
+  }
+
+  @Test
+  void publishesOrderedReactiveDeterminationsAsOneImmutableAggregateHead() {
+    UUID netSalaryId = UUID.randomUUID();
+    UUID paymentDateId = UUID.randomUUID();
+    when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "human-resources.payroll.reactive-determinations"))
+        .thenReturn(Optional.empty());
+    when(definitionRepository.findAllById(List.of(netSalaryId, paymentDateId))).thenReturn(List.of(
+        approvedDefinition(netSalaryId, "human-resources.payroll.net-salary", "approver-a"),
+        approvedDefinition(paymentDateId, "human-resources.payroll.payment-date", "approver-b")));
+
+    var response = service.publish(
+        publicationRequest(payrollReactiveDeterminations(1), List.of(netSalaryId, paymentDateId)),
+        "tenant-a", "prod", null, "*");
+
+    assertThat(response.snapshot().ruleSet().bindings())
+        .extracting(DecisionBinding::bindingKey)
+        .containsExactly(
+            "human-resources.payroll.net-salary",
+            "human-resources.payroll.payment-date");
+    assertThat(response.snapshot().ruleSet().bindings().get(1).dependsOn())
+        .containsExactly("human-resources.payroll.net-salary");
+    assertThat(response.snapshot().sources())
+        .extracting(RuleSnapshotSource::definitionKey)
+        .containsExactlyInAnyOrder(
+            "human-resources.payroll.net-salary",
+            "human-resources.payroll.payment-date");
+    assertThat(response.activationRevision()).isEqualTo(1);
+    verify(headRepository).saveAndFlush(argThat(head ->
+        "human-resources.payroll.reactive-determinations".equals(head.getRuleSetKey())
+            && head.getActivationRevision() == 1L));
   }
 
   @Test
@@ -1019,6 +1053,41 @@ class DomainRuleSnapshotServiceTest {
 
   private RuleSetDefinition javaRuleSet() {
     return javaRuleSet("1.0.0");
+  }
+
+  private RuleSetDefinition payrollReactiveDeterminations(int version) {
+    var netSalary = objectMapper.createObjectNode();
+    netSalary.put("var", "payroll.salarioBruto");
+    var paymentDate = objectMapper.createObjectNode();
+    paymentDate.put("var", "payroll.ano");
+    String netKey = "human-resources.payroll.net-salary";
+    String paymentKey = "human-resources.payroll.payment-date";
+    return new RuleSetDefinition(
+        new RuleSetRef(
+            "human-resources", "human-resources.payroll",
+            "human-resources.payroll.reactive-determinations",
+            "determine-payroll-derived-fields", version),
+        List.of("payroll"),
+        List.of(
+            new DecisionSlot(
+                netKey, DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
+                OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT),
+            new DecisionSlot(
+                paymentKey, DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
+                OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT)),
+        List.of(
+            new DecisionBinding(
+                netKey, netKey, DecisionSource.PRODUCT, null,
+                RuleExecutorRef.jsonLogic(netSalary), List.of(), 10, true,
+                RuleDecision.INCONCLUSIVE, "NET_SALARY_UNAVAILABLE",
+                List.of("payroll.salarioBruto", "payroll.totalDescontos")),
+            new DecisionBinding(
+                paymentKey, paymentKey, DecisionSource.PRODUCT, null,
+                RuleExecutorRef.jsonLogic(paymentDate), List.of(netKey), 20, true,
+                RuleDecision.INCONCLUSIVE, "PAYMENT_DATE_UNAVAILABLE",
+                List.of("payroll.ano", "payroll.mes", "payroll.salarioLiquido"))),
+        RuleRuntimeCompatibility.current(),
+        RuleFailPolicy.FAIL_CLOSED);
   }
 
   private RuleSetDefinition javaRuleSet(String implementationVersion) {

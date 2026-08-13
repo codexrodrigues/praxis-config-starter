@@ -34,6 +34,13 @@ Each scoped RuleSet has three independent records:
 - append-only publication/activation/rollback events with monotonic
   `activationRevision`.
 
+The RuleSet is also the atomic composition boundary. When multiple reactive
+determinations have an ordering dependency or must roll forward/back together,
+all bindings belong to one immutable snapshot and one scoped head. Publishing
+separate materialization heads for each step would permit mixed revisions inside
+one business operation and is therefore not a valid corporate runtime design.
+The colocated host must pin one verified head for the complete operation.
+
 The content hash is deliberately not the head ETag. Every activation, including
 rollback from v2 to v1, rotates the opaque head ETag. This prevents an ABA race
 where a stale client could mistake the reselected v1 head for the original v1
@@ -175,6 +182,34 @@ The admission catalog and executable registry must resolve the same exact
 coordinates. The Config Starter does not load plugins or verify signatures, and
 the engine is not a sandbox. A host must not register arbitrary tenant code in
 the application process.
+
+## PostgreSQL concurrency and host LKG proof
+
+The scoped mutable head is serialized with a pessimistic write lock on
+`tenantId + environment + ruleSetKey`. The integration gate below starts a clean,
+ephemeral PostgreSQL 14 process, applies the canonical snapshot-control-plane
+migrations and stops the process after the tests. It proves that two concurrent writers
+cannot advance the same head simultaneously and that rollback selects existing
+immutable content while rotating the ETag, increasing `activationRevision` and
+appending one auditable event.
+
+```shell
+mvn -Dtest=DomainRuleSnapshotHeadRepositoryConcurrencyTest test
+```
+
+Last-known-good retention and readiness are deliberately host-runtime concerns,
+not a second cache owned by the Config Starter. The Quickstart reference runtime
+loads through `PublishedRuleSnapshotHeadReader`, compiles and verifies a candidate
+before atomically replacing its active reference, and retains the previous
+effective plan when the control plane is unavailable. Its focused proof is:
+
+```shell
+cd ../praxis-api-quickstart
+mvn -Dtest=ExtraordinaryGrantRuleSnapshotRuntimeTest test
+```
+
+An outage never makes expired content ready: the runtime recomputes temporal
+effectiveness when reporting status or capturing an evaluation session.
 
 ## Host catalog example
 

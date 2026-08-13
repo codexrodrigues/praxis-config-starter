@@ -64,6 +64,19 @@ class DomainRuleMigrationConstraintTest {
     }
 
     @Test
+    void materializationHeadMigrationSupersedesLegacyDuplicatesAndEnforcesOneAppliedTarget() throws IOException {
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/V55__enforce_single_applied_materialization_head.sql"));
+
+        assertThat(migration).contains("definition.status <> 'active'");
+        assertThat(migration).contains("row_number() OVER");
+        assertThat(migration).contains("head_rank > 1");
+        assertThat(migration).contains("uq_domain_rule_materialization_applied_target_head");
+        assertThat(migration).contains("WHERE status = 'applied'");
+        assertThat(migration).contains("'materialization.superseded'");
+    }
+
+    @Test
     void cleanInstallBaselineIncludesSnapshotControlPlaneSchema() throws IOException {
         String baseline = Files.readString(Path.of(
                 "src/main/resources/db/baseline/V1__baseline.sql"));

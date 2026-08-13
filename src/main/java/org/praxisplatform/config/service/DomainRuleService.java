@@ -371,6 +371,9 @@ public class DomainRuleService {
             }
         }
         DomainRuleDefinition saved = definitionRepository.save(definition);
+        if (isTerminalOrInactiveDefinitionStatus(status)) {
+            supersedeAppliedMaterializationsForDefinition(saved, principal, now);
+        }
         if (isApprovalSatisfiedDefinitionStatus(status)) {
             persistDefinitionApproval(saved, principal.actorRef(), now);
         }
@@ -2802,6 +2805,15 @@ public class DomainRuleService {
             DomainRuleMaterialization materialization,
             DomainRuleGovernancePrincipal principal,
             Instant now) {
+        if ("draft".equals(materialization.getStatus())
+                || "pending_review".equals(materialization.getStatus())
+                || "applied".equals(materialization.getStatus())) {
+            if (!hasActiveDefinition(materialization)) {
+                throw new ConfigurationIngestionException(
+                        "Rule materialization can only be applied when its definition is active");
+            }
+            supersedeAppliedTargetHeads(materialization, principal, now);
+        }
         if ("draft".equals(materialization.getStatus()) || "pending_review".equals(materialization.getStatus())) {
             materialization.setStatus("applied");
             materialization.setAppliedByType("authenticated");
@@ -2851,6 +2863,7 @@ public class DomainRuleService {
                             targetArtifactKey.trim())
                     .stream()
                     .filter(materialization -> !StringUtils.hasText(status) || status.trim().equals(materialization.getStatus()))
+                    .filter(materialization -> isRuntimeEligibleMaterialization(materialization, status))
                     .sorted(materializationComparator())
                     .map(this::toResponse)
                     .toList();
@@ -2859,6 +2872,7 @@ public class DomainRuleService {
             return materializationRepository
                     .findByTenantIdAndEnvironmentAndStatus(resolvedTenant, resolvedEnvironment, status.trim())
                     .stream()
+                    .filter(materialization -> isRuntimeEligibleMaterialization(materialization, status))
                     .sorted(materializationComparator())
                     .map(this::toResponse)
                     .toList();
@@ -2962,12 +2976,16 @@ public class DomainRuleService {
         }
 
         String previousStatus = materialization.getStatus();
+        Instant now = Instant.now();
+        if ("applied".equals(status)) {
+            supersedeAppliedTargetHeads(materialization, principal, now);
+        }
         materialization.setStatus(status);
         materialization.setValidationResult(writeNullable(request.validationResult()));
         if ("applied".equals(status) && !"applied".equals(previousStatus)) {
             materialization.setAppliedByType("authenticated");
             materialization.setAppliedBy(principal.actorRef());
-            materialization.setAppliedAt(Instant.now());
+            materialization.setAppliedAt(now);
         }
         DomainRuleMaterialization saved = materializationRepository.save(materialization);
         if ("applied".equals(status) && !"applied".equals(previousStatus)) {
@@ -3292,6 +3310,61 @@ public class DomainRuleService {
     private boolean hasActiveDefinition(DomainRuleMaterialization materialization) {
         DomainRuleDefinition definition = materialization.getRuleDefinition();
         return definition != null && "active".equals(definition.getStatus());
+    }
+
+    private boolean isRuntimeEligibleMaterialization(
+            DomainRuleMaterialization materialization,
+            String requestedStatus) {
+        return !"applied".equals(normalize(requestedStatus)) || hasActiveDefinition(materialization);
+    }
+
+    private void supersedeAppliedMaterializationsForDefinition(
+            DomainRuleDefinition definition,
+            DomainRuleGovernancePrincipal principal,
+            Instant now) {
+        materializationRepository.findForUpdateByDefinition(
+                        normalize(definition.getTenantId()),
+                        normalize(definition.getEnvironment()),
+                        definition.getId())
+                .stream()
+                .filter(materialization -> "applied".equals(materialization.getStatus()))
+                .forEach(materialization -> supersedeMaterialization(materialization, principal, now));
+    }
+
+    private void supersedeAppliedTargetHeads(
+            DomainRuleMaterialization selected,
+            DomainRuleGovernancePrincipal principal,
+            Instant now) {
+        List<DomainRuleMaterialization> superseded = materializationRepository.findAppliedForUpdateByExactTarget(
+                        normalize(selected.getTenantId()),
+                        normalize(selected.getEnvironment()),
+                        selected.getTargetLayer(),
+                        selected.getTargetArtifactType(),
+                        selected.getTargetArtifactKey())
+                .stream()
+                .filter(existing -> !existing.getId().equals(selected.getId()))
+                .toList();
+        superseded.forEach(existing -> supersedeMaterialization(existing, principal, now));
+        if (!superseded.isEmpty()) {
+            // The partial unique index is immediate in PostgreSQL. Flush the previous head first so
+            // the selected projection can become applied without relying on Hibernate update order.
+            materializationRepository.flush();
+        }
+    }
+
+    private void supersedeMaterialization(
+            DomainRuleMaterialization materialization,
+            DomainRuleGovernancePrincipal principal,
+            Instant now) {
+        materialization.setStatus("superseded");
+        DomainRuleMaterialization saved = materializationRepository.save(materialization);
+        recordMaterializationEvent(
+                saved,
+                "materialization.superseded",
+                now,
+                "authenticated",
+                principal.actorRef(),
+                "Decision materialization superseded by the governed target head");
     }
 
     private DomainCatalogRelease resolveRelease(UUID releaseId) {

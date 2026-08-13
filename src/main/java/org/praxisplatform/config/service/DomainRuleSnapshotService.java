@@ -274,7 +274,6 @@ public class DomainRuleSnapshotService {
         .environment(env)
         .ruleSetKey(ruleSetKey)
         .activationRevision(0L)
-        .rowVersion(0L)
         .build());
     UUID fromSnapshotId = head.getActiveSnapshotId();
     activate(head, persisted.getId(), now);
