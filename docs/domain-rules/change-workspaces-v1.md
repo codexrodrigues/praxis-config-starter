@@ -8,10 +8,18 @@ canonical fingerprint of one persisted `domain_rule_definition`.
 
 - Definition lifecycle, approvals, publication and immutable snapshots: `ja-suportado-so-ux`.
 - Structural readiness currently named simulation: `ja-suportado-mal-nomeado-ou-mal-materializado`.
-- Collaborative draft with base fingerprint and optimistic concurrency: `lacuna-real-de-contrato`.
-- Reusable facts and expected five-state outcome: `lacuna-real-de-contrato`.
-- Candidate/active/legacy evaluation: remains a host-owned `lacuna-real-de-contrato`; Config does
-  not execute business rules.
+- Collaborative draft with base fingerprint and optimistic concurrency:
+  `ja-suportado-mal-nomeado-ou-mal-materializado`; o contrato está implementado,
+  mas discovery/actions/blockers do workspace ainda não são server-owned.
+- Reusable facts, expected five-state outcome and immutable Test Run:
+  `suportado-parcialmente`; `expectedOutput` é persistido, mas ainda não participa
+  do resultado/gate do host de referência.
+- Candidate/active evaluation: `suportado-parcialmente` por adapter host-owned; o
+  Config armazena evidência redigida e não executa regras.
+- Candidate/legacy evidence and comparison: `lacuna-real-de-contrato`; requer
+  provenance, status HTTP/campo, before/after, effects, no-mutation e cleanup.
+- Output, reason codes and planned effects as acceptance gates:
+  `lacuna-real-de-contrato` no Test Run atual.
 
 The Config Starter owns workspace and scenario persistence. The Rules Engine owns deterministic
 evaluation semantics. The host owns fact resolution, executable registries and sandbox execution.
@@ -64,7 +72,7 @@ Reads require `RULE_DEFINITION_READER`; draft, scenario, test-run and submission
 returned as not found. Wildcard `If-Match` is rejected for mutations so a client cannot bypass
 reconciliation.
 
-## Next vertical: sandbox runs
+## Sandbox runs implementados e limites restantes
 
 A sandbox run must freeze facts, `nowUtc`, timezone and actor context once, then evaluate:
 
@@ -76,3 +84,15 @@ The implemented run ledger persists immutable per-scenario decisions, exact snap
 fingerprints, plan/facts digests and comparison classification. It never stores raw facts or
 snapshot content, executes effects or promotes a candidate. Config receives safe host evidence,
 but it does not receive Java executors or become the evaluation runtime.
+
+The current record proves only the canonical five-state decision against the
+scenario expectation. Although a scenario stores `expectedOutput`, the Test Run
+does not carry `candidateOutput`, `outputMatchesExpected`, expected reason codes
+or expected planned effects. A corporate submission gate must add those fields at
+the canonical Config contract and require the host to derive them from the same
+frozen evaluation. A browser-only comparison is not acceptable.
+
+Workspace responses also do not yet expose `availableActions` and `blockers` for
+the authenticated principal. Clients must not infer review, promotion, submission
+or publication authority from `status`; this remains a pre-production contract
+gap shared with the public `@praxisui/core` client.
