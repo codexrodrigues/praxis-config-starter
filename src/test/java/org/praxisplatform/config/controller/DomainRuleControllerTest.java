@@ -600,7 +600,7 @@ class DomainRuleControllerTest {
         DomainRuleController controller = new DomainRuleController(service, resolver);
         HttpServletRequest servletRequest = servletRequest();
         UUID definitionId = UUID.randomUUID();
-        when(resolver.resolve(servletRequest, "caller-tenant", "caller-env", "RULE_DEFINITION_READER"))
+        when(resolver.resolve(servletRequest, "caller-tenant", "caller-env", "RULE_SNAPSHOT_READER"))
                 .thenReturn(PRINCIPAL);
 
         controller.definitions(
@@ -611,8 +611,8 @@ class DomainRuleControllerTest {
         controller.materializations(
                 "caller-tenant", "caller-env", null, null, null, null, null, servletRequest);
 
-        verify(resolver, org.mockito.Mockito.times(4)).resolve(
-                servletRequest, "caller-tenant", "caller-env", "RULE_DEFINITION_READER");
+        verify(resolver, org.mockito.Mockito.times(3)).resolve(
+                servletRequest, "caller-tenant", "caller-env", "RULE_SNAPSHOT_READER");
         verify(service).definitions("tenant-a", "dev", null, null, null, null);
         verify(service).definition(definitionId, PRINCIPAL);
         verify(service).definitionTimeline(definitionId, "tenant-a", "dev");
