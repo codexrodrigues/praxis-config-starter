@@ -28,10 +28,16 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanP
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
 import org.praxisplatform.config.repository.AiRegistryRepository;
+import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.praxisplatform.config.repository.DomainRuleEventRepository;
+import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.AiRegistryTemplateService;
 import org.praxisplatform.config.service.AiTurnEventService;
+import org.praxisplatform.config.service.DomainRuleDefinitionFingerprint;
+import org.praxisplatform.config.service.DomainRuleExplanationProjectionService;
+import org.praxisplatform.config.service.DomainRuleService;
 import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -42,7 +48,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 class AgenticAuthoringAutoConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(AgenticAuthoringAutoConfiguration.class))
+            .withConfiguration(AutoConfigurations.of(
+                    DomainRuleExplanationAutoConfiguration.class,
+                    AgenticAuthoringAutoConfiguration.class))
             .withBean(ObjectMapper.class, ObjectMapper::new);
 
     @Test
@@ -68,6 +76,28 @@ class AgenticAuthoringAutoConfigurationTest {
             assertThat(context).doesNotHaveBean(AgenticAuthoringReplayAuditService.class);
             assertThat(context).doesNotHaveBean(ApplicationRunner.class);
         });
+    }
+
+    @Test
+    void shouldRegisterDomainDecisionExplanationProjectionWhenRuleControlPlaneIsAvailable() {
+        DomainRuleService domainRuleService = org.mockito.Mockito.mock(DomainRuleService.class);
+        DomainRuleDefinitionFingerprint fingerprint =
+                org.mockito.Mockito.mock(DomainRuleDefinitionFingerprint.class);
+
+        contextRunner
+                .withBean(DomainRuleDefinitionRepository.class,
+                        () -> org.mockito.Mockito.mock(DomainRuleDefinitionRepository.class))
+                .withBean(DomainRuleMaterializationRepository.class,
+                        () -> org.mockito.Mockito.mock(DomainRuleMaterializationRepository.class))
+                .withBean(DomainRuleEventRepository.class,
+                        () -> org.mockito.Mockito.mock(DomainRuleEventRepository.class))
+                .withBean(DomainRuleService.class, () -> domainRuleService)
+                .withBean(DomainRuleDefinitionFingerprint.class, () -> fingerprint)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(DomainRuleService.class);
+                    assertThat(context).hasSingleBean(DomainRuleDefinitionFingerprint.class);
+                    assertThat(context).hasSingleBean(DomainRuleExplanationProjectionService.class);
+                });
     }
 
     @Test

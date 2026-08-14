@@ -1960,6 +1960,91 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     }
 
     @Test
+    void selectedDomainDecisionExplanationNormalizesToReadOnlyConsultativeTuple() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "semanticIntentClass": "domain_decision_guidance",
+                  "operationKind": "modify",
+                  "artifactKind": "component",
+                  "changeKind": "explain_domain_decision",
+                  "selectedResourcePath": "/api/should-not-survive",
+                  "resourceSearchQuery": "should-not-survive",
+                  "followUpKind": "refinement",
+                  "requiresGovernedAuthoring": true,
+                  "assistantMessage": "Vou explicar a decisão selecionada.",
+                  "visualizationDecision": {
+                    "artifactKind": "page",
+                    "primaryComponent": "praxis-table",
+                    "layoutKind": "single",
+                    "axes": []
+                  },
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": ["Confirma?"],
+                  "warnings": []
+                }
+                """));
+
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("selectedDomainDecisionRef")
+                .put("schemaVersion", "praxis.ai.context-hints.domain-decision/v1")
+                .put("definitionId", "758db752-19f0-4ab6-afd8-33f34eacb447")
+                .put("ruleKey", "human-resources.example")
+                .put("version", 3)
+                .put("source", "policy-studio-selection");
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        new AgenticAuthoringIntentResolutionRequest(
+                                "Explique esta decisão",
+                                "policy-studio",
+                                null,
+                                "/policy-studio",
+                                contextHints,
+                                null,
+                                "openai",
+                                "gpt-5.4-mini",
+                                "test-key"),
+                        "Explique esta decisão",
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(result.semanticIntentClass()).isEqualTo("domain_decision_guidance");
+        assertThat(result.operationKind()).isEqualTo("explain");
+        assertThat(result.artifactKind()).isEqualTo("domain_decision");
+        assertThat(result.changeKind()).isEqualTo("explain_domain_decision");
+        assertThat(result.selectedResourcePath()).isNull();
+        assertThat(result.resourceSearchQuery()).isNull();
+        assertThat(result.followUpKind()).isEqualTo("none");
+        assertThat(result.requiresGovernedAuthoring()).isFalse();
+        assertThat(result.visualizationDecision()).isNull();
+        assertThat(result.clarificationQuestions()).isEmpty();
+        assertThat(result.warnings()).contains("llm-semantic-intent-tuple-normalized");
+        Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
     void semanticReconciliationForcesTheFullIntentPass() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);

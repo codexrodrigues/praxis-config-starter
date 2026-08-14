@@ -1618,7 +1618,7 @@ components:
       required: false
       schema:
         type: string
-        default: d817fcf351207371c5cb8528b70c0ba6830648710581b08c7cc2b2b428989289
+        default: 2af79434993fed5cdcbe5298fc50f82d719362217f9b44b227537397ceac2a41
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1648,7 +1648,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: d817fcf351207371c5cb8528b70c0ba6830648710581b08c7cc2b2b428989289
+        example: 2af79434993fed5cdcbe5298fc50f82d719362217f9b44b227537397ceac2a41
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -2038,6 +2038,8 @@ components:
               properties:
                 domainCatalog:
                   $ref: '#/components/schemas/AiDomainCatalogContextHint'
+                selectedDomainDecisionRef:
+                  $ref: '#/components/schemas/AiSelectedDomainDecisionRef'
               additionalProperties: true
               description: Dados estruturados preservados de acoes do assistente, como chips de recurso.
 
@@ -2072,6 +2074,8 @@ components:
               properties:
                 domainCatalog:
                   $ref: '#/components/schemas/AiDomainCatalogContextHint'
+                selectedDomainDecisionRef:
+                  $ref: '#/components/schemas/AiSelectedDomainDecisionRef'
               description: Dados estruturados preservados de acoes do assistente, como chips de recurso.
 
     AgenticAuthoringTurnStreamRequest:
@@ -2114,6 +2118,8 @@ components:
               nullable: true
               additionalProperties: true
               properties:
+                selectedDomainDecisionRef:
+                  $ref: '#/components/schemas/AiSelectedDomainDecisionRef'
                 agenticApplyTarget:
                   $ref: '#/components/schemas/AgenticAuthoringApplyTarget'
                 clientActions:
@@ -2403,7 +2409,7 @@ components:
           nullable: true
           description: >-
             Evidencia consultiva sanitizada do turno. Pode incluir
-            runtimeConsultableContext, runtimeRelatedSurfaceResolution,
+            domainDecision, runtimeConsultableContext, runtimeRelatedSurfaceResolution,
             runtimeToolPlan, runtimeRelatedSurfaceReads[],
             runtimeRelatedSurfaceDisambiguation, runtimeRelatedSurfaceSummary,
             runtimeRelatedSurfaceCompare e o alias beta runtimeRelatedSurfaceRead.
@@ -3334,6 +3340,32 @@ components:
           description: Valor estruturado seguro da opcao selecionavel, por exemplo refs de uma runtimeRelatedSurfaceDisambiguationSelection.
           additionalProperties: true
       additionalProperties: true
+
+    AiSelectedDomainDecisionRef:
+      type: object
+      required: [schemaVersion, definitionId, ruleKey, version, source]
+      description: >-
+        Referencia exata e nao autoritativa da decisao selecionada no Policy Studio.
+        O backend deve reler definitionId e reconciliar ruleKey, version, tenant e
+        environment sob o principal server-owned antes de produzir evidencia.
+      properties:
+        schemaVersion:
+          type: string
+          enum: [praxis.ai.context-hints.domain-decision/v1]
+        definitionId:
+          type: string
+          format: uuid
+        ruleKey:
+          type: string
+          minLength: 1
+        version:
+          type: integer
+          format: int32
+          minimum: 1
+        source:
+          type: string
+          enum: [policy-studio-selection]
+      additionalProperties: false
 
     AiDomainCatalogContextHint:
       type: object

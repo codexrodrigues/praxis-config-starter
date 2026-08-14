@@ -243,7 +243,16 @@ export type AgenticAuthoringApplyTargetContract = AgenticAuthoringApplyTargetBas
 
 export interface AiContextHintsContract {
   domainCatalog?: AiDomainCatalogContextHintContract;
-  [key: string]: AiJsonValue | AiDomainCatalogContextHintContract | undefined;
+  selectedDomainDecisionRef?: AiSelectedDomainDecisionRefContract;
+  [key: string]: AiJsonValue | AiDomainCatalogContextHintContract | AiSelectedDomainDecisionRefContract | undefined;
+}
+
+export interface AiSelectedDomainDecisionRefContract {
+  schemaVersion: 'praxis.ai.context-hints.domain-decision/v1';
+  definitionId: string;
+  ruleKey: string;
+  version: number;
+  source: 'policy-studio-selection';
 }
 
 export interface AgenticAuthoringClientActionContract {
@@ -257,9 +266,10 @@ export interface AgenticAuthoringClientActionContract {
 
 export interface AgenticAuthoringTurnStreamContextHintsContract {
   domainCatalog?: AiDomainCatalogContextHintContract;
+  selectedDomainDecisionRef?: AiSelectedDomainDecisionRefContract;
   agenticApplyTarget?: AgenticAuthoringApplyTargetContract;
   clientActions?: AgenticAuthoringClientActionContract[];
-  [key: string]: AiJsonValue | AiDomainCatalogContextHintContract | AgenticAuthoringApplyTargetContract | AgenticAuthoringClientActionContract[] | undefined;
+  [key: string]: AiJsonValue | AiDomainCatalogContextHintContract | AiSelectedDomainDecisionRefContract | AgenticAuthoringApplyTargetContract | AgenticAuthoringClientActionContract[] | undefined;
 }
 
 export interface AiSchemaContextContract {
@@ -754,6 +764,7 @@ export interface AgenticAuthoringTurnResultPayloadContract {
   applyTarget?: AgenticAuthoringApplyTargetContract | null;
   clientAction?: AgenticAuthoringClientActionContract | null;
   decisionDiagnostics?: AgenticAuthoringDecisionDiagnosticsContract | null;
+  evidenceBundle?: AiJsonObject | null;
   toolLoopTrace?: AiJsonObject[] | null;
   [key: string]: AiJsonValue | AgenticAuthoringIntentResolutionResultContract | AgenticAuthoringPreviewResultContract | AgenticAuthoringQuickReplyContract[] | AgenticAuthoringApplyTargetContract | AgenticAuthoringClientActionContract | AgenticAuthoringDecisionDiagnosticsContract | AiJsonObject[] | undefined;
 }

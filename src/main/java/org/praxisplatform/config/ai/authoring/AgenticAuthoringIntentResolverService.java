@@ -10454,6 +10454,7 @@ public class AgenticAuthoringIntentResolverService {
             String assistantMessage) {
         if (llmIntent == null
                 || "platform_guidance".equals(llmIntent.semanticIntentClass())
+                || "domain_decision_guidance".equals(llmIntent.semanticIntentClass())
                 || llmIntent.quickReplies() == null
                 || !llmIntent.quickReplies().isEmpty()
                 || gate == null

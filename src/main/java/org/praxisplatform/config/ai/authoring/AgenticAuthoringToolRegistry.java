@@ -16,12 +16,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
+import org.praxisplatform.config.service.DomainRuleExplanationProjectionService;
+import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
 import org.praxisplatform.config.service.LiveOptionValueRetrievalRequest;
 import org.praxisplatform.config.service.LiveOptionValueRetrievalResult;
 import org.praxisplatform.config.service.LiveOptionValueRetrievalService;
@@ -46,6 +49,7 @@ public class AgenticAuthoringToolRegistry {
     static final String INSPECT_DOMAIN_BINDINGS = "inspectDomainBindings";
     static final String VERIFY_DOMAIN_OPERATION = "verifyDomainOperation";
     static final String SEARCH_OPTION_SOURCE_VALUES = "searchOptionSourceValues";
+    static final String INSPECT_DOMAIN_DECISION = "inspectDomainDecision";
 
     private final Map<String, AgenticAuthoringToolExecutor> executors;
 
@@ -195,6 +199,36 @@ public class AgenticAuthoringToolRegistry {
             DomainCatalogIngestionService domainCatalogIngestionService,
             String domainCatalogServiceKey,
             LiveOptionValueRetrievalService liveOptionValueRetrievalService) {
+        this(
+                resourceDiscoveryService,
+                contextRetrievalService,
+                manifestService,
+                schemaRetrievalService,
+                objectMapper,
+                presentationAffordanceDiscoveryService,
+                projectKnowledgeService,
+                domainBindingService,
+                operationalVerificationService,
+                domainCatalogIngestionService,
+                domainCatalogServiceKey,
+                liveOptionValueRetrievalService,
+                null);
+    }
+
+    public AgenticAuthoringToolRegistry(
+            AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
+            ContextRetrievalService contextRetrievalService,
+            AgenticAuthoringManifestService manifestService,
+            SchemaRetrievalService schemaRetrievalService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringPresentationAffordanceDiscoveryService presentationAffordanceDiscoveryService,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            AgenticAuthoringDomainBindingService domainBindingService,
+            AgenticAuthoringOperationalBindingVerificationService operationalVerificationService,
+            DomainCatalogIngestionService domainCatalogIngestionService,
+            String domainCatalogServiceKey,
+            LiveOptionValueRetrievalService liveOptionValueRetrievalService,
+            DomainRuleExplanationProjectionService domainRuleExplanationProjectionService) {
         Map<String, AgenticAuthoringToolExecutor> registered = new LinkedHashMap<>();
         register(registered, new SearchApiResourcesToolExecutor(
                 resourceDiscoveryService, domainBindingService, operationalVerificationService));
@@ -233,7 +267,102 @@ public class AgenticAuthoringToolRegistry {
         register(registered, new DomainBindingInspectionToolExecutor(domainBindingService));
         register(registered, new DomainOperationVerificationToolExecutor(operationalVerificationService));
         register(registered, new LiveOptionSourceValueSearchToolExecutor(liveOptionValueRetrievalService));
+        if (domainRuleExplanationProjectionService != null) {
+            register(registered, new DomainDecisionInspectionToolExecutor(domainRuleExplanationProjectionService));
+        }
         this.executors = Map.copyOf(registered);
+    }
+
+    private static final class DomainDecisionInspectionToolExecutor implements AgenticAuthoringToolExecutor {
+
+        private static final String SELECTION_SCHEMA = "praxis.ai.context-hints.domain-decision/v1";
+        private static final String SELECTION_SOURCE = "policy-studio-selection";
+
+        private static final AgenticAuthoringToolDefinition DEFINITION = new AgenticAuthoringToolDefinition(
+                INSPECT_DOMAIN_DECISION,
+                Set.of("advisory_authoring"),
+                Set.of("retrieveEvidence"),
+                "praxis-config-starter:/api/praxis/config/domain-rules/definitions/{definitionId}",
+                "read_only",
+                "governed_domain_decision_explanation",
+                "domain-decision-explanation-redaction.v1");
+
+        private final DomainRuleExplanationProjectionService projectionService;
+
+        private DomainDecisionInspectionToolExecutor(
+                DomainRuleExplanationProjectionService projectionService) {
+            this.projectionService = Objects.requireNonNull(
+                    projectionService, "projectionService must not be null");
+        }
+
+        @Override
+        public AgenticAuthoringToolDefinition definition() {
+            return DEFINITION;
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call) {
+            return execute(call, null);
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(
+                AgenticAuthoringToolCall call,
+                AiPrincipalContext principalContext) {
+            if (!(call.payload() instanceof JsonNode payload) || !payload.isObject()) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(),
+                        "tool-payload-invalid",
+                        "inspectDomainDecision requires an exact selectedDomainDecisionRef payload.");
+            }
+            if (principalContext == null
+                    || !StringUtils.hasText(principalContext.tenantId())
+                    || !StringUtils.hasText(principalContext.environment())
+                    || !StringUtils.hasText(principalContext.userId())) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(),
+                        "governed-principal-required",
+                        "Domain decision explanation requires a server-resolved governed principal.");
+            }
+            if (!SELECTION_SCHEMA.equals(payload.path("schemaVersion").asText(""))
+                    || !SELECTION_SOURCE.equals(payload.path("source").asText(""))) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(),
+                        "decision-ref-contract-invalid",
+                        "selectedDomainDecisionRef requires the canonical schemaVersion and source.");
+            }
+            UUID definitionId;
+            try {
+                definitionId = UUID.fromString(payload.path("definitionId").asText(""));
+            } catch (IllegalArgumentException ex) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(), "definition-id-invalid", "definitionId must be a UUID.");
+            }
+            String ruleKey = payload.path("ruleKey").asText("").trim();
+            JsonNode versionNode = payload.path("version");
+            if (ruleKey.isEmpty() || !versionNode.canConvertToInt() || versionNode.asInt() <= 0) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(),
+                        "decision-ref-incomplete",
+                        "selectedDomainDecisionRef requires ruleKey and a positive version.");
+            }
+            var projection = projectionService.project(
+                    definitionId,
+                    ruleKey,
+                    versionNode.asInt(),
+                    new DomainRuleGovernancePrincipal(
+                            principalContext.tenantId(),
+                            principalContext.userId(),
+                            principalContext.environment()));
+            return AgenticAuthoringToolResult.success(
+                    call.name(),
+                    projection,
+                    Map.of(
+                            "schemaVersion", projection.schemaVersion(),
+                            "exposureMode", projection.conditionEvidence().exposureMode(),
+                            "exactVersion", projection.versionAttestation().exactMatch(),
+                            "materializationCount", projection.materializations().size()));
+        }
     }
 
     private static final class LiveOptionSourceValueSearchToolExecutor implements AgenticAuthoringToolExecutor {

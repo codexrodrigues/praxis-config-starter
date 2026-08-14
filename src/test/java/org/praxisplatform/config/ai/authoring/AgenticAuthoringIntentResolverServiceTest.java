@@ -2968,6 +2968,77 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void selectedDomainDecisionExplanationRemainsEligibleWithoutResourceOrAuthoringCandidate() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explain",
+                        "domain_decision",
+                        "explain_domain_decision",
+                        null,
+                        null,
+                        "none",
+                        "Vou explicar a decisão selecionada usando a evidência governada.",
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        null,
+                        null,
+                        false,
+                        "domain_decision_guidance")));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+        ObjectNode hints = objectMapper.createObjectNode();
+        ObjectNode selected = hints.putObject("selectedDomainDecisionRef");
+        selected.put("schemaVersion", "praxis.ai.context-hints.domain-decision/v1");
+        selected.put("definitionId", "00000000-0000-0000-0000-000000000382");
+        selected.put("ruleKey", "ERG-08382");
+        selected.put("version", 3);
+        selected.put("source", "policy-studio-selection");
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Explique esta regra",
+                        "praxis-policy-studio",
+                        null,
+                        "/policy-studio",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "mock",
+                        null,
+                        null,
+                        "session",
+                        "turn",
+                        List.of(),
+                        null,
+                        List.of(),
+                        hints));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.operationKind()).isEqualTo("explain");
+        assertThat(result.artifactKind()).isEqualTo("domain_decision");
+        assertThat(result.changeKind()).isEqualTo("explain_domain_decision");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.pendingClarification()).isNull();
+        assertThat(result.failureCodes()).isEmpty();
+    }
+
+    @Test
     void platformGuidanceForConcreteDashboardOffersContextualConversationContinuations() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
