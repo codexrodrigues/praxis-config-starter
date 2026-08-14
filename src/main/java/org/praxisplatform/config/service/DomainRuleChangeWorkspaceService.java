@@ -15,6 +15,8 @@ import org.praxisplatform.config.domain.DomainRuleTestScenario;
 import org.praxisplatform.config.domain.DomainRuleWorkspaceReview;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceCreateRequest;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceResponse;
+import org.praxisplatform.config.dto.DomainRuleWorkspaceBlocker;
+import org.praxisplatform.config.dto.DomainRuleWorkspaceCapabilityResponse;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceUpdateRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionStatusTransitionRequest;
@@ -29,6 +31,7 @@ import org.praxisplatform.config.repository.DomainRuleTestScenarioRepository;
 import org.praxisplatform.config.repository.DomainRuleTestRunRepository;
 import org.praxisplatform.config.repository.DomainRuleTestRunResultRepository;
 import org.praxisplatform.config.repository.DomainRuleWorkspaceReviewRepository;
+import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -50,7 +53,7 @@ public class DomainRuleChangeWorkspaceService {
   private final DomainRuleWorkspaceReviewRepository reviewRepository;
   private final DomainRuleService domainRuleService;
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleChangeWorkspaceResponse create(
       DomainRuleChangeWorkspaceCreateRequest request,
       DomainRuleGovernancePrincipal principal) {
@@ -81,12 +84,12 @@ public class DomainRuleChangeWorkspaceService {
     return response(workspaceRepository.save(workspace));
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public DomainRuleChangeWorkspaceResponse get(UUID id, DomainRuleGovernancePrincipal principal) {
     return response(scopedWorkspace(id, principal));
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public List<DomainRuleChangeWorkspaceResponse> list(DomainRuleGovernancePrincipal principal) {
     return workspaceRepository.findByTenantIdAndEnvironmentOrderByUpdatedAtDesc(
             principal.tenantId(), principal.environment()).stream()
@@ -94,7 +97,46 @@ public class DomainRuleChangeWorkspaceService {
         .toList();
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+  public DomainRuleWorkspaceCapabilityResponse capabilities(
+      UUID id,
+      DomainRuleGovernancePrincipal principal,
+      boolean canAuthor,
+      boolean canApprove) {
+    DomainRuleChangeWorkspace workspace = scopedWorkspace(id, principal);
+    List<String> actions = new java.util.ArrayList<>();
+    List<DomainRuleWorkspaceBlocker> blockers = new java.util.ArrayList<>();
+    actions.add("VIEW");
+    switch (workspace.getStatus()) {
+      case "OPEN" -> {
+        if (canAuthor) {
+          actions.add("UPDATE_DRAFT");
+          actions.add("MANAGE_SCENARIOS");
+          actions.add("RECORD_TEST_RUN");
+          blockers.addAll(submissionBlockers(workspace, principal));
+          if (blockers.isEmpty()) actions.add("SUBMIT");
+        }
+      }
+      case "SUBMITTED" -> {
+        if (canApprove && !requireActor(principal).equals(workspace.getCreatedBy())) {
+          actions.add("REVIEW");
+        } else if (canApprove) {
+          blockers.add(new DomainRuleWorkspaceBlocker(
+              "REVIEWER_MUST_DIFFER_FROM_AUTHOR", "REVIEW",
+              "Workspace reviewer must be different from its author"));
+        }
+      }
+      case "APPROVED" -> {
+        if (canAuthor) actions.add("PROMOTE");
+      }
+      default -> { }
+    }
+    return new DomainRuleWorkspaceCapabilityResponse(
+        workspace.getId(), workspace.getRuleKey(), workspace.getStatus(), workspace.getRevision(),
+        workspace.getEtag().toString(), actions, blockers);
+  }
+
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleChangeWorkspaceResponse updateDraft(
       UUID id,
       DomainRuleChangeWorkspaceUpdateRequest request,
@@ -117,7 +159,7 @@ public class DomainRuleChangeWorkspaceService {
     return response(workspaceRepository.save(workspace));
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleTestScenarioResponse createScenario(
       UUID workspaceId,
       DomainRuleTestScenarioRequest request,
@@ -139,6 +181,8 @@ public class DomainRuleChangeWorkspaceService {
         .facts(json(valid.facts()))
         .expectedDecision(valid.expectedDecision())
         .expectedOutput(json(valid.expectedOutput()))
+        .expectedReasonCodes(jsonValue(valid.expectedReasonCodes()))
+        .expectedEffectIntents(jsonValue(valid.expectedEffectIntents()))
         .status(valid.status())
         .etag(UUID.randomUUID())
         .revision(1L)
@@ -150,7 +194,7 @@ public class DomainRuleChangeWorkspaceService {
     return scenarioResponse(scenarioRepository.save(scenario));
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public List<DomainRuleTestScenarioResponse> scenarios(
       UUID workspaceId, DomainRuleGovernancePrincipal principal) {
     scopedWorkspace(workspaceId, principal);
@@ -160,7 +204,7 @@ public class DomainRuleChangeWorkspaceService {
         .toList();
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleTestScenarioResponse updateScenario(
       UUID workspaceId,
       UUID scenarioId,
@@ -191,21 +235,36 @@ public class DomainRuleChangeWorkspaceService {
     return scenarioResponse(scenarioRepository.save(scenario));
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleChangeWorkspaceResponse submit(
       UUID id, String ifMatch, DomainRuleGovernancePrincipal principal) {
     DomainRuleChangeWorkspace workspace = scopedWorkspace(id, principal);
     requireOpen(workspace);
     requireStrongMatch(ifMatch, workspace.getEtag().toString());
+    List<DomainRuleWorkspaceBlocker> blockers = submissionBlockers(workspace, principal);
+    if (!blockers.isEmpty()) throw conflict(blockers.getFirst().message());
+    workspace.setStatus("SUBMITTED");
+    rotate(workspace, principal);
+    return response(workspaceRepository.save(workspace));
+  }
+
+  private List<DomainRuleWorkspaceBlocker> submissionBlockers(
+      DomainRuleChangeWorkspace workspace, DomainRuleGovernancePrincipal principal) {
     var run = runRepository.findFirstByTenantIdAndEnvironmentAndWorkspaceIdOrderByRecordedAtDesc(
-            principal.tenantId(), principal.environment(), id)
-        .orElseThrow(() -> conflict("A current passing Test Run is required before submission"));
-    if (!workspace.getRevision().equals(run.getWorkspaceRevision())
-        || !workspace.getBaseDefinitionHash().equals(run.getBaseDefinitionHash())) {
-      throw conflict("The latest Test Run does not prove the current workspace revision");
+        principal.tenantId(), principal.environment(), workspace.getId());
+    if (run.isEmpty()) {
+      return List.of(new DomainRuleWorkspaceBlocker(
+          "CURRENT_PASSING_TEST_RUN_REQUIRED", "SUBMIT",
+          "A current passing Test Run is required before submission"));
     }
-    var evidence = runResultRepository.findByTestRunIdOrderByScenarioKey(run.getId());
-    Set<UUID> activeScenarioIds = scenarioRepository.findByWorkspaceIdOrderByScenarioKey(id).stream()
+    if (!workspace.getRevision().equals(run.get().getWorkspaceRevision())
+        || !workspace.getBaseDefinitionHash().equals(run.get().getBaseDefinitionHash())) {
+      return List.of(new DomainRuleWorkspaceBlocker(
+          "TEST_RUN_DOES_NOT_PROVE_CURRENT_REVISION", "SUBMIT",
+          "The latest Test Run does not prove the current workspace revision"));
+    }
+    var evidence = runResultRepository.findByTestRunIdOrderByScenarioKey(run.get().getId());
+    Set<UUID> activeScenarioIds = scenarioRepository.findByWorkspaceIdOrderByScenarioKey(workspace.getId()).stream()
         .filter(item -> sameScope(item.getTenantId(), item.getEnvironment(), principal))
         .filter(item -> "ACTIVE".equals(item.getStatus()))
         .map(DomainRuleTestScenario::getId)
@@ -213,19 +272,30 @@ public class DomainRuleChangeWorkspaceService {
     Set<UUID> evidencedScenarioIds = evidence.stream()
         .map(item -> item.getScenarioId())
         .collect(java.util.stream.Collectors.toSet());
-    if (activeScenarioIds.isEmpty()
-        || !activeScenarioIds.equals(evidencedScenarioIds)
-        || evidence.stream().anyMatch(item -> !Boolean.TRUE.equals(item.getCandidateMatchesExpected())
-            || "INCONCLUSIVE".equals(item.getComparison())
-            || "TECHNICAL_ERROR".equals(item.getComparison()))) {
-      throw conflict("The latest Test Run must cover and pass every active scenario without inconclusive or technical results");
+    if (activeScenarioIds.isEmpty()) {
+      return List.of(new DomainRuleWorkspaceBlocker(
+          "ACTIVE_SCENARIO_REQUIRED", "SUBMIT",
+          "At least one active scenario is required before submission"));
     }
-    workspace.setStatus("SUBMITTED");
-    rotate(workspace, principal);
-    return response(workspaceRepository.save(workspace));
+    if (!activeScenarioIds.equals(evidencedScenarioIds)) {
+      return List.of(new DomainRuleWorkspaceBlocker(
+          "ACTIVE_SCENARIO_COVERAGE_INCOMPLETE", "SUBMIT",
+          "The latest Test Run must cover every active scenario"));
+    }
+    if (evidence.stream().anyMatch(item -> !Boolean.TRUE.equals(item.getCandidateMatchesExpected())
+        || !Boolean.TRUE.equals(item.getCandidateOutputMatchesExpected())
+        || !Boolean.TRUE.equals(item.getCandidateReasonCodesMatchExpected())
+        || !Boolean.TRUE.equals(item.getCandidateEffectsMatchExpected())
+        || "INCONCLUSIVE".equals(item.getComparison())
+        || "TECHNICAL_ERROR".equals(item.getComparison()))) {
+      return List.of(new DomainRuleWorkspaceBlocker(
+          "TEST_RUN_NOT_PASSING", "SUBMIT",
+          "The latest Test Run must pass every active scenario without inconclusive or technical results"));
+    }
+    return List.of();
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleWorkspaceReviewResponse review(
       UUID id, DomainRuleWorkspaceReviewRequest request, String ifMatch,
       DomainRuleGovernancePrincipal principal) {
@@ -258,7 +328,7 @@ public class DomainRuleChangeWorkspaceService {
     return reviewResponse(review);
   }
 
-  @Transactional(readOnly = true)
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public List<DomainRuleWorkspaceReviewResponse> reviews(
       UUID id, DomainRuleGovernancePrincipal principal) {
     scopedWorkspace(id, principal);
@@ -268,7 +338,7 @@ public class DomainRuleChangeWorkspaceService {
         .toList();
   }
 
-  @Transactional
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleChangeWorkspaceResponse promote(
       UUID id, String ifMatch, DomainRuleGovernancePrincipal principal) {
     DomainRuleChangeWorkspace workspace = scopedWorkspace(id, principal);
@@ -389,10 +459,15 @@ public class DomainRuleChangeWorkspaceService {
     if (!SCENARIO_STATUSES.contains(status)) {
       throw badRequest("status must be ACTIVE or DISABLED");
     }
+    if (request.expectedOutput() != null && request.expectedOutput().toString().length() > 16384) {
+      throw badRequest("expectedOutput exceeds 16384 characters");
+    }
     return new ValidScenario(
         requireText(request.scenarioKey(), "scenarioKey", 255),
         requireText(request.name(), "name", 255),
-        request.facts(), decision, request.expectedOutput(), status);
+        request.facts(), decision, request.expectedOutput(),
+        normalizedAssertions(request.expectedReasonCodes(), "expectedReasonCodes"),
+        normalizedAssertions(request.expectedEffectIntents(), "expectedEffectIntents"), status);
   }
 
   private void rotate(DomainRuleChangeWorkspace workspace, DomainRuleGovernancePrincipal principal) {
@@ -413,7 +488,8 @@ public class DomainRuleChangeWorkspaceService {
   private DomainRuleTestScenarioResponse scenarioResponse(DomainRuleTestScenario source) {
     return new DomainRuleTestScenarioResponse(
         source.getId(), source.getWorkspaceId(), source.getScenarioKey(), source.getName(), tree(source.getFacts()),
-        source.getExpectedDecision(), tree(source.getExpectedOutput()), source.getStatus(), source.getRevision(),
+        source.getExpectedDecision(), tree(source.getExpectedOutput()), strings(source.getExpectedReasonCodes()),
+        strings(source.getExpectedEffectIntents()), source.getStatus(), source.getRevision(),
         source.getEtag().toString(), source.getCreatedBy(), source.getUpdatedBy(), source.getCreatedAt(), source.getUpdatedAt());
   }
 
@@ -426,12 +502,36 @@ public class DomainRuleChangeWorkspaceService {
     }
   }
 
+  private String jsonValue(Object value) {
+    try {
+      return objectMapper.writeValueAsString(value);
+    } catch (JsonProcessingException exception) {
+      throw badRequest("JSON payload is invalid");
+    }
+  }
+
   private JsonNode tree(String value) {
     if (value == null) return null;
     try {
       return objectMapper.readTree(value);
     } catch (JsonProcessingException exception) {
       throw new IllegalStateException("Persisted governed JSON is invalid", exception);
+    }
+  }
+
+  private List<String> normalizedAssertions(List<String> values, String field) {
+    if (values == null) return List.of();
+    if (values.size() > 100) throw badRequest(field + " exceeds 100 entries");
+    return values.stream().map(value -> requireText(value, field, 255))
+        .distinct().sorted().toList();
+  }
+
+  private List<String> strings(String value) {
+    if (value == null) return List.of();
+    try {
+      return objectMapper.readerForListOf(String.class).readValue(value);
+    } catch (JsonProcessingException exception) {
+      throw new IllegalStateException("Persisted scenario assertions are invalid", exception);
     }
   }
 
@@ -458,5 +558,6 @@ public class DomainRuleChangeWorkspaceService {
   private ResponseStatusException conflict(String message) { return new ResponseStatusException(HttpStatus.CONFLICT, message); }
 
   private record ValidScenario(
-      String key, String name, JsonNode facts, String expectedDecision, JsonNode expectedOutput, String status) {}
+      String key, String name, JsonNode facts, String expectedDecision, JsonNode expectedOutput,
+      List<String> expectedReasonCodes, List<String> expectedEffectIntents, String status) {}
 }

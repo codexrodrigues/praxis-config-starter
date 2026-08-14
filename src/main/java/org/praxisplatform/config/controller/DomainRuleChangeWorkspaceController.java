@@ -13,6 +13,7 @@ import org.praxisplatform.config.dto.DomainRuleTestRunRecordRequest;
 import org.praxisplatform.config.dto.DomainRuleTestRunResponse;
 import org.praxisplatform.config.dto.DomainRuleWorkspaceReviewRequest;
 import org.praxisplatform.config.dto.DomainRuleWorkspaceReviewResponse;
+import org.praxisplatform.config.dto.DomainRuleWorkspaceCapabilityResponse;
 import org.praxisplatform.config.http.HttpEntityTagCondition;
 import org.praxisplatform.config.service.DomainRuleChangeWorkspaceService;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
@@ -74,6 +75,22 @@ public class DomainRuleChangeWorkspaceController {
           .eTag(response.etag()).cacheControl(CacheControl.noCache()).build();
     }
     return withEtag(HttpStatus.OK, response, response.etag());
+  }
+
+  @GetMapping("/{workspaceId}/capabilities")
+  public ResponseEntity<DomainRuleWorkspaceCapabilityResponse> capabilities(
+      @PathVariable UUID workspaceId,
+      @RequestHeader(value = "X-Tenant-ID", required = false) String tenant,
+      @RequestHeader(value = "X-Env", required = false) String environment,
+      HttpServletRequest servletRequest) {
+    DomainRuleGovernancePrincipal principal = principal(
+        servletRequest, tenant, environment, "RULE_DEFINITION_READER");
+    return ResponseEntity.ok()
+        .cacheControl(CacheControl.noStore())
+        .body(service.capabilities(
+            workspaceId, principal,
+            principalResolver.hasRole(servletRequest, "RULE_DEFINITION_AUTHOR"),
+            principalResolver.hasRole(servletRequest, "RULE_DEFINITION_APPROVER")));
   }
 
   @PutMapping("/{workspaceId}/draft")

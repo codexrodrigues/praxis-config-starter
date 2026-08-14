@@ -2,11 +2,13 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -29,7 +31,6 @@ import org.springframework.web.server.ResponseStatusException;
 @RequiredArgsConstructor
 public class DomainRuleTestRunService {
   private static final Set<String> DECISIONS = Set.of("ALLOW","DENY","NOT_APPLICABLE","INCONCLUSIVE","TECHNICAL_ERROR");
-  private static final Set<String> COMPARISONS = Set.of("MATCH","MISMATCH","INCONCLUSIVE","TECHNICAL_ERROR");
   private final DomainRuleTestRunRepository runs;
   private final DomainRuleTestRunResultRepository results;
   private final DomainRuleChangeWorkspaceRepository workspaces;
@@ -46,10 +47,10 @@ public class DomainRuleTestRunService {
     String actor = text(principal.actorRef(), "actor", 255);
     ObjectNode summary = objectMapper.createObjectNode();
     summary.put("scenarioCount", request.results().size());
-    summary.put("matchCount", request.results().stream().filter(r -> "MATCH".equals(r.comparison())).count());
-    summary.put("mismatchCount", request.results().stream().filter(r -> "MISMATCH".equals(r.comparison())).count());
-    summary.put("inconclusiveCount", request.results().stream().filter(r -> "INCONCLUSIVE".equals(r.comparison())).count());
-    summary.put("technicalErrorCount", request.results().stream().filter(r -> "TECHNICAL_ERROR".equals(r.comparison())).count());
+    summary.put("matchCount", request.results().stream().filter(r -> "MATCH".equals(comparison(r.candidateDecision(), r.activeDecision()))).count());
+    summary.put("mismatchCount", request.results().stream().filter(r -> "MISMATCH".equals(comparison(r.candidateDecision(), r.activeDecision()))).count());
+    summary.put("inconclusiveCount", request.results().stream().filter(r -> "INCONCLUSIVE".equals(comparison(r.candidateDecision(), r.activeDecision()))).count());
+    summary.put("technicalErrorCount", request.results().stream().filter(r -> "TECHNICAL_ERROR".equals(comparison(r.candidateDecision(), r.activeDecision()))).count());
     runs.save(DomainRuleTestRun.builder()
         .id(runId).workspaceId(workspaceId).tenantId(principal.tenantId()).environment(principal.environment())
         .workspaceRevision(request.workspaceRevision()).baseDefinitionHash(request.baseDefinitionHash())
@@ -58,7 +59,8 @@ public class DomainRuleTestRunService {
         .activeSnapshotContentHash(blankToNull(request.activeSnapshotContentHash()))
         .activeActivationRevision(request.activeActivationRevision()).resultSummary(json(summary))
         .recordedBy(actor).recordedAt(recordedAt).build());
-    List<DomainRuleTestRunResult> persisted = request.results().stream().map(item -> entity(runId, item)).toList();
+    List<DomainRuleTestRunResult> persisted = request.results().stream()
+        .map(item -> entity(runId, item, validatedScenario(workspace.getId(), item))).toList();
     results.saveAll(persisted);
     return response(runId, workspaceId, request, persisted, actor, recordedAt);
   }
@@ -94,21 +96,51 @@ public class DomainRuleTestRunService {
 
   private void validateResult(UUID workspaceId, DomainRuleTestRunResultRequest item, Set<UUID> seen) {
     if (item == null || item.scenarioId() == null || !seen.add(item.scenarioId())) throw bad("scenarioId must be unique");
-    var scenario = scenarios.findById(item.scenarioId()).filter(s -> workspaceId.equals(s.getWorkspaceId()))
-        .orElseThrow(() -> bad("scenario does not belong to the workspace"));
+    var scenario = validatedScenario(workspaceId, item);
     if (!scenario.getScenarioKey().equals(item.scenarioKey())) throw bad("scenarioKey does not match persisted scenario");
-    if (!DECISIONS.contains(item.expectedDecision()) || !DECISIONS.contains(item.candidateDecision()) || !DECISIONS.contains(item.activeDecision()))
+    if (!DECISIONS.contains(item.candidateDecision()) || !DECISIONS.contains(item.activeDecision()))
       throw bad("test run decisions must use the canonical five states");
-    if (!COMPARISONS.contains(item.comparison())) throw bad("comparison is invalid");
     digest(item.candidatePlanDigest(), "candidatePlanDigest"); digest(item.activePlanDigest(), "activePlanDigest"); digest(item.factsDigest(), "factsDigest");
+    assertions(item.candidateReasonCodes(), "candidateReasonCodes");
+    assertions(item.activeReasonCodes(), "activeReasonCodes");
+    assertions(item.candidateEffectIntents(), "candidateEffectIntents");
+    assertions(item.activeEffectIntents(), "activeEffectIntents");
+    safeOutput(item.candidateOutput(), "candidateOutput");
+    safeOutput(item.activeOutput(), "activeOutput");
   }
 
-  private DomainRuleTestRunResult entity(UUID runId, DomainRuleTestRunResultRequest item) {
+  private org.praxisplatform.config.domain.DomainRuleTestScenario validatedScenario(
+      UUID workspaceId, DomainRuleTestRunResultRequest item) {
+    return scenarios.findById(item.scenarioId()).filter(s -> workspaceId.equals(s.getWorkspaceId()))
+        .orElseThrow(() -> bad("scenario does not belong to the workspace"));
+  }
+
+  private DomainRuleTestRunResult entity(
+      UUID runId, DomainRuleTestRunResultRequest item,
+      org.praxisplatform.config.domain.DomainRuleTestScenario scenario) {
+    JsonNode expectedOutput = tree(scenario.getExpectedOutput());
+    List<String> expectedReasons = strings(scenario.getExpectedReasonCodes());
+    List<String> expectedEffects = strings(scenario.getExpectedEffectIntents());
+    List<String> candidateReasons = assertions(item.candidateReasonCodes(), "candidateReasonCodes");
+    List<String> activeReasons = assertions(item.activeReasonCodes(), "activeReasonCodes");
+    List<String> candidateEffects = assertions(item.candidateEffectIntents(), "candidateEffectIntents");
+    List<String> activeEffects = assertions(item.activeEffectIntents(), "activeEffectIntents");
+    boolean candidateOutputMatch = expectedOutput == null || Objects.equals(expectedOutput, item.candidateOutput());
+    boolean activeOutputMatch = expectedOutput == null || Objects.equals(expectedOutput, item.activeOutput());
     return DomainRuleTestRunResult.builder().id(UUID.randomUUID()).testRunId(runId).scenarioId(item.scenarioId())
-        .scenarioKey(item.scenarioKey()).expectedDecision(item.expectedDecision()).candidateDecision(item.candidateDecision())
-        .activeDecision(item.activeDecision()).comparison(item.comparison()).candidateMatchesExpected(item.candidateMatchesExpected())
-        .activeMatchesExpected(item.activeMatchesExpected()).candidateReasonCodes(json(item.candidateReasonCodes() == null ? List.of() : item.candidateReasonCodes()))
-        .activeReasonCodes(json(item.activeReasonCodes() == null ? List.of() : item.activeReasonCodes()))
+        .scenarioKey(item.scenarioKey()).expectedDecision(scenario.getExpectedDecision()).candidateDecision(item.candidateDecision())
+        .activeDecision(item.activeDecision()).comparison(comparison(item.candidateDecision(), item.activeDecision()))
+        .candidateMatchesExpected(item.candidateDecision().equals(scenario.getExpectedDecision()))
+        .activeMatchesExpected(item.activeDecision().equals(scenario.getExpectedDecision()))
+        .expectedOutput(nullableJson(expectedOutput)).candidateOutput(nullableJson(item.candidateOutput()))
+        .activeOutput(nullableJson(item.activeOutput())).candidateOutputMatchesExpected(candidateOutputMatch)
+        .activeOutputMatchesExpected(activeOutputMatch).expectedReasonCodes(json(expectedReasons))
+        .candidateReasonCodes(json(candidateReasons)).activeReasonCodes(json(activeReasons))
+        .candidateReasonCodesMatchExpected(candidateReasons.equals(expectedReasons))
+        .activeReasonCodesMatchExpected(activeReasons.equals(expectedReasons))
+        .expectedEffectIntents(json(expectedEffects)).candidateEffectIntents(json(candidateEffects))
+        .activeEffectIntents(json(activeEffects)).candidateEffectsMatchExpected(candidateEffects.equals(expectedEffects))
+        .activeEffectsMatchExpected(activeEffects.equals(expectedEffects))
         .candidatePlanDigest(item.candidatePlanDigest()).activePlanDigest(item.activePlanDigest()).factsDigest(item.factsDigest()).build();
   }
 
@@ -121,7 +153,12 @@ public class DomainRuleTestRunService {
   private DomainRuleTestRunResultResponse resultResponse(DomainRuleTestRunResult e) {
     return new DomainRuleTestRunResultResponse(e.getScenarioId(),e.getScenarioKey(),e.getExpectedDecision(),e.getCandidateDecision(),
         e.getActiveDecision(),e.getComparison(),e.getCandidateMatchesExpected(),e.getActiveMatchesExpected(),
-        strings(e.getCandidateReasonCodes()),strings(e.getActiveReasonCodes()),e.getCandidatePlanDigest(),e.getActivePlanDigest(),e.getFactsDigest());
+        tree(e.getExpectedOutput()),tree(e.getCandidateOutput()),tree(e.getActiveOutput()),
+        e.getCandidateOutputMatchesExpected(),e.getActiveOutputMatchesExpected(),strings(e.getExpectedReasonCodes()),
+        strings(e.getCandidateReasonCodes()),strings(e.getActiveReasonCodes()),e.getCandidateReasonCodesMatchExpected(),
+        e.getActiveReasonCodesMatchExpected(),strings(e.getExpectedEffectIntents()),strings(e.getCandidateEffectIntents()),
+        strings(e.getActiveEffectIntents()),e.getCandidateEffectsMatchExpected(),e.getActiveEffectsMatchExpected(),
+        e.getCandidatePlanDigest(),e.getActivePlanDigest(),e.getFactsDigest());
   }
   private DomainRuleChangeWorkspace scopedWorkspace(UUID id, DomainRuleGovernancePrincipal p) {
     return workspaces.findById(id).filter(w -> p.tenantId().equals(w.getTenantId()) && p.environment().equals(w.getEnvironment()))
@@ -131,6 +168,11 @@ public class DomainRuleTestRunService {
   private String text(String v,String field,int max){if(v==null||v.isBlank()||v.trim().length()>max)throw bad(field+" is invalid");return v.trim();}
   private String blankToNull(String v){return v==null||v.isBlank()?null:v.trim();}
   private String json(Object v){try{return objectMapper.writeValueAsString(v);}catch(JsonProcessingException e){throw bad("result evidence is invalid");}}
-  private List<String> strings(String v){try{return objectMapper.readerForListOf(String.class).readValue(v);}catch(JsonProcessingException e){throw new IllegalStateException("Persisted result evidence is invalid",e);}}
+  private String nullableJson(JsonNode value){return value==null||value.isNull()?null:json(value);}
+  private JsonNode tree(String value){try{return value==null?null:objectMapper.readTree(value);}catch(JsonProcessingException e){throw new IllegalStateException("Persisted result output is invalid",e);}}
+  private List<String> strings(String v){try{return v==null?List.of():objectMapper.readerForListOf(String.class).readValue(v);}catch(JsonProcessingException e){throw new IllegalStateException("Persisted result evidence is invalid",e);}}
+  private List<String> assertions(List<String> values,String field){if(values==null)return List.of();if(values.size()>100)throw bad(field+" exceeds 100 entries");return values.stream().map(v->text(v,field,255)).distinct().sorted().toList();}
+  private void safeOutput(JsonNode value,String field){if(value!=null&&!value.isNull()&&value.toString().length()>16384)throw bad(field+" exceeds 16384 characters");}
+  private String comparison(String candidate,String active){if("TECHNICAL_ERROR".equals(candidate)||"TECHNICAL_ERROR".equals(active))return "TECHNICAL_ERROR";if("INCONCLUSIVE".equals(candidate)||"INCONCLUSIVE".equals(active))return "INCONCLUSIVE";return candidate.equals(active)?"MATCH":"MISMATCH";}
   private ResponseStatusException bad(String m){return new ResponseStatusException(HttpStatus.BAD_REQUEST,m);}
 }

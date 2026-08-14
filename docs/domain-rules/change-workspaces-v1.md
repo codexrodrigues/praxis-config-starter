@@ -8,10 +8,18 @@ canonical fingerprint of one persisted `domain_rule_definition`.
 
 - Definition lifecycle, approvals, publication and immutable snapshots: `ja-suportado-so-ux`.
 - Structural readiness currently named simulation: `ja-suportado-mal-nomeado-ou-mal-materializado`.
-- Collaborative draft with base fingerprint and optimistic concurrency: `lacuna-real-de-contrato`.
-- Reusable facts and expected five-state outcome: `lacuna-real-de-contrato`.
-- Candidate/active/legacy evaluation: remains a host-owned `lacuna-real-de-contrato`; Config does
-  not execute business rules.
+- Collaborative draft with base fingerprint and optimistic concurrency:
+  `ja-suportado-mal-nomeado-ou-mal-materializado`; o contrato, suas ações e
+  blockers por principal estão implementados, mas a seleção canônica entre
+  workspaces concorrentes ainda não é publicada.
+- Reusable facts, expected decision, output, reason codes, planned effect intents
+  and immutable Test Run: `ja-suportado-mal-nomeado-ou-mal-materializado`; o
+  contrato e o gate estão implementados e aguardam prova HTTP/Neon do corte.
+- Candidate/active evaluation: `suportado-parcialmente` por adapter host-owned; o
+  Config armazena evidência redigida e não executa regras.
+- Candidate/legacy evidence and comparison: `lacuna-real-de-contrato`; requer
+  provenance, status HTTP/campo, before/after, effects, no-mutation e cleanup.
+- Execution of effects remains host-owned and is never performed by a Test Run.
 
 The Config Starter owns workspace and scenario persistence. The Rules Engine owns deterministic
 evaluation semantics. The host owns fact resolution, executable registries and sandbox execution.
@@ -30,6 +38,10 @@ hints only in explicitly configured local mode.
   definition SHA-256.
 - `GET /api/praxis/config/domain-rules/workspaces` lists only the effective tenant/environment.
 - `GET /api/praxis/config/domain-rules/workspaces/{id}` supports private revalidation with ETag.
+- `GET /api/praxis/config/domain-rules/workspaces/{id}/capabilities` publishes the authenticated
+  principal's `availableActions` plus stable, action-scoped business blockers. `SUBMIT` reuses the
+  same current-revision, active-scenario coverage and passing Test Run invariants as the command;
+  `REVIEW` also enforces maker-checker identity, and `PROMOTE` is role- and lifecycle-owned.
 - `PUT /api/praxis/config/domain-rules/workspaces/{id}/draft` requires a strong `If-Match`, verifies
   that the base fingerprint has not changed, increments `revision` and rotates the ETag.
 - `POST /api/praxis/config/domain-rules/workspaces/{id}/scenarios` persists reusable typed facts and
@@ -64,7 +76,7 @@ Reads require `RULE_DEFINITION_READER`; draft, scenario, test-run and submission
 returned as not found. Wildcard `If-Match` is rejected for mutations so a client cannot bypass
 reconciliation.
 
-## Next vertical: sandbox runs
+## Sandbox runs implementados e limites restantes
 
 A sandbox run must freeze facts, `nowUtc`, timezone and actor context once, then evaluate:
 
@@ -76,3 +88,20 @@ The implemented run ledger persists immutable per-scenario decisions, exact snap
 fingerprints, plan/facts digests and comparison classification. It never stores raw facts or
 snapshot content, executes effects or promotes a candidate. Config receives safe host evidence,
 but it does not receive Java executors or become the evaluation runtime.
+
+The immutable record preserves expected/candidate/active output, normalized
+reason codes and planned effect-intent identifiers. Config recomputes every match
+flag from the persisted scenario instead of trusting booleans sent by the host.
+Submission fails closed when any candidate assertion differs. Absence of
+`expectedOutput` means output is not asserted; empty reason/effect lists explicitly
+expect none. The sandbox never executes an effect.
+
+Migration `V56` gives existing scenarios empty reason/effect expectations. Existing
+DENY scenarios that omitted expected reason codes can become blocked until an
+author records the intended assertions; this is deliberate fail-closed beta behavior.
+
+Workspace actions and blockers are exposed through the dedicated capabilities
+read and the public `@praxisui/core` client. Clients must not infer review,
+promotion or submission authority from `status`. Publication, rollout creation
+and rollout-policy commands still require their own server-owned action catalogs;
+one capability must never be reused to authorize a different operation.

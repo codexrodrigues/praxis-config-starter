@@ -134,7 +134,7 @@ class DomainRuleChangeWorkspaceServiceTest {
         workspaceId,
         new DomainRuleTestScenarioRequest(
             "boundary-null", "Null guard", objectMapper.readTree("{\"amount\":null}"),
-            "INCONCLUSIVE", null, null),
+            "INCONCLUSIVE", null, List.of(), List.of(), null),
         PRINCIPAL);
 
     assertThat(response.expectedDecision()).isEqualTo("INCONCLUSIVE");
@@ -146,7 +146,7 @@ class DomainRuleChangeWorkspaceServiceTest {
     assertThatThrownBy(() -> service.createScenario(
         workspaceId,
         new DomainRuleTestScenarioRequest(
-            "bad", "Bad", objectMapper.createObjectNode(), "PASS", null, "ACTIVE"),
+            "bad", "Bad", objectMapper.createObjectNode(), "PASS", null, List.of(), List.of(), "ACTIVE"),
         PRINCIPAL))
         .isInstanceOf(ResponseStatusException.class)
         .hasMessageContaining("five-state");
@@ -167,6 +167,8 @@ class DomainRuleChangeWorkspaceServiceTest {
             .baseDefinitionHash("B".repeat(64)).build()));
     when(runResults.findByTestRunIdOrderByScenarioKey(runId)).thenReturn(List.of(
         DomainRuleTestRunResult.builder().scenarioId(scenarioId).candidateMatchesExpected(true)
+            .candidateOutputMatchesExpected(true).candidateReasonCodesMatchExpected(true)
+            .candidateEffectsMatchExpected(true)
             .comparison("MATCH").build()));
 
     var submitted = service.submit(id, "\"" + workspace.getEtag() + "\"", PRINCIPAL);
@@ -190,6 +192,8 @@ class DomainRuleChangeWorkspaceServiceTest {
             .baseDefinitionHash("B".repeat(64)).build()));
     when(runResults.findByTestRunIdOrderByScenarioKey(runId)).thenReturn(List.of(
         DomainRuleTestRunResult.builder().scenarioId(scenarioId).candidateMatchesExpected(true)
+            .candidateOutputMatchesExpected(true).candidateReasonCodesMatchExpected(true)
+            .candidateEffectsMatchExpected(true)
             .comparison("TECHNICAL_ERROR").build()));
 
     assertThatThrownBy(() -> service.submit(id, "\"" + workspace.getEtag() + "\"", PRINCIPAL))
@@ -214,10 +218,70 @@ class DomainRuleChangeWorkspaceServiceTest {
             .baseDefinitionHash("B".repeat(64)).build()));
     when(runResults.findByTestRunIdOrderByScenarioKey(runId)).thenReturn(List.of(
         DomainRuleTestRunResult.builder().scenarioId(coveredScenarioId).candidateMatchesExpected(true)
+            .candidateOutputMatchesExpected(true).candidateReasonCodesMatchExpected(true)
+            .candidateEffectsMatchExpected(true)
             .comparison("MATCH").build()));
 
     assertThatThrownBy(() -> service.submit(id, "\"" + workspace.getEtag() + "\"", PRINCIPAL))
         .isInstanceOf(ResponseStatusException.class).hasMessageContaining("every active scenario");
+  }
+
+  @Test
+  void publishesSubmitOnlyWhenServerOwnedTestRunGatePasses() {
+    UUID id = UUID.randomUUID();
+    DomainRuleChangeWorkspace workspace = workspace(id, "tenant-a", "dev");
+    when(workspaces.findById(id)).thenReturn(Optional.of(workspace));
+    when(runs.findFirstByTenantIdAndEnvironmentAndWorkspaceIdOrderByRecordedAtDesc(
+        "tenant-a", "dev", id)).thenReturn(Optional.empty());
+
+    var blocked = service.capabilities(id, PRINCIPAL, true, false);
+
+    assertThat(blocked.availableActions())
+        .containsExactly("VIEW", "UPDATE_DRAFT", "MANAGE_SCENARIOS", "RECORD_TEST_RUN")
+        .doesNotContain("SUBMIT");
+    assertThat(blocked.blockers()).extracting("code")
+        .containsExactly("CURRENT_PASSING_TEST_RUN_REQUIRED");
+
+    UUID runId = UUID.randomUUID();
+    UUID scenarioId = UUID.randomUUID();
+    when(runs.findFirstByTenantIdAndEnvironmentAndWorkspaceIdOrderByRecordedAtDesc(
+        "tenant-a", "dev", id)).thenReturn(Optional.of(
+            DomainRuleTestRun.builder().id(runId).workspaceRevision(1L)
+                .baseDefinitionHash("B".repeat(64)).build()));
+    when(scenarios.findByWorkspaceIdOrderByScenarioKey(id)).thenReturn(List.of(
+        DomainRuleTestScenario.builder().id(scenarioId).tenantId("tenant-a").environment("dev")
+            .status("ACTIVE").build()));
+    when(runResults.findByTestRunIdOrderByScenarioKey(runId)).thenReturn(List.of(
+        DomainRuleTestRunResult.builder().scenarioId(scenarioId).candidateMatchesExpected(true)
+            .candidateOutputMatchesExpected(true).candidateReasonCodesMatchExpected(true)
+            .candidateEffectsMatchExpected(true)
+            .comparison("MATCH").build()));
+
+    var ready = service.capabilities(id, PRINCIPAL, true, false);
+
+    assertThat(ready.availableActions()).contains("SUBMIT");
+    assertThat(ready.blockers()).isEmpty();
+  }
+
+  @Test
+  void publishesReviewOnlyToDifferentApproverAndPromoteOnlyToAuthor() {
+    UUID id = UUID.randomUUID();
+    DomainRuleChangeWorkspace submitted = workspace(id, "tenant-a", "dev");
+    submitted.setStatus("SUBMITTED");
+    when(workspaces.findById(id)).thenReturn(Optional.of(submitted));
+
+    var authorApprover = service.capabilities(id, PRINCIPAL, true, true);
+    assertThat(authorApprover.availableActions()).containsExactly("VIEW");
+    assertThat(authorApprover.blockers()).extracting("code")
+        .containsExactly("REVIEWER_MUST_DIFFER_FROM_AUTHOR");
+
+    var independentApprover = service.capabilities(
+        id, new DomainRuleGovernancePrincipal("tenant-a", "reviewer-b", "dev"), false, true);
+    assertThat(independentApprover.availableActions()).containsExactly("VIEW", "REVIEW");
+
+    submitted.setStatus("APPROVED");
+    var author = service.capabilities(id, PRINCIPAL, true, false);
+    assertThat(author.availableActions()).containsExactly("VIEW", "PROMOTE");
   }
 
   @Test

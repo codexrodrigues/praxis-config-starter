@@ -30,6 +30,8 @@ public class DomainRuleTestScenario {
   @Column(nullable = false, columnDefinition = "jsonb") @ColumnTransformer(write = "?::jsonb") private String facts;
   @Column(name = "expected_decision", nullable = false, length = 32) private String expectedDecision;
   @Column(name = "expected_output", columnDefinition = "jsonb") @ColumnTransformer(write = "?::jsonb") private String expectedOutput;
+  @Column(name = "expected_reason_codes", nullable = false, columnDefinition = "jsonb") @ColumnTransformer(write = "?::jsonb") private String expectedReasonCodes;
+  @Column(name = "expected_effect_intents", nullable = false, columnDefinition = "jsonb") @ColumnTransformer(write = "?::jsonb") private String expectedEffectIntents;
   @Column(nullable = false, length = 32) private String status;
   @Column(nullable = false) private UUID etag;
   @Column(nullable = false) private Long revision;
