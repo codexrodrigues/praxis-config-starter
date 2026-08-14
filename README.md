@@ -485,11 +485,12 @@ digest. In corporate mode the host must map the IAM roles
 `RULE_DEFINITION_READER`, `RULE_DEFINITION_AUTHOR`, `RULE_DEFINITION_APPROVER`,
 `RULE_COMPOSITION_APPROVER`, `RULE_SNAPSHOT_PUBLISHER`,
 `RULE_SNAPSHOT_OPERATOR` and `RULE_SNAPSHOT_READER`; actor names sent in request
-bodies are not accepted. All domain-rule catalog GETs (definitions, safe
-timeline, materializations and snapshots) require `RULE_SNAPSHOT_READER` and
-resolve tenant/environment from that authenticated principal before querying
-the store. `X-Tenant-ID` and `X-Env` remain optional routing hints; in corporate
-mode they never replace or expand the server-resolved scope.
+bodies are not accepted. Definition, capability, safe timeline and materialization
+reads require `RULE_DEFINITION_READER`; snapshot, rollout and operational status
+reads require `RULE_SNAPSHOT_READER`. Both families resolve tenant/environment
+from the authenticated principal before querying the store. `X-Tenant-ID` and
+`X-Env` remain optional routing hints; in corporate mode they never replace or
+expand the server-resolved scope.
 Hosts that publish execution observations or candidate probes additionally map
 `RULE_EXECUTION_OBSERVER`. Structural simulation requires `RULE_DEFINITION_AUTHOR`; caller hints
 never widen the resolved scope.

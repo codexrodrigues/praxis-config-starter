@@ -1,6 +1,7 @@
 package org.praxisplatform.config.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,9 +25,12 @@ import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
 import org.praxisplatform.config.dto.DomainRuleTimelineResponse;
+import org.praxisplatform.config.service.AiPrincipalContext;
+import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.DomainRuleService;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
+import org.springframework.web.server.ResponseStatusException;
 
 @Tag("unit")
 class DomainRuleControllerTest {
@@ -256,7 +260,7 @@ class DomainRuleControllerTest {
                 List.of());
 
         when(resolver.resolve(
-                servletRequest, "spoofed-tenant", "spoofed-env", "RULE_SNAPSHOT_READER"))
+                servletRequest, "spoofed-tenant", "spoofed-env", "RULE_DEFINITION_READER"))
                 .thenReturn(PRINCIPAL);
         when(service.definitions("tenant-a", "dev", null, null, null, null))
                 .thenReturn(List.of());
@@ -273,7 +277,7 @@ class DomainRuleControllerTest {
                 "spoofed-tenant", "spoofed-env", null, null, null, null, null, servletRequest);
 
         verify(resolver, org.mockito.Mockito.times(3)).resolve(
-                servletRequest, "spoofed-tenant", "spoofed-env", "RULE_SNAPSHOT_READER");
+                servletRequest, "spoofed-tenant", "spoofed-env", "RULE_DEFINITION_READER");
         verify(service).definitions("tenant-a", "dev", null, null, null, null);
         verify(service).definitionTimeline(definitionId, "tenant-a", "dev");
         verify(service).materializations("tenant-a", "dev", null, null, null, null, null);
@@ -289,7 +293,7 @@ class DomainRuleControllerTest {
         DomainRuleDefinitionResponse definition = definitionResponse(definitionId, "rule-a", 3);
 
         when(resolver.resolve(
-                servletRequest, "spoofed-tenant", "spoofed-env", "RULE_SNAPSHOT_READER"))
+                servletRequest, "spoofed-tenant", "spoofed-env", "RULE_DEFINITION_READER"))
                 .thenReturn(PRINCIPAL);
         when(resolver.hasRole(servletRequest, "RULE_DEFINITION_AUTHOR")).thenReturn(true);
         when(service.definitions("tenant-a", "dev", null, null, null, null))
@@ -317,7 +321,7 @@ class DomainRuleControllerTest {
         DomainRuleController controller = new DomainRuleController(service, resolver);
         HttpServletRequest servletRequest = servletRequest();
         DomainRuleDefinitionResponse definition = definitionResponse(UUID.randomUUID(), "rule-a", 3);
-        when(resolver.resolve(servletRequest, null, null, "RULE_SNAPSHOT_READER")).thenReturn(PRINCIPAL);
+        when(resolver.resolve(servletRequest, null, null, "RULE_DEFINITION_READER")).thenReturn(PRINCIPAL);
         when(resolver.hasRole(servletRequest, "RULE_DEFINITION_AUTHOR")).thenReturn(false);
         when(service.definitions("tenant-a", "dev", null, null, null, null)).thenReturn(List.of(definition));
 
@@ -600,7 +604,7 @@ class DomainRuleControllerTest {
         DomainRuleController controller = new DomainRuleController(service, resolver);
         HttpServletRequest servletRequest = servletRequest();
         UUID definitionId = UUID.randomUUID();
-        when(resolver.resolve(servletRequest, "caller-tenant", "caller-env", "RULE_SNAPSHOT_READER"))
+        when(resolver.resolve(servletRequest, "caller-tenant", "caller-env", "RULE_DEFINITION_READER"))
                 .thenReturn(PRINCIPAL);
 
         controller.definitions(
@@ -612,11 +616,50 @@ class DomainRuleControllerTest {
                 "caller-tenant", "caller-env", null, null, null, null, null, servletRequest);
 
         verify(resolver, org.mockito.Mockito.times(4)).resolve(
-                servletRequest, "caller-tenant", "caller-env", "RULE_SNAPSHOT_READER");
+                servletRequest, "caller-tenant", "caller-env", "RULE_DEFINITION_READER");
         verify(service).definitions("tenant-a", "dev", null, null, null, null);
         verify(service).definition(definitionId, PRINCIPAL);
         verify(service).definitionTimeline(definitionId, "tenant-a", "dev");
         verify(service).materializations("tenant-a", "dev", null, null, null, null, null);
+    }
+
+    @Test
+    void corporateDefinitionReadAcceptsDefinitionReaderWithoutSnapshotReader() {
+        DomainRuleService service = mock(DomainRuleService.class);
+        AiPrincipalContextResolver contextResolver = mock(AiPrincipalContextResolver.class);
+        HttpServletRequest servletRequest = servletRequest();
+        when(contextResolver.resolve(servletRequest, "caller-tenant", null, "caller-env"))
+                .thenReturn(new AiPrincipalContext("trusted-tenant", "iam-reader", "prod", true));
+        when(servletRequest.isUserInRole("RULE_DEFINITION_READER")).thenReturn(true);
+        when(servletRequest.isUserInRole("RULE_SNAPSHOT_READER")).thenReturn(false);
+        when(service.definitions("trusted-tenant", "prod", null, null, null, null))
+                .thenReturn(List.of());
+        DomainRuleController controller = new DomainRuleController(
+                service, new DomainRuleGovernancePrincipalResolver(contextResolver, true));
+
+        var response = controller.definitions(
+                "caller-tenant", "caller-env", null, null, null, null, servletRequest);
+
+        assertThat(response.getBody()).isEmpty();
+        verify(service).definitions("trusted-tenant", "prod", null, null, null, null);
+    }
+
+    @Test
+    void corporateDefinitionReadRejectsSnapshotReaderWithoutDefinitionReader() {
+        DomainRuleService service = mock(DomainRuleService.class);
+        AiPrincipalContextResolver contextResolver = mock(AiPrincipalContextResolver.class);
+        HttpServletRequest servletRequest = servletRequest();
+        when(contextResolver.resolve(servletRequest, "caller-tenant", null, "caller-env"))
+                .thenReturn(new AiPrincipalContext("trusted-tenant", "iam-snapshot-reader", "prod", true));
+        when(servletRequest.isUserInRole("RULE_DEFINITION_READER")).thenReturn(false);
+        when(servletRequest.isUserInRole("RULE_SNAPSHOT_READER")).thenReturn(true);
+        DomainRuleController controller = new DomainRuleController(
+                service, new DomainRuleGovernancePrincipalResolver(contextResolver, true));
+
+        assertThatThrownBy(() -> controller.definitions(
+                "caller-tenant", "caller-env", null, null, null, null, servletRequest))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("RULE_DEFINITION_READER");
     }
 
     private DomainRuleController controller(DomainRuleService service) {

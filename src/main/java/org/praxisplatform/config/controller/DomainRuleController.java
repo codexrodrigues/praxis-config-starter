@@ -48,7 +48,7 @@ import org.springframework.web.bind.annotation.RestController;
 @ConditionalOnBean({DomainRuleDefinitionRepository.class, DomainRuleMaterializationRepository.class})
 public class DomainRuleController {
 
-    private static final String RULE_READER_ROLE = "RULE_SNAPSHOT_READER";
+    private static final String DEFINITION_READER_ROLE = "RULE_DEFINITION_READER";
 
     private final DomainRuleService domainRuleService;
     private final DomainRuleGovernancePrincipalResolver principalResolver;
@@ -77,10 +77,10 @@ public class DomainRuleController {
 
     @GetMapping("/definitions")
     @Operation(summary = "List governed domain-rule definitions",
-            description = "Returns definitions only from the tenant and environment resolved from the authenticated RULE_SNAPSHOT_READER principal.")
+            description = "Returns definitions only from the tenant and environment resolved from the authenticated RULE_DEFINITION_READER principal.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Definitions in the server-resolved scope"),
-            @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_SNAPSHOT_READER")
+            @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_DEFINITION_READER")
     })
     public ResponseEntity<List<DomainRuleDefinitionResponse>> definitions(
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
@@ -91,7 +91,7 @@ public class DomainRuleController {
             @RequestParam(required = false) String ruleKey,
             HttpServletRequest servletRequest) {
         DomainRuleGovernancePrincipal principal = principalResolver.resolve(
-                servletRequest, tenantId, environment, RULE_READER_ROLE);
+                servletRequest, tenantId, environment, DEFINITION_READER_ROLE);
         return ResponseEntity.ok(domainRuleService.definitions(
                 principal.tenantId(),
                 principal.environment(),
@@ -106,14 +106,14 @@ public class DomainRuleController {
             description = "Returns actions authorized by the server for each governed definition in the authenticated reader's tenant and environment.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Capabilities in the server-resolved scope"),
-            @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_SNAPSHOT_READER")
+            @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_DEFINITION_READER")
     })
     public ResponseEntity<DomainRuleDefinitionCapabilitiesResponse> definitionCapabilities(
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment,
             HttpServletRequest servletRequest) {
         DomainRuleGovernancePrincipal principal = principalResolver.resolve(
-                servletRequest, tenantId, environment, RULE_READER_ROLE);
+                servletRequest, tenantId, environment, DEFINITION_READER_ROLE);
         boolean canCreateVersion = principalResolver.hasRole(servletRequest, "RULE_DEFINITION_AUTHOR");
         List<DomainRuleDefinitionCapability> capabilities = domainRuleService.definitions(
                         principal.tenantId(), principal.environment(), null, null, null, null)
@@ -153,7 +153,7 @@ public class DomainRuleController {
             @RequestHeader(value = "X-Env", required = false) String environment,
             HttpServletRequest servletRequest) {
         DomainRuleGovernancePrincipal principal = principalResolver.resolve(
-                servletRequest, tenantId, environment, RULE_READER_ROLE);
+                servletRequest, tenantId, environment, DEFINITION_READER_ROLE);
         return ResponseEntity.ok(domainRuleService.definition(definitionId, principal));
     }
 
@@ -162,7 +162,7 @@ public class DomainRuleController {
             description = "Returns persisted safe lifecycle evidence only when the definition belongs to the authenticated reader's server-resolved scope.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Safe timeline in the server-resolved scope"),
-            @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_SNAPSHOT_READER"),
+            @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_DEFINITION_READER"),
             @ApiResponse(responseCode = "404", description = "Definition does not exist in the resolved scope")
     })
     public ResponseEntity<DomainRuleTimelineResponse> definitionTimeline(
@@ -171,7 +171,7 @@ public class DomainRuleController {
             @RequestHeader(value = "X-Env", required = false) String environment,
             HttpServletRequest servletRequest) {
         DomainRuleGovernancePrincipal principal = principalResolver.resolve(
-                servletRequest, tenantId, environment, RULE_READER_ROLE);
+                servletRequest, tenantId, environment, DEFINITION_READER_ROLE);
         return ResponseEntity.ok(domainRuleService.definitionTimeline(
                 definitionId, principal.tenantId(), principal.environment()));
     }
@@ -212,10 +212,10 @@ public class DomainRuleController {
 
     @GetMapping("/materializations")
     @Operation(summary = "List governed rule materializations",
-            description = "Returns runtime-target projections only from the tenant and environment resolved from the authenticated RULE_SNAPSHOT_READER principal.")
+            description = "Returns runtime-target projections only from the tenant and environment resolved from the authenticated RULE_DEFINITION_READER principal.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Materializations in the server-resolved scope"),
-            @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_SNAPSHOT_READER")
+            @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_DEFINITION_READER")
     })
     public ResponseEntity<List<DomainRuleMaterializationResponse>> materializations(
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
@@ -227,7 +227,7 @@ public class DomainRuleController {
             @RequestParam(required = false) String status,
             HttpServletRequest servletRequest) {
         DomainRuleGovernancePrincipal principal = principalResolver.resolve(
-                servletRequest, tenantId, environment, RULE_READER_ROLE);
+                servletRequest, tenantId, environment, DEFINITION_READER_ROLE);
         return ResponseEntity.ok(domainRuleService.materializations(
                 principal.tenantId(),
                 principal.environment(),
