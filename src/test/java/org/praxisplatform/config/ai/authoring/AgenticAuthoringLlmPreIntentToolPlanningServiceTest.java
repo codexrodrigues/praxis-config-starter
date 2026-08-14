@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,67 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
     private DomainCatalogPromptContextService domainCatalogPromptContextService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void exposesSelectedDomainDecisionToSemanticPlanningWithoutApiResourceDiscovery() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                  "semanticIntentClass": "authoring_or_other",
+                  "assistantMessage": "",
+                  "shouldRetrieveGovernedResources": true,
+                  "requiresFullIntentResolution": true,
+                  "queryConstraints": {"appliesToDataSelection": false, "filters": []},
+                  "groundingProfile": "api_resource",
+                  "artifactKind": "page",
+                  "primaryComponent": "praxis-table",
+                  "retrievalQuery": "folhas de pagamento",
+                  "resourceSearchFocus": {
+                    "primaryBusinessEntity": "human-resources.folhas-pagamento",
+                    "supportingConcepts": [],
+                    "desiredSurface": "table",
+                    "uncertainty": null,
+                    "rationale": "Candidate deliberately conflicts with the selected governed decision."
+                  },
+                  "reason": "Generic resource retrieval must be suppressed by the canonical selection guard."
+                }
+                """));
+        ObjectNode hints = objectMapper.createObjectNode();
+        hints.putObject("selectedDomainDecisionRef")
+                .put("schemaVersion", "praxis.ai.context-hints.domain-decision/v1")
+                .put("definitionId", "758db752-19f0-4ab6-afd8-33f34eacb447")
+                .put("ruleKey", "human-resources.example")
+                .put("version", 3)
+                .put("source", "policy-studio-selection");
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService, objectMapper, 7, 1, 0L);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("Explique esta decisao", objectMapper.createObjectNode(), hints),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().requiresFullIntentResolution()).isTrue();
+        assertThat(result.plan().toolCalls()).isEmpty();
+        assertThat(result.plan().artifactKind()).isEqualTo("unknown");
+        assertThat(result.plan().primaryComponent()).isEmpty();
+        assertThat(result.plan().reason())
+                .isEqualTo("selected-domain-decision-deferred-to-full-semantic-resolution");
+        assertThat(promptCaptor.getValue())
+                .contains("planningHints.selectedDomainDecisionRef")
+                .contains("758db752-19f0-4ab6-afd8-33f34eacb447")
+                .contains("human-resources.example")
+                .contains("policy-studio-selection")
+                .contains("never generic-search");
+    }
 
     @Test
     void plansSearchApiResourcesWithLlmAuthoredSemanticQuery() throws Exception {

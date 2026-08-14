@@ -235,7 +235,10 @@ public class AgenticAuthoringIntentResolverService {
                         shouldResolveLlmIntent,
                         request,
                         target);
-        List<AgenticAuthoringCandidate> candidates = serverIssuedQuickReplyContinuation
+        boolean selectedDomainDecisionFocus = hasSelectedDomainDecisionFocus(request);
+        List<AgenticAuthoringCandidate> candidates = selectedDomainDecisionFocus
+                ? List.of()
+                : serverIssuedQuickReplyContinuation
                 ? discoverResolvedContinuationCandidates(activeDecision, artifactKind, tenantId, environment)
                 : usePreIntentResourceDiscoveryAsPrimaryEvidence
                         ? contextHintCandidates(request)
@@ -244,14 +247,16 @@ public class AgenticAuthoringIntentResolverService {
                                         ? discoverPreLlmContextCandidates(discoveryPrompt, artifactKind, target)
                                         : discoverInitialCandidates(discoveryPrompt, artifactKind, target, tenantId, environment)
                                 : discoverCandidates(discoveryPrompt, artifactKind, target, tenantId, environment);
-        if (usePreIntentResourceDiscoveryAsPrimaryEvidence && candidates.isEmpty()) {
+        if (!selectedDomainDecisionFocus
+                && usePreIntentResourceDiscoveryAsPrimaryEvidence
+                && candidates.isEmpty()) {
             candidates = shouldResolveLlmIntent
                     ? deferPreLlmApiMetadataDiscovery
                             ? discoverPreLlmContextCandidates(discoveryPrompt, artifactKind, target)
                             : discoverInitialCandidates(discoveryPrompt, artifactKind, target, tenantId, environment)
                     : discoverCandidates(discoveryPrompt, artifactKind, target, tenantId, environment);
         }
-        if (deterministicDashboardMaterialization) {
+        if (!selectedDomainDecisionFocus && deterministicDashboardMaterialization) {
             List<AgenticAuthoringCandidate> dashboardCandidates = new ArrayList<>(candidates);
             dashboardCandidates.addAll(discoverCandidates(discoveryPrompt, "table", target, tenantId, environment));
             candidates = deduplicateCandidates(dashboardCandidates);
@@ -3767,12 +3772,25 @@ public class AgenticAuthoringIntentResolverService {
             String artifactKind,
             String changeKind,
             AgenticAuthoringLlmIntentResolution llmIntent) {
+        if ("explain".equals(operationKind)
+                && "domain_decision".equals(artifactKind)
+                && "explain_domain_decision".equals(changeKind)
+                && llmIntent != null
+                && llmIntent.resolved()) {
+            return true;
+        }
         return isApiCatalogQuestion(operationKind, artifactKind, changeKind)
                 && llmIntent != null
                 && llmIntent.resolved()
                 && hasLlmWarning(llmIntent, "llm-fast-intent-resolution-used")
                 && explicitResourcePath(prompt).isBlank()
                 && !isConfirmedDataSourceSelection(prompt);
+    }
+
+    private boolean hasSelectedDomainDecisionFocus(AgenticAuthoringIntentResolutionRequest request) {
+        return request != null
+                && request.contextHints() != null
+                && request.contextHints().path("selectedDomainDecisionRef").isObject();
     }
 
     private AgenticAuthoringLlmIntentResolution resolveLlmIntentAfterCandidateRefinement(

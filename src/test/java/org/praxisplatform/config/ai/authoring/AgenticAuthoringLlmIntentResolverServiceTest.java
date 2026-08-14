@@ -1961,8 +1961,9 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
 
     @Test
     void selectedDomainDecisionExplanationNormalizesToReadOnlyConsultativeTuple() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         when(providerManagementService.generateJson(
-                any(),
+                promptCaptor.capture(),
                 any(AiJsonSchema.class),
                 any(AiCallConfig.class),
                 eq("tenant"),
@@ -2009,11 +2010,17 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                                 "policy-studio",
                                 null,
                                 "/policy-studio",
-                                contextHints,
+                                objectMapper.createObjectNode(),
                                 null,
                                 "openai",
                                 "gpt-5.4-mini",
-                                "test-key"),
+                                "test-key",
+                                null,
+                                null,
+                                List.of(),
+                                null,
+                                List.of(),
+                                contextHints),
                         "Explique esta decisão",
                         objectMapper.createObjectNode(),
                         null,
@@ -2035,6 +2042,11 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(result.visualizationDecision()).isNull();
         assertThat(result.clarificationQuestions()).isEmpty();
         assertThat(result.warnings()).contains("llm-semantic-intent-tuple-normalized");
+        assertThat(promptCaptor.getValue())
+                .contains("selectedDomainDecisionRef")
+                .contains("758db752-19f0-4ab6-afd8-33f34eacb447")
+                .contains("human-resources.example")
+                .contains("policy-studio-selection");
         Mockito.verify(providerManagementService, Mockito.times(1)).generateJson(
                 any(),
                 any(AiJsonSchema.class),

@@ -15199,6 +15199,80 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void selectedDomainDecisionExplanationNeverDiscoversOrCarriesGenericApiCandidates() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explain",
+                        "domain_decision",
+                        "explain_domain_decision",
+                        null,
+                        "folhas de pagamento",
+                        "none",
+                        "Vou explicar a decisão governada selecionada.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-fast-intent-resolution-used"),
+                        null,
+                        null,
+                        false,
+                        "domain_decision_guidance")));
+        AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("selectedDomainDecisionRef")
+                .put("schemaVersion", "praxis.ai.context-hints.domain-decision/v1")
+                .put("definitionId", "00000000-0000-0000-0000-000000000382")
+                .put("ruleKey", "ERG-08382")
+                .put("version", 3)
+                .put("source", "policy-studio-selection");
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Explique a decisão selecionada",
+                        "praxis-policy-studio",
+                        "policy-decision-explanation",
+                        "/catalog",
+                        objectMapper.createObjectNode(),
+                        null,
+                        "openai",
+                        "gpt-test",
+                        null,
+                        null,
+                        "turn-1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints),
+                "tenant",
+                "reader",
+                "local");
+
+        assertThat(result.operationKind()).isEqualTo("explain");
+        assertThat(result.artifactKind()).isEqualTo("domain_decision");
+        assertThat(result.changeKind()).isEqualTo("explain_domain_decision");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.candidates()).isEmpty();
+        Mockito.verifyNoInteractions(candidateCatalog);
+    }
+
+    @Test
     void rejectsBlankPrompt() {
         assertThatThrownBy(() -> service.resolve(new AgenticAuthoringIntentResolutionRequest(
                 " ",

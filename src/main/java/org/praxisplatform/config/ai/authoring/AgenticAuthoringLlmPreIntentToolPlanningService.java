@@ -359,6 +359,12 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 && !request.contextHints().path("resourceDiscovery").path("candidates").isEmpty();
     }
 
+    private boolean hasSelectedDomainDecision(AgenticAuthoringTurnStreamRequest request) {
+        return request != null
+                && request.contextHints() != null
+                && request.contextHints().path("selectedDomainDecisionRef").isObject();
+    }
+
     private AgenticAuthoringPreIntentToolPlanningResult toPlan(
             AgenticAuthoringTurnStreamRequest request,
             JsonNode result) {
@@ -366,6 +372,19 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         if (!List.of("platform_guidance", "governed_domain_discovery", "authoring_or_other")
                 .contains(semanticIntentClass)) {
             semanticIntentClass = "authoring_or_other";
+        }
+        if ("authoring_or_other".equals(semanticIntentClass)
+                && hasSelectedDomainDecision(request)) {
+            return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
+                    textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v2"),
+                    "selected-domain-decision-deferred-to-full-semantic-resolution",
+                    List.of(),
+                    semanticIntentClass,
+                    "",
+                    true,
+                    result.path("queryConstraints").deepCopy(),
+                    "unknown",
+                    ""));
         }
         String assistantMessage = "platform_guidance".equals(semanticIntentClass)
                 ? text(result, "assistantMessage")
@@ -552,6 +571,17 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         String responseLocale = request.contextHints() == null
                 ? ""
                 : text(request.contextHints(), "responseLocale");
+        boolean hasSelectedDomainDecision = request.contextHints() != null
+                && request.contextHints().path("selectedDomainDecisionRef").isObject();
+        String selectedDomainDecisionInstruction = hasSelectedDomainDecision
+                ? """
+                planningHints.selectedDomainDecisionRef is an exact governed semantic focus. For explanation, use
+                semanticIntentClass=authoring_or_other, shouldRetrieveGovernedResources=false,
+                requiresFullIntentResolution=true, artifactKind=unknown and primaryComponent=null. Defer semantic
+                classification and attested reread to the full resolver; never generic-search, simulate, preview,
+                apply or materialize from this untrusted hint.
+                """
+                : "";
         return """
                 Praxis first semantic orientation and pre-intent tool planner. Decide semantically and without keyword routing
                 whether this turn is platform guidance or should continue to governed authoring.
@@ -586,6 +616,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
 
                 Set semanticIntentClass=authoring_or_other when the user requests creation, editing, removal,
                 inspection, a concrete domain artifact, or another intent that needs the complete governed resolver.
+                %s
                 A request to show records on an empty canvas is UI authoring even without a component name.
                 Preserve its constraints for schema-grounded materialization.
                 Set queryConstraints.appliesToDataSelection=true and populate filters only for record selection.
@@ -639,7 +670,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 praxis-chart for analytics, otherwise null. Never keyword-route this choice.
                 Canonical response locale: %s
                 Context JSON: %s
-                """.formatted(responseLocale, context.toString());
+                """.formatted(selectedDomainDecisionInstruction, responseLocale, context.toString());
     }
 
     private ObjectNode planningContext(
@@ -910,6 +941,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         copyCompactObject(compact, "domainBindings", contextHints.path("domainBindings"));
         copyCompactObject(compact, "verifiedDomainOperations", contextHints.path("verifiedDomainOperations"));
         copyCompactObject(compact, "groundedRuntimeComponentContext", contextHints.path("groundedRuntimeComponentContext"));
+        copyCompactObject(compact, "selectedDomainDecisionRef", contextHints.path("selectedDomainDecisionRef"));
         return compact;
     }
 
