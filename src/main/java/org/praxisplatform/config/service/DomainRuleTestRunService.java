@@ -19,6 +19,8 @@ import org.praxisplatform.config.dto.DomainRuleTestRunRecordRequest;
 import org.praxisplatform.config.dto.DomainRuleTestRunResponse;
 import org.praxisplatform.config.dto.DomainRuleTestRunResultRequest;
 import org.praxisplatform.config.dto.DomainRuleTestRunResultResponse;
+import org.praxisplatform.config.dto.DomainRuleTestBaselineEvidence;
+import org.praxisplatform.config.dto.DomainRuleOperationalTestEvidence;
 import org.praxisplatform.config.repository.DomainRuleChangeWorkspaceRepository;
 import org.praxisplatform.config.repository.DomainRuleTestRunRepository;
 import org.praxisplatform.config.repository.DomainRuleTestRunResultRepository;
@@ -57,7 +59,8 @@ public class DomainRuleTestRunService {
         .evaluatedAt(request.evaluatedAtUtc()).userTimeZone(ZoneId.of(request.userTimeZone()).getId())
         .activeSnapshotKey(blankToNull(request.activeSnapshotKey()))
         .activeSnapshotContentHash(blankToNull(request.activeSnapshotContentHash()))
-        .activeActivationRevision(request.activeActivationRevision()).resultSummary(json(summary))
+        .activeActivationRevision(request.activeActivationRevision())
+        .baselineEvidence(nullableJson(request.baselineEvidence())).resultSummary(json(summary))
         .recordedBy(actor).recordedAt(recordedAt).build());
     List<DomainRuleTestRunResult> persisted = request.results().stream()
         .map(item -> entity(runId, item, validatedScenario(workspace.getId(), item))).toList();
@@ -73,7 +76,8 @@ public class DomainRuleTestRunService {
           List<DomainRuleTestRunResult> items = results.findByTestRunIdOrderByScenarioKey(run.getId());
           DomainRuleTestRunRecordRequest request = new DomainRuleTestRunRecordRequest(
               run.getWorkspaceRevision(), run.getBaseDefinitionHash(), run.getEvaluatedAt(), run.getUserTimeZone(),
-              run.getActiveSnapshotKey(), run.getActiveSnapshotContentHash(), run.getActiveActivationRevision(), List.of());
+              run.getActiveSnapshotKey(), run.getActiveSnapshotContentHash(), run.getActiveActivationRevision(),
+              value(run.getBaselineEvidence(), DomainRuleTestBaselineEvidence.class), List.of());
           return response(run.getId(), workspaceId, request, items, run.getRecordedBy(), run.getRecordedAt());
         }).toList();
   }
@@ -88,6 +92,7 @@ public class DomainRuleTestRunService {
     if (request.activeSnapshotContentHash() != null && !request.activeSnapshotContentHash().isBlank()) {
       digest(request.activeSnapshotContentHash(), "activeSnapshotContentHash");
     }
+    validateBaseline(request.baselineEvidence());
     Set<UUID> seen = new HashSet<>();
     for (DomainRuleTestRunResultRequest item : request.results()) {
       validateResult(workspace.getId(), item, seen);
@@ -107,6 +112,7 @@ public class DomainRuleTestRunService {
     assertions(item.activeEffectIntents(), "activeEffectIntents");
     safeOutput(item.candidateOutput(), "candidateOutput");
     safeOutput(item.activeOutput(), "activeOutput");
+    validateOperational(item.operationalEvidence());
   }
 
   private org.praxisplatform.config.domain.DomainRuleTestScenario validatedScenario(
@@ -141,14 +147,16 @@ public class DomainRuleTestRunService {
         .expectedEffectIntents(json(expectedEffects)).candidateEffectIntents(json(candidateEffects))
         .activeEffectIntents(json(activeEffects)).candidateEffectsMatchExpected(candidateEffects.equals(expectedEffects))
         .activeEffectsMatchExpected(activeEffects.equals(expectedEffects))
-        .candidatePlanDigest(item.candidatePlanDigest()).activePlanDigest(item.activePlanDigest()).factsDigest(item.factsDigest()).build();
+        .candidatePlanDigest(item.candidatePlanDigest()).activePlanDigest(item.activePlanDigest())
+        .factsDigest(item.factsDigest()).operationalEvidence(nullableJson(item.operationalEvidence())).build();
   }
 
   private DomainRuleTestRunResponse response(UUID runId, UUID workspaceId, DomainRuleTestRunRecordRequest request,
                                              List<DomainRuleTestRunResult> items, String actor, Instant recordedAt) {
     return new DomainRuleTestRunResponse(runId, workspaceId, request.workspaceRevision(), request.baseDefinitionHash(),
         request.evaluatedAtUtc(), request.userTimeZone(), request.activeSnapshotKey(), request.activeSnapshotContentHash(),
-        request.activeActivationRevision(), items.stream().map(this::resultResponse).toList(), actor, recordedAt);
+        request.activeActivationRevision(), request.baselineEvidence(),
+        items.stream().map(this::resultResponse).toList(), actor, recordedAt);
   }
   private DomainRuleTestRunResultResponse resultResponse(DomainRuleTestRunResult e) {
     return new DomainRuleTestRunResultResponse(e.getScenarioId(),e.getScenarioKey(),e.getExpectedDecision(),e.getCandidateDecision(),
@@ -158,19 +166,48 @@ public class DomainRuleTestRunService {
         strings(e.getCandidateReasonCodes()),strings(e.getActiveReasonCodes()),e.getCandidateReasonCodesMatchExpected(),
         e.getActiveReasonCodesMatchExpected(),strings(e.getExpectedEffectIntents()),strings(e.getCandidateEffectIntents()),
         strings(e.getActiveEffectIntents()),e.getCandidateEffectsMatchExpected(),e.getActiveEffectsMatchExpected(),
-        e.getCandidatePlanDigest(),e.getActivePlanDigest(),e.getFactsDigest());
+        e.getCandidatePlanDigest(),e.getActivePlanDigest(),e.getFactsDigest(),
+        value(e.getOperationalEvidence(), DomainRuleOperationalTestEvidence.class));
+  }
+  private void validateBaseline(DomainRuleTestBaselineEvidence evidence) {
+    if (evidence == null) return;
+    if (!Set.of("SYNTHETIC_EXPECTED", "ACTIVE_SNAPSHOT", "LEGACY_ORACLE").contains(evidence.authorityType()))
+      throw bad("baselineEvidence.authorityType is invalid");
+    text(evidence.artifactRef(), "baselineEvidence.artifactRef", 512);
+    digest(evidence.artifactDigest(), "baselineEvidence.artifactDigest");
+    if (evidence.observedAtUtc() == null) throw bad("baselineEvidence.observedAtUtc is required");
+    if (!Set.of("ELIGIBLE", "INELIGIBLE", "PENDING").contains(evidence.eligibility()))
+      throw bad("baselineEvidence.eligibility is invalid");
+  }
+  private void validateOperational(DomainRuleOperationalTestEvidence evidence) {
+    if (evidence == null) return;
+    if (!Set.of("CREATE", "UPDATE").contains(evidence.operationMode()))
+      throw bad("operationalEvidence.operationMode is invalid");
+    if ("UPDATE".equals(evidence.operationMode())) digest(evidence.beforeStateDigest(), "operationalEvidence.beforeStateDigest");
+    else optionalDigest(evidence.beforeStateDigest(), "operationalEvidence.beforeStateDigest");
+    if (evidence.mutationObserved()) digest(evidence.afterStateDigest(), "operationalEvidence.afterStateDigest");
+    else optionalDigest(evidence.afterStateDigest(), "operationalEvidence.afterStateDigest");
+    optionalDigest(evidence.effectLedgerDigest(), "operationalEvidence.effectLedgerDigest");
+    if (evidence.mutationObserved() && evidence.noMutationVerified())
+      throw bad("operationalEvidence cannot report mutation and no-mutation together");
+    if (!evidence.mutationObserved() && !evidence.noMutationVerified())
+      throw bad("operationalEvidence must verify no-mutation when no mutation was observed");
+    if (evidence.baselineCallCount() < 0) throw bad("operationalEvidence.baselineCallCount cannot be negative");
   }
   private DomainRuleChangeWorkspace scopedWorkspace(UUID id, DomainRuleGovernancePrincipal p) {
     return workspaces.findById(id).filter(w -> p.tenantId().equals(w.getTenantId()) && p.environment().equals(w.getEnvironment()))
         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,"Change workspace not found"));
   }
   private void digest(String value,String field){ if(value==null||!value.matches("[A-Fa-f0-9]{64}")) throw bad(field+" must be SHA-256"); }
+  private void optionalDigest(String value,String field){if(value!=null&&!value.isBlank())digest(value,field);}
   private String text(String v,String field,int max){if(v==null||v.isBlank()||v.trim().length()>max)throw bad(field+" is invalid");return v.trim();}
   private String blankToNull(String v){return v==null||v.isBlank()?null:v.trim();}
   private String json(Object v){try{return objectMapper.writeValueAsString(v);}catch(JsonProcessingException e){throw bad("result evidence is invalid");}}
   private String nullableJson(JsonNode value){return value==null||value.isNull()?null:json(value);}
+  private String nullableJson(Object value){return value==null?null:json(value);}
   private JsonNode tree(String value){try{return value==null?null:objectMapper.readTree(value);}catch(JsonProcessingException e){throw new IllegalStateException("Persisted result output is invalid",e);}}
   private List<String> strings(String v){try{return v==null?List.of():objectMapper.readerForListOf(String.class).readValue(v);}catch(JsonProcessingException e){throw new IllegalStateException("Persisted result evidence is invalid",e);}}
+  private <T> T value(String json,Class<T> type){try{return json==null?null:objectMapper.readValue(json,type);}catch(JsonProcessingException e){throw new IllegalStateException("Persisted test evidence is invalid",e);}}
   private List<String> assertions(List<String> values,String field){if(values==null)return List.of();if(values.size()>100)throw bad(field+" exceeds 100 entries");return values.stream().map(v->text(v,field,255)).distinct().sorted().toList();}
   private void safeOutput(JsonNode value,String field){if(value!=null&&!value.isNull()&&value.toString().length()>16384)throw bad(field+" exceeds 16384 characters");}
   private String comparison(String candidate,String active){if("TECHNICAL_ERROR".equals(candidate)||"TECHNICAL_ERROR".equals(active))return "TECHNICAL_ERROR";if("INCONCLUSIVE".equals(candidate)||"INCONCLUSIVE".equals(active))return "INCONCLUSIVE";return candidate.equals(active)?"MATCH":"MISMATCH";}

@@ -42,4 +42,5 @@ public class DomainRuleTestRunResult {
   @Column(name="candidate_plan_digest", nullable=false, length=64) private String candidatePlanDigest;
   @Column(name="active_plan_digest", nullable=false, length=64) private String activePlanDigest;
   @Column(name="facts_digest", nullable=false, length=64) private String factsDigest;
+  @Column(name="operational_evidence", columnDefinition="jsonb") @ColumnTransformer(write="?::jsonb") private String operationalEvidence;
 }

@@ -11,4 +11,5 @@ public record DomainRuleTestRunResultResponse(
     boolean candidateReasonCodesMatchExpected, boolean activeReasonCodesMatchExpected,
     List<String> expectedEffectIntents, List<String> candidateEffectIntents, List<String> activeEffectIntents,
     boolean candidateEffectsMatchExpected, boolean activeEffectsMatchExpected,
-    String candidatePlanDigest, String activePlanDigest, String factsDigest) {}
+    String candidatePlanDigest, String activePlanDigest, String factsDigest,
+    DomainRuleOperationalTestEvidence operationalEvidence) {}
