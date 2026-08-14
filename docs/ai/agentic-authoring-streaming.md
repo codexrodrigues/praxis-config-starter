@@ -701,6 +701,16 @@ somente um hint de selecao: em corporate mode o controller exige
 `inspectDomainDecision` rele `definitionId` e reconcilia `ruleKey`, versao,
 tenant e environment no Config.
 
+Os dois estagios semanticos recebem essa referencia compacta. O planner inicial
+deve encaminhar a explicacao ao resolvedor completo sem buscar recursos API
+genericos; o resolvedor recebe ID, rule key, versao e source no contexto do
+provider e continua sendo o autor da classificacao primaria. Isso evita tanto
+roteamento por palavras-chave quanto o desvio da decisao para authoring de
+pagina/recurso. Quando o planner classifica o turno como `authoring_or_other`,
+a presenca da referencia canonica tambem suprime qualquer busca API generica
+proposta nessa etapa e exige resolucao completa; esse guard governa apenas a
+selecao de tools, nao decide a intencao do usuario.
+
 O resultado termina com `canApply=false` e pode carregar
 `evidenceBundle.domainDecision`, contendo hashes, contexto semantico,
 operadores/fact paths permitidos, timeline segura, materializacoes sem payload,

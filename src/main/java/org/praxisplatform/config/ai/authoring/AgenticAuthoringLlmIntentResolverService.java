@@ -1826,6 +1826,13 @@ public class AgenticAuthoringLlmIntentResolverService {
         if (authoringScopePolicy != null) {
             context.set("authoringScopePolicy", authoringScopePolicy);
         }
+        JsonNode selectedDomainDecisionRef = request.contextHints() == null
+                ? null
+                : request.contextHints().path("selectedDomainDecisionRef");
+        if (selectedDomainDecisionRef != null && selectedDomainDecisionRef.isObject()) {
+            context.putObject("contextHints")
+                    .set("selectedDomainDecisionRef", selectedDomainDecisionRef.deepCopy());
+        }
         JsonNode resourceDiscovery = request.contextHints() == null
                 ? null
                 : request.contextHints().path("resourceDiscovery");
