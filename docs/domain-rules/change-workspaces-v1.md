@@ -17,8 +17,10 @@ canonical fingerprint of one persisted `domain_rule_definition`.
   contrato e o gate estão implementados e aguardam prova HTTP/Neon do corte.
 - Candidate/active evaluation: `suportado-parcialmente` por adapter host-owned; o
   Config armazena evidência redigida e não executa regras.
-- Candidate/legacy evidence and comparison: `lacuna-real-de-contrato`; requer
-  provenance, status HTTP/campo, before/after, effects, no-mutation e cleanup.
+- Candidate/legacy evidence and comparison: `suportado-parcialmente`. Migration `V57` adds
+  sanitized baseline provenance and optional operational CREATE/UPDATE evidence to the canonical
+  Test Run. A real host still has to collect and register that evidence; Config never calls a
+  legacy system or infers eligibility.
 - Execution of effects remains host-owned and is never performed by a Test Run.
 
 The Config Starter owns workspace and scenario persistence. The Rules Engine owns deterministic
@@ -50,7 +52,12 @@ hints only in explicitly configured local mode.
 - `PUT /api/praxis/config/domain-rules/workspaces/{id}/scenarios/{scenarioId}` requires the current
   strong scenario ETag.
 - `POST /api/praxis/config/domain-rules/workspaces/{id}/test-runs` records immutable host-produced
-  evidence only if workspace revision, base fingerprint and scenario identities still match.
+  evidence only if workspace revision, base fingerprint and scenario identities still match. The
+  optional `baselineEvidence` identifies `SYNTHETIC_EXPECTED`, `ACTIVE_SNAPSHOT` or
+  `LEGACY_ORACLE` authority through an opaque artifact reference, SHA-256, observation time and
+  explicit `ELIGIBLE`, `INELIGIBLE` or `PENDING` status. Each result may add sanitized
+  `operationalEvidence` for an actual `CREATE` or `UPDATE`, including before/after state digests,
+  mutation/no-mutation, cleanup, effect-ledger digest and baseline call count.
 - `GET /api/praxis/config/domain-rules/workspaces/{id}/test-runs` lists safe evidence without facts
   or executable snapshot payloads.
 - `POST /api/praxis/config/domain-rules/workspaces/{id}/submit` requires the current strong ETag and
@@ -99,6 +106,14 @@ expect none. The sandbox never executes an effect.
 Migration `V56` gives existing scenarios empty reason/effect expectations. Existing
 DENY scenarios that omitted expected reason codes can become blocked until an
 author records the intended assertions; this is deliberate fail-closed beta behavior.
+
+Migration `V57` keeps provenance optional for existing generic workspaces. When supplied, Config
+validates the closed authority, eligibility and operation vocabularies, every digest and
+contradictory mutation/no-mutation claims. Only redacted references and digests are persisted: raw
+Oracle rows, facts, credentials, SQL, executable policy and effect payloads remain outside Config.
+An `operationMode` without state/effect evidence is not an operational proof; conversely, the
+portable synthetic corpus must not claim legacy parity merely because its fixtures contain the
+strings `CREATE` and `UPDATE`.
 
 Workspace actions and blockers are exposed through the dedicated capabilities
 read and the public `@praxisui/core` client. Clients must not infer review,

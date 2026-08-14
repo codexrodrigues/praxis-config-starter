@@ -22,6 +22,8 @@ import org.praxisplatform.config.domain.DomainRuleTestRunResult;
 import org.praxisplatform.config.domain.DomainRuleTestScenario;
 import org.praxisplatform.config.dto.DomainRuleTestRunRecordRequest;
 import org.praxisplatform.config.dto.DomainRuleTestRunResultRequest;
+import org.praxisplatform.config.dto.DomainRuleTestBaselineEvidence;
+import org.praxisplatform.config.dto.DomainRuleOperationalTestEvidence;
 import org.praxisplatform.config.repository.DomainRuleChangeWorkspaceRepository;
 import org.praxisplatform.config.repository.DomainRuleTestRunRepository;
 import org.praxisplatform.config.repository.DomainRuleTestRunResultRepository;
@@ -42,7 +44,7 @@ class DomainRuleTestRunServiceTest {
   @BeforeEach void setup() {
     runs=mock(DomainRuleTestRunRepository.class); results=mock(DomainRuleTestRunResultRepository.class);
     workspaces=mock(DomainRuleChangeWorkspaceRepository.class); scenarios=mock(DomainRuleTestScenarioRepository.class);
-    service=new DomainRuleTestRunService(runs,results,workspaces,scenarios,new ObjectMapper());
+    service=new DomainRuleTestRunService(runs,results,workspaces,scenarios,new ObjectMapper().findAndRegisterModules());
     when(workspaces.findById(WORKSPACE)).thenReturn(Optional.of(workspace("tenant-a",2L)));
     when(scenarios.findById(SCENARIO)).thenReturn(Optional.of(DomainRuleTestScenario.builder()
         .id(SCENARIO).workspaceId(WORKSPACE).scenarioKey("happy").expectedDecision("ALLOW")
@@ -88,6 +90,50 @@ class DomainRuleTestRunServiceTest {
     assertThat(result.candidateOutputMatchesExpected()).isFalse();
     assertThat(result.candidateReasonCodesMatchExpected()).isFalse();
     assertThat(result.candidateEffectsMatchExpected()).isTrue();
+  }
+
+  @Test void recordsSanitizedBaselineAndOperationalProvenance() {
+    var baseline = new DomainRuleTestBaselineEvidence("LEGACY_ORACLE", "ergon:r013:matrix:case-01",
+        "D".repeat(64), Instant.parse("2026-08-13T11:55:00Z"), "ELIGIBLE");
+    var operational = new DomainRuleOperationalTestEvidence("UPDATE", "E".repeat(64),
+        "F".repeat(64), true, false, true, "1".repeat(64), 1);
+    var base = request(2L, "A".repeat(64));
+    var item = base.results().getFirst();
+    var request = new DomainRuleTestRunRecordRequest(base.workspaceRevision(), base.baseDefinitionHash(),
+        base.evaluatedAtUtc(), base.userTimeZone(), base.activeSnapshotKey(),
+        base.activeSnapshotContentHash(), base.activeActivationRevision(), baseline,
+        List.of(new DomainRuleTestRunResultRequest(item.scenarioId(), item.scenarioKey(),
+            item.candidateDecision(), item.activeDecision(), item.candidateOutput(), item.activeOutput(),
+            item.candidateReasonCodes(), item.activeReasonCodes(), item.candidateEffectIntents(),
+            item.activeEffectIntents(), item.candidatePlanDigest(), item.activePlanDigest(),
+            item.factsDigest(), operational)));
+
+    var response = service.record(WORKSPACE, request, PRINCIPAL);
+
+    assertThat(response.baselineEvidence()).isEqualTo(baseline);
+    assertThat(response.results().getFirst().operationalEvidence()).isEqualTo(operational);
+    ArgumentCaptor<DomainRuleTestRun> run = ArgumentCaptor.forClass(DomainRuleTestRun.class);
+    verify(runs).save(run.capture());
+    assertThat(run.getValue().getBaselineEvidence()).contains("LEGACY_ORACLE").doesNotContain("facts");
+  }
+
+  @Test void rejectsContradictoryOperationalEvidence() {
+    var base = request(2L, "A".repeat(64));
+    var item = base.results().getFirst();
+    var contradictory = new DomainRuleOperationalTestEvidence("CREATE", null, "F".repeat(64),
+        true, true, false, null, 0);
+    var request = new DomainRuleTestRunRecordRequest(base.workspaceRevision(), base.baseDefinitionHash(),
+        base.evaluatedAtUtc(), base.userTimeZone(), base.activeSnapshotKey(),
+        base.activeSnapshotContentHash(), base.activeActivationRevision(), null,
+        List.of(new DomainRuleTestRunResultRequest(item.scenarioId(), item.scenarioKey(),
+            item.candidateDecision(), item.activeDecision(), item.candidateOutput(), item.activeOutput(),
+            item.candidateReasonCodes(), item.activeReasonCodes(), item.candidateEffectIntents(),
+            item.activeEffectIntents(), item.candidatePlanDigest(), item.activePlanDigest(),
+            item.factsDigest(), contradictory)));
+
+    assertThatThrownBy(() -> service.record(WORKSPACE, request, PRINCIPAL))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("cannot report mutation and no-mutation together");
   }
 
   private DomainRuleTestRunRecordRequest request(long revision,String hash) {

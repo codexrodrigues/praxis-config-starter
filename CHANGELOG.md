@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Optional, sanitized Test Run provenance for synthetic, active-snapshot and legacy-oracle
+  baselines, plus validated CREATE/UPDATE before/after, mutation, cleanup and effect-ledger
+  evidence in migration `V57`.
 - Opt-in GitHub release gate for the versioned assistant consistency corpus,
   reusing the canonical local runner to execute repeated real-provider journeys
   with semantic accuracy, transaction, latency, token and cost evidence.

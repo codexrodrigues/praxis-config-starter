@@ -26,6 +26,7 @@ public class DomainRuleTestRun {
   @Column(name="active_snapshot_key", length=128) private String activeSnapshotKey;
   @Column(name="active_snapshot_content_hash", length=64) private String activeSnapshotContentHash;
   @Column(name="active_activation_revision", nullable=false) private Long activeActivationRevision;
+  @Column(name="baseline_evidence", columnDefinition="jsonb") @ColumnTransformer(write="?::jsonb") private String baselineEvidence;
   @Column(name="result_summary", nullable=false, columnDefinition="jsonb") @ColumnTransformer(write="?::jsonb") private String resultSummary;
   @Column(name="recorded_by", nullable=false, length=255) private String recordedBy;
   @Column(name="recorded_at", nullable=false) private Instant recordedAt;
