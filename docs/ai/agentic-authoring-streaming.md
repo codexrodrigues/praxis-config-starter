@@ -691,6 +691,26 @@ seguro para exibir na conversa; `message` pode conter detalhe tecnico para
 diagnostico restrito. Falhas inesperadas de processamento usam
 `code=agentic-authoring-processing-failed`.
 
+### Explicacao consultiva de decisao governada
+
+Quando o Policy Studio envia `contextHints.selectedDomainDecisionRef` com o
+contrato `praxis.ai.context-hints.domain-decision/v1`, o resolvedor LLM pode
+produzir `explain/domain_decision/explain_domain_decision`. A referencia e
+somente um hint de selecao: em corporate mode o controller exige
+`RULE_DEFINITION_READER` antes de enfileirar o turno, e a tool read-only
+`inspectDomainDecision` rele `definitionId` e reconcilia `ruleKey`, versao,
+tenant e environment no Config.
+
+O resultado termina com `canApply=false` e pode carregar
+`evidenceBundle.domainDecision`, contendo hashes, contexto semantico,
+operadores/fact paths permitidos, timeline segura, materializacoes sem payload,
+source refs, atestado de versao e a politica de redacao aplicada. O fluxo nao
+chama `domain-rules/simulations`, porque essa superficie registra eventos e nao
+e uma leitura pura. `governance.aiUsage` governa o envio ao provider: ausencia
+usa `summary_only`; `visibility=deny` ou `reasoningUse=deny` gera resposta
+deterministica sem chamada LLM. Runtime facts, tenant, atores, rationale de
+workspace e payload materializado nunca entram na projecao.
+
 ### Diagnostico de decisao
 
 O evento terminal `result` deve incluir `decisionDiagnostics` com

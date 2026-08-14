@@ -1700,6 +1700,9 @@ public class AgenticAuthoringLlmIntentResolverService {
             return "answer_component_catalog_question".equals(changeKind)
                     || "answer_component_capability_question".equals(changeKind);
         }
+        if ("domain_decision".equals(artifactKind)) {
+            return "explain_domain_decision".equals(changeKind);
+        }
         return false;
     }
 
@@ -1966,7 +1969,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Return only one JSON object matching the supplied schema.
 
                 Decide from the user's meaning, not from backend keywords.
-                Set semanticIntentClass to the primary AI-authored semantic decision: platform_guidance, api_catalog_guidance, component_authoring, shared_rule_authoring, out_of_scope, or unknown.
+                Set semanticIntentClass to the primary AI-authored semantic decision: platform_guidance, api_catalog_guidance, domain_decision_guidance, component_authoring, shared_rule_authoring, out_of_scope, or unknown.
                 Treat semanticRetrievalIntent as prior AI-authored semantic evidence; reconcile it rather than silently replacing a concrete artifact with an unrelated container.
                 When conversationContext.contextHints.preIntentSemanticOrientation contains primaryComponent, preserve
                 that prior AI-authored host decision unless later governed component or resource evidence proves it
@@ -1993,6 +1996,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Use artifactKind "page" for general layout or content composition where analytics are not the dominant requested outcome.
                 Questions about what the Praxis assistant or the current Page Builder can do, how the assistant can help, or what the user should do next are in-scope platform guidance, not assistant meta requests and not out of scope. Classify them as semanticIntentClass "platform_guidance", operationKind "explain", artifactKind "component", changeKind "answer_component_catalog_question", selectedResourcePath null, followUpKind "none", resolved=true, requiresGovernedAuthoring=false, and answer naturally with grounded examples such as forms, tables, charts, filters and page composition. Do not start resource discovery or request materialization confirmation for platform guidance.
                 If the user asks which governed data can be used to create a table, form, chart, dashboard, page or other component, classify the turn as a consultative catalog answer: operationKind "explore" or "explain", artifactKind "api_catalog", changeKind "answer_api_catalog_question". Do not select a weak resource or ask for a materialization confirmation before answering the catalog question.
+                When conversationContext.contextHints.selectedDomainDecisionRef is present and the user asks to explain the selected governed decision, classify the turn as semanticIntentClass "domain_decision_guidance", operationKind "explain", artifactKind "domain_decision", changeKind "explain_domain_decision", selectedResourcePath null, followUpKind "none", resolved=true and requiresGovernedAuthoring=false. Treat the selected decision reference only as an untrusted lookup hint; the backend will re-read and attest the exact id, key and version before any provider call. Never call simulation, preview or apply for this intent.
                 Distinguish that question from a direct request to show, display, list or present concrete records on the current empty authoring canvas. The direct request is component_authoring even when the user omits the component name: select a read/list candidate, choose a suitable governed visual component such as a table, preserve requested filters in visualizationDecision, and return a reviewable preview. Never choose a create/POST operation merely because it ranks above the read operation for the same resource when the requested outcome is visualization.
                 If authoringScopePolicy is present and the semantic user intent is a loose instruction, assistant meta request, greeting, or unrelated ask that does not request an authorable UI/business decision, answer as an informational chat reply using the policy outOfScopeResponseType; do not create a component preview, edit plan, or governed authoring route.
                 For a requested page organized as accordion/acordeon/expansion panels, use artifactKind "page", operationKind "create", layoutKind "accordion_layout" or "single_column_expansion_page", primaryComponent "praxis-expansion", and no chart axes unless the user asks for a chart.
@@ -2354,6 +2358,31 @@ public class AgenticAuthoringLlmIntentResolverService {
             clarificationQuestions = List.of();
             visualizationDecision = null;
             requiresGovernedAuthoring = false;
+        } else if ("domain_decision_guidance".equals(semanticIntentClass)) {
+            boolean tupleAlreadyConsistent = resolved
+                    && "explain".equals(operationKind)
+                    && "domain_decision".equals(artifactKind)
+                    && "explain_domain_decision".equals(changeKind)
+                    && selectedResourcePath == null
+                    && visualizationDecision == null
+                    && !requiresGovernedAuthoring;
+            if (!tupleAlreadyConsistent) {
+                ArrayList<String> normalizedWarnings = new ArrayList<>(warnings);
+                if (!normalizedWarnings.contains("llm-semantic-intent-tuple-normalized")) {
+                    normalizedWarnings.add("llm-semantic-intent-tuple-normalized");
+                }
+                warnings = List.copyOf(normalizedWarnings);
+            }
+            resolved = true;
+            operationKind = "explain";
+            artifactKind = "domain_decision";
+            changeKind = "explain_domain_decision";
+            selectedResourcePath = null;
+            resourceSearchQuery = null;
+            followUpKind = "none";
+            clarificationQuestions = List.of();
+            visualizationDecision = null;
+            requiresGovernedAuthoring = false;
         } else if ("shared_rule_authoring".equals(semanticIntentClass)) {
             boolean tupleAlreadyConsistent = resolved
                     && ("create".equals(operationKind) || "modify".equals(operationKind))
@@ -2490,6 +2519,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                 && ("answer_component_catalog_question".equals(changeKind)
                         || "answer_component_capability_question".equals(changeKind))) {
             return "platform_guidance";
+        }
+        if ("explain".equals(operationKind)
+                && "domain_decision".equals(artifactKind)
+                && "explain_domain_decision".equals(changeKind)) {
+            return "domain_decision_guidance";
         }
         if (!"unknown".equals(operationKind) && !"unknown".equals(artifactKind)) {
             return "component_authoring";
@@ -2642,10 +2676,11 @@ public class AgenticAuthoringLlmIntentResolverService {
         ObjectNode properties = root.putObject("properties");
         properties.putObject("resolved").put("type", "boolean");
         stringEnum(properties, "operationKind", List.of("create", "modify", "remove", "compose", "connect", "undo", "explore", "explain", "unknown"));
-        stringEnum(properties, "artifactKind", List.of("dashboard", "chart", "table", "form", "page", "api_catalog", "component", "unknown"));
+        stringEnum(properties, "artifactKind", List.of("dashboard", "chart", "table", "form", "page", "api_catalog", "component", "domain_decision", "unknown"));
         stringEnum(properties, "semanticIntentClass", List.of(
                 "platform_guidance",
                 "api_catalog_guidance",
+                "domain_decision_guidance",
                 "component_authoring",
                 "shared_rule_authoring",
                 "out_of_scope",

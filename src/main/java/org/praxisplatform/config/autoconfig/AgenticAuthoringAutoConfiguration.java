@@ -57,6 +57,7 @@ import org.praxisplatform.config.service.AiTurnService;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
+import org.praxisplatform.config.service.DomainRuleExplanationProjectionService;
 import org.praxisplatform.config.service.GovernedPlatformRequestAuthorizationProvider;
 import org.praxisplatform.config.service.LiveOptionValueRetrievalService;
 import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
@@ -69,6 +70,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -78,6 +80,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.core.annotation.Order;
 
 @AutoConfiguration
+@AutoConfigureAfter(DomainRuleExplanationAutoConfiguration.class)
 @ConditionalOnClass(AgenticAuthoringDryRunService.class)
 @EnableConfigurationProperties({
         AgenticAuthoringArtifactProperties.class,
@@ -382,6 +385,7 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectProvider<org.praxisplatform.config.ai.authoring.AgenticAuthoringOperationalBindingVerificationService> operationalVerificationService,
             ObjectProvider<DomainCatalogIngestionService> domainCatalogIngestionService,
             ObjectProvider<LiveOptionValueRetrievalService> liveOptionValueRetrievalService,
+            ObjectProvider<DomainRuleExplanationProjectionService> domainRuleExplanationProjectionService,
             @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey,
             ObjectMapper objectMapper) {
         return new AgenticAuthoringToolRegistry(
@@ -396,7 +400,8 @@ public class AgenticAuthoringAutoConfiguration {
                 operationalVerificationService.getIfAvailable(),
                 domainCatalogIngestionService.getIfAvailable(),
                 domainCatalogServiceKey,
-                liveOptionValueRetrievalService.getIfAvailable());
+                liveOptionValueRetrievalService.getIfAvailable(),
+                domainRuleExplanationProjectionService.getIfAvailable());
     }
 
     @Bean

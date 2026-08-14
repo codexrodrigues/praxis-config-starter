@@ -40,6 +40,7 @@ import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.AiStreamAccessTokenService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -63,6 +64,8 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 @ConditionalOnProperty(prefix = "praxis.ai.authoring", name = "http-enabled", havingValue = "true")
 public class AgenticAuthoringController {
 
+    private static final String RULE_DEFINITION_READER_ROLE = "RULE_DEFINITION_READER";
+
     private final AgenticAuthoringDryRunService dryRunService;
     private final AgenticAuthoringArtifactSource artifactSource;
     private final AgenticAuthoringIntentResolverService intentResolverService;
@@ -76,6 +79,7 @@ public class AgenticAuthoringController {
     private final AiPrincipalContextResolver principalContextResolver;
     private final AiStreamAccessTokenService streamAccessTokenService;
     private final AgenticAuthoringConsultativeAnswerService consultativeAnswerService;
+    private final boolean corporateMode;
 
     @Autowired
     public AgenticAuthoringController(
@@ -91,7 +95,8 @@ public class AgenticAuthoringController {
             AgenticAuthoringTurnStreamService turnStreamService,
             AiPrincipalContextResolver principalContextResolver,
             AiStreamAccessTokenService streamAccessTokenService,
-            AgenticAuthoringConsultativeAnswerService consultativeAnswerService) {
+            AgenticAuthoringConsultativeAnswerService consultativeAnswerService,
+            @Value("${praxis.ai.security.corporate-mode:true}") boolean corporateMode) {
         this.dryRunService = dryRunService;
         this.artifactSource = artifactSource;
         this.intentResolverService = intentResolverService;
@@ -105,6 +110,38 @@ public class AgenticAuthoringController {
         this.principalContextResolver = principalContextResolver;
         this.streamAccessTokenService = streamAccessTokenService;
         this.consultativeAnswerService = consultativeAnswerService;
+        this.corporateMode = corporateMode;
+    }
+
+    public AgenticAuthoringController(
+            AgenticAuthoringDryRunService dryRunService,
+            AgenticAuthoringArtifactSource artifactSource,
+            AgenticAuthoringIntentResolverService intentResolverService,
+            AgenticAuthoringPlanService planService,
+            AgenticAuthoringPatchCompilerService patchCompilerService,
+            AgenticAuthoringPreviewService previewService,
+            AgenticAuthoringApplyService applyService,
+            AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
+            AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
+            AgenticAuthoringTurnStreamService turnStreamService,
+            AiPrincipalContextResolver principalContextResolver,
+            AiStreamAccessTokenService streamAccessTokenService,
+            AgenticAuthoringConsultativeAnswerService consultativeAnswerService) {
+        this(
+                dryRunService,
+                artifactSource,
+                intentResolverService,
+                planService,
+                patchCompilerService,
+                previewService,
+                applyService,
+                componentCapabilitiesService,
+                resourceDiscoveryService,
+                turnStreamService,
+                principalContextResolver,
+                streamAccessTokenService,
+                consultativeAnswerService,
+                true);
     }
 
     public AgenticAuthoringController(
@@ -190,6 +227,7 @@ public class AgenticAuthoringController {
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         requireTurnStreamSupport();
+        requireSelectedDomainDecisionReadAccess(request, servletRequest);
         AiPrincipalContext principalContext = principalContextResolver.resolve(
                 servletRequest,
                 tenantId,
@@ -581,6 +619,30 @@ public class AgenticAuthoringController {
         if (turnStreamService == null || principalContextResolver == null || streamAccessTokenService == null) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Agentic authoring stream is not configured.");
         }
+    }
+
+    private void requireSelectedDomainDecisionReadAccess(
+            AgenticAuthoringTurnStreamRequest request,
+            HttpServletRequest servletRequest) {
+        if (!corporateMode || !hasSelectedDomainDecisionRef(request)) {
+            return;
+        }
+        if (servletRequest == null || servletRequest.getUserPrincipal() == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication is required.");
+        }
+        if (!servletRequest.isUserInRole(RULE_DEFINITION_READER_ROLE)) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Authenticated principal requires IAM role " + RULE_DEFINITION_READER_ROLE + ".");
+        }
+    }
+
+    private boolean hasSelectedDomainDecisionRef(AgenticAuthoringTurnStreamRequest request) {
+        return request != null
+                && request.contextHints() != null
+                && request.contextHints().isObject()
+                && request.contextHints().has("selectedDomainDecisionRef")
+                && !request.contextHints().get("selectedDomainDecisionRef").isNull();
     }
 
     private String firstNonBlank(String... values) {
