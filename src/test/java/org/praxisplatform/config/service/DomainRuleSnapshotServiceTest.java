@@ -982,8 +982,14 @@ class DomainRuleSnapshotServiceTest {
             ruleSet(), ids, "quickstart", "quickstart/1.0",
             "2026-07-13T20:00:00Z", null), "tenant-a", "prod"))
         .isInstanceOfSatisfying(DomainRuleSnapshotControlPlaneException.class,
-            exception -> assertThat(exception.getMessage())
-                .contains("SNAPSHOT:BOUND_TEST_RUN_REQUIRED"));
+            exception -> {
+              assertThat(exception.code()).isEqualTo("TEST_EVIDENCE_BLOCKED");
+              assertThat(exception.blockers()).singleElement().satisfies(blocker -> {
+                assertThat(blocker.code()).isEqualTo("BOUND_TEST_RUN_REQUIRED");
+                assertThat(blocker.stage()).isEqualTo("SNAPSHOT");
+                assertThat(ids).contains(blocker.definitionId());
+              });
+            });
   }
 
   private DomainRuleSnapshotPublicationRequest publicationRequest(

@@ -75,6 +75,9 @@ fail closed for an old snapshot that the current engine cannot verify.
     immutable safe references plus an evidence digest, never raw scenario facts;
   - validates the candidate and returns the canonical manifest and SHA-256 to
     present to composition approvers.
+  - returns `DomainRuleSnapshotProblemResponse` with `code=TEST_EVIDENCE_BLOCKED` and safe
+    `blockers[]` (`code`, `stage`, `definitionId`, `message`) when reviewed evidence is insufficient;
+    IAM remains represented by `401/403` and clients must never parse the message to infer either.
 - `POST /api/praxis/config/domain-rules/snapshots/composition-approvals`
   - receives the complete candidate, recomputes its canonical manifest and
     appends one approval for the authenticated `RULE_COMPOSITION_APPROVER`;
@@ -177,6 +180,11 @@ ambiguous or the stage policy is not satisfied. Activation and rollback trust on
 approved immutable manifest and reverify its digest; they do not query a later mutable workspace.
 Version 1 manifests remain historical immutable publications and continue through their original
 composition verification, but cannot claim the v2 Test Run binding.
+
+Snapshot control-plane failures use a typed response. Ordinary validation/concurrency failures keep
+an empty blocker list; only server-owned governance diagnostics populate it. This allows Policy
+Studio and other clients to localize known codes while preserving the sanitized server message as a
+fallback. A blocker is not an authorization grant and never replaces `availableAction` or IAM.
 
 ## Compatibility and ownership
 
