@@ -3,6 +3,7 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -48,13 +49,14 @@ import org.praxisplatform.rules.snapshot.PraxisRuleSnapshotCompiler;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Governed publication, activation and rollback of immutable RuleSet snapshots. */
 public class DomainRuleSnapshotService {
   private static final Set<String> PUBLISHABLE_STATUSES = Set.of("approved", "active");
   private static final int MINIMUM_DISTINCT_APPROVERS = 2;
-  private static final String COMPOSITION_CONTRACT_VERSION = "praxis-rule-composition/1";
+  private static final String COMPOSITION_CONTRACT_VERSION = "praxis-rule-composition/2";
 
   private final DomainRuleDefinitionRepository definitionRepository;
   private final DomainRuleSnapshotRepository snapshotRepository;
@@ -66,6 +68,7 @@ public class DomainRuleSnapshotService {
   private final ObjectMapper objectMapper;
   private final DomainRuleImplementationCatalog implementationCatalog;
   private final DomainRuleSnapshotActivationGate activationGate;
+  private final ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGate;
 
   public DomainRuleSnapshotService(
       DomainRuleDefinitionRepository definitionRepository,
@@ -79,7 +82,7 @@ public class DomainRuleSnapshotService {
       DomainRuleImplementationCatalog implementationCatalog) {
     this(definitionRepository, snapshotRepository, headRepository, eventRepository,
         compositionApprovalRepository, definitionApprovalRepository, definitionFingerprint,
-        objectMapper, implementationCatalog, DomainRuleSnapshotActivationGate.allowAll());
+        objectMapper, implementationCatalog, DomainRuleSnapshotActivationGate.allowAll(), null);
   }
 
   public DomainRuleSnapshotService(
@@ -93,6 +96,23 @@ public class DomainRuleSnapshotService {
       ObjectMapper objectMapper,
       DomainRuleImplementationCatalog implementationCatalog,
       DomainRuleSnapshotActivationGate activationGate) {
+    this(definitionRepository, snapshotRepository, headRepository, eventRepository,
+        compositionApprovalRepository, definitionApprovalRepository, definitionFingerprint,
+        objectMapper, implementationCatalog, activationGate, null);
+  }
+
+  public DomainRuleSnapshotService(
+      DomainRuleDefinitionRepository definitionRepository,
+      DomainRuleSnapshotRepository snapshotRepository,
+      DomainRuleSnapshotHeadRepository headRepository,
+      DomainRuleSnapshotEventRepository eventRepository,
+      DomainRuleCompositionApprovalRepository compositionApprovalRepository,
+      DomainRuleDefinitionApprovalRepository definitionApprovalRepository,
+      DomainRuleDefinitionFingerprint definitionFingerprint,
+      ObjectMapper objectMapper,
+      DomainRuleImplementationCatalog implementationCatalog,
+      DomainRuleSnapshotActivationGate activationGate,
+      ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGate) {
     this.definitionRepository = definitionRepository;
     this.snapshotRepository = snapshotRepository;
     this.headRepository = headRepository;
@@ -103,6 +123,7 @@ public class DomainRuleSnapshotService {
     this.objectMapper = objectMapper;
     this.implementationCatalog = implementationCatalog;
     this.activationGate = activationGate;
+    this.evidenceGate = evidenceGate;
   }
 
   /**
@@ -130,7 +151,8 @@ public class DomainRuleSnapshotService {
         definitionFingerprint,
         objectMapper,
         DomainRuleImplementationCatalog.denyAll(),
-        DomainRuleSnapshotActivationGate.allowAll());
+        DomainRuleSnapshotActivationGate.allowAll(),
+        null);
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -588,6 +610,7 @@ public class DomainRuleSnapshotService {
     manifest.put("validFromUtc", validFromUtc);
     if (validUntilUtc == null) manifest.putNull("validUntilUtc"); else manifest.put("validUntilUtc", validUntilUtc);
     manifest.set("sources", objectMapper.valueToTree(sourceEvidence));
+    manifest.set("testEvidence", evidenceManifest(sources, tenant, environment));
     manifest.set("implementationCatalog", catalog);
     manifest.put("implementationCatalogDigest", catalogDigest);
     manifest.set("ruleSet", objectMapper.valueToTree(ruleSet));
@@ -601,6 +624,55 @@ public class DomainRuleSnapshotService {
         new DomainRuleCompositionManifestResponse(
             COMPOSITION_CONTRACT_VERSION, PraxisCanonicalJson.sha256(manifest), catalogDigest, manifest),
         implementations);
+  }
+
+  private ArrayNode evidenceManifest(
+      List<DomainRuleDefinition> sources, String tenant, String environment) {
+    ArrayNode evidence = objectMapper.createArrayNode();
+    DomainRuleDefinitionEvidenceGateService gate = evidenceGate == null
+        ? null : evidenceGate.getIfAvailable();
+    DomainRuleGovernancePrincipal principal =
+        new DomainRuleGovernancePrincipal(tenant, "snapshot-composer", environment);
+    for (DomainRuleDefinition source : sources) {
+      for (String stage : List.of("SNAPSHOT", "ACTIVATE")) {
+        if (gate == null) {
+          if (declaresEvidenceStage(source, stage)) {
+            throw badRequest("Test evidence gate is unavailable for governed " + stage + " stage");
+          }
+          continue;
+        }
+        DomainRuleDefinitionEvidenceDecision decision = gate.decision(stage, source, principal);
+        if (!decision.required()) continue;
+        if (!decision.satisfied()) {
+          String codes = decision.blockers().stream()
+              .map(blocker -> blocker.code()).sorted().distinct()
+              .reduce((left, right) -> left + "," + right).orElse("TEST_EVIDENCE_REQUIRED");
+          throw badRequest("RuleSet composition blocked by reviewed Test Run evidence ["
+              + stage + ":" + codes + "]");
+        }
+        ObjectNode item = evidence.addObject();
+        item.put("definitionId", decision.definitionId().toString());
+        item.put("stage", stage);
+        item.put("workspaceId", decision.workspaceId().toString());
+        item.put("testRunId", decision.testRunId().toString());
+        item.put("requestHash", decision.requestHash());
+        item.put("workspaceRevision", decision.workspaceRevision());
+        item.put("evidenceDigest", decision.evidenceDigest());
+        item.put("satisfied", true);
+      }
+    }
+    return evidence;
+  }
+
+  private boolean declaresEvidenceStage(DomainRuleDefinition source, String stage) {
+    if (source.getGovernance() == null || source.getGovernance().isBlank()) return false;
+    try {
+      var stages = objectMapper.readTree(source.getGovernance())
+          .path("testEvidencePolicy").path("stages");
+      return stages.isObject() && stages.has(stage) && !stages.get(stage).isNull();
+    } catch (JsonProcessingException exception) {
+      throw badRequest("Source definition governance is not valid JSON");
+    }
   }
 
   private List<RuleImplementationRef> allowedImplementations(
@@ -842,6 +914,23 @@ public class DomainRuleSnapshotService {
           .map(RuleSnapshotApproval::actorRef).distinct().count();
       if (!digest.equals(stored.getCompositionDigest()) || approvers < MINIMUM_DISTINCT_APPROVERS) {
         throw new IllegalStateException("Persisted RuleSet composition approval verification failed");
+      }
+      if (COMPOSITION_CONTRACT_VERSION.equals(manifest.path("compositionContractVersion").asText())) {
+        var testEvidence = manifest.get("testEvidence");
+        if (testEvidence == null || !testEvidence.isArray()) {
+          throw new IllegalStateException("Persisted RuleSet test evidence manifest is unreadable");
+        }
+        for (var item : testEvidence) {
+          if (!item.path("satisfied").asBoolean(false)
+              || item.path("definitionId").asText().isBlank()
+              || item.path("stage").asText().isBlank()
+              || item.path("workspaceId").asText().isBlank()
+              || item.path("testRunId").asText().isBlank()
+              || item.path("requestHash").asText().isBlank()
+              || item.path("evidenceDigest").asText().isBlank()) {
+            throw new IllegalStateException("Persisted RuleSet test evidence manifest is invalid");
+          }
+        }
       }
     } catch (JsonProcessingException | NullPointerException exception) {
       throw new IllegalStateException("Persisted RuleSet composition manifest is unreadable", exception);

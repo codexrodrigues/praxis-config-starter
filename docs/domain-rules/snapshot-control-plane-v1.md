@@ -71,6 +71,8 @@ fail closed for an old snapshot that the current engine cannot verify.
   - later publications require a strong `If-Match` with the current head ETag.
 - `POST /api/praxis/config/domain-rules/snapshots/composition-manifest`
   - resolves approved source hashes and the host admission catalog;
+  - evaluates opt-in `SNAPSHOT` and `ACTIVATE` Test Run policies for every source and embeds only
+    immutable safe references plus an evidence digest, never raw scenario facts;
   - validates the candidate and returns the canonical manifest and SHA-256 to
     present to composition approvers.
 - `POST /api/praxis/config/domain-rules/snapshots/composition-approvals`
@@ -138,7 +140,8 @@ evidence become part of the immutable snapshot envelope.
 
 The selected design is an explicit canonical composition manifest. Its digest
 covers tenant/environment, owner and host contract, validity, approved source
-hashes, the complete RuleSet and the host-governed admission catalog. Publication
+hashes, reviewed Test Run evidence required for `SNAPSHOT`/`ACTIVATE`, the complete RuleSet and the
+host-governed admission catalog. Publication
 rebuilds that manifest in the same transaction and loads two distinct,
 append-only approvals created in independent authenticated calls; the
 authenticated publisher cannot be one of them.
@@ -166,6 +169,14 @@ one to the exact canonical source hash used by snapshot publication.
 Definitions created before this contract without `createdByType=authenticated`
 fail closed and must be recreated or versioned through the authenticated author
 flow; migration does not relabel caller-declared legacy identity as trusted.
+
+Composition contract `praxis-rule-composition/2` binds each required evidence receipt by definition,
+stage, workspace, Test Run, request hash, workspace revision and canonical evidence digest. Preparing
+or rebuilding a candidate fails closed when the evidence service is unavailable, provenance is
+ambiguous or the stage policy is not satisfied. Activation and rollback trust only the already
+approved immutable manifest and reverify its digest; they do not query a later mutable workspace.
+Version 1 manifests remain historical immutable publications and continue through their original
+composition verification, but cannot claim the v2 Test Run binding.
 
 ## Compatibility and ownership
 

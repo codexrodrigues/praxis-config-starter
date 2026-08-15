@@ -32,6 +32,7 @@ import org.praxisplatform.config.service.DomainRuleDefinitionFingerprint;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleImplementationCatalog;
+import org.praxisplatform.config.service.DomainRuleDefinitionEvidenceGateService;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -76,7 +77,8 @@ public class DomainRuleSnapshotAutoConfiguration {
       ObjectMapper objectMapper,
       DomainRuleDefinitionFingerprint definitionFingerprint,
       DomainRuleImplementationCatalog implementationCatalog,
-      ObjectProvider<DomainRuleSnapshotActivationGate> activationGate) {
+      ObjectProvider<DomainRuleSnapshotActivationGate> activationGate,
+      ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGate) {
     return new DomainRuleSnapshotService(
         definitionRepository,
         snapshotRepository,
@@ -87,7 +89,8 @@ public class DomainRuleSnapshotAutoConfiguration {
         definitionFingerprint,
         objectMapper,
         implementationCatalog,
-        activationGate.getIfAvailable(DomainRuleSnapshotActivationGate::allowAll));
+        activationGate.getIfAvailable(DomainRuleSnapshotActivationGate::allowAll),
+        evidenceGate);
   }
 
   @Bean

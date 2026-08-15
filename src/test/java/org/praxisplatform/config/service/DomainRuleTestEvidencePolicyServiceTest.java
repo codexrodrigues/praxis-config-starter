@@ -79,18 +79,25 @@ class DomainRuleTestEvidencePolicyServiceTest {
   }
 
   @Test
-  void rejectsUnknownOrPrematureStagesInsteadOfSilentlySkippingTheirPolicy() {
+  void rejectsUnknownStagesInsteadOfSilentlySkippingTheirPolicy() {
     String typoed = """
         {"testEvidencePolicy":{"stages":{"PROMT":{"requireCleanupVerified":true}}}}
         """;
-    String premature = """
-        {"testEvidencePolicy":{"stages":{"ACTIVATE":{"requireCleanupVerified":true}}}}
-        """;
-
     assertThat(service.blockers("PROMOTE", definition(typoed), null, List.of()))
         .extracting("code").containsExactly("TEST_EVIDENCE_POLICY_INVALID");
-    assertThat(service.blockers("PROMOTE", definition(premature), null, List.of()))
-        .extracting("code").containsExactly("TEST_EVIDENCE_POLICY_INVALID");
+  }
+
+  @Test
+  void recognizesSnapshotAndActivationAsGovernedEvidenceStages() {
+    String lifecycle = """
+        {"testEvidencePolicy":{"stages":{
+          "SNAPSHOT":{"baselineEligibility":"ELIGIBLE"},
+          "ACTIVATE":{"requireCleanupVerified":true}
+        }}}
+        """;
+
+    assertThat(service.hasStage("SNAPSHOT", definition(lifecycle))).isTrue();
+    assertThat(service.hasStage("ACTIVATE", definition(lifecycle))).isTrue();
   }
 
   private String policy() {

@@ -22,9 +22,10 @@ class DomainRuleDefinitionEvidenceGateServiceTest {
   private final DomainRuleChangeWorkspaceRepository workspaces = mock(DomainRuleChangeWorkspaceRepository.class);
   private final DomainRuleTestRunRepository runs = mock(DomainRuleTestRunRepository.class);
   private final DomainRuleTestRunResultRepository results = mock(DomainRuleTestRunResultRepository.class);
+  private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
   private final DomainRuleDefinitionEvidenceGateService service =
       new DomainRuleDefinitionEvidenceGateService(workspaces, runs, results,
-          new DomainRuleTestEvidencePolicyService(new ObjectMapper().findAndRegisterModules()));
+          new DomainRuleTestEvidencePolicyService(objectMapper), objectMapper);
   private final DomainRuleGovernancePrincipal principal =
       new DomainRuleGovernancePrincipal("tenant-a", "publisher", "prod");
 

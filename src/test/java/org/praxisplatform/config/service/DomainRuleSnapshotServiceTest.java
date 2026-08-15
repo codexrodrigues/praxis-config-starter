@@ -64,6 +64,7 @@ import org.praxisplatform.rules.snapshot.PraxisRuleSnapshotCompiler;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.ObjectProvider;
 
 @Tag("unit")
 class DomainRuleSnapshotServiceTest {
@@ -911,6 +912,78 @@ class DomainRuleSnapshotServiceTest {
               assertThat(exception.status()).isEqualTo(HttpStatus.BAD_REQUEST);
               assertThat(exception.getMessage()).contains("exact content hash");
             });
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void compositionManifestBindsReviewedSnapshotEvidenceByDigest() {
+    ObjectProvider<DomainRuleDefinitionEvidenceGateService> provider = mock(ObjectProvider.class);
+    DomainRuleDefinitionEvidenceGateService gate = mock(DomainRuleDefinitionEvidenceGateService.class);
+    when(provider.getIfAvailable()).thenReturn(gate);
+    service = new DomainRuleSnapshotService(
+        definitionRepository, snapshotRepository, headRepository, eventRepository,
+        compositionApprovalRepository, definitionApprovalRepository,
+        new DomainRuleDefinitionFingerprint(objectMapper), objectMapper, implementationCatalog,
+        DomainRuleSnapshotActivationGate.allowAll(), provider);
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    List<UUID> ids = List.of(firstId, secondId);
+    DomainRuleDefinition first = approvedDefinition(firstId, "grant:eligibility", "approver-a");
+    DomainRuleDefinition second = approvedDefinition(secondId, "grant:amount", "approver-b");
+    when(definitionRepository.findAllById(ids)).thenReturn(List.of(first, second));
+    when(gate.decision(eq("SNAPSHOT"), any(), any())).thenAnswer(invocation -> {
+      DomainRuleDefinition definition = invocation.getArgument(1);
+      return new DomainRuleDefinitionEvidenceDecision(
+          definition.getId(), "SNAPSHOT", true, UUID.randomUUID(), UUID.randomUUID(),
+          "A".repeat(64), 7L, "B".repeat(64), List.of());
+    });
+    when(gate.decision(eq("ACTIVATE"), any(), any())).thenAnswer(invocation -> {
+      DomainRuleDefinition definition = invocation.getArgument(1);
+      return new DomainRuleDefinitionEvidenceDecision(
+          definition.getId(), "ACTIVATE", false, null, null, null, null, null, List.of());
+    });
+
+    var response = service.prepareCompositionManifest(new DomainRuleCompositionManifestRequest(
+        ruleSet(), ids, "quickstart", "quickstart/1.0",
+        "2026-07-13T20:00:00Z", null), "tenant-a", "prod");
+
+    assertThat(response.compositionContractVersion()).isEqualTo("praxis-rule-composition/2");
+    assertThat(response.manifest().path("testEvidence")).hasSize(2);
+    assertThat(response.manifest().path("testEvidence").get(0).path("satisfied").asBoolean()).isTrue();
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void compositionFailsClosedWhenRequiredSnapshotEvidenceIsBlocked() {
+    ObjectProvider<DomainRuleDefinitionEvidenceGateService> provider = mock(ObjectProvider.class);
+    DomainRuleDefinitionEvidenceGateService gate = mock(DomainRuleDefinitionEvidenceGateService.class);
+    when(provider.getIfAvailable()).thenReturn(gate);
+    service = new DomainRuleSnapshotService(
+        definitionRepository, snapshotRepository, headRepository, eventRepository,
+        compositionApprovalRepository, definitionApprovalRepository,
+        new DomainRuleDefinitionFingerprint(objectMapper), objectMapper, implementationCatalog,
+        DomainRuleSnapshotActivationGate.allowAll(), provider);
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    List<UUID> ids = List.of(firstId, secondId);
+    when(definitionRepository.findAllById(ids)).thenReturn(List.of(
+        approvedDefinition(firstId, "grant:eligibility", "approver-a"),
+        approvedDefinition(secondId, "grant:amount", "approver-b")));
+    when(gate.decision(eq("SNAPSHOT"), any(), any())).thenAnswer(invocation -> {
+      DomainRuleDefinition definition = invocation.getArgument(1);
+      return new DomainRuleDefinitionEvidenceDecision(
+          definition.getId(), "SNAPSHOT", true, null, null, null, null, null,
+          List.of(new org.praxisplatform.config.dto.DomainRuleWorkspaceBlocker(
+              "BOUND_TEST_RUN_REQUIRED", "SNAPSHOT", "Reviewed Test Run required")));
+    });
+
+    assertThatThrownBy(() -> service.prepareCompositionManifest(
+        new DomainRuleCompositionManifestRequest(
+            ruleSet(), ids, "quickstart", "quickstart/1.0",
+            "2026-07-13T20:00:00Z", null), "tenant-a", "prod"))
+        .isInstanceOfSatisfying(DomainRuleSnapshotControlPlaneException.class,
+            exception -> assertThat(exception.getMessage())
+                .contains("SNAPSHOT:BOUND_TEST_RUN_REQUIRED"));
   }
 
   private DomainRuleSnapshotPublicationRequest publicationRequest(
