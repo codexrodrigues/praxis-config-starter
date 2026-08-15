@@ -242,6 +242,39 @@ class DomainRuleRolloutPolicyServiceTest {
     verifyNoInteractions(heads, events);
   }
 
+  @Test void catalogPublishesOnlyPrincipalOwnedLifecycleActions() {
+    UUID etag = UUID.randomUUID();
+    var ownDraft = draft(UUID.randomUUID(), "reviewer-b");
+    var independentDraft = draft(UUID.randomUUID(), "author-a");
+    var reviewer = new DomainRuleGovernancePrincipal("tenant-a", "reviewer-b", "dev");
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "dev", "benefit.eligibility"))
+        .thenReturn(Optional.of(policyHead(null, 0, etag)));
+    when(policies.findByTenantIdAndEnvironmentAndRuleSetKeyOrderByCreatedAtDesc(
+        "tenant-a", "dev", "benefit.eligibility"))
+        .thenReturn(List.of(ownDraft, independentDraft));
+
+    var catalog = service.catalog(
+        "benefit.eligibility", reviewer, false, true, false);
+
+    assertThat(catalog.availableActions()).isEmpty();
+    assertThat(catalog.versions().get(0).availableActions()).isEmpty();
+    assertThat(catalog.versions().get(1).availableActions()).containsExactly("APPROVE");
+  }
+
+  @Test void authorCanDiscoverInitialPolicyCreationBeforeAHeadExists() {
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.empty());
+    when(policies.findByTenantIdAndEnvironmentAndRuleSetKeyOrderByCreatedAtDesc(
+        "tenant-a", "dev", "benefit.eligibility")).thenReturn(List.of());
+
+    var catalog = service.catalog("benefit.eligibility", author, true, false, false);
+
+    assertThat(catalog.activationRevision()).isZero();
+    assertThat(catalog.headEtag()).isNull();
+    assertThat(catalog.availableActions()).containsExactly("CREATE_POLICY_VERSION");
+  }
+
   private static DomainRuleRolloutPolicyCreateRequest requiredRequest() {
     return new DomainRuleRolloutPolicyCreateRequest("benefit.eligibility", "safe-rollout",
         "REQUIRED", 2, new BigDecimal("0.7500"), true, 120L, 600L);

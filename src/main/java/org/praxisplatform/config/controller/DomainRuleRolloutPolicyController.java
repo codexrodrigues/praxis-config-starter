@@ -51,14 +51,16 @@ public class DomainRuleRolloutPolicyController {
       @RequestHeader(value="X-Tenant-ID", required=false) String tenant,
       @RequestHeader(value="X-Env", required=false) String env, HttpServletRequest request) {
     var principal = principals.resolve(request, tenant, env, "RULE_SNAPSHOT_READER");
-    var response = service.catalog(ruleSetKey, principal)
-        .orElseThrow(() -> new DomainRuleSnapshotControlPlaneException(
-            HttpStatus.NOT_FOUND, "Rollout policy head was not found"));
-    if (matchesWeak(ifNoneMatch, response.headEtag()))
+    boolean canAuthor = principals.hasRole(request, "RULE_DEFINITION_AUTHOR");
+    boolean canApprove = principals.hasRole(request, "RULE_DEFINITION_APPROVER");
+    boolean canOperate = principals.hasRole(request, "RULE_SNAPSHOT_OPERATOR");
+    var response = service.catalog(ruleSetKey, principal, canAuthor, canApprove, canOperate);
+    if (response.headEtag() != null && matchesWeak(ifNoneMatch, response.headEtag()))
       return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(quote(response.headEtag()))
           .cacheControl(CacheControl.noCache()).build();
-    return ResponseEntity.ok().eTag(quote(response.headEtag()))
-        .cacheControl(CacheControl.noCache()).body(response);
+    var builder = ResponseEntity.ok().cacheControl(CacheControl.noCache());
+    if (response.headEtag() != null) builder.eTag(quote(response.headEtag()));
+    return builder.body(response);
   }
 
   @GetMapping("/timeline")

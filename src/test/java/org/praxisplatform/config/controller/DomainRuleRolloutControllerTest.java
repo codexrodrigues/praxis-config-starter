@@ -44,8 +44,10 @@ class DomainRuleRolloutControllerTest {
     when(service.probe(rolloutId, probe, observer))
         .thenReturn(new DomainRuleCandidateProbeResponse(true, probe.observedAtUtc()));
     when(service.readiness(rolloutId, reader)).thenReturn(readiness);
-    var catalog = new DomainRuleRolloutCatalogResponse("rules", java.util.List.of());
-    when(service.catalog("rules", reader)).thenReturn(catalog);
+    var catalog = new DomainRuleRolloutCatalogResponse(
+        "rules", java.util.List.of(), java.util.List.of("CREATE_ROLLOUT"));
+    when(resolver.hasRole(request, "RULE_SNAPSHOT_OPERATOR")).thenReturn(true);
+    when(service.catalog("rules", reader, true)).thenReturn(catalog);
     var pending = new DomainRulePendingRolloutResponse(
         rolloutId, "rules", "candidate-v2", "A".repeat(64), "PREPARING", null);
     when(service.pending("rules", observer)).thenReturn(Optional.of(pending));

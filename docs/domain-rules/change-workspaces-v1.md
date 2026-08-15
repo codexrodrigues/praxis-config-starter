@@ -170,5 +170,6 @@ immutable reviewed Test Run; they must not infer permission or evidence sufficie
 Workspace actions and blockers are exposed through the dedicated capabilities
 read and the public `@praxisui/core` client. Clients must not infer review,
 promotion or submission authority from `status`. Publication, rollout creation
-and rollout-policy commands still require their own server-owned action catalogs;
-one capability must never be reused to authorize a different operation.
+and rollout-policy commands use their own server-owned action catalogs. Definition publication,
+rollout creation and rollout-policy lifecycle actions are now principal-specific; one capability
+is never reused to authorize a different operation.

@@ -203,6 +203,14 @@ to repair.
 - policy v1 -> v2 -> v1 selection rotates the policy-head ETag and prevents ABA;
 - rollback remains available when rollout readiness is unhealthy;
 - Studio receives counts/capabilities only, never host identities.
+- Human catalogs publish principal-specific actions instead of requiring clients to infer
+  authority from lifecycle status. Definition capabilities include `PUBLISH` only for an
+  approved/active definition and an authenticated publisher. Rollout catalogs publish
+  `CREATE_ROLLOUT`, `CANCEL`, and `ACTIVATE_CANDIDATE` only to snapshot operators. Rollout-policy
+  catalogs publish `CREATE_POLICY_VERSION`, `APPROVE`, and `ACTIVATE`, preserving maker-checker,
+  open-rollout blockers, and the server-resolved principal. An empty policy catalog remains
+  readable before the first policy head exists so an authorized author can discover the initial
+  creation command.
 
 The Quickstart reference host implements the persisted happy-path proof in
 `RuleStagedRolloutPostgresIntegrationTest`: real PostgreSQL constraints, immutable RuleSet versions,

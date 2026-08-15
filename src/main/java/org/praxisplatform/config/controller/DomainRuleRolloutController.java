@@ -34,7 +34,8 @@ public class DomainRuleRolloutController {
       @RequestHeader(value="X-Tenant-ID", required=false) String tenant,
       @RequestHeader(value="X-Env", required=false) String env, HttpServletRequest request) {
     var principal = principals.resolve(request, tenant, env, "RULE_SNAPSHOT_READER");
-    return ResponseEntity.ok(service.catalog(ruleSetKey, principal));
+    boolean canOperate = principals.hasRole(request, "RULE_SNAPSHOT_OPERATOR");
+    return ResponseEntity.ok(service.catalog(ruleSetKey, principal, canOperate));
   }
 
   @GetMapping("/pending")

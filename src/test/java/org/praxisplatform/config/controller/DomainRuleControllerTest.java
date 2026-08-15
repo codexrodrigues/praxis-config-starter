@@ -296,6 +296,7 @@ class DomainRuleControllerTest {
                 servletRequest, "spoofed-tenant", "spoofed-env", "RULE_DEFINITION_READER"))
                 .thenReturn(PRINCIPAL);
         when(resolver.hasRole(servletRequest, "RULE_DEFINITION_AUTHOR")).thenReturn(true);
+        when(resolver.hasRole(servletRequest, "RULE_SNAPSHOT_PUBLISHER")).thenReturn(true);
         when(service.definitions("tenant-a", "dev", null, null, null, null))
                 .thenReturn(List.of(definition));
 
@@ -309,7 +310,7 @@ class DomainRuleControllerTest {
             assertThat(capability.definitionId()).isEqualTo(definitionId);
             assertThat(capability.ruleKey()).isEqualTo("rule-a");
             assertThat(capability.version()).isEqualTo(3);
-            assertThat(capability.availableActions()).containsExactly("CREATE_NEW_VERSION");
+            assertThat(capability.availableActions()).containsExactly("CREATE_NEW_VERSION", "PUBLISH");
         });
         verify(service).definitions("tenant-a", "dev", null, null, null, null);
     }
@@ -678,7 +679,7 @@ class DomainRuleControllerTest {
 
     private DomainRuleDefinitionResponse definitionResponse(UUID id, String ruleKey, int version) {
         return new DomainRuleDefinitionResponse(
-                id, "tenant-a", "dev", ruleKey, version, "validation", "draft",
+                id, "tenant-a", "dev", ruleKey, version, "validation", "approved",
                 null, null, null, null, null, null, null, null, null, null, null, null,
                 "authenticated", "agent", null, null, null, null, null);
     }
