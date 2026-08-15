@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceCreateRequest;
+import org.praxisplatform.config.contract.DomainRuleChangeWorkspaceContract;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceResponse;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceUpdateRequest;
 import org.praxisplatform.config.dto.DomainRuleTestScenarioRequest;
@@ -34,7 +35,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 /** Governed authoring workspaces and reusable outcome scenarios for Policy Studio. */
 @RestController("configDomainRuleChangeWorkspaceController")
-@RequestMapping("/api/praxis/config/domain-rules/workspaces")
+@RequestMapping(DomainRuleChangeWorkspaceContract.RESOURCE_PATH)
 @RequiredArgsConstructor
 public class DomainRuleChangeWorkspaceController {
   private final DomainRuleChangeWorkspaceService service;
