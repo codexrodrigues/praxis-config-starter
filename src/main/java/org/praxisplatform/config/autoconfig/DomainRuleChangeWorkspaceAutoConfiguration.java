@@ -12,6 +12,7 @@ import org.praxisplatform.config.service.DomainRuleChangeWorkspaceService;
 import org.praxisplatform.config.service.DomainRuleDefinitionFingerprint;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleTestRunService;
+import org.praxisplatform.config.service.DomainRuleTestEvidencePolicyService;
 import org.praxisplatform.config.service.DomainRuleService;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -42,10 +43,17 @@ public class DomainRuleChangeWorkspaceAutoConfiguration {
       DomainRuleTestRunRepository runRepository,
       DomainRuleTestRunResultRepository runResultRepository,
       DomainRuleWorkspaceReviewRepository reviewRepository,
-      DomainRuleService domainRuleService) {
+      DomainRuleService domainRuleService,
+      DomainRuleTestEvidencePolicyService evidencePolicyService) {
     return new DomainRuleChangeWorkspaceService(
         workspaceRepository, scenarioRepository, definitionRepository, fingerprint, objectMapper,
-        runRepository, runResultRepository, reviewRepository, domainRuleService);
+        runRepository, runResultRepository, reviewRepository, domainRuleService, evidencePolicyService);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  DomainRuleTestEvidencePolicyService domainRuleTestEvidencePolicyService(ObjectMapper objectMapper) {
+    return new DomainRuleTestEvidencePolicyService(objectMapper);
   }
 
   @Bean

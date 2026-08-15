@@ -42,5 +42,11 @@ public class DomainRuleTestRunResult {
   @Column(name="candidate_plan_digest", nullable=false, length=64) private String candidatePlanDigest;
   @Column(name="active_plan_digest", nullable=false, length=64) private String activePlanDigest;
   @Column(name="facts_digest", nullable=false, length=64) private String factsDigest;
+  @Column(name="baseline_result", columnDefinition="jsonb") @ColumnTransformer(write="?::jsonb") private String baselineResult;
+  @Column(name="candidate_baseline_comparison", length=32) private String candidateBaselineComparison;
+  @Column(name="baseline_matches_expected") private Boolean baselineMatchesExpected;
+  @Column(name="baseline_output_matches_expected") private Boolean baselineOutputMatchesExpected;
+  @Column(name="baseline_reason_codes_match_expected") private Boolean baselineReasonCodesMatchExpected;
+  @Column(name="baseline_effects_match_expected") private Boolean baselineEffectsMatchExpected;
   @Column(name="operational_evidence", columnDefinition="jsonb") @ColumnTransformer(write="?::jsonb") private String operationalEvidence;
 }

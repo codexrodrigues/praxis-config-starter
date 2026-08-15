@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- Governed Test Run V58 persistence with a lightweight host-neutral transport,
+  scoped idempotency and canonical request hashing, an independent redacted
+  baseline result per scenario, immutable submission receipt binding, and
+  opt-in server-owned evidence gates for `SUBMIT` and `PROMOTE`.
 - Optional, sanitized Test Run provenance for synthetic, active-snapshot and legacy-oracle
   baselines, plus validated CREATE/UPDATE before/after, mutation, cleanup and effect-ledger
   evidence in migration `V57`.
@@ -50,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Project Knowledge Vector RAG checkpoint.
 
 ### Changed
+- Scenario creation and update now serialize with Test Run recording on the
+  parent workspace lock, rotate the workspace revision/ETag and invalidate
+  evidence captured against older expectations. Scenario updates persist the
+  complete decision, output, reason-code and effect-intent assertion set.
 - Domain-rule intake, creation and definition status transitions now derive
   tenant, environment and actor from server authentication. Definition approval
   requires authenticated author evidence, rejects self-approval and fails closed

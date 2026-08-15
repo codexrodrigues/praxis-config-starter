@@ -319,4 +319,22 @@ class DomainRuleMigrationConstraintTest {
         assertThat(baseline).contains("CREATE TABLE IF NOT EXISTS domain_rule_rollout_policy_head");
         assertThat(baseline).contains("CREATE TABLE IF NOT EXISTS domain_rule_rollout_policy_event");
     }
+
+    @Test
+    void policyTestRunV58MakesRetriesIdempotentAndKeepsBaselineIndependent() throws IOException {
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/V58__govern_policy_test_run_idempotency_and_baseline_lane.sql"));
+
+        assertThat(migration).contains("idempotency_key VARCHAR(180)");
+        assertThat(migration).contains("request_hash VARCHAR(64)");
+        assertThat(migration).contains("uq_domain_rule_test_run_idempotency");
+        assertThat(migration).contains("tenant_id, environment, workspace_id, idempotency_key");
+        assertThat(migration).contains("submitted_test_run_id UUID");
+        assertThat(migration).contains("fk_domain_rule_change_workspace_submitted_test_run");
+        assertThat(migration).contains("baseline_result JSONB");
+        assertThat(migration).contains("candidate_baseline_comparison VARCHAR(32)");
+        assertThat(migration).contains("jsonb_typeof(baseline_result) = 'object'");
+        assertThat(migration).contains("'MATCH', 'MISMATCH', 'INCONCLUSIVE', 'TECHNICAL_ERROR'");
+        assertThat(migration).doesNotContain("oracle_row", "raw_facts", "sql_text", "exception_message");
+    }
 }

@@ -29,6 +29,7 @@ public class DomainRuleChangeWorkspace {
   @Column(name = "base_definition_version", nullable = false) private Integer baseDefinitionVersion;
   @Column(name = "base_definition_hash", nullable = false, length = 64) private String baseDefinitionHash;
   @Column(name = "promoted_definition_id") private UUID promotedDefinitionId;
+  @Column(name = "submitted_test_run_id") private UUID submittedTestRunId;
   @Column(nullable = false, length = 255) private String title;
   @Column(nullable = false, length = 32) private String status;
   @Column(name = "draft_condition", columnDefinition = "jsonb")

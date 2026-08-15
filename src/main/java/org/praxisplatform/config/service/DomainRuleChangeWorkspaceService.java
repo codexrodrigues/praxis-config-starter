@@ -12,6 +12,8 @@ import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.domain.DomainRuleChangeWorkspace;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
 import org.praxisplatform.config.domain.DomainRuleTestScenario;
+import org.praxisplatform.config.domain.DomainRuleTestRun;
+import org.praxisplatform.config.domain.DomainRuleTestRunResult;
 import org.praxisplatform.config.domain.DomainRuleWorkspaceReview;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceCreateRequest;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceResponse;
@@ -52,6 +54,7 @@ public class DomainRuleChangeWorkspaceService {
   private final DomainRuleTestRunResultRepository runResultRepository;
   private final DomainRuleWorkspaceReviewRepository reviewRepository;
   private final DomainRuleService domainRuleService;
+  private final DomainRuleTestEvidencePolicyService evidencePolicyService;
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleChangeWorkspaceResponse create(
@@ -127,7 +130,10 @@ public class DomainRuleChangeWorkspaceService {
         }
       }
       case "APPROVED" -> {
-        if (canAuthor) actions.add("PROMOTE");
+        if (canAuthor) {
+          blockers.addAll(promotionEvidenceBlockers(workspace, principal));
+          if (blockers.isEmpty()) actions.add("PROMOTE");
+        }
       }
       default -> { }
     }
@@ -164,7 +170,7 @@ public class DomainRuleChangeWorkspaceService {
       UUID workspaceId,
       DomainRuleTestScenarioRequest request,
       DomainRuleGovernancePrincipal principal) {
-    DomainRuleChangeWorkspace workspace = scopedWorkspace(workspaceId, principal);
+    DomainRuleChangeWorkspace workspace = scopedWorkspaceForUpdate(workspaceId, principal);
     requireOpen(workspace);
     ValidScenario valid = validateScenario(request);
     if (scenarioRepository.findByWorkspaceIdAndScenarioKey(workspaceId, valid.key()).isPresent()) {
@@ -191,7 +197,10 @@ public class DomainRuleChangeWorkspaceService {
         .createdAt(now)
         .updatedAt(now)
         .build();
-    return scenarioResponse(scenarioRepository.save(scenario));
+    DomainRuleTestScenario persisted = scenarioRepository.save(scenario);
+    rotate(workspace, principal);
+    workspaceRepository.save(workspace);
+    return scenarioResponse(persisted);
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -211,7 +220,7 @@ public class DomainRuleChangeWorkspaceService {
       DomainRuleTestScenarioRequest request,
       String ifMatch,
       DomainRuleGovernancePrincipal principal) {
-    DomainRuleChangeWorkspace workspace = scopedWorkspace(workspaceId, principal);
+    DomainRuleChangeWorkspace workspace = scopedWorkspaceForUpdate(workspaceId, principal);
     requireOpen(workspace);
     DomainRuleTestScenario scenario = scenarioRepository.findById(scenarioId)
         .filter(item -> item.getWorkspaceId().equals(workspaceId))
@@ -227,22 +236,32 @@ public class DomainRuleChangeWorkspaceService {
     scenario.setFacts(json(valid.facts()));
     scenario.setExpectedDecision(valid.expectedDecision());
     scenario.setExpectedOutput(json(valid.expectedOutput()));
+    scenario.setExpectedReasonCodes(jsonValue(valid.expectedReasonCodes()));
+    scenario.setExpectedEffectIntents(jsonValue(valid.expectedEffectIntents()));
     scenario.setStatus(valid.status());
     scenario.setEtag(UUID.randomUUID());
     scenario.setRevision(scenario.getRevision() + 1);
     scenario.setUpdatedBy(requireActor(principal));
     scenario.setUpdatedAt(Instant.now());
-    return scenarioResponse(scenarioRepository.save(scenario));
+    DomainRuleTestScenario persisted = scenarioRepository.save(scenario);
+    rotate(workspace, principal);
+    workspaceRepository.save(workspace);
+    return scenarioResponse(persisted);
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleChangeWorkspaceResponse submit(
       UUID id, String ifMatch, DomainRuleGovernancePrincipal principal) {
-    DomainRuleChangeWorkspace workspace = scopedWorkspace(id, principal);
+    DomainRuleChangeWorkspace workspace = scopedWorkspaceForUpdate(id, principal);
     requireOpen(workspace);
     requireStrongMatch(ifMatch, workspace.getEtag().toString());
     List<DomainRuleWorkspaceBlocker> blockers = submissionBlockers(workspace, principal);
     if (!blockers.isEmpty()) throw conflict(blockers.getFirst().message());
+    DomainRuleTestRun submittedRun = runRepository
+        .findFirstByTenantIdAndEnvironmentAndWorkspaceIdOrderByRecordedAtDesc(
+            principal.tenantId(), principal.environment(), workspace.getId())
+        .orElseThrow(() -> conflict("A current passing Test Run is required before submission"));
+    workspace.setSubmittedTestRunId(submittedRun.getId());
     workspace.setStatus("SUBMITTED");
     rotate(workspace, principal);
     return response(workspaceRepository.save(workspace));
@@ -292,7 +311,8 @@ public class DomainRuleChangeWorkspaceService {
           "TEST_RUN_NOT_PASSING", "SUBMIT",
           "The latest Test Run must pass every active scenario without inconclusive or technical results"));
     }
-    return List.of();
+    DomainRuleDefinition base = scopedDefinition(workspace.getBaseDefinitionId(), principal);
+    return evidencePolicyService.blockers("SUBMIT", base, run.get(), evidence);
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
@@ -349,6 +369,8 @@ public class DomainRuleChangeWorkspaceService {
       throw conflict("Only an approved workspace can be promoted");
     }
     requireStrongMatch(ifMatch, workspace.getEtag().toString());
+    List<DomainRuleWorkspaceBlocker> evidenceBlockers = promotionEvidenceBlockers(workspace, principal);
+    if (!evidenceBlockers.isEmpty()) throw conflict(evidenceBlockers.getFirst().message());
     DomainRuleWorkspaceReview approval = reviewRepository
         .findByTenantIdAndEnvironmentAndWorkspaceIdOrderByReviewedAtDesc(
             principal.tenantId(), principal.environment(), id).stream()
@@ -416,8 +438,28 @@ public class DomainRuleChangeWorkspaceService {
         .orElseThrow(() -> notFound("Base definition not found"));
   }
 
+  private List<DomainRuleWorkspaceBlocker> promotionEvidenceBlockers(
+      DomainRuleChangeWorkspace workspace, DomainRuleGovernancePrincipal principal) {
+    DomainRuleDefinition base = scopedDefinition(workspace.getBaseDefinitionId(), principal);
+    DomainRuleTestRun boundRun = workspace.getSubmittedTestRunId() == null ? null
+        : runRepository.findById(workspace.getSubmittedTestRunId())
+            .filter(run -> workspace.getId().equals(run.getWorkspaceId()))
+            .filter(run -> sameScope(run.getTenantId(), run.getEnvironment(), principal))
+            .orElse(null);
+    List<DomainRuleTestRunResult> evidence = boundRun == null ? List.of()
+        : runResultRepository.findByTestRunIdOrderByScenarioKey(boundRun.getId());
+    return evidencePolicyService.blockers("PROMOTE", base, boundRun, evidence);
+  }
+
   private DomainRuleChangeWorkspace scopedWorkspace(UUID id, DomainRuleGovernancePrincipal principal) {
     return workspaceRepository.findById(id)
+        .filter(item -> sameScope(item.getTenantId(), item.getEnvironment(), principal))
+        .orElseThrow(() -> notFound("Change workspace not found"));
+  }
+
+  private DomainRuleChangeWorkspace scopedWorkspaceForUpdate(
+      UUID id, DomainRuleGovernancePrincipal principal) {
+    return workspaceRepository.findByIdForUpdate(id)
         .filter(item -> sameScope(item.getTenantId(), item.getEnvironment(), principal))
         .orElseThrow(() -> notFound("Change workspace not found"));
   }
@@ -480,7 +522,8 @@ public class DomainRuleChangeWorkspaceService {
   private DomainRuleChangeWorkspaceResponse response(DomainRuleChangeWorkspace source) {
     return new DomainRuleChangeWorkspaceResponse(
         source.getId(), source.getRuleKey(), source.getBaseDefinitionId(), source.getBaseDefinitionVersion(),
-        source.getBaseDefinitionHash(), source.getPromotedDefinitionId(), source.getTitle(), source.getStatus(), tree(source.getDraftCondition()),
+        source.getBaseDefinitionHash(), source.getPromotedDefinitionId(), source.getSubmittedTestRunId(),
+        source.getTitle(), source.getStatus(), tree(source.getDraftCondition()),
         tree(source.getDraftParameters()), source.getRationale(), source.getRevision(), source.getEtag().toString(),
         source.getCreatedBy(), source.getUpdatedBy(), source.getCreatedAt(), source.getUpdatedAt());
   }
