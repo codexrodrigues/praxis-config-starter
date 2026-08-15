@@ -3,10 +3,12 @@ package org.praxisplatform.config.contract;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.controller.DomainRuleChangeWorkspaceController;
 import org.springframework.web.bind.annotation.RequestMapping;
 
+@Tag("unit")
 class DomainRuleChangeWorkspaceContractTest {
 
   @Test
