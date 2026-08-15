@@ -21,7 +21,7 @@ public class DomainRuleTestEvidencePolicyService {
       "baselineAuthorityType", "baselineEligibility", "requiredOperationModes",
       "requiredDecisions", "requireCleanupVerified", "requireBaselineMatch");
   private static final Set<String> POLICY_FIELDS = Set.of("stages");
-  private static final Set<String> SUPPORTED_STAGES = Set.of("SUBMIT", "PROMOTE");
+  private static final Set<String> SUPPORTED_STAGES = Set.of("SUBMIT", "PROMOTE", "PUBLISH");
   private static final Set<String> AUTHORITIES = Set.of(
       "SYNTHETIC_EXPECTED", "ACTIVE_SNAPSHOT", "LEGACY_ORACLE");
   private static final Set<String> ELIGIBILITIES = Set.of("ELIGIBLE", "INELIGIBLE", "PENDING");

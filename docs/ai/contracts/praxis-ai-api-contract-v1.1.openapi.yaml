@@ -4897,7 +4897,7 @@ components:
 
     DomainRulePublicationRequest:
       type: object
-      description: Publica uma definicao governada ja aprovada. O endpoint nao aprova draft/proposed; identidade, tenant e ambiente sao resolvidos pelo servidor, e o principal autenticado precisa da role `RULE_SNAPSHOT_PUBLISHER`.
+      description: Publica uma definicao governada ja aprovada. O endpoint nao aprova draft/proposed; identidade, tenant e ambiente sao resolvidos pelo servidor, e o principal autenticado precisa da role `RULE_SNAPSHOT_PUBLISHER`. Quando a governance declarar `testEvidencePolicy.stages.PUBLISH`, o Test Run revisado vinculado a definicao promovida e revalidado antes de qualquer materializacao.
       properties:
         ruleDefinitionId:
           type: string
