@@ -494,7 +494,9 @@ expand the server-resolved scope.
 Hosts that publish execution observations or candidate probes additionally map
 `RULE_EXECUTION_OBSERVER`. Structural simulation requires `RULE_DEFINITION_AUTHOR`; caller hints
 never widen the resolved scope.
-Policy Studio workspaces require a current, fully passing Test Run before submission. A different
+Policy Studio workspaces require a current, fully passing, idempotently recorded Test Run before
+submission. The run may carry an independent redacted baseline lane and governed operational
+CREATE/UPDATE evidence; the accepted run id is bound to the submitted workspace. A different
 authenticated `RULE_DEFINITION_APPROVER` then appends an immutable review for that exact workspace
 revision; this review does not publish or activate the underlying rule.
 The same server-side identity boundary applies to legacy publication and

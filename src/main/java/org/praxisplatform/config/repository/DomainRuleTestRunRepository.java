@@ -6,4 +6,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface DomainRuleTestRunRepository extends JpaRepository<DomainRuleTestRun, UUID> {
   List<DomainRuleTestRun> findByTenantIdAndEnvironmentAndWorkspaceIdOrderByRecordedAtDesc(String tenantId, String environment, UUID workspaceId);
   java.util.Optional<DomainRuleTestRun> findFirstByTenantIdAndEnvironmentAndWorkspaceIdOrderByRecordedAtDesc(String tenantId, String environment, UUID workspaceId);
+  java.util.Optional<DomainRuleTestRun> findByTenantIdAndEnvironmentAndWorkspaceIdAndIdempotencyKey(
+      String tenantId, String environment, UUID workspaceId, String idempotencyKey);
 }

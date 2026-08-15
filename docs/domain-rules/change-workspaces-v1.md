@@ -17,10 +17,14 @@ canonical fingerprint of one persisted `domain_rule_definition`.
   contrato e o gate estão implementados e aguardam prova HTTP/Neon do corte.
 - Candidate/active evaluation: `suportado-parcialmente` por adapter host-owned; o
   Config armazena evidência redigida e não executa regras.
-- Candidate/legacy evidence and comparison: `suportado-parcialmente`. Migration `V57` adds
-  sanitized baseline provenance and optional operational CREATE/UPDATE evidence to the canonical
-  Test Run. A real host still has to collect and register that evidence; Config never calls a
-  legacy system or infers eligibility.
+- Candidate/legacy evidence and comparison: `suportado-parcialmente`. Migrations `V57` and `V58`
+  persist sanitized baseline provenance, an independent per-scenario baseline result lane and
+  optional operational CREATE/UPDATE evidence. A real host still has to collect and register that
+  evidence; Config never calls a legacy system or infers eligibility.
+- Idempotent Test Run transport and stage-specific operational gates: `lacuna-real-de-contrato`
+  closed in `V58`. The lightweight `praxis-config-contracts` artifact owns the host-neutral records;
+  Config owns persistence, request hashing and policy evaluation. Hosts do not depend on the
+  starter's JPA/autoconfiguration surface.
 - Execution of effects remains host-owned and is never performed by a Test Run.
 
 The Config Starter owns workspace and scenario persistence. The Rules Engine owns deterministic
@@ -50,20 +54,32 @@ hints only in explicitly configured local mode.
   an expected `ALLOW`, `DENY`, `NOT_APPLICABLE`, `INCONCLUSIVE` or `TECHNICAL_ERROR` result.
 - `GET /api/praxis/config/domain-rules/workspaces/{id}/scenarios` returns scenarios in stable key order.
 - `PUT /api/praxis/config/domain-rules/workspaces/{id}/scenarios/{scenarioId}` requires the current
-  strong scenario ETag.
+  strong scenario ETag. Creating or changing a scenario rotates the parent workspace revision and
+  ETag, invalidating every earlier Test Run. Scenario mutation and Test Run recording serialize on
+  the same workspace lock so evidence cannot race an expectation change.
 - `POST /api/praxis/config/domain-rules/workspaces/{id}/test-runs` records immutable host-produced
-  evidence only if workspace revision, base fingerprint and scenario identities still match. The
-  optional `baselineEvidence` identifies `SYNTHETIC_EXPECTED`, `ACTIVE_SNAPSHOT` or
+  evidence only if workspace revision, base fingerprint and scenario identities still match. Its
+  required `idempotencyKey` may be retried only with the exact same canonical payload: an exact
+  replay returns the original run, while key reuse with different evidence returns `409`. The
+  command is bounded to 1,000 scenario results so a control-plane write cannot become an unbounded
+  evidence payload. The configured suite should normally remain much smaller than this transport
+  safety ceiling. Optional `baselineEvidence` identifies `SYNTHETIC_EXPECTED`, `ACTIVE_SNAPSHOT` or
   `LEGACY_ORACLE` authority through an opaque artifact reference, SHA-256, observation time and
-  explicit `ELIGIBLE`, `INELIGIBLE` or `PENDING` status. Each result may add sanitized
+  explicit `ELIGIBLE`, `INELIGIBLE` or `PENDING` status. An `ELIGIBLE` authority requires an
+  independent `baselineResult` for every scenario; `activeDecision` must never be relabeled as a
+  legacy result. Each result may also add sanitized
   `operationalEvidence` for an actual `CREATE` or `UPDATE`, including before/after state digests,
   mutation/no-mutation, cleanup, effect-ledger digest and baseline call count.
+- Host orchestrators may resolve an already persisted receipt by the same scoped idempotency key
+  before re-running evaluation or operational probes. This lookup remains service-internal in V58;
+  remote hosts retry the canonical POST with the identical frozen payload.
 - `GET /api/praxis/config/domain-rules/workspaces/{id}/test-runs` lists safe evidence without facts
   or executable snapshot payloads.
 - `POST /api/praxis/config/domain-rules/workspaces/{id}/submit` requires the current strong ETag and
   a latest Test Run for the exact workspace revision/fingerprint. The run must cover exactly every
   active scenario; every candidate must match its expected decision and no result may be
-  inconclusive or technical.
+  inconclusive or technical. The accepted Test Run id is bound immutably to the submitted workspace
+  so review and later stages cannot be switched to a newer, unreviewed run.
 - `POST /api/praxis/config/domain-rules/workspaces/{id}/reviews` requires
   `RULE_DEFINITION_APPROVER`, a current strong ETag and a reviewer different from the workspace
   author. It appends `APPROVE` or `REJECT` evidence bound to the exact submitted revision and base
@@ -77,6 +93,9 @@ hints only in explicitly configured local mode.
   persisted independent reviewer to perform the existing Definition approval transition, and
   closes the workspace as `PROMOTED`. The transaction does not publish, materialize or activate.
   A retry after successful promotion is idempotent and returns the existing promoted definition id.
+  When the base Definition declares a `governance.testEvidencePolicy.stages.PROMOTE` policy, Config
+  also evaluates the Test Run bound at submission and withholds the capability/command until its
+  baseline authority, eligibility, operation/decision matrix, parity and cleanup requirements pass.
 
 Reads require `RULE_DEFINITION_READER`; draft, scenario, test-run and submission mutations require
 `RULE_DEFINITION_AUTHOR`; reviews require `RULE_DEFINITION_APPROVER`. A cross-scope identifier is
@@ -114,6 +133,33 @@ Oracle rows, facts, credentials, SQL, executable policy and effect payloads rema
 An `operationMode` without state/effect evidence is not an operational proof; conversely, the
 portable synthetic corpus must not claim legacy parity merely because its fixtures contain the
 strings `CREATE` and `UPDATE`.
+
+Migration `V58` adds scoped idempotency, a canonical request hash, the independent baseline lane and
+the submitted-Test-Run binding. Stage policy is opt-in and server-owned; it does not globally force
+Oracle evidence at `SUBMIT`. A definition can govern `SUBMIT`, `PROMOTE` or both with this shape:
+
+```json
+{
+  "testEvidencePolicy": {
+    "stages": {
+      "PROMOTE": {
+        "baselineAuthorityType": "LEGACY_ORACLE",
+        "baselineEligibility": "ELIGIBLE",
+        "requiredOperationModes": ["CREATE", "UPDATE"],
+        "requiredDecisions": ["ALLOW", "DENY"],
+        "requireCleanupVerified": true,
+        "requireBaselineMatch": true
+      }
+    }
+  }
+}
+```
+
+The required operation and decision lists form a Cartesian gate. Unknown fields and malformed
+policies fail closed instead of silently weakening governance. `SUBMIT` and `PROMOTE` are the only
+accepted stage names in V58; premature or misspelled stages are invalid rather than inert.
+Publication, snapshot and activation will reuse the same evaluator only after those stages bind an
+immutable reviewed Test Run; they must not infer permission or evidence sufficiency in the browser.
 
 Workspace actions and blockers are exposed through the dedicated capabilities
 read and the public `@praxisui/core` client. Clients must not infer review,

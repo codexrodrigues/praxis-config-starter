@@ -19,6 +19,8 @@ public class DomainRuleTestRun {
   @Column(name="workspace_id", nullable=false) private UUID workspaceId;
   @Column(name="tenant_id", nullable=false, length=128) private String tenantId;
   @Column(nullable=false, length=128) private String environment;
+  @Column(name="idempotency_key", nullable=false, length=180) private String idempotencyKey;
+  @Column(name="request_hash", nullable=false, length=64) private String requestHash;
   @Column(name="workspace_revision", nullable=false) private Long workspaceRevision;
   @Column(name="base_definition_hash", nullable=false, length=64) private String baseDefinitionHash;
   @Column(name="evaluated_at", nullable=false) private Instant evaluatedAt;

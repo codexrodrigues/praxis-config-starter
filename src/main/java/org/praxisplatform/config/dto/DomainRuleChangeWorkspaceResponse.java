@@ -11,6 +11,7 @@ public record DomainRuleChangeWorkspaceResponse(
     Integer baseDefinitionVersion,
     String baseDefinitionHash,
     UUID promotedDefinitionId,
+    UUID submittedTestRunId,
     String title,
     String status,
     JsonNode condition,

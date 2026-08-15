@@ -47,6 +47,7 @@ class DomainRuleChangeWorkspaceServiceTest {
   private DomainRuleTestRunResultRepository runResults;
   private DomainRuleWorkspaceReviewRepository reviews;
   private DomainRuleService domainRules;
+  private DomainRuleTestEvidencePolicyService evidencePolicies;
 
   @BeforeEach
   void setUp() {
@@ -58,11 +59,14 @@ class DomainRuleChangeWorkspaceServiceTest {
     runResults = mock(DomainRuleTestRunResultRepository.class);
     reviews = mock(DomainRuleWorkspaceReviewRepository.class);
     domainRules = mock(DomainRuleService.class);
+    evidencePolicies = new DomainRuleTestEvidencePolicyService(objectMapper);
     service = new DomainRuleChangeWorkspaceService(
-        workspaces, scenarios, definitions, fingerprint, objectMapper, runs, runResults, reviews, domainRules);
+        workspaces, scenarios, definitions, fingerprint, objectMapper, runs, runResults, reviews,
+        domainRules, evidencePolicies);
     when(workspaces.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     when(scenarios.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     when(reviews.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+    when(definitions.findById(any())).thenAnswer(invocation -> Optional.of(definition("tenant-a", "dev")));
   }
 
   @Test
@@ -125,8 +129,8 @@ class DomainRuleChangeWorkspaceServiceTest {
   @Test
   void persistsCanonicalFiveStateScenarioAndRejectsUnknownOutcome() throws Exception {
     UUID workspaceId = UUID.randomUUID();
-    when(workspaces.findById(workspaceId))
-        .thenReturn(Optional.of(workspace(workspaceId, "tenant-a", "dev")));
+    DomainRuleChangeWorkspace workspace = workspace(workspaceId, "tenant-a", "dev");
+    when(workspaces.findByIdForUpdate(workspaceId)).thenReturn(Optional.of(workspace));
     when(scenarios.findByWorkspaceIdAndScenarioKey(workspaceId, "boundary-null"))
         .thenReturn(Optional.empty());
 
@@ -142,6 +146,8 @@ class DomainRuleChangeWorkspaceServiceTest {
     ArgumentCaptor<DomainRuleTestScenario> saved = ArgumentCaptor.forClass(DomainRuleTestScenario.class);
     verify(scenarios).save(saved.capture());
     assertThat(saved.getValue().getFacts()).isEqualTo("{\"amount\":null}");
+    assertThat(workspace.getRevision()).isEqualTo(2L);
+    verify(workspaces).save(workspace);
 
     assertThatThrownBy(() -> service.createScenario(
         workspaceId,
@@ -153,12 +159,43 @@ class DomainRuleChangeWorkspaceServiceTest {
   }
 
   @Test
+  void updatesEveryScenarioAssertionAndInvalidatesEarlierEvidence() throws Exception {
+    UUID workspaceId = UUID.randomUUID();
+    UUID scenarioId = UUID.randomUUID();
+    DomainRuleChangeWorkspace workspace = workspace(workspaceId, "tenant-a", "dev");
+    UUID scenarioEtag = UUID.randomUUID();
+    DomainRuleTestScenario scenario = DomainRuleTestScenario.builder()
+        .id(scenarioId).workspaceId(workspaceId).tenantId("tenant-a").environment("dev")
+        .scenarioKey("boundary").name("Old").facts("{}")
+        .expectedDecision("ALLOW").expectedReasonCodes("[]").expectedEffectIntents("[]")
+        .status("ACTIVE").revision(1L).etag(scenarioEtag).build();
+    when(workspaces.findByIdForUpdate(workspaceId)).thenReturn(Optional.of(workspace));
+    when(scenarios.findById(scenarioId)).thenReturn(Optional.of(scenario));
+    when(scenarios.findByWorkspaceIdAndScenarioKey(workspaceId, "boundary"))
+        .thenReturn(Optional.of(scenario));
+
+    var response = service.updateScenario(
+        workspaceId, scenarioId,
+        new DomainRuleTestScenarioRequest(
+            "boundary", "Updated", objectMapper.readTree("{\"amount\":500}"), "DENY", null,
+            List.of("LIMIT_EXCEEDED"), List.of("DO_NOT_REGISTER"), "ACTIVE"),
+        "\"" + scenarioEtag + "\"", PRINCIPAL);
+
+    assertThat(response.expectedDecision()).isEqualTo("DENY");
+    assertThat(response.expectedReasonCodes()).containsExactly("LIMIT_EXCEEDED");
+    assertThat(response.expectedEffectIntents()).containsExactly("DO_NOT_REGISTER");
+    assertThat(workspace.getRevision()).isEqualTo(2L);
+    verify(workspaces).save(workspace);
+  }
+
+  @Test
   void submitsOnlyWhenLatestRunProvesCurrentRevisionWithoutTechnicalEvidence() {
     UUID id = UUID.randomUUID();
     DomainRuleChangeWorkspace workspace = workspace(id, "tenant-a", "dev");
     UUID runId = UUID.randomUUID();
     UUID scenarioId = UUID.randomUUID();
     when(workspaces.findById(id)).thenReturn(Optional.of(workspace));
+    when(workspaces.findByIdForUpdate(id)).thenReturn(Optional.of(workspace));
     when(scenarios.findByWorkspaceIdOrderByScenarioKey(id)).thenReturn(List.of(
         DomainRuleTestScenario.builder().id(scenarioId).tenantId("tenant-a").environment("dev")
             .status("ACTIVE").build()));
@@ -175,6 +212,7 @@ class DomainRuleChangeWorkspaceServiceTest {
 
     assertThat(submitted.status()).isEqualTo("SUBMITTED");
     assertThat(submitted.revision()).isEqualTo(2);
+    assertThat(submitted.submittedTestRunId()).isEqualTo(runId);
   }
 
   @Test
@@ -184,6 +222,7 @@ class DomainRuleChangeWorkspaceServiceTest {
     UUID runId = UUID.randomUUID();
     UUID scenarioId = UUID.randomUUID();
     when(workspaces.findById(id)).thenReturn(Optional.of(workspace));
+    when(workspaces.findByIdForUpdate(id)).thenReturn(Optional.of(workspace));
     when(scenarios.findByWorkspaceIdOrderByScenarioKey(id)).thenReturn(List.of(
         DomainRuleTestScenario.builder().id(scenarioId).tenantId("tenant-a").environment("dev")
             .status("ACTIVE").build()));
@@ -208,6 +247,7 @@ class DomainRuleChangeWorkspaceServiceTest {
     UUID coveredScenarioId = UUID.randomUUID();
     UUID missingScenarioId = UUID.randomUUID();
     when(workspaces.findById(id)).thenReturn(Optional.of(workspace));
+    when(workspaces.findByIdForUpdate(id)).thenReturn(Optional.of(workspace));
     when(scenarios.findByWorkspaceIdOrderByScenarioKey(id)).thenReturn(List.of(
         DomainRuleTestScenario.builder().id(coveredScenarioId).tenantId("tenant-a").environment("dev")
             .status("ACTIVE").build(),
@@ -282,6 +322,33 @@ class DomainRuleChangeWorkspaceServiceTest {
     submitted.setStatus("APPROVED");
     var author = service.capabilities(id, PRINCIPAL, true, false);
     assertThat(author.availableActions()).containsExactly("VIEW", "PROMOTE");
+  }
+
+  @Test
+  void withholdsPromotionWhenTheCanonicalDefinitionRequiresBoundOperationalEvidence() {
+    UUID id = UUID.randomUUID();
+    DomainRuleChangeWorkspace approved = workspace(id, "tenant-a", "dev");
+    approved.setStatus("APPROVED");
+    DomainRuleDefinition governed = definition("tenant-a", "dev");
+    governed.setGovernance("""
+        {"testEvidencePolicy":{"stages":{"PROMOTE":{
+          "baselineAuthorityType":"LEGACY_ORACLE",
+          "baselineEligibility":"ELIGIBLE",
+          "requiredOperationModes":["CREATE","UPDATE"],
+          "requiredDecisions":["ALLOW","DENY"],
+          "requireCleanupVerified":true,
+          "requireBaselineMatch":true
+        }}}}
+        """);
+    approved.setBaseDefinitionId(governed.getId());
+    when(workspaces.findById(id)).thenReturn(Optional.of(approved));
+    when(definitions.findById(governed.getId())).thenReturn(Optional.of(governed));
+
+    var capability = service.capabilities(id, PRINCIPAL, true, false);
+
+    assertThat(capability.availableActions()).containsExactly("VIEW");
+    assertThat(capability.blockers()).extracting("code")
+        .containsExactly("BOUND_TEST_RUN_REQUIRED");
   }
 
   @Test
