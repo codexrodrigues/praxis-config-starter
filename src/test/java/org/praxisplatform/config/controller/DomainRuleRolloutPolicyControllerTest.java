@@ -37,9 +37,10 @@ class DomainRuleRolloutPolicyControllerTest {
         "rules", "safe", "REQUIRED", 1, BigDecimal.ONE, true, 120L, 600L);
     var policy = new DomainRuleRolloutPolicyResponse(policyId, "rules", "safe", 1,
         "DRAFT", "REQUIRED", 1, BigDecimal.ONE, true, 120L, 600L,
-        "author", Instant.now(), null, null, null, null);
+        "author", Instant.now(), null, null, null, null, List.of("APPROVE"));
     var mutation = new DomainRuleRolloutPolicyMutationResponse(policy, 1, etag);
-    var catalog = new DomainRuleRolloutPolicyCatalogResponse("rules", 1, etag, null, List.of(policy));
+    var catalog = new DomainRuleRolloutPolicyCatalogResponse(
+        "rules", 1, etag, null, List.of(policy), List.of("CREATE_POLICY_VERSION"));
     when(resolver.resolve(request, "caller", "test", "RULE_DEFINITION_AUTHOR")).thenReturn(author);
     when(resolver.resolve(request, "caller", "test", "RULE_DEFINITION_APPROVER")).thenReturn(reviewer);
     when(resolver.resolve(request, "caller", "test", "RULE_SNAPSHOT_OPERATOR")).thenReturn(operator);
@@ -47,7 +48,10 @@ class DomainRuleRolloutPolicyControllerTest {
     when(service.create(body, author)).thenReturn(mutation);
     when(service.approve(policyId, reviewer)).thenReturn(mutation);
     when(service.activate(policyId, "\"old\"", operator)).thenReturn(mutation);
-    when(service.catalog("rules", reader)).thenReturn(Optional.of(catalog));
+    when(resolver.hasRole(request, "RULE_DEFINITION_AUTHOR")).thenReturn(true);
+    when(resolver.hasRole(request, "RULE_DEFINITION_APPROVER")).thenReturn(true);
+    when(resolver.hasRole(request, "RULE_SNAPSHOT_OPERATOR")).thenReturn(true);
+    when(service.catalog("rules", reader, true, true, true)).thenReturn(catalog);
     when(service.timeline("rules", reader)).thenReturn(List.of());
 
     assertThat(controller.create(body, "caller", "test", request).getStatusCode())
@@ -67,8 +71,9 @@ class DomainRuleRolloutPolicyControllerTest {
     var reader = new DomainRuleGovernancePrincipal("tenant", "auditor", "prod");
     String etag = UUID.randomUUID().toString();
     when(resolver.resolve(request, null, null, "RULE_SNAPSHOT_READER")).thenReturn(reader);
-    when(service.catalog("rules", reader)).thenReturn(Optional.of(
-        new DomainRuleRolloutPolicyCatalogResponse("rules", 1, etag, null, List.of())));
+    when(service.catalog("rules", reader, false, false, false)).thenReturn(
+        new DomainRuleRolloutPolicyCatalogResponse(
+            "rules", 1, etag, null, List.of(), List.of()));
 
     var response = controller.catalog("rules", "W/\"" + etag + "\"", null, null, request);
 

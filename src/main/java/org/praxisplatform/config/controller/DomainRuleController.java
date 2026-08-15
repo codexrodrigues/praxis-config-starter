@@ -115,6 +115,7 @@ public class DomainRuleController {
         DomainRuleGovernancePrincipal principal = principalResolver.resolve(
                 servletRequest, tenantId, environment, DEFINITION_READER_ROLE);
         boolean canCreateVersion = principalResolver.hasRole(servletRequest, "RULE_DEFINITION_AUTHOR");
+        boolean canPublish = principalResolver.hasRole(servletRequest, "RULE_SNAPSHOT_PUBLISHER");
         List<DomainRuleDefinitionCapability> capabilities = domainRuleService.definitions(
                         principal.tenantId(), principal.environment(), null, null, null, null)
                 .stream()
@@ -122,7 +123,7 @@ public class DomainRuleController {
                         definition.id(),
                         definition.ruleKey(),
                         definition.version(),
-                        canCreateVersion ? List.of("CREATE_NEW_VERSION") : List.of()))
+                        definitionActions(definition, canCreateVersion, canPublish)))
                 .toList();
         return ResponseEntity.ok(new DomainRuleDefinitionCapabilitiesResponse(
                 principal.tenantId(), principal.environment(), capabilities));
@@ -256,6 +257,15 @@ public class DomainRuleController {
     private boolean isAuthorTransition(DomainRuleDefinitionStatusTransitionRequest request) {
         return request != null
                 && ("draft".equals(request.status()) || "proposed".equals(request.status()));
+    }
+
+    private List<String> definitionActions(
+            DomainRuleDefinitionResponse definition, boolean canCreateVersion, boolean canPublish) {
+        var actions = new java.util.ArrayList<String>();
+        if (canCreateVersion) actions.add("CREATE_NEW_VERSION");
+        if (canPublish && ("approved".equals(definition.status())
+                || "active".equals(definition.status()))) actions.add("PUBLISH");
+        return List.copyOf(actions);
     }
 
     private String requiredMaterializationRole(DomainRuleStatusTransitionRequest request) {

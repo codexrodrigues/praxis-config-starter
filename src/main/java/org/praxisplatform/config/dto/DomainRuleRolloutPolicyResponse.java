@@ -2,6 +2,7 @@ package org.praxisplatform.config.dto;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /** Safe governed projection of one immutable rollout-policy version and its lifecycle. */
@@ -22,4 +23,5 @@ public record DomainRuleRolloutPolicyResponse(
     String approvedBy,
     Instant approvedAt,
     String activatedBy,
-    Instant activatedAt) {}
+    Instant activatedAt,
+    List<String> availableActions) {}

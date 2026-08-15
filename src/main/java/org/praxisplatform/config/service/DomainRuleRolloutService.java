@@ -144,7 +144,7 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public DomainRuleRolloutCatalogResponse catalog(
-      String ruleSetKey, DomainRuleGovernancePrincipal principal) {
+      String ruleSetKey, DomainRuleGovernancePrincipal principal, boolean canOperate) {
     String key = requireText(ruleSetKey, "ruleSetKey");
     Instant now = clock.instant();
     var head = heads.findByTenantIdAndEnvironmentAndRuleSetKey(
@@ -158,8 +158,9 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
               && head.getActiveSnapshotId().equals(rollout.getExpectedActiveSnapshotId())
               && head.getHeadEtag().equals(rollout.getExpectedHeadEtag());
           var actions = new java.util.ArrayList<String>();
-          actions.add("CANCEL");
-          if (!expired && current && summary.activationReady()) actions.add("ACTIVATE_CANDIDATE");
+          if (canOperate) actions.add("CANCEL");
+          if (canOperate && !expired && current && summary.activationReady())
+            actions.add("ACTIVATE_CANDIDATE");
           DomainRuleSnapshot candidate = snapshots.findById(rollout.getCandidateSnapshotId())
               .orElseThrow(() -> new IllegalStateException("Rollout references missing candidate"));
           DomainRuleSnapshot active = snapshots.findById(rollout.getExpectedActiveSnapshotId())
@@ -169,7 +170,8 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
               response(rollout, candidate, active, policy), summary, current, expired,
               List.copyOf(actions));
         }).toList();
-    return new DomainRuleRolloutCatalogResponse(key, items);
+    return new DomainRuleRolloutCatalogResponse(
+        key, items, canOperate && items.isEmpty() ? List.of("CREATE_ROLLOUT") : List.of());
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)

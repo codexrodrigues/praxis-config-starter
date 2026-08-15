@@ -226,7 +226,7 @@ class DomainRuleRolloutServiceTest {
     when(snapshots.findById(candidate.getId())).thenReturn(Optional.of(candidate));
     when(snapshots.findById(activeId)).thenReturn(Optional.of(active));
 
-    var catalog = service.catalog("benefit.eligibility", principal);
+    var catalog = service.catalog("benefit.eligibility", principal, true);
 
     assertThat(catalog.rollouts()).hasSize(1);
     assertThat(catalog.rollouts().getFirst().availableActions())
@@ -260,10 +260,21 @@ class DomainRuleRolloutServiceTest {
     when(snapshots.findById(candidate.getId())).thenReturn(Optional.of(candidate));
     when(snapshots.findById(activeId)).thenReturn(Optional.of(active));
 
-    var item = service.catalog("benefit.eligibility", principal).rollouts().getFirst();
+    var item = service.catalog("benefit.eligibility", principal, true).rollouts().getFirst();
 
     assertThat(item.expired()).isTrue();
     assertThat(item.availableActions()).containsExactly("CANCEL");
+  }
+
+  @Test void readerWithoutOperatorRoleReceivesNoRolloutCommands() {
+    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusInOrderByCreatedAtDesc(
+        eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), anySet()))
+        .thenReturn(List.of());
+
+    var catalog = service.catalog("benefit.eligibility", principal, false);
+
+    assertThat(catalog.availableActions()).isEmpty();
+    assertThat(catalog.rollouts()).isEmpty();
   }
 
   @Test void requiredActivationGateRejectsMissingRollout() {

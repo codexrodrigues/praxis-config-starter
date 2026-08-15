@@ -8,4 +8,5 @@ public record DomainRuleRolloutPolicyCatalogResponse(
     long activationRevision,
     String headEtag,
     DomainRuleRolloutPolicyResponse activePolicy,
-    List<DomainRuleRolloutPolicyResponse> versions) {}
+    List<DomainRuleRolloutPolicyResponse> versions,
+    List<String> availableActions) {}

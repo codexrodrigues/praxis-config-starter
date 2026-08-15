@@ -136,20 +136,24 @@ public class DomainRuleRolloutPolicyService {
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
-  public Optional<DomainRuleRolloutPolicyCatalogResponse> catalog(
-      String ruleSetKey, DomainRuleGovernancePrincipal principal) {
+  public DomainRuleRolloutPolicyCatalogResponse catalog(
+      String ruleSetKey, DomainRuleGovernancePrincipal principal,
+      boolean canAuthor, boolean canApprove, boolean canOperate) {
     String key = requireText(ruleSetKey, "ruleSetKey", 512);
-    return policyHeads.findByTenantIdAndEnvironmentAndRuleSetKey(
+    var versions = policies.findByTenantIdAndEnvironmentAndRuleSetKeyOrderByCreatedAtDesc(
             principal.tenantId(), principal.environment(), key)
-        .map(head -> new DomainRuleRolloutPolicyCatalogResponse(
-            key, head.getActivationRevision(), head.getHeadEtag().toString(),
-            head.getActivePolicyId() == null ? null : policies
-                .findByIdAndTenantIdAndEnvironment(
-                    head.getActivePolicyId(), principal.tenantId(), principal.environment())
-                .map(this::response).orElseThrow(),
-            policies.findByTenantIdAndEnvironmentAndRuleSetKeyOrderByCreatedAtDesc(
-                    principal.tenantId(), principal.environment(), key)
-                .stream().map(this::response).toList()));
+        .stream().map(policy -> response(policy,
+            availableActions(policy, principal, canApprove, canOperate))).toList();
+    var head = policyHeads.findByTenantIdAndEnvironmentAndRuleSetKey(
+        principal.tenantId(), principal.environment(), key).orElse(null);
+    var active = head == null || head.getActivePolicyId() == null ? null : policies
+        .findByIdAndTenantIdAndEnvironment(
+            head.getActivePolicyId(), principal.tenantId(), principal.environment())
+        .map(policy -> response(policy, List.of())).orElseThrow();
+    return new DomainRuleRolloutPolicyCatalogResponse(
+        key, head == null ? 0 : head.getActivationRevision(),
+        head == null ? null : head.getHeadEtag().toString(), active, versions,
+        canAuthor ? List.of("CREATE_POLICY_VERSION") : List.of());
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -308,17 +312,29 @@ public class DomainRuleRolloutPolicyService {
   private DomainRuleRolloutPolicyMutationResponse mutation(
       DomainRuleRolloutPolicy policy, DomainRuleRolloutPolicyHead head) {
     return new DomainRuleRolloutPolicyMutationResponse(
-        response(policy), head.getActivationRevision(), head.getHeadEtag().toString());
+        response(policy, List.of()), head.getActivationRevision(), head.getHeadEtag().toString());
   }
 
-  private DomainRuleRolloutPolicyResponse response(DomainRuleRolloutPolicy policy) {
+  private List<String> availableActions(DomainRuleRolloutPolicy policy,
+      DomainRuleGovernancePrincipal principal, boolean canApprove, boolean canOperate) {
+    if ("DRAFT".equals(policy.getStatus()) && canApprove
+        && !policy.getCreatedBy().equals(principal.actorRef())) return List.of("APPROVE");
+    if (("APPROVED".equals(policy.getStatus()) || "SUPERSEDED".equals(policy.getStatus()))
+        && canOperate && rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusIn(
+            principal.tenantId(), principal.environment(), policy.getRuleSetKey(), OPEN_ROLLOUT)
+            .isEmpty()) return List.of("ACTIVATE");
+    return List.of();
+  }
+
+  private DomainRuleRolloutPolicyResponse response(
+      DomainRuleRolloutPolicy policy, List<String> availableActions) {
     return new DomainRuleRolloutPolicyResponse(policy.getId(), policy.getRuleSetKey(),
         policy.getPolicyKey(), policy.getPolicyVersion(), policy.getStatus(),
         policy.getEnforcementMode(), policy.getMinimumFreshProbes(),
         policy.getMinimumReadyRatio(), Boolean.TRUE.equals(policy.getBlockOnIncompatible()),
         policy.getStaleAfterSeconds(), policy.getMaximumRolloutAgeSeconds(),
         policy.getCreatedBy(), policy.getCreatedAt(), policy.getApprovedBy(), policy.getApprovedAt(),
-        policy.getActivatedBy(), policy.getActivatedAt());
+        policy.getActivatedBy(), policy.getActivatedAt(), availableActions);
   }
 
   private static String requireActor(DomainRuleGovernancePrincipal principal) {
