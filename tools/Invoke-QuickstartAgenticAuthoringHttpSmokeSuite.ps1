@@ -96,19 +96,33 @@ $quickstartProcess = $null
 $startedQuickstart = $false
 $logDir = Join-Path $QuickstartRoot "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-$governanceAuthorUsername = "$UserId-publisher"
-$governanceReviewerUsername = "$UserId-reviewer"
+$governanceAuthorUsername = "$UserId-author"
+$governanceApproverAUsername = "$UserId-approver-a"
+$governanceApproverBUsername = "$UserId-approver-b"
+$governancePublisherUsername = "$UserId-publisher"
+$governanceOperatorUsername = "$UserId-operator"
+$governanceAuditorUsername = "$UserId-auditor"
 $governanceAuthorPassword = [Guid]::NewGuid().ToString("N")
-$governanceReviewerPassword = [Guid]::NewGuid().ToString("N")
+$governanceApproverAPassword = [Guid]::NewGuid().ToString("N")
+$governanceApproverBPassword = [Guid]::NewGuid().ToString("N")
+$governancePublisherPassword = [Guid]::NewGuid().ToString("N")
+$governanceOperatorPassword = [Guid]::NewGuid().ToString("N")
+$governanceAuditorPassword = [Guid]::NewGuid().ToString("N")
 $corporateMode = if ($DomainRuleLifecycleOnly) { "true" } else { "false" }
 $governanceLabEnvironment = @"
 `$env:APP_AUTH_GOVERNANCE_LAB_ENABLED = 'true'
-`$env:APP_AUTH_GOVERNANCE_APPROVER_A_USERNAME = '$governanceReviewerUsername'
-`$env:APP_AUTH_GOVERNANCE_APPROVER_A_PASSWORD = '$governanceReviewerPassword'
-`$env:APP_AUTH_GOVERNANCE_APPROVER_B_USERNAME = '$governanceReviewerUsername-b'
-`$env:APP_AUTH_GOVERNANCE_APPROVER_B_PASSWORD = '$governanceReviewerPassword-b'
-`$env:APP_AUTH_GOVERNANCE_PUBLISHER_USERNAME = '$governanceAuthorUsername'
-`$env:APP_AUTH_GOVERNANCE_PUBLISHER_PASSWORD = '$governanceAuthorPassword'
+`$env:APP_AUTH_GOVERNANCE_AUTHOR_USERNAME = '$governanceAuthorUsername'
+`$env:APP_AUTH_GOVERNANCE_AUTHOR_PASSWORD = '$governanceAuthorPassword'
+`$env:APP_AUTH_GOVERNANCE_APPROVER_A_USERNAME = '$governanceApproverAUsername'
+`$env:APP_AUTH_GOVERNANCE_APPROVER_A_PASSWORD = '$governanceApproverAPassword'
+`$env:APP_AUTH_GOVERNANCE_APPROVER_B_USERNAME = '$governanceApproverBUsername'
+`$env:APP_AUTH_GOVERNANCE_APPROVER_B_PASSWORD = '$governanceApproverBPassword'
+`$env:APP_AUTH_GOVERNANCE_PUBLISHER_USERNAME = '$governancePublisherUsername'
+`$env:APP_AUTH_GOVERNANCE_PUBLISHER_PASSWORD = '$governancePublisherPassword'
+`$env:APP_AUTH_GOVERNANCE_OPERATOR_USERNAME = '$governanceOperatorUsername'
+`$env:APP_AUTH_GOVERNANCE_OPERATOR_PASSWORD = '$governanceOperatorPassword'
+`$env:APP_AUTH_GOVERNANCE_AUDITOR_USERNAME = '$governanceAuditorUsername'
+`$env:APP_AUTH_GOVERNANCE_AUDITOR_PASSWORD = '$governanceAuditorPassword'
 "@
 if ($DomainRuleLifecycleOnly) {
 $governanceLabEnvironment += [Environment]::NewLine + @"
@@ -200,8 +214,8 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
     $domainRuleArgs = @{} + $commonArgs
     $domainRuleArgs.AuthorUsername = $governanceAuthorUsername
     $domainRuleArgs.AuthorPassword = $governanceAuthorPassword
-    $domainRuleArgs.ReviewerUsername = $governanceReviewerUsername
-    $domainRuleArgs.ReviewerPassword = $governanceReviewerPassword
+    $domainRuleArgs.ReviewerUsername = $governanceApproverAUsername
+    $domainRuleArgs.ReviewerPassword = $governanceApproverAPassword
     $domainRuleArgs.ExpectAuthorApprovalIamRejection = $true
     $domainRuleLifecycle = & (Join-Path $PSScriptRoot "Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1") @domainRuleArgs | ConvertFrom-Json
     if ($DomainRuleLifecycleOnly) {
