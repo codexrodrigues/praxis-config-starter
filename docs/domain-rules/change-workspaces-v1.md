@@ -142,7 +142,8 @@ strings `CREATE` and `UPDATE`.
 
 Migration `V58` adds scoped idempotency, a canonical request hash, the independent baseline lane and
 the submitted-Test-Run binding. Stage policy is opt-in and server-owned; it does not globally force
-Oracle evidence at `SUBMIT`. A definition can govern `SUBMIT`, `PROMOTE`, `PUBLISH` or a combination
+Oracle evidence at `SUBMIT`. A definition can govern `SUBMIT`, `PROMOTE`, `PUBLISH`, `SNAPSHOT`,
+`ACTIVATE` or a combination
 of those stages with this shape:
 
 ```json
@@ -163,14 +164,19 @@ of those stages with this shape:
 ```
 
 The required operation and decision lists form a Cartesian gate. Unknown fields and malformed
-policies fail closed instead of silently weakening governance. `SUBMIT`, `PROMOTE` and `PUBLISH`
-are accepted stage names. Premature or misspelled stages are invalid rather than inert. At
+policies fail closed instead of silently weakening governance. `SUBMIT`, `PROMOTE`, `PUBLISH`,
+`SNAPSHOT` and `ACTIVATE` are accepted stage names. Misspelled stages are invalid rather than inert. At
 publication, Config resolves the unique promoted workspace by `promotedDefinitionId`, reuses its
 immutable `submittedTestRunId` and returns `blocked_by_test_evidence` plus safe blocker codes when
 the reviewed receipt does not satisfy the policy. A definition without a `PUBLISH` stage retains
 the existing publication behavior.
-Snapshot and activation will reuse the same evaluator only after those stages bind an immutable
-reviewed Test Run; they must not infer permission or evidence sufficiency in the browser.
+For `SNAPSHOT` and `ACTIVATE`, the same evaluator runs while the canonical composition manifest is
+prepared. Required evidence is represented only by safe IDs, request hash, workspace revision and a
+canonical digest of the immutable Test Run/results; raw facts are never copied into the manifest.
+The composition digest and two independent approvals therefore bind the reviewed evidence before
+publication. Later activation and rollback verify the persisted manifest and do not reinterpret
+mutable workspace state. A definition without either stage remains opt-in compatible. Browsers must
+not infer permission or evidence sufficiency.
 
 Workspace actions and blockers are exposed through the dedicated capabilities
 read and the public `@praxisui/core` client. Clients must not infer review,

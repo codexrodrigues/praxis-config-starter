@@ -21,7 +21,8 @@ public class DomainRuleTestEvidencePolicyService {
       "baselineAuthorityType", "baselineEligibility", "requiredOperationModes",
       "requiredDecisions", "requireCleanupVerified", "requireBaselineMatch");
   private static final Set<String> POLICY_FIELDS = Set.of("stages");
-  private static final Set<String> SUPPORTED_STAGES = Set.of("SUBMIT", "PROMOTE", "PUBLISH");
+  private static final Set<String> SUPPORTED_STAGES = Set.of(
+      "SUBMIT", "PROMOTE", "PUBLISH", "SNAPSHOT", "ACTIVATE");
   private static final Set<String> AUTHORITIES = Set.of(
       "SYNTHETIC_EXPECTED", "ACTIVE_SNAPSHOT", "LEGACY_ORACLE");
   private static final Set<String> ELIGIBILITIES = Set.of("ELIGIBLE", "INELIGIBLE", "PENDING");
@@ -104,6 +105,11 @@ public class DomainRuleTestEvidencePolicyService {
       return List.of(blocker("TEST_EVIDENCE_POLICY_INVALID", normalizedStage,
           "The canonical testEvidencePolicy is invalid: " + exception.getMessage()));
     }
+  }
+
+  public boolean hasStage(String stage, DomainRuleDefinition definition) {
+    String normalizedStage = stage == null ? "" : stage.trim().toUpperCase(Locale.ROOT);
+    return stagePolicy(definition, normalizedStage) != null;
   }
 
   private JsonNode stagePolicy(DomainRuleDefinition definition, String stage) {

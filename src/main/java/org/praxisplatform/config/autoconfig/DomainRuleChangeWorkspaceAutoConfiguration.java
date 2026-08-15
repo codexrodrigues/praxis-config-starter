@@ -63,9 +63,10 @@ public class DomainRuleChangeWorkspaceAutoConfiguration {
       DomainRuleChangeWorkspaceRepository workspaceRepository,
       DomainRuleTestRunRepository runRepository,
       DomainRuleTestRunResultRepository resultRepository,
-      DomainRuleTestEvidencePolicyService evidencePolicyService) {
+      DomainRuleTestEvidencePolicyService evidencePolicyService,
+      ObjectMapper objectMapper) {
     return new DomainRuleDefinitionEvidenceGateService(
-        workspaceRepository, runRepository, resultRepository, evidencePolicyService);
+        workspaceRepository, runRepository, resultRepository, evidencePolicyService, objectMapper);
   }
 
   @Bean
