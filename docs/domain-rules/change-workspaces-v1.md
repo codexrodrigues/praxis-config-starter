@@ -31,6 +31,12 @@ The Config Starter owns workspace and scenario persistence. The Rules Engine own
 evaluation semantics. The host owns fact resolution, executable registries and sandbox execution.
 Policy Studio is the experience plane over these contracts.
 
+The stable semantic identity of this resource is
+`praxis.config.domain-rule-change-workspaces`, published by
+`DomainRuleChangeWorkspaceContract.RESOURCE_KEY`. Metadata producers that protect a workspace
+version must reference this identity instead of deriving it from the HTTP path. The canonical path
+is separately published as `DomainRuleChangeWorkspaceContract.RESOURCE_PATH`.
+
 ## HTTP contract
 
 All scope is resolved from the authenticated server principal. Tenant and environment headers are

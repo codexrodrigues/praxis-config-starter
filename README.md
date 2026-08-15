@@ -77,6 +77,8 @@ CodeWiki is complementary navigation for code reading; the repository docs and s
 - governed domain decisions and materialization workflows under `/api/praxis/config/**`.
 - Policy Studio change workspaces with strong ETag concurrency and reusable five-state outcome
   scenarios, documented in [`docs/domain-rules/change-workspaces-v1.md`](docs/domain-rules/change-workspaces-v1.md).
+  The public `DomainRuleChangeWorkspaceContract` keeps its semantic `RESOURCE_KEY` distinct from
+  the canonical HTTP `RESOURCE_PATH`, allowing cross-resource action preconditions without URL inference.
 
 In a typical host, `praxis-metadata-starter` explains what backend resources are and which UI/schema capabilities they expose. `praxis-config-starter` stores how a tenant or user configures those capabilities, how AI tools reason over them, and how governed authoring changes are validated before they become runtime configuration.
 
