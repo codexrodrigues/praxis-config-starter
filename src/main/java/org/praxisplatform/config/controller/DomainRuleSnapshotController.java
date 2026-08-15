@@ -4,6 +4,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
 import java.util.List;
@@ -16,6 +18,7 @@ import org.praxisplatform.config.dto.DomainRuleCompositionManifestResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotActivationResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotHeadStatusResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotPublicationRequest;
+import org.praxisplatform.config.dto.DomainRuleSnapshotProblemResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotStoredResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotVersionResponse;
 import org.praxisplatform.config.exception.DomainRuleSnapshotControlPlaneException;
@@ -55,6 +58,12 @@ public class DomainRuleSnapshotController {
   @PostMapping("/composition-manifest")
   @Operation(summary = "Canonicalize a RuleSet composition for approval",
       description = "Resolves governed source hashes and the admitted implementation catalog, validates the candidate, and returns the exact SHA-256 that composition approvers must sign off before publication.")
+  @ApiResponses({
+    @ApiResponse(responseCode = "200", description = "Canonical composition manifest ready for review"),
+    @ApiResponse(responseCode = "400", description = "Candidate invalid or blocked by typed reviewed-evidence diagnostics",
+        content = @Content(schema = @Schema(implementation = DomainRuleSnapshotProblemResponse.class))),
+    @ApiResponse(responseCode = "403", description = "Principal lacks the governed composition permission")
+  })
   public ResponseEntity<DomainRuleCompositionManifestResponse> compositionManifest(
       @RequestBody DomainRuleCompositionManifestRequest request,
       @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
@@ -314,11 +323,10 @@ public class DomainRuleSnapshotController {
   }
 
   @ExceptionHandler(DomainRuleSnapshotControlPlaneException.class)
-  public ResponseEntity<Map<String, String>> handleControlPlaneFailure(
+  public ResponseEntity<DomainRuleSnapshotProblemResponse> handleControlPlaneFailure(
       DomainRuleSnapshotControlPlaneException exception) {
-    return ResponseEntity.status(exception.status()).body(Map.of(
-        "code", exception.status().name(),
-        "message", exception.getMessage()));
+    return ResponseEntity.status(exception.status()).body(new DomainRuleSnapshotProblemResponse(
+        exception.code(), exception.getMessage(), exception.blockers()));
   }
 
   @ExceptionHandler(IllegalArgumentException.class)

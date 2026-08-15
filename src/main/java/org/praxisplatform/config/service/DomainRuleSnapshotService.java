@@ -25,6 +25,7 @@ import org.praxisplatform.config.dto.DomainRuleCompositionManifestResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotActivationResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotHeadStatusResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotPublicationRequest;
+import org.praxisplatform.config.dto.DomainRuleSnapshotBlocker;
 import org.praxisplatform.config.dto.DomainRuleSnapshotStoredResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotVersionResponse;
 import org.praxisplatform.config.exception.DomainRuleSnapshotControlPlaneException;
@@ -637,18 +638,19 @@ public class DomainRuleSnapshotService {
       for (String stage : List.of("SNAPSHOT", "ACTIVATE")) {
         if (gate == null) {
           if (declaresEvidenceStage(source, stage)) {
-            throw badRequest("Test evidence gate is unavailable for governed " + stage + " stage");
+            throw evidenceBlocked(List.of(new DomainRuleSnapshotBlocker(
+                "TEST_EVIDENCE_GATE_UNAVAILABLE", stage, source.getId(),
+                "The reviewed Test Run evidence service is unavailable")));
           }
           continue;
         }
         DomainRuleDefinitionEvidenceDecision decision = gate.decision(stage, source, principal);
         if (!decision.required()) continue;
         if (!decision.satisfied()) {
-          String codes = decision.blockers().stream()
-              .map(blocker -> blocker.code()).sorted().distinct()
-              .reduce((left, right) -> left + "," + right).orElse("TEST_EVIDENCE_REQUIRED");
-          throw badRequest("RuleSet composition blocked by reviewed Test Run evidence ["
-              + stage + ":" + codes + "]");
+          throw evidenceBlocked(decision.blockers().stream()
+              .map(blocker -> new DomainRuleSnapshotBlocker(
+                  blocker.code(), stage, source.getId(), blocker.message()))
+              .toList());
         }
         ObjectNode item = evidence.addObject();
         item.put("definitionId", decision.definitionId().toString());
@@ -958,6 +960,15 @@ public class DomainRuleSnapshotService {
 
   private DomainRuleSnapshotControlPlaneException badRequest(String message) {
     return new DomainRuleSnapshotControlPlaneException(HttpStatus.BAD_REQUEST, message);
+  }
+
+  private DomainRuleSnapshotControlPlaneException evidenceBlocked(
+      List<DomainRuleSnapshotBlocker> blockers) {
+    return new DomainRuleSnapshotControlPlaneException(
+        HttpStatus.BAD_REQUEST,
+        "TEST_EVIDENCE_BLOCKED",
+        "RuleSet composition is blocked by reviewed Test Run evidence",
+        blockers);
   }
 
   private DomainRuleSnapshotControlPlaneException notFound(String message) {

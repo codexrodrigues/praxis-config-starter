@@ -16,6 +16,8 @@ import org.praxisplatform.config.dto.DomainRuleSnapshotStoredResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotVersionResponse;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestRequest;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestResponse;
+import org.praxisplatform.config.dto.DomainRuleSnapshotBlocker;
+import org.praxisplatform.config.exception.DomainRuleSnapshotControlPlaneException;
 import org.praxisplatform.config.service.DomainRuleSnapshotService;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
@@ -157,6 +159,28 @@ class DomainRuleSnapshotControllerTest {
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     assertThat(response.getBody()).containsEntry("code", "PLAN_COMPATIBILITY_INVALID");
+  }
+
+  @Test
+  void evidenceFailureReturnsTypedBlockersWithoutParsingTheMessage() {
+    UUID definitionId = UUID.randomUUID();
+    var exception = new DomainRuleSnapshotControlPlaneException(
+        HttpStatus.BAD_REQUEST,
+        "TEST_EVIDENCE_BLOCKED",
+        "RuleSet composition is blocked by reviewed Test Run evidence",
+        List.of(new DomainRuleSnapshotBlocker(
+            "BOUND_TEST_RUN_REQUIRED", "SNAPSHOT", definitionId,
+            "The governed stage requires the Test Run bound at submission")));
+
+    var response = controller.handleControlPlaneFailure(exception);
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(response.getBody().code()).isEqualTo("TEST_EVIDENCE_BLOCKED");
+    assertThat(response.getBody().blockers()).singleElement().satisfies(blocker -> {
+      assertThat(blocker.code()).isEqualTo("BOUND_TEST_RUN_REQUIRED");
+      assertThat(blocker.stage()).isEqualTo("SNAPSHOT");
+      assertThat(blocker.definitionId()).isEqualTo(definitionId);
+    });
   }
 
   @Test
