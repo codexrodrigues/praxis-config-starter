@@ -38,6 +38,7 @@ import org.praxisplatform.config.dto.DomainRuleSimulationResponse;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
 import org.praxisplatform.config.dto.DomainRuleTimelineEventResponse;
 import org.praxisplatform.config.dto.DomainRuleTimelineResponse;
+import org.praxisplatform.config.dto.DomainRuleWorkspaceBlocker;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
@@ -48,6 +49,7 @@ import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -83,6 +85,7 @@ public class DomainRuleService {
     private final DomainRuleDefinitionApprovalRepository definitionApprovalRepository;
     private final DomainRuleDefinitionFingerprint definitionFingerprint;
     private final ObjectMapper objectMapper;
+    private final ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGateProvider;
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleIntakeResponse intake(
@@ -577,6 +580,11 @@ public class DomainRuleService {
             readiness = "approval_required";
         }
 
+        List<DomainRuleWorkspaceBlocker> evidenceBlockers = publicationEvidenceBlockers(definition, principal);
+        if (!evidenceBlockers.isEmpty()) {
+            readiness = "blocked_by_test_evidence";
+        }
+
         if (!"ready_to_publish".equals(readiness)) {
             return new DomainRulePublicationResponse(
                     UUID.randomUUID(),
@@ -592,7 +600,8 @@ public class DomainRuleService {
                     definition.getServiceKey(),
                     toResponse(definition),
                     List.of(),
-                    withBlockedPublicationDiagnostics(simulation.explainability(), readiness, definition),
+                    withBlockedPublicationDiagnostics(
+                            simulation.explainability(), readiness, definition, evidenceBlockers),
                     Instant.now());
         }
         Instant publicationRequestedAt = Instant.now();
@@ -2141,7 +2150,8 @@ public class DomainRuleService {
     private JsonNode withBlockedPublicationDiagnostics(
             JsonNode explainability,
             String publicationReadiness,
-            DomainRuleDefinition definition) {
+            DomainRuleDefinition definition,
+            List<DomainRuleWorkspaceBlocker> evidenceBlockers) {
         ObjectNode copy = explainability != null && explainability.isObject()
                 ? ((ObjectNode) explainability).deepCopy()
                 : objectMapper.createObjectNode();
@@ -2157,6 +2167,9 @@ public class DomainRuleService {
         if (definition != null && StringUtils.hasText(definition.getStatus())) {
             diagnostics.put("definitionStatusAtResolution", definition.getStatus());
         }
+        if (evidenceBlockers != null && !evidenceBlockers.isEmpty()) {
+            diagnostics.set("testEvidenceBlockers", objectMapper.valueToTree(evidenceBlockers));
+        }
         diagnostics.set("materializationOutcomes", objectMapper.createArrayNode());
         return copy;
     }
@@ -2166,9 +2179,26 @@ public class DomainRuleService {
             case "blocked_by_definition_status" -> "definition_status_not_publishable";
             case "blocked_by_existing_coverage" -> "existing_coverage";
             case "approval_required" -> "approval_required";
+            case "blocked_by_test_evidence" -> "test_evidence_policy_not_satisfied";
             case "ready_for_definition_review" -> "definition_not_persisted";
             default -> publicationReadiness;
         };
+    }
+
+    private List<DomainRuleWorkspaceBlocker> publicationEvidenceBlockers(
+            DomainRuleDefinition definition,
+            DomainRuleGovernancePrincipal principal) {
+        DomainRuleDefinitionEvidenceGateService gate = evidenceGateProvider.getIfAvailable();
+        if (gate != null) {
+            return gate.blockers("PUBLISH", definition, principal);
+        }
+        JsonNode governance = read(definition.getGovernance());
+        if (governance != null && governance.path("testEvidencePolicy").isObject()) {
+            return List.of(new DomainRuleWorkspaceBlocker(
+                    "TEST_EVIDENCE_GATE_UNAVAILABLE", "PUBLISH",
+                    "The governed publication evidence gate is unavailable"));
+        }
+        return List.of();
     }
 
     private void addMaterializationOutcome(

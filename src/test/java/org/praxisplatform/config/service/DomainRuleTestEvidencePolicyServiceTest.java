@@ -36,6 +36,22 @@ class DomainRuleTestEvidencePolicyServiceTest {
   }
 
   @Test
+  void appliesTheSameGovernedMatrixAtPublication() throws Exception {
+    List<DomainRuleTestRunResult> results = new ArrayList<>();
+    for (String operation : List.of("CREATE", "UPDATE")) {
+      for (String decision : List.of("ALLOW", "DENY")) {
+        results.add(result(operation, decision, true, true));
+      }
+    }
+
+    var blockers = service.blockers(
+        "PUBLISH", definition(policy().replace("PROMOTE", "PUBLISH")),
+        run("ELIGIBLE"), results);
+
+    assertThat(blockers).isEmpty();
+  }
+
+  @Test
   void failsClosedWhenAuthorityEligibilityCleanupParityOrMatrixIsIncomplete() throws Exception {
     var blockers = service.blockers("PROMOTE", definition(policy()), run("PENDING"),
         List.of(result("CREATE", "ALLOW", false, false)));

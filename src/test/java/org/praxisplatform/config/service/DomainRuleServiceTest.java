@@ -29,6 +29,7 @@ import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRulePublicationRequest;
 import org.praxisplatform.config.dto.DomainRuleSimulationRequest;
 import org.praxisplatform.config.dto.DomainRuleStatusTransitionRequest;
+import org.praxisplatform.config.dto.DomainRuleWorkspaceBlocker;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
@@ -36,6 +37,7 @@ import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.repository.DomainRuleDefinitionApprovalRepository;
 import org.praxisplatform.config.repository.DomainRuleEventRepository;
 import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
+import org.springframework.beans.factory.ObjectProvider;
 
 @Tag("unit")
 class DomainRuleServiceTest {
@@ -2505,6 +2507,50 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void blocksPublicationWhenTheReviewedTestRunDoesNotSatisfyGovernance() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<DomainRuleDefinitionEvidenceGateService> provider = mock(ObjectProvider.class);
+        DomainRuleDefinitionEvidenceGateService gate = mock(DomainRuleDefinitionEvidenceGateService.class);
+        when(provider.getIfAvailable()).thenReturn(gate);
+        DomainRuleService service = service(
+                definitionRepository, materializationRepository, eventRepository,
+                mock(DomainRuleDefinitionApprovalRepository.class), provider);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId).tenantId("tenant-a").environment("dev")
+                .ruleKey("ergon.r013.rule.frequency").version(2).ruleType("policy_reference")
+                .status("approved").contextKey("ergon").resourceKey("ergon.frequency")
+                .serviceKey("ergon-migration")
+                .definition("{\"summary\":\"RN-013 frequency rule\"}")
+                .parameters("{}")
+                .governance("{\"testEvidencePolicy\":{\"stages\":{\"PUBLISH\":{\"baselineEligibility\":\"ELIGIBLE\"}}}}")
+                .build();
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a", "dev", "ergon.frequency", List.of("approved", "active")))
+                .thenReturn(List.of());
+        when(gate.blockers("PUBLISH", definition, principal("publisher"))).thenReturn(List.of(
+                new DomainRuleWorkspaceBlocker(
+                        "REQUIRED_BASELINE_ELIGIBILITY_MISSING", "PUBLISH",
+                        "The bound Test Run baseline is not eligible for this governed stage")));
+
+        var response = service.publish(
+                new DomainRulePublicationRequest(definitionId, null, true, null),
+                principal("publisher"));
+
+        assertThat(response.publicationStatus()).isEqualTo("blocked");
+        assertThat(response.publicationReadiness()).isEqualTo("blocked_by_test_evidence");
+        assertThat(response.explainability().path("publicationDiagnostics")
+                .path("testEvidenceBlockers").get(0).path("code").asText())
+                .isEqualTo("REQUIRED_BASELINE_ELIGIBILITY_MISSING");
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any());
+    }
+
+    @Test
     void publicationUsesAuthenticatedPublisherWithoutConflatingItWithDomainApprover() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
@@ -3904,6 +3950,17 @@ class DomainRuleServiceTest {
             DomainRuleMaterializationRepository materializationRepository,
             DomainRuleEventRepository eventRepository,
             DomainRuleDefinitionApprovalRepository approvalRepository) {
+        @SuppressWarnings("unchecked")
+        ObjectProvider<DomainRuleDefinitionEvidenceGateService> provider = mock(ObjectProvider.class);
+        return service(definitionRepository, materializationRepository, eventRepository, approvalRepository, provider);
+    }
+
+    private DomainRuleService service(
+            DomainRuleDefinitionRepository definitionRepository,
+            DomainRuleMaterializationRepository materializationRepository,
+            DomainRuleEventRepository eventRepository,
+            DomainRuleDefinitionApprovalRepository approvalRepository,
+            ObjectProvider<DomainRuleDefinitionEvidenceGateService> provider) {
         return new DomainRuleService(
                 definitionRepository,
                 materializationRepository,
@@ -3912,7 +3969,8 @@ class DomainRuleServiceTest {
                 mock(DomainKnowledgeChangeSetRepository.class),
                 approvalRepository,
                 new DomainRuleDefinitionFingerprint(objectMapper),
-                objectMapper);
+                objectMapper,
+                provider);
     }
 
     private DomainRuleGovernancePrincipal principal(String actorRef) {

@@ -142,13 +142,14 @@ strings `CREATE` and `UPDATE`.
 
 Migration `V58` adds scoped idempotency, a canonical request hash, the independent baseline lane and
 the submitted-Test-Run binding. Stage policy is opt-in and server-owned; it does not globally force
-Oracle evidence at `SUBMIT`. A definition can govern `SUBMIT`, `PROMOTE` or both with this shape:
+Oracle evidence at `SUBMIT`. A definition can govern `SUBMIT`, `PROMOTE`, `PUBLISH` or a combination
+of those stages with this shape:
 
 ```json
 {
   "testEvidencePolicy": {
     "stages": {
-      "PROMOTE": {
+      "PUBLISH": {
         "baselineAuthorityType": "LEGACY_ORACLE",
         "baselineEligibility": "ELIGIBLE",
         "requiredOperationModes": ["CREATE", "UPDATE"],
@@ -162,10 +163,14 @@ Oracle evidence at `SUBMIT`. A definition can govern `SUBMIT`, `PROMOTE` or both
 ```
 
 The required operation and decision lists form a Cartesian gate. Unknown fields and malformed
-policies fail closed instead of silently weakening governance. `SUBMIT` and `PROMOTE` are the only
-accepted stage names in V58; premature or misspelled stages are invalid rather than inert.
-Publication, snapshot and activation will reuse the same evaluator only after those stages bind an
-immutable reviewed Test Run; they must not infer permission or evidence sufficiency in the browser.
+policies fail closed instead of silently weakening governance. `SUBMIT`, `PROMOTE` and `PUBLISH`
+are accepted stage names. Premature or misspelled stages are invalid rather than inert. At
+publication, Config resolves the unique promoted workspace by `promotedDefinitionId`, reuses its
+immutable `submittedTestRunId` and returns `blocked_by_test_evidence` plus safe blocker codes when
+the reviewed receipt does not satisfy the policy. A definition without a `PUBLISH` stage retains
+the existing publication behavior.
+Snapshot and activation will reuse the same evaluator only after those stages bind an immutable
+reviewed Test Run; they must not infer permission or evidence sufficiency in the browser.
 
 Workspace actions and blockers are exposed through the dedicated capabilities
 read and the public `@praxisui/core` client. Clients must not infer review,
