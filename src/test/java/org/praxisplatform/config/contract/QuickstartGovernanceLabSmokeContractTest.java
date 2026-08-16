@@ -74,4 +74,20 @@ class QuickstartGovernanceLabSmokeContractTest {
         assertThat(script).doesNotContain(
                 "-Uri \"$base/api/praxis/config/domain-rules/publications\" `\n    -Headers $headers");
     }
+
+    @Test
+    void shouldProveReuseBeforeACompetingDecisionSupersedesTheTargetHead() throws IOException {
+        String script = Files.readString(LIFECYCLE_SCRIPT);
+
+        int initialPublication = script.indexOf("$inactivePublication = Invoke-JsonRequest");
+        int reusedPublication = script.indexOf("$inactiveRepublish = Invoke-JsonRequest");
+        int competingPublication = script.indexOf("$suspendedPublication = Invoke-JsonRequest");
+
+        assertThat(initialPublication).isGreaterThanOrEqualTo(0);
+        assertThat(reusedPublication).isGreaterThan(initialPublication);
+        assertThat(competingPublication).isGreaterThan(reusedPublication);
+        assertThat(script)
+                .contains("Prove deterministic reuse while this definition still owns the applied target head")
+                .contains("Publishing the competing suspended rule below correctly supersedes this materialization");
+    }
 }

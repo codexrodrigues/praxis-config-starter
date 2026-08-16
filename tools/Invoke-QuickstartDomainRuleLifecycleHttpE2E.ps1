@@ -808,6 +808,47 @@ $inactivePublication = Invoke-JsonRequest `
         }
     }
 
+$inactiveOptionSourceMaterialization = Find-MaterializationByLayer `
+    -Publication $inactivePublication `
+    -TargetLayer "option_source"
+$inactiveBackendValidationMaterialization = Find-MaterializationByLayer `
+    -Publication $inactivePublication `
+    -TargetLayer "backend_validation"
+$inactiveHash = [string] $inactiveOptionSourceMaterialization.sourceHash
+$inactiveBackendValidationHash = [string] $inactiveBackendValidationMaterialization.sourceHash
+$inactiveMaterializationKey = [string] $inactiveOptionSourceMaterialization.materializationKey
+
+$createdDiagnosticsSeen = Assert-MaterializationOutcome `
+    -Publication $inactivePublication `
+    -ExpectedResolution "created" `
+    -ExpectedMaterializationKey $inactiveMaterializationKey
+
+# Prove deterministic reuse while this definition still owns the applied target head.
+# Publishing the competing suspended rule below correctly supersedes this materialization.
+$inactiveRepublish = Invoke-JsonRequest `
+    -Method Post `
+    -Uri "$base/api/praxis/config/domain-rules/publications" `
+    -Headers $publisherHeaders `
+    -Body @{
+        ruleDefinitionId = $inactiveDefinition.id
+        applyEligibleMaterializations = $true
+        publishedByType = "human"
+        publishedBy = $publisherUserId
+        publicationNotes = @{
+            smoke = "domain-rule-publication-diagnostics"
+        }
+    }
+
+$reusedDiagnosticsSeen = Assert-MaterializationOutcome `
+    -Publication $inactiveRepublish `
+    -ExpectedResolution "reused" `
+    -ExpectedMaterializationKey $inactiveMaterializationKey
+
+$reusedHash = [string] $inactiveRepublish.materializations[0].sourceHash
+if ($reusedHash -ne $inactiveHash) {
+    throw "Expected republished materialization hash '$reusedHash' to match original '$inactiveHash'."
+}
+
 $suspendedPublication = Invoke-JsonRequest `
     -Method Post `
     -Uri "$base/api/praxis/config/domain-rules/publications" `
@@ -822,23 +863,14 @@ $suspendedPublication = Invoke-JsonRequest `
         }
     }
 
-$inactiveOptionSourceMaterialization = Find-MaterializationByLayer `
-    -Publication $inactivePublication `
-    -TargetLayer "option_source"
-$inactiveBackendValidationMaterialization = Find-MaterializationByLayer `
-    -Publication $inactivePublication `
-    -TargetLayer "backend_validation"
 $suspendedOptionSourceMaterialization = Find-MaterializationByLayer `
     -Publication $suspendedPublication `
     -TargetLayer "option_source"
 $suspendedBackendValidationMaterialization = Find-MaterializationByLayer `
     -Publication $suspendedPublication `
     -TargetLayer "backend_validation"
-$inactiveHash = [string] $inactiveOptionSourceMaterialization.sourceHash
 $suspendedHash = [string] $suspendedOptionSourceMaterialization.sourceHash
-$inactiveBackendValidationHash = [string] $inactiveBackendValidationMaterialization.sourceHash
 $suspendedBackendValidationHash = [string] $suspendedBackendValidationMaterialization.sourceHash
-$inactiveMaterializationKey = [string] $inactiveOptionSourceMaterialization.materializationKey
 if ([string]::IsNullOrWhiteSpace($inactiveHash) -or $inactiveHash -notlike "derived:sha256:*") {
     throw "Expected inactive semantic hash to use derived:sha256 prefix, got '$inactiveHash'."
 }
@@ -866,35 +898,6 @@ $procurementBackendValidationPolicySeen = Assert-BackendValidationPolicy `
     -Materialization $inactiveBackendValidationMaterialization `
     -ExpectedResourceKey "procurement.semantic-hash-inactive-$unique" `
     -ExpectedBlockedStatuses @("INACTIVE", "BLOCKED")
-
-$createdDiagnosticsSeen = Assert-MaterializationOutcome `
-    -Publication $inactivePublication `
-    -ExpectedResolution "created" `
-    -ExpectedMaterializationKey $inactiveMaterializationKey
-
-$inactiveRepublish = Invoke-JsonRequest `
-    -Method Post `
-    -Uri "$base/api/praxis/config/domain-rules/publications" `
-    -Headers $publisherHeaders `
-    -Body @{
-        ruleDefinitionId = $inactiveDefinition.id
-        applyEligibleMaterializations = $true
-        publishedByType = "human"
-        publishedBy = $publisherUserId
-        publicationNotes = @{
-            smoke = "domain-rule-publication-diagnostics"
-        }
-    }
-
-$reusedDiagnosticsSeen = Assert-MaterializationOutcome `
-    -Publication $inactiveRepublish `
-    -ExpectedResolution "reused" `
-    -ExpectedMaterializationKey $inactiveMaterializationKey
-
-$reusedHash = [string] $inactiveRepublish.materializations[0].sourceHash
-if ($reusedHash -ne $inactiveHash) {
-    throw "Expected republished materialization hash '$reusedHash' to match original '$inactiveHash'."
-}
 
 [pscustomobject]@{
     health = $health.status
