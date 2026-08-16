@@ -53,6 +53,8 @@ class QuickstartGovernanceLabSmokeContractTest {
                 .contains("$domainRuleArgs.ReviewerUsername = $governanceApproverAUsername")
                 .contains("$domainRuleArgs.PublisherUsername = $governancePublisherUsername")
                 .contains("$domainRuleArgs.PublisherPassword = $governancePublisherPassword")
+                .contains("$domainRuleArgs.OperatorUsername = $governanceOperatorUsername")
+                .contains("$domainRuleArgs.OperatorPassword = $governanceOperatorPassword")
                 .contains("$expectAuthorApprovalIamRejection = $DomainRuleLifecycleOnly.IsPresent")
                 .contains("$domainRuleArgs.ExpectAuthorApprovalIamRejection = $expectAuthorApprovalIamRejection")
                 .doesNotContain("$domainRuleArgs.ExpectAuthorApprovalIamRejection = $true");
@@ -69,10 +71,35 @@ class QuickstartGovernanceLabSmokeContractTest {
         assertThat(script.split(java.util.regex.Pattern.quote(
                 "-Uri \"$base/api/praxis/config/domain-rules/publications\""), -1))
                 .hasSize(7);
-        assertThat(script.split(java.util.regex.Pattern.quote("-Headers $publisherHeaders"), -1))
-                .hasSize(7);
+        assertThat(java.util.regex.Pattern.compile(
+                        "-Uri \\\"\\$base/api/praxis/config/domain-rules/publications\\\" `\\R\\s+-Headers \\$publisherHeaders")
+                .matcher(script).results().count()).isEqualTo(6);
         assertThat(script).doesNotContain(
                 "-Uri \"$base/api/praxis/config/domain-rules/publications\" `\n    -Headers $headers");
+    }
+
+    @Test
+    void shouldUseTheAuthorizedActorForEachMaterializationTransition() throws IOException {
+        String script = Files.readString(LIFECYCLE_SCRIPT);
+
+        assertThat(script)
+                .contains("$operatorHeaders = Add-AuthenticatedCookie")
+                .containsSubsequence(
+                        "$appliedCreationBlocked = Invoke-ExpectedFailure",
+                        "-Headers $publisherHeaders",
+                        "status = \"applied\"")
+                .containsSubsequence(
+                        "$appliedMaterialization = Invoke-JsonRequest",
+                        "-Headers $publisherHeaders",
+                        "status = \"applied\"")
+                .containsSubsequence(
+                        "$failedMaterialization = Invoke-JsonRequest",
+                        "-Headers $operatorHeaders",
+                        "status = \"failed\"")
+                .containsSubsequence(
+                        "$terminalMaterializationTransitionBlocked = Invoke-ExpectedFailure",
+                        "-Headers $publisherHeaders",
+                        "status = \"applied\"");
     }
 
     @Test
