@@ -103,7 +103,7 @@ class DomainRuleChangeWorkspaceServiceTest {
     workspace.setBaseDefinitionId(base.getId());
     workspace.setBaseDefinitionHash("B".repeat(64));
     UUID priorEtag = workspace.getEtag();
-    when(workspaces.findById(id)).thenReturn(Optional.of(workspace));
+    when(workspaces.findByIdForUpdate(id)).thenReturn(Optional.of(workspace));
     when(definitions.findById(base.getId())).thenReturn(Optional.of(base));
     when(fingerprint.sha256(base)).thenReturn("B".repeat(64));
 
@@ -387,7 +387,7 @@ class DomainRuleChangeWorkspaceServiceTest {
     UUID etag = workspace.getEtag();
     DomainRuleDefinition base = definition("tenant-a", "dev");
     workspace.setBaseDefinitionId(base.getId());
-    when(workspaces.findById(id)).thenReturn(Optional.of(workspace));
+    when(workspaces.findByIdForUpdate(id)).thenReturn(Optional.of(workspace));
     when(definitions.findById(base.getId())).thenReturn(Optional.of(base));
     when(fingerprint.sha256(base)).thenReturn("B".repeat(64));
 
@@ -402,6 +402,7 @@ class DomainRuleChangeWorkspaceServiceTest {
     assertThat(workspace.getStatus()).isEqualTo("APPROVED");
     assertThat(workspace.getRevision()).isEqualTo(2L);
     verify(reviews).save(any());
+    verify(workspaces).findByIdForUpdate(id);
     verify(domainRules).validateDefinitionApprovalAuthority(
         base.getId(), new DomainRuleGovernancePrincipal("tenant-a", "reviewer-a", "dev"));
   }
@@ -413,7 +414,7 @@ class DomainRuleChangeWorkspaceServiceTest {
     workspace.setStatus("SUBMITTED");
     DomainRuleDefinition base = definition("tenant-a", "dev");
     workspace.setBaseDefinitionId(base.getId());
-    when(workspaces.findById(id)).thenReturn(Optional.of(workspace));
+    when(workspaces.findByIdForUpdate(id)).thenReturn(Optional.of(workspace));
 
     assertThatThrownBy(() -> service.review(id,
         new DomainRuleWorkspaceReviewRequest("APPROVE", "self review"),
@@ -432,7 +433,7 @@ class DomainRuleChangeWorkspaceServiceTest {
     DomainRuleDefinition base = definition("tenant-a", "dev");
     workspace.setBaseDefinitionId(base.getId());
     workspace.setRuleKey(base.getRuleKey());
-    when(workspaces.findById(id)).thenReturn(Optional.of(workspace));
+    when(workspaces.findByIdForUpdate(id)).thenReturn(Optional.of(workspace));
     when(reviews.findByTenantIdAndEnvironmentAndWorkspaceIdOrderByReviewedAtDesc("tenant-a", "dev", id))
         .thenReturn(List.of(org.praxisplatform.config.domain.DomainRuleWorkspaceReview.builder()
             .workspaceRevision(1L).baseDefinitionHash("B".repeat(64)).decision("APPROVE")

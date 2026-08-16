@@ -148,7 +148,7 @@ public class DomainRuleChangeWorkspaceService {
       DomainRuleChangeWorkspaceUpdateRequest request,
       String ifMatch,
       DomainRuleGovernancePrincipal principal) {
-    DomainRuleChangeWorkspace workspace = scopedWorkspace(id, principal);
+    DomainRuleChangeWorkspace workspace = scopedWorkspaceForUpdate(id, principal);
     requireOpen(workspace);
     requireStrongMatch(ifMatch, workspace.getEtag().toString());
     DomainRuleDefinition base = scopedDefinition(workspace.getBaseDefinitionId(), principal);
@@ -319,7 +319,7 @@ public class DomainRuleChangeWorkspaceService {
   public DomainRuleWorkspaceReviewResponse review(
       UUID id, DomainRuleWorkspaceReviewRequest request, String ifMatch,
       DomainRuleGovernancePrincipal principal) {
-    DomainRuleChangeWorkspace workspace = scopedWorkspace(id, principal);
+    DomainRuleChangeWorkspace workspace = scopedWorkspaceForUpdate(id, principal);
     if (!"SUBMITTED".equals(workspace.getStatus())) {
       throw conflict("Only a submitted workspace can be reviewed");
     }
@@ -361,7 +361,7 @@ public class DomainRuleChangeWorkspaceService {
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleChangeWorkspaceResponse promote(
       UUID id, String ifMatch, DomainRuleGovernancePrincipal principal) {
-    DomainRuleChangeWorkspace workspace = scopedWorkspace(id, principal);
+    DomainRuleChangeWorkspace workspace = scopedWorkspaceForUpdate(id, principal);
     if ("PROMOTED".equals(workspace.getStatus()) && workspace.getPromotedDefinitionId() != null) {
       return response(workspace);
     }
