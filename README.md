@@ -492,7 +492,8 @@ reads require `RULE_DEFINITION_READER`; snapshot, rollout and operational status
 reads require `RULE_SNAPSHOT_READER`. Both families resolve tenant/environment
 from the authenticated principal before querying the store. `X-Tenant-ID` and
 `X-Env` remain optional routing hints; in corporate mode they never replace or
-expand the server-resolved scope.
+expand the server-resolved scope. Composition-manifest preparation requires the
+authenticated `RULE_SNAPSHOT_PUBLISHER` and uses that same server-resolved scope.
 Hosts that publish execution observations or candidate probes additionally map
 `RULE_EXECUTION_OBSERVER`. Structural simulation requires `RULE_DEFINITION_AUTHOR`; caller hints
 never widen the resolved scope.
