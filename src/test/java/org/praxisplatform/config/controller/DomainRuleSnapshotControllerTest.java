@@ -135,18 +135,24 @@ class DomainRuleSnapshotControllerTest {
   }
 
   @Test
-  void compositionManifestEndpointReturnsServerCanonicalDigest() {
+  void compositionManifestEndpointUsesAuthenticatedPublisherScope() {
+    MockHttpServletRequest servletRequest = new MockHttpServletRequest();
     DomainRuleCompositionManifestRequest request = new DomainRuleCompositionManifestRequest(
         null, java.util.List.of(), "quickstart", "quickstart/1.0", "2026-07-15T20:00:00Z", null);
     DomainRuleCompositionManifestResponse manifest = new DomainRuleCompositionManifestResponse(
         "praxis-rule-composition/1", "A".repeat(64), "B".repeat(64), null);
-    when(service.prepareCompositionManifest(request, "tenant-a", "prod")).thenReturn(manifest);
+    when(principalResolver.resolve(
+        servletRequest, "tenant-caller", "test", "RULE_SNAPSHOT_PUBLISHER"))
+        .thenReturn(new DomainRuleGovernancePrincipal(
+            "tenant-server", "publisher-a", "prod"));
+    when(service.prepareCompositionManifest(request, "tenant-server", "prod")).thenReturn(manifest);
 
-    var response = controller.compositionManifest(request, "tenant-a", "prod");
+    var response = controller.compositionManifest(
+        request, "tenant-caller", "test", servletRequest);
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(response.getBody()).isSameAs(manifest);
-    verify(service).prepareCompositionManifest(request, "tenant-a", "prod");
+    verify(service).prepareCompositionManifest(request, "tenant-server", "prod");
   }
 
   @Test
