@@ -14,6 +14,8 @@ class QuickstartGovernanceLabSmokeContractTest {
 
     private static final Path SMOKE_SCRIPT = Path.of(
             "tools", "Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1");
+    private static final Path LIFECYCLE_SCRIPT = Path.of(
+            "tools", "Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1");
 
     @Test
     void shouldConfigureEveryGovernanceLabIdentityRequiredByTheQuickstart() throws IOException {
@@ -49,8 +51,27 @@ class QuickstartGovernanceLabSmokeContractTest {
                 .contains("$governanceAuditorUsername = \"$UserId-auditor\"")
                 .contains("$domainRuleArgs.AuthorUsername = $governanceAuthorUsername")
                 .contains("$domainRuleArgs.ReviewerUsername = $governanceApproverAUsername")
+                .contains("$domainRuleArgs.PublisherUsername = $governancePublisherUsername")
+                .contains("$domainRuleArgs.PublisherPassword = $governancePublisherPassword")
                 .contains("$expectAuthorApprovalIamRejection = $DomainRuleLifecycleOnly.IsPresent")
                 .contains("$domainRuleArgs.ExpectAuthorApprovalIamRejection = $expectAuthorApprovalIamRejection")
                 .doesNotContain("$domainRuleArgs.ExpectAuthorApprovalIamRejection = $true");
+    }
+
+    @Test
+    void shouldPublishDomainRulesWithTheDedicatedPublisherIdentity() throws IOException {
+        String script = Files.readString(LIFECYCLE_SCRIPT);
+
+        assertThat(script)
+                .contains("$publisherHeaders = Add-AuthenticatedCookie")
+                .contains("-Headers $publisherHeaders")
+                .contains("publishedBy = $publisherUserId");
+        assertThat(script.split(java.util.regex.Pattern.quote(
+                "-Uri \"$base/api/praxis/config/domain-rules/publications\""), -1))
+                .hasSize(7);
+        assertThat(script.split(java.util.regex.Pattern.quote("-Headers $publisherHeaders"), -1))
+                .hasSize(7);
+        assertThat(script).doesNotContain(
+                "-Uri \"$base/api/praxis/config/domain-rules/publications\" `\n    -Headers $headers");
     }
 }

@@ -11,6 +11,8 @@ param(
     [string] $AuthorPassword = "",
     [string] $ReviewerUsername = "",
     [string] $ReviewerPassword = "",
+    [string] $PublisherUsername = "",
+    [string] $PublisherPassword = "",
     [switch] $ExpectAuthorApprovalIamRejection
 )
 
@@ -298,9 +300,12 @@ $headers = @{
     "X-Env" = $Environment
 }
 $reviewerUserId = if ([string]::IsNullOrWhiteSpace($ReviewerUsername)) { "$UserId-reviewer" } else { $ReviewerUsername }
+$publisherUserId = if ([string]::IsNullOrWhiteSpace($PublisherUsername)) { "$UserId-publisher" } else { $PublisherUsername }
 $authenticatedAuthor = if ([string]::IsNullOrWhiteSpace($AuthorUsername)) { $UserId } else { $AuthorUsername }
 $reviewerHeaders = $headers.Clone()
 $reviewerHeaders["X-User-ID"] = $reviewerUserId
+$publisherHeaders = $headers.Clone()
+$publisherHeaders["X-User-ID"] = $publisherUserId
 
 function Add-AuthenticatedCookie(
     [hashtable] $Headers,
@@ -323,6 +328,7 @@ function Add-AuthenticatedCookie(
 
 $headers = Add-AuthenticatedCookie $headers $AuthorUsername $AuthorPassword
 $reviewerHeaders = Add-AuthenticatedCookie $reviewerHeaders $ReviewerUsername $ReviewerPassword
+$publisherHeaders = Add-AuthenticatedCookie $publisherHeaders $PublisherUsername $PublisherPassword
 
 $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
 if ($health.status -ne "UP") {
@@ -566,12 +572,12 @@ $materializationSourceHashDiagnosticsSeen = -not [string]::IsNullOrWhiteSpace([s
 $manualSelectedExistingPublication = Invoke-JsonRequest `
     -Method Post `
     -Uri "$base/api/praxis/config/domain-rules/publications" `
-    -Headers $headers `
+    -Headers $publisherHeaders `
     -Body @{
         ruleDefinitionId = $activeDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = $reviewerUserId
+        publishedBy = $publisherUserId
         publicationNotes = @{
             smoke = "domain-rule-selected-existing-diagnostics"
         }
@@ -638,13 +644,13 @@ $terminalMaterializationTransitionBlocked = Invoke-ExpectedFailure `
 $terminalPublishBlocked = Invoke-ExpectedFailure `
     -Method Post `
     -Uri "$base/api/praxis/config/domain-rules/publications" `
-    -Headers $headers `
+    -Headers $publisherHeaders `
     -Body @{
         ruleDefinitionId = $activeDefinition.id
         materializationIds = @($failedMaterialization.id)
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = $reviewerUserId
+        publishedBy = $publisherUserId
         publicationNotes = @{
             smoke = "domain-rule-lifecycle"
         }
@@ -676,12 +682,12 @@ $reviewRequiredDefinition = Invoke-JsonRequest `
 $blockedPublication = Invoke-JsonRequest `
     -Method Post `
     -Uri "$base/api/praxis/config/domain-rules/publications" `
-    -Headers $headers `
+    -Headers $publisherHeaders `
     -Body @{
         ruleDefinitionId = $reviewRequiredDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = $reviewerUserId
+        publishedBy = $publisherUserId
         publicationNotes = @{
             smoke = "domain-rule-blocked-diagnostics"
         }
@@ -791,12 +797,12 @@ $suspendedDefinition = Set-DefinitionStatus `
 $inactivePublication = Invoke-JsonRequest `
     -Method Post `
     -Uri "$base/api/praxis/config/domain-rules/publications" `
-    -Headers $headers `
+    -Headers $publisherHeaders `
     -Body @{
         ruleDefinitionId = $inactiveDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = $reviewerUserId
+        publishedBy = $publisherUserId
         publicationNotes = @{
             smoke = "domain-rule-semantic-source-hash"
         }
@@ -805,12 +811,12 @@ $inactivePublication = Invoke-JsonRequest `
 $suspendedPublication = Invoke-JsonRequest `
     -Method Post `
     -Uri "$base/api/praxis/config/domain-rules/publications" `
-    -Headers $headers `
+    -Headers $publisherHeaders `
     -Body @{
         ruleDefinitionId = $suspendedDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = $reviewerUserId
+        publishedBy = $publisherUserId
         publicationNotes = @{
             smoke = "domain-rule-semantic-source-hash"
         }
@@ -869,12 +875,12 @@ $createdDiagnosticsSeen = Assert-MaterializationOutcome `
 $inactiveRepublish = Invoke-JsonRequest `
     -Method Post `
     -Uri "$base/api/praxis/config/domain-rules/publications" `
-    -Headers $headers `
+    -Headers $publisherHeaders `
     -Body @{
         ruleDefinitionId = $inactiveDefinition.id
         applyEligibleMaterializations = $true
         publishedByType = "human"
-        publishedBy = $reviewerUserId
+        publishedBy = $publisherUserId
         publicationNotes = @{
             smoke = "domain-rule-publication-diagnostics"
         }
