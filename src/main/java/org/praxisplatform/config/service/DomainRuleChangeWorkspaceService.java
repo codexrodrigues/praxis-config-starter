@@ -305,8 +305,8 @@ public class DomainRuleChangeWorkspaceService {
         || !Boolean.TRUE.equals(item.getCandidateOutputMatchesExpected())
         || !Boolean.TRUE.equals(item.getCandidateReasonCodesMatchExpected())
         || !Boolean.TRUE.equals(item.getCandidateEffectsMatchExpected())
-        || "INCONCLUSIVE".equals(item.getComparison())
-        || "TECHNICAL_ERROR".equals(item.getComparison()))) {
+        || "INCONCLUSIVE".equals(item.getCandidateDecision())
+        || "TECHNICAL_ERROR".equals(item.getCandidateDecision()))) {
       return List.of(new DomainRuleWorkspaceBlocker(
           "TEST_RUN_NOT_PASSING", "SUBMIT",
           "The latest Test Run must pass every active scenario without inconclusive or technical results"));

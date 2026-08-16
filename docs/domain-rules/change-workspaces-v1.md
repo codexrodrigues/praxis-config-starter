@@ -83,9 +83,11 @@ hints only in explicitly configured local mode.
   or executable snapshot payloads.
 - `POST /api/praxis/config/domain-rules/workspaces/{id}/submit` requires the current strong ETag and
   a latest Test Run for the exact workspace revision/fingerprint. The run must cover exactly every
-  active scenario; every candidate must match its expected decision and no result may be
-  inconclusive or technical. The accepted Test Run id is bound immutably to the submitted workspace
-  so review and later stages cannot be switched to a newer, unreviewed run.
+  active scenario; every candidate must match its expected decision and no candidate result may be
+  inconclusive or technical. A mismatch or technical result from the independently evaluated active
+  lane remains comparison evidence but does not block submission; this is required for the first
+  publication, when no active snapshot exists yet. The accepted Test Run id is bound immutably to
+  the submitted workspace so review and later stages cannot be switched to a newer, unreviewed run.
 - `POST /api/praxis/config/domain-rules/workspaces/{id}/reviews` requires
   `RULE_DEFINITION_APPROVER`, a current strong ETag and a reviewer different from the workspace
   author. It appends `APPROVE` or `REJECT` evidence bound to the exact submitted revision and base

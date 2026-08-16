@@ -206,7 +206,7 @@ class DomainRuleChangeWorkspaceServiceTest {
         DomainRuleTestRunResult.builder().scenarioId(scenarioId).candidateMatchesExpected(true)
             .candidateOutputMatchesExpected(true).candidateReasonCodesMatchExpected(true)
             .candidateEffectsMatchExpected(true)
-            .comparison("MATCH").build()));
+            .candidateDecision("ALLOW").comparison("MATCH").build()));
 
     var submitted = service.submit(id, "\"" + workspace.getEtag() + "\"", PRINCIPAL);
 
@@ -216,7 +216,7 @@ class DomainRuleChangeWorkspaceServiceTest {
   }
 
   @Test
-  void rejectsSubmissionWhenLatestEvidenceIsTechnical() {
+  void allowsFirstPublicationSubmissionWhenCandidatePassesAndActiveSnapshotIsUnavailable() {
     UUID id = UUID.randomUUID();
     DomainRuleChangeWorkspace workspace = workspace(id, "tenant-a", "dev");
     UUID runId = UUID.randomUUID();
@@ -233,6 +233,34 @@ class DomainRuleChangeWorkspaceServiceTest {
         DomainRuleTestRunResult.builder().scenarioId(scenarioId).candidateMatchesExpected(true)
             .candidateOutputMatchesExpected(true).candidateReasonCodesMatchExpected(true)
             .candidateEffectsMatchExpected(true)
+            .candidateDecision("ALLOW")
+            .comparison("TECHNICAL_ERROR").build()));
+
+    var submitted = service.submit(id, "\"" + workspace.getEtag() + "\"", PRINCIPAL);
+
+    assertThat(submitted.status()).isEqualTo("SUBMITTED");
+    assertThat(submitted.submittedTestRunId()).isEqualTo(runId);
+  }
+
+  @Test
+  void rejectsSubmissionWhenCandidateEvidenceIsTechnical() {
+    UUID id = UUID.randomUUID();
+    DomainRuleChangeWorkspace workspace = workspace(id, "tenant-a", "dev");
+    UUID runId = UUID.randomUUID();
+    UUID scenarioId = UUID.randomUUID();
+    when(workspaces.findById(id)).thenReturn(Optional.of(workspace));
+    when(workspaces.findByIdForUpdate(id)).thenReturn(Optional.of(workspace));
+    when(scenarios.findByWorkspaceIdOrderByScenarioKey(id)).thenReturn(List.of(
+        DomainRuleTestScenario.builder().id(scenarioId).tenantId("tenant-a").environment("dev")
+            .status("ACTIVE").build()));
+    when(runs.findFirstByTenantIdAndEnvironmentAndWorkspaceIdOrderByRecordedAtDesc("tenant-a", "dev", id))
+        .thenReturn(Optional.of(DomainRuleTestRun.builder().id(runId).workspaceRevision(1L)
+            .baseDefinitionHash("B".repeat(64)).build()));
+    when(runResults.findByTestRunIdOrderByScenarioKey(runId)).thenReturn(List.of(
+        DomainRuleTestRunResult.builder().scenarioId(scenarioId).candidateMatchesExpected(true)
+            .candidateOutputMatchesExpected(true).candidateReasonCodesMatchExpected(true)
+            .candidateEffectsMatchExpected(true)
+            .candidateDecision("TECHNICAL_ERROR")
             .comparison("TECHNICAL_ERROR").build()));
 
     assertThatThrownBy(() -> service.submit(id, "\"" + workspace.getEtag() + "\"", PRINCIPAL))
@@ -295,7 +323,7 @@ class DomainRuleChangeWorkspaceServiceTest {
         DomainRuleTestRunResult.builder().scenarioId(scenarioId).candidateMatchesExpected(true)
             .candidateOutputMatchesExpected(true).candidateReasonCodesMatchExpected(true)
             .candidateEffectsMatchExpected(true)
-            .comparison("MATCH").build()));
+            .candidateDecision("ALLOW").comparison("TECHNICAL_ERROR").build()));
 
     var ready = service.capabilities(id, PRINCIPAL, true, false);
 
