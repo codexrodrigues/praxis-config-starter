@@ -49,8 +49,8 @@ class QuickstartGovernanceLabSmokeContractTest {
                 .contains("$governanceAuditorUsername = \"$UserId-auditor\"")
                 .contains("$domainRuleArgs.AuthorUsername = $governanceAuthorUsername")
                 .contains("$domainRuleArgs.ReviewerUsername = $governanceApproverAUsername")
-            .contains("$expectAuthorApprovalIamRejection = $DomainRuleLifecycleOnly.IsPresent")
-            .contains("$domainRuleArgs.ExpectAuthorApprovalIamRejection = $expectAuthorApprovalIamRejection")
-            .doesNotContain("$domainRuleArgs.ExpectAuthorApprovalIamRejection = $true");
+                .contains("$expectAuthorApprovalIamRejection = $DomainRuleLifecycleOnly.IsPresent")
+                .contains("$domainRuleArgs.ExpectAuthorApprovalIamRejection = $expectAuthorApprovalIamRejection")
+                .doesNotContain("$domainRuleArgs.ExpectAuthorApprovalIamRejection = $true");
     }
 }
