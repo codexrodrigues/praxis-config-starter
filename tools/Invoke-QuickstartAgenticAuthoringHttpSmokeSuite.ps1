@@ -108,7 +108,8 @@ $governanceApproverBPassword = [Guid]::NewGuid().ToString("N")
 $governancePublisherPassword = [Guid]::NewGuid().ToString("N")
 $governanceOperatorPassword = [Guid]::NewGuid().ToString("N")
 $governanceAuditorPassword = [Guid]::NewGuid().ToString("N")
-$corporateMode = if ($DomainRuleLifecycleOnly) { "true" } else { "false" }
+$expectAuthorApprovalIamRejection = $DomainRuleLifecycleOnly.IsPresent
+$corporateMode = if ($expectAuthorApprovalIamRejection) { "true" } else { "false" }
 $governanceLabEnvironment = @"
 `$env:APP_AUTH_GOVERNANCE_LAB_ENABLED = 'true'
 `$env:APP_AUTH_GOVERNANCE_AUTHOR_USERNAME = '$governanceAuthorUsername'
@@ -216,7 +217,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
     $domainRuleArgs.AuthorPassword = $governanceAuthorPassword
     $domainRuleArgs.ReviewerUsername = $governanceApproverAUsername
     $domainRuleArgs.ReviewerPassword = $governanceApproverAPassword
-    $domainRuleArgs.ExpectAuthorApprovalIamRejection = $true
+    $domainRuleArgs.ExpectAuthorApprovalIamRejection = $expectAuthorApprovalIamRejection
     $domainRuleLifecycle = & (Join-Path $PSScriptRoot "Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1") @domainRuleArgs | ConvertFrom-Json
     if ($DomainRuleLifecycleOnly) {
         [pscustomobject]@{
