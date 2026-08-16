@@ -13,6 +13,8 @@ param(
     [string] $ReviewerPassword = "",
     [string] $PublisherUsername = "",
     [string] $PublisherPassword = "",
+    [string] $OperatorUsername = "",
+    [string] $OperatorPassword = "",
     [switch] $ExpectAuthorApprovalIamRejection
 )
 
@@ -301,11 +303,14 @@ $headers = @{
 }
 $reviewerUserId = if ([string]::IsNullOrWhiteSpace($ReviewerUsername)) { "$UserId-reviewer" } else { $ReviewerUsername }
 $publisherUserId = if ([string]::IsNullOrWhiteSpace($PublisherUsername)) { "$UserId-publisher" } else { $PublisherUsername }
+$operatorUserId = if ([string]::IsNullOrWhiteSpace($OperatorUsername)) { "$UserId-operator" } else { $OperatorUsername }
 $authenticatedAuthor = if ([string]::IsNullOrWhiteSpace($AuthorUsername)) { $UserId } else { $AuthorUsername }
 $reviewerHeaders = $headers.Clone()
 $reviewerHeaders["X-User-ID"] = $reviewerUserId
 $publisherHeaders = $headers.Clone()
 $publisherHeaders["X-User-ID"] = $publisherUserId
+$operatorHeaders = $headers.Clone()
+$operatorHeaders["X-User-ID"] = $operatorUserId
 
 function Add-AuthenticatedCookie(
     [hashtable] $Headers,
@@ -329,6 +334,7 @@ function Add-AuthenticatedCookie(
 $headers = Add-AuthenticatedCookie $headers $AuthorUsername $AuthorPassword
 $reviewerHeaders = Add-AuthenticatedCookie $reviewerHeaders $ReviewerUsername $ReviewerPassword
 $publisherHeaders = Add-AuthenticatedCookie $publisherHeaders $PublisherUsername $PublisherPassword
+$operatorHeaders = Add-AuthenticatedCookie $operatorHeaders $OperatorUsername $OperatorPassword
 
 $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
 if ($health.status -ne "UP") {
@@ -460,7 +466,7 @@ $pendingMaterialization = Invoke-JsonRequest `
 $appliedCreationBlocked = Invoke-ExpectedFailure `
     -Method Patch `
     -Uri "$base/api/praxis/config/domain-rules/materializations/$($pendingMaterialization.id)/status" `
-    -Headers $headers `
+    -Headers $publisherHeaders `
     -Body @{
         status = "applied"
         validationResult = @{
@@ -547,7 +553,7 @@ $appliedMaterialization = Invoke-JsonRequest `
 $appliedMaterialization = Invoke-JsonRequest `
     -Method Patch `
     -Uri "$base/api/praxis/config/domain-rules/materializations/$($appliedMaterialization.id)/status" `
-    -Headers $headers `
+    -Headers $publisherHeaders `
     -Body @{
         status = "applied"
         validationResult = @{
@@ -615,7 +621,7 @@ $failedMaterialization = Invoke-JsonRequest `
 $failedMaterialization = Invoke-JsonRequest `
     -Method Patch `
     -Uri "$base/api/praxis/config/domain-rules/materializations/$($failedMaterialization.id)/status" `
-    -Headers $headers `
+    -Headers $operatorHeaders `
     -Body @{
         status = "failed"
         validationResult = @{
@@ -630,7 +636,7 @@ if ($failedMaterialization.status -ne "failed") {
 $terminalMaterializationTransitionBlocked = Invoke-ExpectedFailure `
     -Method Patch `
     -Uri "$base/api/praxis/config/domain-rules/materializations/$($failedMaterialization.id)/status" `
-    -Headers $headers `
+    -Headers $publisherHeaders `
     -Body @{
         status = "applied"
         decidedByType = "human"
