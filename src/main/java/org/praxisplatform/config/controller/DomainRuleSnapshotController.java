@@ -67,8 +67,12 @@ public class DomainRuleSnapshotController {
   public ResponseEntity<DomainRuleCompositionManifestResponse> compositionManifest(
       @RequestBody DomainRuleCompositionManifestRequest request,
       @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
-      @RequestHeader(value = "X-Env", required = false) String environment) {
-    return ResponseEntity.ok(snapshotService.prepareCompositionManifest(request, tenantId, environment));
+      @RequestHeader(value = "X-Env", required = false) String environment,
+      HttpServletRequest servletRequest) {
+    DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+        servletRequest, tenantId, environment, "RULE_SNAPSHOT_PUBLISHER");
+    return ResponseEntity.ok(snapshotService.prepareCompositionManifest(
+        request, principal.tenantId(), principal.environment()));
   }
 
   @PostMapping("/composition-approvals")

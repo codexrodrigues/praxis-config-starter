@@ -70,6 +70,9 @@ fail closed for an old snapshot that the current engine cannot verify.
   - initial publication requires `If-None-Match: *`;
   - later publications require a strong `If-Match` with the current head ETag.
 - `POST /api/praxis/config/domain-rules/snapshots/composition-manifest`
+  - resolves the authenticated principal and requires `RULE_SNAPSHOT_PUBLISHER`;
+  - uses tenant and environment resolved by the server; caller headers are optional routing hints
+    and cannot widen the authenticated scope;
   - resolves approved source hashes and the host admission catalog;
   - evaluates opt-in `SNAPSHOT` and `ACTIVATE` Test Run policies for every source and embeds only
     immutable safe references plus an evidence digest, never raw scenario facts;
