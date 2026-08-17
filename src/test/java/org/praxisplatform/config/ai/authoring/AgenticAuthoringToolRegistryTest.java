@@ -12,7 +12,9 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -24,12 +26,127 @@ import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
+import org.praxisplatform.config.service.DomainRuleAssistantSearchProjection;
+import org.praxisplatform.config.service.DomainRuleAssistantSearchService;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 
 @Tag("unit")
 class AgenticAuthoringToolRegistryTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void searchesDomainRulesOnlyWithServerResolvedReaderAuthority() {
+        DomainRuleAssistantSearchService searchService = Mockito.mock(DomainRuleAssistantSearchService.class);
+        DomainRuleAssistantSearchProjection projection = new DomainRuleAssistantSearchProjection(
+                DomainRuleAssistantSearchProjection.SCHEMA_VERSION,
+                List.of(new DomainRuleAssistantSearchProjection.Candidate(
+                        UUID.randomUUID(),
+                        "human-resources.payroll.net-salary",
+                        3,
+                        "calculation",
+                        "approved",
+                        "human-resources.payroll",
+                        "human-resources.folhas-pagamento",
+                        "payroll",
+                        "people-operations",
+                        Instant.parse("2026-08-16T12:00:00Z"))),
+                0,
+                6,
+                false);
+        when(searchService.search(
+                eq("salary"), eq("calculation"), eq("approved"), eq(""), eq(0), eq(6),
+                Mockito.any()))
+                .thenReturn(projection);
+        AgenticAuthoringToolRegistry registry = registryWithDomainRuleSearch(searchService);
+        JsonNode payload = objectMapper.createObjectNode()
+                .put("query", "salary")
+                .put("ruleType", "calculation")
+                .put("status", "approved")
+                .put("page", 0)
+                .put("limit", 6);
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.SEARCH_DOMAIN_RULES,
+                        "pre_intent_resource_discovery",
+                        payload),
+                new AiPrincipalContext(
+                        "tenant-a", "reader", "prod", true, Set.of("RULE_DEFINITION_READER")),
+                "retrieveEvidence");
+
+        assertThat(result.valid())
+                .as("errorCode=%s errorMessage=%s", result.errorCode(), result.errorMessage())
+                .isTrue();
+        assertThat(result.payload()).isEqualTo(projection);
+        assertThat(result.safeDiagnostics())
+                .containsEntry("candidateCount", 1)
+                .containsEntry("scopeSource", "server_principal");
+    }
+
+    @Test
+    void rejectsDomainRuleSearchWithoutReaderAuthority() {
+        DomainRuleAssistantSearchService searchService = Mockito.mock(DomainRuleAssistantSearchService.class);
+        AgenticAuthoringToolResult result = registryWithDomainRuleSearch(searchService).execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.SEARCH_DOMAIN_RULES,
+                        "advisory_authoring",
+                        objectMapper.createObjectNode().put("query", "payroll")),
+                new AiPrincipalContext("tenant-a", "authenticated-user", "prod", true),
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errorCode()).isEqualTo("domain-rule-reader-required");
+        Mockito.verifyNoInteractions(searchService);
+    }
+
+    @Test
+    void acceptsBackendIssuedReadAuthorityInLocalGovernanceMode() {
+        DomainRuleAssistantSearchService searchService = Mockito.mock(DomainRuleAssistantSearchService.class);
+        DomainRuleAssistantSearchProjection projection = new DomainRuleAssistantSearchProjection(
+                DomainRuleAssistantSearchProjection.SCHEMA_VERSION,
+                List.of(),
+                0,
+                6,
+                false);
+        when(searchService.search(
+                eq("benefit"), eq(""), eq(""), eq(""), eq(0), eq(6), Mockito.any()))
+                .thenReturn(projection);
+
+        AgenticAuthoringToolResult result = registryWithDomainRuleSearch(searchService).execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.SEARCH_DOMAIN_RULES,
+                        "pre_intent_resource_discovery",
+                        objectMapper.createObjectNode()
+                                .put("query", "benefit")
+                                .put("page", 0)
+                                .put("limit", 6)),
+                new AiPrincipalContext(
+                        "demo", "demo", "local", false, Set.of("RULE_DEFINITION_READER")),
+                "retrieveEvidence");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.safeDiagnostics()).containsEntry("scopeSource", "local_governance");
+    }
+
+    private AgenticAuthoringToolRegistry registryWithDomainRuleSearch(
+            DomainRuleAssistantSearchService searchService) {
+        return new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                null,
+                null,
+                null,
+                objectMapper,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "praxis-service",
+                null,
+                null,
+                searchService);
+    }
 
     @Test
     void exposesSearchApiResourcesAsInternalRouteScopedTool() {

@@ -24,6 +24,7 @@ import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
 import org.praxisplatform.config.service.DomainRuleExplanationProjectionService;
+import org.praxisplatform.config.service.DomainRuleAssistantSearchService;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
 import org.praxisplatform.config.service.LiveOptionValueRetrievalRequest;
 import org.praxisplatform.config.service.LiveOptionValueRetrievalResult;
@@ -50,6 +51,7 @@ public class AgenticAuthoringToolRegistry {
     static final String VERIFY_DOMAIN_OPERATION = "verifyDomainOperation";
     static final String SEARCH_OPTION_SOURCE_VALUES = "searchOptionSourceValues";
     static final String INSPECT_DOMAIN_DECISION = "inspectDomainDecision";
+    static final String SEARCH_DOMAIN_RULES = "searchDomainRules";
 
     private final Map<String, AgenticAuthoringToolExecutor> executors;
 
@@ -229,6 +231,38 @@ public class AgenticAuthoringToolRegistry {
             String domainCatalogServiceKey,
             LiveOptionValueRetrievalService liveOptionValueRetrievalService,
             DomainRuleExplanationProjectionService domainRuleExplanationProjectionService) {
+        this(
+                resourceDiscoveryService,
+                contextRetrievalService,
+                manifestService,
+                schemaRetrievalService,
+                objectMapper,
+                presentationAffordanceDiscoveryService,
+                projectKnowledgeService,
+                domainBindingService,
+                operationalVerificationService,
+                domainCatalogIngestionService,
+                domainCatalogServiceKey,
+                liveOptionValueRetrievalService,
+                domainRuleExplanationProjectionService,
+                null);
+    }
+
+    public AgenticAuthoringToolRegistry(
+            AgenticAuthoringResourceDiscoveryService resourceDiscoveryService,
+            ContextRetrievalService contextRetrievalService,
+            AgenticAuthoringManifestService manifestService,
+            SchemaRetrievalService schemaRetrievalService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringPresentationAffordanceDiscoveryService presentationAffordanceDiscoveryService,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            AgenticAuthoringDomainBindingService domainBindingService,
+            AgenticAuthoringOperationalBindingVerificationService operationalVerificationService,
+            DomainCatalogIngestionService domainCatalogIngestionService,
+            String domainCatalogServiceKey,
+            LiveOptionValueRetrievalService liveOptionValueRetrievalService,
+            DomainRuleExplanationProjectionService domainRuleExplanationProjectionService,
+            DomainRuleAssistantSearchService domainRuleAssistantSearchService) {
         Map<String, AgenticAuthoringToolExecutor> registered = new LinkedHashMap<>();
         register(registered, new SearchApiResourcesToolExecutor(
                 resourceDiscoveryService, domainBindingService, operationalVerificationService));
@@ -270,7 +304,78 @@ public class AgenticAuthoringToolRegistry {
         if (domainRuleExplanationProjectionService != null) {
             register(registered, new DomainDecisionInspectionToolExecutor(domainRuleExplanationProjectionService));
         }
+        if (domainRuleAssistantSearchService != null) {
+            register(registered, new DomainRuleSearchToolExecutor(domainRuleAssistantSearchService));
+        }
         this.executors = Map.copyOf(registered);
+    }
+
+    private static final class DomainRuleSearchToolExecutor implements AgenticAuthoringToolExecutor {
+
+        private static final String REQUIRED_AUTHORITY = "RULE_DEFINITION_READER";
+        private static final AgenticAuthoringToolDefinition DEFINITION = new AgenticAuthoringToolDefinition(
+                SEARCH_DOMAIN_RULES,
+                Set.of("pre_intent_resource_discovery", "advisory_authoring"),
+                Set.of("retrieveEvidence"),
+                "praxis-config-starter:/api/praxis/config/domain-rules/definitions",
+                "read_only",
+                "governed_domain_decision_discovery",
+                "domain-decision-search-redaction.v1");
+
+        private final DomainRuleAssistantSearchService searchService;
+
+        private DomainRuleSearchToolExecutor(DomainRuleAssistantSearchService searchService) {
+            this.searchService = Objects.requireNonNull(searchService, "searchService must not be null");
+        }
+
+        @Override
+        public AgenticAuthoringToolDefinition definition() {
+            return DEFINITION;
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(AgenticAuthoringToolCall call) {
+            return execute(call, null);
+        }
+
+        @Override
+        public AgenticAuthoringToolResult execute(
+                AgenticAuthoringToolCall call,
+                AiPrincipalContext principalContext) {
+            if (!(call.payload() instanceof JsonNode payload) || !payload.isObject()) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(), "tool-payload-invalid", "searchDomainRules requires an object payload.");
+            }
+            if (principalContext == null
+                    || !principalContext.hasAuthority(REQUIRED_AUTHORITY)) {
+                return AgenticAuthoringToolResult.failure(
+                        call.name(),
+                        "domain-rule-reader-required",
+                        "Domain decision discovery requires server-issued RULE_DEFINITION_READER authority.");
+            }
+            var projection = searchService.search(
+                    text(payload, "query"),
+                    text(payload, "ruleType"),
+                    text(payload, "status"),
+                    text(payload, "resourceKey"),
+                    payload.path("page").canConvertToInt() ? payload.path("page").asInt() : null,
+                    payload.path("limit").canConvertToInt() ? payload.path("limit").asInt() : null,
+                    new DomainRuleGovernancePrincipal(
+                            principalContext.tenantId(),
+                            principalContext.userId(),
+                            principalContext.environment()));
+            return AgenticAuthoringToolResult.success(
+                    call.name(),
+                    projection,
+                    Map.of(
+                            "schemaVersion", projection.schemaVersion(),
+                            "candidateCount", projection.candidates().size(),
+                            "page", projection.page(),
+                            "hasMore", projection.hasMore(),
+                            "scopeSource", principalContext.resolvedFromServerPrincipal()
+                                    ? "server_principal"
+                                    : "local_governance"));
+        }
     }
 
     private static final class DomainDecisionInspectionToolExecutor implements AgenticAuthoringToolExecutor {

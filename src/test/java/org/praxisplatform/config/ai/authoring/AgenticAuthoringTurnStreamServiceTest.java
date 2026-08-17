@@ -23,6 +23,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
@@ -621,7 +622,7 @@ class AgenticAuthoringTurnStreamServiceTest {
                         UUID.randomUUID(),
                         createdAt,
                         expiresAt,
-                        requestHash(originalRequest, threadId),
+                        requestHash(originalRequest, threadId, principalContext),
                         "status")));
 
         AgenticAuthoringTurnStreamService service = new AgenticAuthoringTurnStreamService(
@@ -633,6 +634,61 @@ class AgenticAuthoringTurnStreamServiceTest {
 
         org.assertj.core.api.Assertions.assertThatThrownBy(
                         () -> service.start(changedRequest, "http://localhost", principalContext))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> {
+                    ResponseStatusException response = (ResponseStatusException) ex;
+                    org.assertj.core.api.Assertions.assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                    org.assertj.core.api.Assertions.assertThat(response.getReason())
+                            .isEqualTo("agentic-authoring-idempotency-conflict");
+                });
+        service.shutdown();
+
+        verify(turnService, never()).reserveTurnForStreaming(any(), any());
+        verify(turnEngine, never()).execute(any(), any(), any(), anyString());
+    }
+
+    @Test
+    void startWithExistingClientTurnIdConflictsWhenServerIssuedAuthoritiesChange() {
+        UUID threadId = UUID.randomUUID();
+        UUID streamId = UUID.randomUUID();
+        Instant createdAt = Instant.now().minusSeconds(5);
+        Instant expiresAt = Instant.now().plusSeconds(300);
+        AiPrincipalContext originalPrincipal = new AiPrincipalContext(
+                "tenant",
+                "user",
+                "local",
+                true,
+                Set.of("RULE_DEFINITION_READER"));
+        AiPrincipalContext changedPrincipal = new AiPrincipalContext(
+                "tenant",
+                "user",
+                "local",
+                true,
+                Set.of());
+        AgenticAuthoringTurnStreamRequest request = request();
+        AgenticAuthoringTurnEngine turnEngine = org.mockito.Mockito.mock(AgenticAuthoringTurnEngine.class);
+
+        when(threadService.resolveThread(any(), eq("tenant"), eq("user"), eq("local"), eq("Crie um painel")))
+                .thenReturn(AiThread.builder().threadId(threadId).build());
+        when(turnEventService.findStartMetadata(eq(threadId), any(UUID.class)))
+                .thenReturn(Optional.of(new AiTurnEventService.StreamStartMetadata(
+                        streamId,
+                        threadId,
+                        UUID.randomUUID(),
+                        createdAt,
+                        expiresAt,
+                        requestHash(request, threadId, originalPrincipal),
+                        "status")));
+
+        AgenticAuthoringTurnStreamService service = new AgenticAuthoringTurnStreamService(
+                turnEngine,
+                threadService,
+                turnService,
+                turnEventService,
+                streamAccessTokenService);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> service.start(request, "http://localhost", changedPrincipal))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> {
                     ResponseStatusException response = (ResponseStatusException) ex;
@@ -673,7 +729,10 @@ class AgenticAuthoringTurnStreamServiceTest {
                         UUID.randomUUID(),
                         createdAt,
                         expiresAt,
-                        requestHash(withSemanticDecision(originalRequest, "decision-a"), threadId),
+                        requestHash(
+                                withSemanticDecision(originalRequest, "decision-a"),
+                                threadId,
+                                principalContext),
                         "status")));
 
         AgenticAuthoringTurnStreamService service = new AgenticAuthoringTurnStreamService(
@@ -2021,9 +2080,22 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     private String requestHash(AgenticAuthoringTurnStreamRequest request, UUID canonicalThreadId) {
+        return requestHash(request, canonicalThreadId, null);
+    }
+
+    private String requestHash(
+            AgenticAuthoringTurnStreamRequest request,
+            UUID canonicalThreadId,
+            AiPrincipalContext principalContext) {
         try {
             ObjectNode fingerprint = objectMapper.createObjectNode();
-            fingerprint.put("schemaVersion", "praxis-agentic-authoring-turn-request-fingerprint.v1");
+            fingerprint.put("schemaVersion", "praxis-agentic-authoring-turn-request-fingerprint.v2");
+            putIfPresent(
+                    fingerprint,
+                    "principalAuthorities",
+                    principalContext == null
+                            ? List.of()
+                            : principalContext.authorities().stream().sorted().toList());
             putIfPresent(fingerprint, "userPrompt", request.userPrompt());
             putIfPresent(fingerprint, "targetApp", request.targetApp());
             putIfPresent(fingerprint, "targetComponentId", request.targetComponentId());

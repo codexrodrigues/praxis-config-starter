@@ -140,7 +140,10 @@ o stream existente se o fingerprint canonico do request bater com o evento
 inicial persistido. O fingerprint usa `sha256` sobre os campos que podem alterar
 o resultado do authoring, como prompt, alvo, rota, pagina atual,
 conversacao/clarificacao/anexos resumidos, `contextHints`, capabilities,
-diagnostics seguros e `activeSemanticDecision`. Ele exclui `apiKey`,
+diagnostics seguros, `activeSemanticDecision` e as autoridades server-owned
+ordenadas do principal. O schema de fingerprint v2 impede que um retry do mesmo
+`clientTurnId` reutilize trabalho iniciado antes de uma concessao ou revogacao de
+papel. Ele exclui `apiKey`,
 observacoes runtime brutas e `requestBaseUrl`; observacoes de frontend so entram
 indiretamente quando o backend as aterra em
 `contextHints.groundedRuntimeComponentContext` com campos permitidos. Se o
@@ -690,6 +693,28 @@ deve ser estavel para i18n e tratamento no cliente; `assistantMessage` deve ser
 seguro para exibir na conversa; `message` pode conter detalhe tecnico para
 diagnostico restrito. Falhas inesperadas de processamento usam
 `code=agentic-authoring-processing-failed`.
+
+### Descoberta consultiva de decisoes governadas
+
+Antes de existir uma selecao exata do Policy Studio, o planner LLM pode escolher
+`groundingProfile=domain_decision` e executar a tool read-only
+`searchDomainRules`. A escolha e semantica e authorada pelo modelo; query e
+filtros textuais apenas ranqueiam candidatos depois dessa decisao e nunca roteiam
+a intencao primaria.
+
+A tool exige a autoridade server-issued `RULE_DEFINITION_READER`, usa somente o
+tenant e environment resolvidos pelo backend e limita a resposta a 12 candidatos
+por pagina. O envelope `praxis-domain-rule-search.v1` publica apenas identidade e
+contexto seguro (`definitionId`, `ruleKey`, versao, tipo, status, chaves
+semanticas, owner semantico e `updatedAt`). Condicao, governanca, facts, steward, rationale,
+atores e payloads materializados nao fazem parte da busca. O resultado fornece
+candidatos para a resolucao completa; nao seleciona alvo, nao explica regra e nao
+autoriza edicao, publicacao ou ativacao.
+
+Em corporate mode as autoridades sao capturadas do request autenticado; no modo
+local a mesma autoridade read-only e emitida pelo resolver backend. O token SSE
+continua sendo apenas credencial de transporte e nao transporta nem concede nova
+autoridade para tools.
 
 ### Explicacao consultiva de decisao governada
 

@@ -418,7 +418,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     primaryComponent(result)));
         }
         String groundingProfile = text(result, "groundingProfile");
-        if (!List.of("domain_context", "domain_capability", "domain_concept", "domain_binding", "operation_verification", "api_resource")
+        if (!List.of("domain_context", "domain_capability", "domain_concept", "domain_binding", "operation_verification", "api_resource", "domain_decision")
                 .contains(groundingProfile)) {
             groundingProfile = "api_resource";
         }
@@ -433,7 +433,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         // its canonical business entity, the single pre-intent read must retrieve an executable
         // API resource. Spending that call on the concept already named by the orientation forces
         // a second full-model pass and discards the stronger operational binding evidence.
-        if ("authoring_or_other".equals(semanticIntentClass)
+        if (!"domain_decision".equals(groundingProfile)
+                && "authoring_or_other".equals(semanticIntentClass)
                 && (result.path("requiresFullIntentResolution").asBoolean(false)
                         || resourceSearchFocus != null
                                 && StringUtils.hasText(resourceSearchFocus.primaryBusinessEntity()))) {
@@ -447,9 +448,12 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         // predicate, grouping, aggregation, ordering or layout constraint.
         boolean requiresFullIntentResolution =
                 result.path("requiresFullIntentResolution").asBoolean(false);
-        retrievalQuery = focusedRetrievalQuery(retrievalQuery, resourceSearchFocus);
+        if (!"domain_decision".equals(groundingProfile)) {
+            retrievalQuery = focusedRetrievalQuery(retrievalQuery, resourceSearchFocus);
+        }
         String artifactKind = text(result, "artifactKind");
-        if (!List.of("page", "dashboard", "chart", "table", "form", "api_catalog").contains(artifactKind)) {
+        if (!List.of("page", "dashboard", "chart", "table", "form", "api_catalog", "unknown")
+                .contains(artifactKind)) {
             artifactKind = "page";
         }
         AgenticAuthoringToolCall toolCall = progressiveToolCall(
@@ -472,6 +476,18 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             String retrievalQuery,
             String artifactKind,
             AgenticAuthoringResourceSearchFocus resourceSearchFocus) {
+        if ("domain_decision".equals(groundingProfile)) {
+            ObjectNode payload = objectMapper.createObjectNode();
+            if (StringUtils.hasText(retrievalQuery)) {
+                payload.put("query", retrievalQuery.trim());
+            }
+            payload.put("page", 0);
+            payload.put("limit", 6);
+            return new AgenticAuthoringToolCall(
+                    AgenticAuthoringToolRegistry.SEARCH_DOMAIN_RULES,
+                    "pre_intent_resource_discovery",
+                    payload);
+        }
         if ("api_resource".equals(groundingProfile)) {
             return new AgenticAuthoringToolCall(
                     AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
@@ -628,8 +644,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Set requiresFullIntentResolution=true for an explicit predicate, value, grouping, order, aggregation,
                 layout or measured subject that needs later semantic preservation. Resource discovery, artifact kind,
                 defaults and a generic dashboard are not constraints.
-                For that class, leave assistantMessage empty and decide whether to run searchApiResources before
-                authoring. Select groundingProfile progressively: domain_context for macro business orientation,
+                Use groundingProfile=domain_decision for LLM semantic discovery; searchDomainRules returns identities,
+                never conditions or authority.
+                Select other groundingProfile values progressively: domain_context for macro business orientation,
                 domain_capability when a governed context is known but the business capability is not, domain_concept
                 for concepts inside an already scoped context/resource, domain_binding after a canonical resourceKey
                 has been resolved but its operational binding is not yet grounded, operation_verification after a binding
@@ -1118,6 +1135,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 .add("domain_concept")
                 .add("domain_binding")
                 .add("operation_verification")
+                .add("domain_decision")
                 .add("api_resource");
         ObjectNode artifactKind = properties.putObject("artifactKind");
         artifactKind.put("type", "string");

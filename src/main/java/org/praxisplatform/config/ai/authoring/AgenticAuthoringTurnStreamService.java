@@ -65,7 +65,7 @@ public class AgenticAuthoringTurnStreamService {
     private static final long TERMINAL_TOMBSTONE_SECONDS = 60L;
     private static final long PERSISTED_TERMINAL_RECONCILIATION_SECONDS = 5L;
     private static final String REQUEST_FINGERPRINT_SCHEMA_VERSION =
-            "praxis-agentic-authoring-turn-request-fingerprint.v1";
+            "praxis-agentic-authoring-turn-request-fingerprint.v2";
     private static final String IDEMPOTENCY_CONFLICT_REASON =
             "agentic-authoring-idempotency-conflict";
     private static final String CAPACITY_REJECTED_CODE =
@@ -176,7 +176,7 @@ public class AgenticAuthoringTurnStreamService {
                 resolvedActiveSemanticDecision.issuedCandidateApis());
         AgenticAuthoringSemanticDecision activeSemanticDecision = resolvedActiveSemanticDecision.decision();
         AgenticAuthoringTurnStreamRequest effectiveRequest = withActiveSemanticDecision(request, activeSemanticDecision);
-        String requestHash = requestHash(effectiveRequest);
+        String requestHash = requestHash(effectiveRequest, principalContext);
 
         AiTurnEventService.StreamStartMetadata existing = turnEventService.findStartMetadata(threadId, turnId)
                 .orElse(null);
@@ -1472,10 +1472,18 @@ public class AgenticAuthoringTurnStreamService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
-    private String requestHash(AgenticAuthoringTurnStreamRequest request) {
+    private String requestHash(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext) {
         try {
             ObjectNode fingerprint = objectMapper.createObjectNode();
             fingerprint.put("schemaVersion", REQUEST_FINGERPRINT_SCHEMA_VERSION);
+            putIfPresent(
+                    fingerprint,
+                    "principalAuthorities",
+                    principalContext == null
+                            ? List.of()
+                            : principalContext.authorities().stream().sorted().toList());
             putIfPresent(fingerprint, "userPrompt", request.userPrompt());
             putIfPresent(fingerprint, "targetApp", request.targetApp());
             putIfPresent(fingerprint, "targetComponentId", request.targetComponentId());

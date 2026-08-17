@@ -24,6 +24,8 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class AiPrincipalContextResolver {
 
+    private static final String RULE_DEFINITION_READER = "RULE_DEFINITION_READER";
+
     private static final List<String> TENANT_KEYS = List.of(
             "tenantId",
             "tenant_id",
@@ -110,7 +112,8 @@ public class AiPrincipalContextResolver {
                     resolvedCorporateTenant,
                     principalUser,
                     firstNonBlank(principalEnvironment, serverDefaultEnvironment),
-                    true);
+                    true,
+                    resolvedAuthorities(request));
         }
 
         String resolvedTenant;
@@ -130,7 +133,15 @@ public class AiPrincipalContextResolver {
                 resolvedTenant,
                 resolvedUser,
                 resolvedEnvironment,
-                principalTenant != null || principalUser != null);
+                principalTenant != null || principalUser != null,
+                Set.of(RULE_DEFINITION_READER));
+    }
+
+    private Set<String> resolvedAuthorities(HttpServletRequest request) {
+        if (request != null && request.isUserInRole(RULE_DEFINITION_READER)) {
+            return Set.of(RULE_DEFINITION_READER);
+        }
+        return Set.of();
     }
 
     private String readPrincipalUser(HttpServletRequest request) {
