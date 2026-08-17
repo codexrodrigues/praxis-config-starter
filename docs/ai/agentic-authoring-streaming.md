@@ -708,8 +708,15 @@ por pagina. O envelope `praxis-domain-rule-search.v1` publica apenas identidade 
 contexto seguro (`definitionId`, `ruleKey`, versao, tipo, status, chaves
 semanticas, owner semantico e `updatedAt`). Condicao, governanca, facts, steward, rationale,
 atores e payloads materializados nao fazem parte da busca. O resultado fornece
-candidatos para a resolucao completa; nao seleciona alvo, nao explica regra e nao
-autoriza edicao, publicacao ou ativacao.
+candidatos para selecao humana; nao seleciona alvo, nao explica regra e nao
+autoriza edicao, publicacao ou ativacao. O turno termina consultivamente com
+`routeClass=advisory_authoring`, `canApply=false` e
+`evidenceBundle.source=searchDomainRules`. A projecao segura permanece em
+`evidenceBundle.domainRuleSearch`, e cada quick reply `kind=domain-decision`
+transporta `contextHints.selectedDomainDecisionRef` com `definitionId`, `ruleKey`,
+`version` e `source=policy-studio-selection`. Ao escolher um candidato, o cliente
+deve iniciar o proximo turno com essa referencia estruturada; labels e prompts da
+quick reply continuam sendo apenas apresentacao e nunca autoridade.
 
 Em corporate mode as autoridades sao capturadas do request autenticado; no modo
 local a mesma autoridade read-only e emitida pelo resolver backend. O token SSE

@@ -24,6 +24,7 @@ import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.ContextRetrievalService;
+import org.praxisplatform.config.service.DomainRuleAssistantSearchProjection;
 import org.praxisplatform.config.service.LiveOptionValueCandidate;
 import org.praxisplatform.config.service.LiveOptionValueRetrievalResult;
 import org.praxisplatform.config.service.SchemaFetchResult;
@@ -296,6 +297,14 @@ public class AgenticAuthoringTurnEngine {
             request = withPreIntentAuthoringEvidenceContext(request, principalContext, state, eventSink);
             PreIntentToolPlanExecution preIntentExecution =
                     maybeRunPreIntentToolPlan(request, principalContext, eventSink, schemaBaseUrl);
+            AgenticAuthoringTurnOutcome domainRuleSearchOutcome = completeDomainRuleSearch(
+                    request,
+                    preIntentExecution.domainRuleSearch(),
+                    eventSink,
+                    state);
+            if (domainRuleSearchOutcome != null) {
+                return domainRuleSearchOutcome;
+            }
             if (preIntentExecution.semanticOrientation() != null) {
                 request = withPreIntentSemanticOrientationContext(
                         request, preIntentExecution.semanticOrientation());
@@ -2950,12 +2959,14 @@ public class AgenticAuthoringTurnEngine {
                     List.of(),
                     List.of(),
                     List.of(),
+                    null,
                     planningResult == null ? List.of() : planningResult.providerInvocations());
         }
         AgenticAuthoringPreIntentToolPlan plan = planningResult.plan();
         if (plan == null) {
             emitPreIntentToolPlanSkipped(eventSink, "planner-plan-empty", "");
-            return new PreIntentToolPlanExecution(null, null, List.of(), List.of(), List.of(), planningResult.providerInvocations());
+            return new PreIntentToolPlanExecution(
+                    null, null, List.of(), List.of(), List.of(), null, planningResult.providerInvocations());
         }
         if (plan.resolvesPlatformGuidance()) {
             eventSink.append("thought.step", thoughtStepPayload(
@@ -2967,11 +2978,13 @@ public class AgenticAuthoringTurnEngine {
                             "groundedByPlatform", true,
                             "groundedByDomain", true,
                             "groundedByComponentCapabilities", request.componentCapabilities() != null)));
-            return new PreIntentToolPlanExecution(null, plan, List.of(), List.of(), List.of(), planningResult.providerInvocations());
+            return new PreIntentToolPlanExecution(
+                    null, plan, List.of(), List.of(), List.of(), null, planningResult.providerInvocations());
         }
         if (plan.toolCalls().isEmpty()) {
             emitPreIntentToolPlanSkipped(eventSink, "planner-tool-calls-empty", "");
-            return new PreIntentToolPlanExecution(null, null, List.of(), List.of(), List.of(), planningResult.providerInvocations());
+            return new PreIntentToolPlanExecution(
+                    null, null, List.of(), List.of(), List.of(), null, planningResult.providerInvocations());
         }
         eventSink.append("thought.step", safeToolProjection(
                 "tool.plan",
@@ -2985,6 +2998,7 @@ public class AgenticAuthoringTurnEngine {
         List<AgenticAuthoringProjectKnowledgeProjection> domainKnowledge = new ArrayList<>();
         List<AgenticAuthoringDomainBindingService.BindingProjection> domainBindings = new ArrayList<>();
         List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection> verifiedOperations = new ArrayList<>();
+        DomainRuleAssistantSearchProjection domainRuleSearch = null;
         int executed = 0;
         for (AgenticAuthoringToolCall toolCall : plan.toolCalls()) {
             if (toolCall == null || executed >= MAX_TOOL_CALLS_PER_TURN || eventSink.terminalReached()) {
@@ -3010,6 +3024,9 @@ public class AgenticAuthoringTurnEngine {
             if (payload != null) {
                 resourceDiscovery = payload;
             }
+            if (result.valid() && result.payload() instanceof DomainRuleAssistantSearchProjection searchProjection) {
+                domainRuleSearch = searchProjection;
+            }
             if (result.payload() instanceof List<?> items) {
                 items.stream()
                         .filter(AgenticAuthoringProjectKnowledgeProjection.class::isInstance)
@@ -3034,7 +3051,174 @@ public class AgenticAuthoringTurnEngine {
                 List.copyOf(domainKnowledge),
                 List.copyOf(domainBindings),
                 List.copyOf(verifiedOperations),
+                domainRuleSearch,
                 planningResult.providerInvocations());
+    }
+
+    private AgenticAuthoringTurnOutcome completeDomainRuleSearch(
+            AgenticAuthoringTurnStreamRequest request,
+            DomainRuleAssistantSearchProjection search,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringTurnState state) {
+        if (search == null) {
+            return null;
+        }
+        if (eventSink.terminalReached()) {
+            return AgenticAuthoringTurnOutcome.noop(state);
+        }
+        List<DomainRuleAssistantSearchProjection.Candidate> candidates = search.candidates() == null
+                ? List.of()
+                : search.candidates();
+        boolean english = responseLocale(request).toLowerCase(Locale.ROOT).startsWith("en");
+        String assistantMessage;
+        if (candidates.isEmpty()) {
+            assistantMessage = english
+                    ? "I did not find governed decisions in the authorized scope for this request. Refine the business context or filters and try again."
+                    : "Não encontrei decisões governadas no escopo autorizado para este pedido. Refine o contexto de negócio ou os filtros e tente novamente.";
+        } else {
+            assistantMessage = english
+                    ? "I found %d governed decision candidate%s in the authorized scope. Select one to inspect and explain its attested version."
+                            .formatted(candidates.size(), candidates.size() == 1 ? "" : "s")
+                    : "Encontrei %d %s no escopo autorizado. Selecione uma para inspecionar e explicar a versão atestada."
+                            .formatted(
+                                    candidates.size(),
+                                    candidates.size() == 1
+                                            ? "decisão governada candidata"
+                                            : "decisões governadas candidatas");
+        }
+
+        ObjectNode evidenceBundle = objectMapper.createObjectNode();
+        evidenceBundle.put("source", AgenticAuthoringToolRegistry.SEARCH_DOMAIN_RULES);
+        evidenceBundle.set("domainRuleSearch", domainRuleSearchNode(search));
+
+        ObjectNode diagnostics = objectMapper.createObjectNode();
+        diagnostics.put("schemaVersion", search.schemaVersion());
+        diagnostics.put("candidateCount", candidates.size());
+        diagnostics.put("page", search.page());
+        diagnostics.put("hasMore", search.hasMore());
+        diagnostics.put("selectionRequired", true);
+        diagnostics.put("canApply", false);
+
+        ObjectNode resultPayload = objectMapper.createObjectNode();
+        resultPayload.put("routeClass", "advisory_authoring");
+        resultPayload.put("operationKind", "explore");
+        resultPayload.put("artifactKind", "domain_decision");
+        resultPayload.put("changeKind", "discover_domain_decisions");
+        resultPayload.put("assistantMessage", publicAssistantMessage(assistantMessage, request));
+        resultPayload.set("assistantContent", objectMapper.createObjectNode());
+        resultPayload.set("quickReplies", objectMapper.valueToTree(domainRuleSearchQuickReplies(request, candidates)));
+        resultPayload.put("canApply", false);
+        resultPayload.set("evidenceBundle", evidenceBundle);
+        resultPayload.set("decisionDiagnostics", diagnostics);
+        resultPayload.set("streamEventDiagnostics", objectMapper.valueToTree(streamEventDiagnostics(
+                "result:domain_rule_search",
+                false)));
+        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        AgenticAuthoringTurnState terminalState = state.withRouteClass("advisory_authoring");
+        return terminalResult.appendedType("result")
+                ? AgenticAuthoringTurnOutcome.completed(terminalState)
+                : AgenticAuthoringTurnOutcome.noop(terminalState);
+    }
+
+    private List<AgenticAuthoringQuickReply> domainRuleSearchQuickReplies(
+            AgenticAuthoringTurnStreamRequest request,
+            List<DomainRuleAssistantSearchProjection.Candidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        boolean english = responseLocale(request).toLowerCase(Locale.ROOT).startsWith("en");
+        List<AgenticAuthoringQuickReply> replies = new ArrayList<>();
+        for (DomainRuleAssistantSearchProjection.Candidate candidate : candidates) {
+            if (replies.size() >= 12
+                    || candidate == null
+                    || candidate.definitionId() == null
+                    || !StringUtils.hasText(candidate.ruleKey())
+                    || candidate.version() == null
+                    || candidate.version() < 1) {
+                continue;
+            }
+            ObjectNode contextHints = objectMapper.createObjectNode();
+            ObjectNode selected = contextHints.putObject("selectedDomainDecisionRef");
+            selected.put("schemaVersion", "praxis.ai.context-hints.domain-decision/v1");
+            selected.put("definitionId", candidate.definitionId().toString());
+            selected.put("ruleKey", candidate.ruleKey());
+            selected.put("version", candidate.version());
+            selected.put("source", "policy-studio-selection");
+            String locale = responseLocale(request);
+            if (StringUtils.hasText(locale)) {
+                contextHints.put("responseLocale", locale);
+            }
+            String label = presentationText(candidate.ruleKey());
+            String prompt = english
+                    ? "Explain the governed decision %s at version %d using only attested evidence."
+                            .formatted(candidate.ruleKey(), candidate.version())
+                    : "Explique a decisão governada %s na versão %d usando somente evidência atestada."
+                            .formatted(candidate.ruleKey(), candidate.version());
+            String description = List.of(
+                            safeText(candidate.status()),
+                            safeText(candidate.ruleType()),
+                            safeText(candidate.resourceKey()))
+                    .stream()
+                    .filter(StringUtils::hasText)
+                    .map(this::presentationText)
+                    .reduce((left, right) -> left + " · " + right)
+                    .orElse(english ? "Governed decision" : "Decisão governada");
+            replies.add(new AgenticAuthoringQuickReply(
+                    "domain-decision:" + candidate.definitionId() + ":" + candidate.version(),
+                    "domain-decision",
+                    label,
+                    prompt,
+                    description,
+                    "policy",
+                    "default",
+                    contextHints,
+                    null,
+                    domainRuleSearchCandidateNode(candidate)));
+        }
+        return List.copyOf(replies);
+    }
+
+    private ObjectNode domainRuleSearchNode(DomainRuleAssistantSearchProjection search) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("schemaVersion", search.schemaVersion());
+        ArrayNode candidates = node.putArray("candidates");
+        if (search.candidates() != null) {
+            search.candidates().stream()
+                    .filter(Objects::nonNull)
+                    .map(this::domainRuleSearchCandidateNode)
+                    .forEach(candidates::add);
+        }
+        node.put("page", search.page());
+        node.put("limit", search.limit());
+        node.put("hasMore", search.hasMore());
+        return node;
+    }
+
+    private ObjectNode domainRuleSearchCandidateNode(DomainRuleAssistantSearchProjection.Candidate candidate) {
+        ObjectNode node = objectMapper.createObjectNode();
+        if (candidate.definitionId() != null) {
+            node.put("definitionId", candidate.definitionId().toString());
+        }
+        putText(node, "ruleKey", candidate.ruleKey());
+        if (candidate.version() != null) {
+            node.put("version", candidate.version());
+        }
+        putText(node, "ruleType", candidate.ruleType());
+        putText(node, "status", candidate.status());
+        putText(node, "contextKey", candidate.contextKey());
+        putText(node, "resourceKey", candidate.resourceKey());
+        putText(node, "serviceKey", candidate.serviceKey());
+        putText(node, "semanticOwner", candidate.semanticOwner());
+        if (candidate.updatedAt() != null) {
+            node.put("updatedAt", candidate.updatedAt().toString());
+        }
+        return node;
+    }
+
+    private String responseLocale(AgenticAuthoringTurnStreamRequest request) {
+        return request == null || request.contextHints() == null
+                ? ""
+                : request.contextHints().path("responseLocale").asText("").trim();
     }
 
     private boolean shouldPreservePreIntentSemanticOrientation(AgenticAuthoringPreIntentToolPlan plan) {
@@ -7872,6 +8056,7 @@ public class AgenticAuthoringTurnEngine {
             List<AgenticAuthoringProjectKnowledgeProjection> domainKnowledge,
             List<AgenticAuthoringDomainBindingService.BindingProjection> domainBindings,
             List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection> verifiedOperations,
+            DomainRuleAssistantSearchProjection domainRuleSearch,
             List<AiProviderInvocationTelemetry> providerInvocations) {
 
         private PreIntentToolPlanExecution {
@@ -7882,7 +8067,7 @@ public class AgenticAuthoringTurnEngine {
         }
 
         private static PreIntentToolPlanExecution empty() {
-            return new PreIntentToolPlanExecution(null, null, List.of(), List.of(), List.of(), List.of());
+            return new PreIntentToolPlanExecution(null, null, List.of(), List.of(), List.of(), null, List.of());
         }
     }
 

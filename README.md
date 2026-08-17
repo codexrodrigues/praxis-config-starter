@@ -552,8 +552,9 @@ partir do status, de headers do browser ou de configuração local.
 O assistente pode descobrir decisões existentes pela tool interna read-only
 `searchDomainRules`, escolhida semanticamente pelo LLM e limitada ao escopo e à autoridade
 `RULE_DEFINITION_READER` resolvidos no servidor. A busca retorna apenas identidades seguras;
-explicação e qualquer comando continuam exigindo seleção exata, releitura atestada e os gates
-canônicos do ciclo de vida.
+o turno termina consultivamente com `canApply=false`, evidencia `domainRuleSearch` e quick replies
+que carregam a referência exata de seleção. Explicação e qualquer comando continuam exigindo
+releitura atestada e os gates canônicos do ciclo de vida.
 
 ## License
 
