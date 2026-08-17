@@ -209,6 +209,68 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
     }
 
     @Test
+    void plansGovernedDomainDecisionSearchWithoutKeywordRouting() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                  "semanticIntentClass": "authoring_or_other",
+                  "assistantMessage": "",
+                  "shouldRetrieveGovernedResources": true,
+                  "requiresFullIntentResolution": false,
+                  "queryConstraints": {"appliesToDataSelection": false, "filters": []},
+                  "groundingProfile": "domain_decision",
+                  "artifactKind": "unknown",
+                  "primaryComponent": null,
+                  "retrievalQuery": "decisões de concessão extraordinária",
+                  "resourceSearchFocus": {
+                    "primaryBusinessEntity": null,
+                    "supportingConcepts": [],
+                    "desiredSurface": null,
+                    "uncertainty": null,
+                    "rationale": "O alvo exato deve ser escolhido somente após a busca governada."
+                  },
+                  "reason": "A solicitação precisa descobrir decisões existentes antes da explicação."
+                }
+                """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(
+                        providerManagementService,
+                        objectMapper,
+                        null,
+                        7,
+                        2,
+                        250L,
+                        "gpt-5.6-luna");
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("Quais decisões governam a concessão extraordinária?"),
+                new AiPrincipalContext("tenant", "user", "local", false));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().toolCalls()).singleElement().satisfies(call -> {
+            assertThat(call.name()).isEqualTo("searchDomainRules");
+            assertThat(call.routeClass()).isEqualTo("pre_intent_resource_discovery");
+            assertThat(call.payload()).isInstanceOf(JsonNode.class);
+            JsonNode payload = (JsonNode) call.payload();
+            assertThat(payload.path("query").asText())
+                    .isEqualTo("decisões de concessão extraordinária");
+            assertThat(payload.path("page").asInt()).isZero();
+            assertThat(payload.path("limit").asInt()).isEqualTo(6);
+        });
+        assertThat(promptCaptor.getValue())
+                .contains("groundingProfile=domain_decision")
+                .contains("LLM semantic discovery")
+                .contains("never conditions or authority");
+    }
+
+    @Test
     void preservesCrudAsPrimaryComponentForGovernedWorkflowActions() throws Exception {
         when(providerManagementService.generateJson(
                 any(), any(), any(), eq("tenant"), eq("user"), eq("local")))

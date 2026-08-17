@@ -28,6 +28,7 @@ class AiPrincipalContextResolverTest {
         request.setAttribute("tenantId", "tenant-a");
         request.setAttribute("env", "corp");
         request.setUserPrincipal(new StaticPrincipal("user-a"));
+        request.addUserRole("RULE_DEFINITION_READER");
 
         AiPrincipalContext context = resolver.resolve(request, "header-tenant", "header-user", "header-env");
 
@@ -35,6 +36,27 @@ class AiPrincipalContextResolverTest {
         assertThat(context.userId()).isEqualTo("user-a");
         assertThat(context.environment()).isEqualTo("corp");
         assertThat(context.resolvedFromServerPrincipal()).isTrue();
+        assertThat(context.authorities()).containsExactly("RULE_DEFINITION_READER");
+        assertThat(context.hasAuthority("RULE_DEFINITION_READER")).isTrue();
+    }
+
+    @Test
+    void shouldNotInventCorporateAuthoritiesFromAuthenticationAlone() {
+        AiPrincipalContextResolver resolver = new AiPrincipalContextResolver(
+                true,
+                false,
+                "demo",
+                "demo",
+                "local",
+                "prod");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute("tenantId", "tenant-a");
+        request.setUserPrincipal(new StaticPrincipal("user-a"));
+
+        AiPrincipalContext context = resolver.resolve(request, null, null, null);
+
+        assertThat(context.authorities()).isEmpty();
+        assertThat(context.hasAuthority("RULE_DEFINITION_READER")).isFalse();
     }
 
     @Test
@@ -74,6 +96,7 @@ class AiPrincipalContextResolverTest {
         assertThat(context.tenantId()).isEqualTo("tenant-h");
         assertThat(context.userId()).isEqualTo("user-h");
         assertThat(context.environment()).isEqualTo("dev");
+        assertThat(context.authorities()).containsExactly("RULE_DEFINITION_READER");
     }
 
     @Test

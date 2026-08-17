@@ -549,6 +549,12 @@ somente as ações autorizadas pelo principal e pelo escopo resolvidos no servid
 contrato aditivo é `CREATE_NEW_VERSION`; consumidores não devem inferir essa autorização a
 partir do status, de headers do browser ou de configuração local.
 
+O assistente pode descobrir decisões existentes pela tool interna read-only
+`searchDomainRules`, escolhida semanticamente pelo LLM e limitada ao escopo e à autoridade
+`RULE_DEFINITION_READER` resolvidos no servidor. A busca retorna apenas identidades seguras;
+explicação e qualquer comando continuam exigindo seleção exata, releitura atestada e os gates
+canônicos do ciclo de vida.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
