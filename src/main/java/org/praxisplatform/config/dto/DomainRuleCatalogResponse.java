@@ -1,20 +1,20 @@
-package org.praxisplatform.config.service;
+package org.praxisplatform.config.dto;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** Bounded and redacted decision discovery evidence for the Policy Assistant. */
-public record DomainRuleAssistantSearchProjection(
+/** Bounded and redacted identity projection shared by human and assistant discovery. */
+public record DomainRuleCatalogResponse(
         String schemaVersion,
         List<Candidate> candidates,
         int page,
         int limit,
         boolean hasMore) {
 
-    public static final String SCHEMA_VERSION = "praxis-domain-rule-search.v1";
+    public static final String SCHEMA_VERSION = "praxis-domain-rule-catalog.v1";
 
-    public DomainRuleAssistantSearchProjection {
+    public DomainRuleCatalogResponse {
         schemaVersion = schemaVersion == null || schemaVersion.isBlank()
                 ? SCHEMA_VERSION
                 : schemaVersion.trim();

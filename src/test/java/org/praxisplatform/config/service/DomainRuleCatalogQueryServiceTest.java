@@ -14,11 +14,12 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
+import org.praxisplatform.config.dto.DomainRuleCatalogResponse;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.springframework.data.domain.PageImpl;
 
 @Tag("unit")
-class DomainRuleAssistantSearchServiceTest {
+class DomainRuleCatalogQueryServiceTest {
 
     @Test
     void returnsOnlySafeScopedIdentityFieldsWithBoundedPagination() {
@@ -40,12 +41,12 @@ class DomainRuleAssistantSearchServiceTest {
                 .governance("{\"secret\":true}")
                 .updatedAt(Instant.parse("2026-08-16T12:00:00Z"))
                 .build();
-        when(repository.searchAssistantCandidates(
+        when(repository.searchCatalogCandidates(
                 eq("tenant-a"), eq("prod"), eq("salary"), eq("calculation"), eq("approved"),
                 eq("human-resources.folhas-pagamento"), any()))
                 .thenReturn(new PageImpl<>(List.of(definition)));
 
-        DomainRuleAssistantSearchProjection result = new DomainRuleAssistantSearchService(repository).search(
+        DomainRuleCatalogResponse result = new DomainRuleCatalogQueryService(repository).search(
                 " salary ",
                 "calculation",
                 "approved",
@@ -54,21 +55,21 @@ class DomainRuleAssistantSearchServiceTest {
                 6,
                 new DomainRuleGovernancePrincipal("tenant-a", "reader", "prod"));
 
-        assertThat(result.schemaVersion()).isEqualTo("praxis-domain-rule-search.v1");
+        assertThat(result.schemaVersion()).isEqualTo("praxis-domain-rule-catalog.v1");
         assertThat(result.candidates()).singleElement().satisfies(candidate -> {
             assertThat(candidate.ruleKey()).isEqualTo("human-resources.payroll.net-salary");
             assertThat(candidate.version()).isEqualTo(3);
             assertThat(candidate.resourceKey()).isEqualTo("human-resources.folhas-pagamento");
         });
         assertThat(result.toString()).doesNotContain("salary\"}", "secret");
-        verify(repository).searchAssistantCandidates(
+        verify(repository).searchCatalogCandidates(
                 eq("tenant-a"), eq("prod"), eq("salary"), eq("calculation"), eq("approved"),
                 eq("human-resources.folhas-pagamento"), any());
     }
 
     @Test
     void rejectsUnboundedOrUnscopedSearches() {
-        DomainRuleAssistantSearchService service = new DomainRuleAssistantSearchService(
+        DomainRuleCatalogQueryService service = new DomainRuleCatalogQueryService(
                 Mockito.mock(DomainRuleDefinitionRepository.class));
 
         assertThatThrownBy(() -> service.search(null, null, null, null, 0, 13,

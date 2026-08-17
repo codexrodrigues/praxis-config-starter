@@ -26,8 +26,8 @@ import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
-import org.praxisplatform.config.service.DomainRuleAssistantSearchProjection;
-import org.praxisplatform.config.service.DomainRuleAssistantSearchService;
+import org.praxisplatform.config.dto.DomainRuleCatalogResponse;
+import org.praxisplatform.config.service.DomainRuleCatalogQueryService;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 
 @Tag("unit")
@@ -37,10 +37,10 @@ class AgenticAuthoringToolRegistryTest {
 
     @Test
     void searchesDomainRulesOnlyWithServerResolvedReaderAuthority() {
-        DomainRuleAssistantSearchService searchService = Mockito.mock(DomainRuleAssistantSearchService.class);
-        DomainRuleAssistantSearchProjection projection = new DomainRuleAssistantSearchProjection(
-                DomainRuleAssistantSearchProjection.SCHEMA_VERSION,
-                List.of(new DomainRuleAssistantSearchProjection.Candidate(
+        DomainRuleCatalogQueryService searchService = Mockito.mock(DomainRuleCatalogQueryService.class);
+        DomainRuleCatalogResponse projection = new DomainRuleCatalogResponse(
+                DomainRuleCatalogResponse.SCHEMA_VERSION,
+                List.of(new DomainRuleCatalogResponse.Candidate(
                         UUID.randomUUID(),
                         "human-resources.payroll.net-salary",
                         3,
@@ -86,7 +86,7 @@ class AgenticAuthoringToolRegistryTest {
 
     @Test
     void rejectsDomainRuleSearchWithoutReaderAuthority() {
-        DomainRuleAssistantSearchService searchService = Mockito.mock(DomainRuleAssistantSearchService.class);
+        DomainRuleCatalogQueryService searchService = Mockito.mock(DomainRuleCatalogQueryService.class);
         AgenticAuthoringToolResult result = registryWithDomainRuleSearch(searchService).execute(
                 new AgenticAuthoringToolCall(
                         AgenticAuthoringToolRegistry.SEARCH_DOMAIN_RULES,
@@ -102,9 +102,9 @@ class AgenticAuthoringToolRegistryTest {
 
     @Test
     void acceptsBackendIssuedReadAuthorityInLocalGovernanceMode() {
-        DomainRuleAssistantSearchService searchService = Mockito.mock(DomainRuleAssistantSearchService.class);
-        DomainRuleAssistantSearchProjection projection = new DomainRuleAssistantSearchProjection(
-                DomainRuleAssistantSearchProjection.SCHEMA_VERSION,
+        DomainRuleCatalogQueryService searchService = Mockito.mock(DomainRuleCatalogQueryService.class);
+        DomainRuleCatalogResponse projection = new DomainRuleCatalogResponse(
+                DomainRuleCatalogResponse.SCHEMA_VERSION,
                 List.of(),
                 0,
                 6,
@@ -130,7 +130,7 @@ class AgenticAuthoringToolRegistryTest {
     }
 
     private AgenticAuthoringToolRegistry registryWithDomainRuleSearch(
-            DomainRuleAssistantSearchService searchService) {
+            DomainRuleCatalogQueryService searchService) {
         return new AgenticAuthoringToolRegistry(
                 new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
                 null,

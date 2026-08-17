@@ -31,7 +31,7 @@ public interface DomainRuleDefinitionRepository extends JpaRepository<DomainRule
               )
             order by definition.updatedAt desc, definition.ruleKey asc, definition.version desc
             """)
-    Page<DomainRuleDefinition> searchAssistantCandidates(
+    Page<DomainRuleDefinition> searchCatalogCandidates(
             @Param("tenantId") String tenantId,
             @Param("environment") String environment,
             @Param("query") String query,
