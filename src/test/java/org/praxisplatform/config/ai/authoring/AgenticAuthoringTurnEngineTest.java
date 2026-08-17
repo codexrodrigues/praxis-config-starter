@@ -20,10 +20,13 @@ import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -46,6 +49,8 @@ import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.ContextRetrievalService;
+import org.praxisplatform.config.service.DomainRuleAssistantSearchProjection;
+import org.praxisplatform.config.service.DomainRuleAssistantSearchService;
 import org.praxisplatform.config.service.LiveOptionValueCandidate;
 import org.praxisplatform.config.service.LiveOptionValueRetrievalResult;
 import org.praxisplatform.config.service.SchemaFetchResult;
@@ -11588,6 +11593,114 @@ class AgenticAuthoringTurnEngineTest {
                 any(AgenticAuthoringPreIntentToolPlan.class));
         verify(componentCapabilitiesService).listCapabilities();
         verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
+    }
+
+    @Test
+    void materializesGovernedDomainRuleSearchAsSafeSelectableTerminalEvidence() {
+        UUID definitionId = UUID.fromString("8f0d5f91-91a2-45c8-a384-c7eb2859882b");
+        DomainRuleAssistantSearchProjection projection = new DomainRuleAssistantSearchProjection(
+                DomainRuleAssistantSearchProjection.SCHEMA_VERSION,
+                List.of(new DomainRuleAssistantSearchProjection.Candidate(
+                        definitionId,
+                        "human-resources.payroll.net-salary",
+                        3,
+                        "calculation",
+                        "approved",
+                        "human-resources",
+                        "human-resources.folhas-pagamento",
+                        "praxis-api-quickstart",
+                        "payroll-policy",
+                        Instant.parse("2026-08-16T12:00:00Z"))),
+                0,
+                6,
+                false);
+        DomainRuleAssistantSearchService searchService = Mockito.mock(DomainRuleAssistantSearchService.class);
+        when(searchService.search(any(), any(), any(), any(), any(), any(), any())).thenReturn(projection);
+        AgenticAuthoringPreIntentToolPlanningService planner = (request, principal) -> {
+            ObjectNode payload = objectMapper.createObjectNode();
+            payload.put("query", "cálculo do salário líquido");
+            payload.put("page", 0);
+            payload.put("limit", 6);
+            return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
+                    "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                    "A LLM resolveu semanticamente que o pedido precisa descobrir decisões governadas.",
+                    List.of(new AgenticAuthoringToolCall(
+                            AgenticAuthoringToolRegistry.SEARCH_DOMAIN_RULES,
+                            "pre_intent_resource_discovery",
+                            payload)),
+                    "governed_domain_discovery",
+                    "",
+                    false,
+                    objectMapper.createObjectNode(),
+                    "domain_decision"));
+        };
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper),
+                null,
+                null,
+                null,
+                objectMapper,
+                AgenticAuthoringPresentationAffordanceDiscoveryService.defaultService(objectMapper),
+                null,
+                null,
+                null,
+                null,
+                "praxis-service",
+                null,
+                null,
+                searchService);
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                null,
+                new AgenticAuthoringOrchestrator(new AgenticAuthoringToolLoopExecutor(
+                        registry,
+                        new AgenticAuthoringDefaultToolLoopPlanner())),
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                null,
+                planner);
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("responseLocale", "pt-BR");
+        AgenticAuthoringTurnStreamRequest request = requestWithContextHintsOnEmptyPage(
+                "Quais decisões governam o cálculo da folha?",
+                contextHints);
+        CapturingSink sink = new CapturingSink();
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(
+                request,
+                new AiPrincipalContext(
+                        "tenant",
+                        "reader",
+                        "local",
+                        true,
+                        Set.of("RULE_DEFINITION_READER")),
+                sink);
+
+        assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        Mockito.verifyNoInteractions(intentResolverService, previewService);
+        JsonNode result = firstPayloadOfType(sink, "result");
+        assertThat(result.path("canApply").asBoolean()).isFalse();
+        assertThat(result.path("routeClass").asText()).isEqualTo("advisory_authoring");
+        assertThat(result.path("assistantMessage").asText()).contains("1 decisão governada candidata");
+        assertThat(result.path("evidenceBundle").path("source").asText()).isEqualTo("searchDomainRules");
+        assertThat(result.path("evidenceBundle").path("domainRuleSearch").path("schemaVersion").asText())
+                .isEqualTo("praxis-domain-rule-search.v1");
+        assertThat(result.path("evidenceBundle").path("domainRuleSearch").toString())
+                .doesNotContain("condition", "governance", "tenant", "rationale");
+        JsonNode reply = result.path("quickReplies").path(0);
+        assertThat(reply.path("kind").asText()).isEqualTo("domain-decision");
+        assertThat(reply.path("contextHints").path("selectedDomainDecisionRef").path("definitionId").asText())
+                .isEqualTo(definitionId.toString());
+        assertThat(reply.path("contextHints").path("selectedDomainDecisionRef").path("ruleKey").asText())
+                .isEqualTo("human-resources.payroll.net-salary");
+        assertThat(reply.path("contextHints").path("selectedDomainDecisionRef").path("version").asInt())
+                .isEqualTo(3);
+        assertThat(reply.path("contextHints").path("selectedDomainDecisionRef").path("source").asText())
+                .isEqualTo("policy-studio-selection");
     }
 
     @Test
