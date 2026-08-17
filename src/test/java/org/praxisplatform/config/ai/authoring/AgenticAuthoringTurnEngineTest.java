@@ -49,8 +49,8 @@ import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.ContextRetrievalService;
-import org.praxisplatform.config.service.DomainRuleAssistantSearchProjection;
-import org.praxisplatform.config.service.DomainRuleAssistantSearchService;
+import org.praxisplatform.config.dto.DomainRuleCatalogResponse;
+import org.praxisplatform.config.service.DomainRuleCatalogQueryService;
 import org.praxisplatform.config.service.LiveOptionValueCandidate;
 import org.praxisplatform.config.service.LiveOptionValueRetrievalResult;
 import org.praxisplatform.config.service.SchemaFetchResult;
@@ -11598,9 +11598,9 @@ class AgenticAuthoringTurnEngineTest {
     @Test
     void materializesGovernedDomainRuleSearchAsSafeSelectableTerminalEvidence() {
         UUID definitionId = UUID.fromString("8f0d5f91-91a2-45c8-a384-c7eb2859882b");
-        DomainRuleAssistantSearchProjection projection = new DomainRuleAssistantSearchProjection(
-                DomainRuleAssistantSearchProjection.SCHEMA_VERSION,
-                List.of(new DomainRuleAssistantSearchProjection.Candidate(
+        DomainRuleCatalogResponse projection = new DomainRuleCatalogResponse(
+                DomainRuleCatalogResponse.SCHEMA_VERSION,
+                List.of(new DomainRuleCatalogResponse.Candidate(
                         definitionId,
                         "human-resources.payroll.net-salary",
                         3,
@@ -11614,7 +11614,7 @@ class AgenticAuthoringTurnEngineTest {
                 0,
                 6,
                 false);
-        DomainRuleAssistantSearchService searchService = Mockito.mock(DomainRuleAssistantSearchService.class);
+        DomainRuleCatalogQueryService searchService = Mockito.mock(DomainRuleCatalogQueryService.class);
         when(searchService.search(any(), any(), any(), any(), any(), any(), any())).thenReturn(projection);
         AgenticAuthoringPreIntentToolPlanningService planner = (request, principal) -> {
             ObjectNode payload = objectMapper.createObjectNode();
@@ -11688,7 +11688,7 @@ class AgenticAuthoringTurnEngineTest {
         assertThat(result.path("assistantMessage").asText()).contains("1 decisão governada candidata");
         assertThat(result.path("evidenceBundle").path("source").asText()).isEqualTo("searchDomainRules");
         assertThat(result.path("evidenceBundle").path("domainRuleSearch").path("schemaVersion").asText())
-                .isEqualTo("praxis-domain-rule-search.v1");
+                .isEqualTo("praxis-domain-rule-catalog.v1");
         assertThat(result.path("evidenceBundle").path("domainRuleSearch").toString())
                 .doesNotContain("condition", "governance", "tenant", "rationale");
         JsonNode reply = result.path("quickReplies").path(0);

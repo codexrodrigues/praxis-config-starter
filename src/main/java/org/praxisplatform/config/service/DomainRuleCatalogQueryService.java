@@ -3,13 +3,14 @@ package org.praxisplatform.config.service;
 import java.util.List;
 import java.util.Objects;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
+import org.praxisplatform.config.dto.DomainRuleCatalogResponse;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.util.StringUtils;
 
-/** Scoped read model used only after the assistant has resolved domain-decision intent. */
-public class DomainRuleAssistantSearchService {
+/** Scoped, bounded and redacted catalog of governed domain decisions. */
+public class DomainRuleCatalogQueryService {
 
     private static final int MAX_LIMIT = 12;
     private static final int MAX_PAGE = 100;
@@ -17,11 +18,11 @@ public class DomainRuleAssistantSearchService {
 
     private final DomainRuleDefinitionRepository definitions;
 
-    public DomainRuleAssistantSearchService(DomainRuleDefinitionRepository definitions) {
+    public DomainRuleCatalogQueryService(DomainRuleDefinitionRepository definitions) {
         this.definitions = Objects.requireNonNull(definitions, "definitions must not be null");
     }
 
-    public DomainRuleAssistantSearchProjection search(
+    public DomainRuleCatalogResponse search(
             String query,
             String ruleType,
             String status,
@@ -44,7 +45,7 @@ public class DomainRuleAssistantSearchService {
             throw new IllegalArgumentException("limit must be between 1 and " + MAX_LIMIT);
         }
         String normalizedQuery = optional(query, MAX_QUERY_LENGTH, "query");
-        Page<DomainRuleDefinition> result = definitions.searchAssistantCandidates(
+        Page<DomainRuleDefinition> result = definitions.searchCatalogCandidates(
                 principal.tenantId().trim(),
                 principal.environment().trim(),
                 normalizedQuery,
@@ -52,19 +53,19 @@ public class DomainRuleAssistantSearchService {
                 optional(status, 32, "status"),
                 optional(resourceKey, 255, "resourceKey"),
                 PageRequest.of(page, limit));
-        List<DomainRuleAssistantSearchProjection.Candidate> candidates = result.getContent().stream()
+        List<DomainRuleCatalogResponse.Candidate> candidates = result.getContent().stream()
                 .map(this::candidate)
                 .toList();
-        return new DomainRuleAssistantSearchProjection(
-                DomainRuleAssistantSearchProjection.SCHEMA_VERSION,
+        return new DomainRuleCatalogResponse(
+                DomainRuleCatalogResponse.SCHEMA_VERSION,
                 candidates,
                 page,
                 limit,
                 result.hasNext());
     }
 
-    private DomainRuleAssistantSearchProjection.Candidate candidate(DomainRuleDefinition definition) {
-        return new DomainRuleAssistantSearchProjection.Candidate(
+    private DomainRuleCatalogResponse.Candidate candidate(DomainRuleDefinition definition) {
+        return new DomainRuleCatalogResponse.Candidate(
                 definition.getId(),
                 definition.getRuleKey(),
                 definition.getVersion(),

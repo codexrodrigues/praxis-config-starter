@@ -24,7 +24,7 @@ import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
 import org.praxisplatform.config.service.DomainRuleExplanationProjectionService;
-import org.praxisplatform.config.service.DomainRuleAssistantSearchService;
+import org.praxisplatform.config.service.DomainRuleCatalogQueryService;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
 import org.praxisplatform.config.service.LiveOptionValueRetrievalRequest;
 import org.praxisplatform.config.service.LiveOptionValueRetrievalResult;
@@ -262,7 +262,7 @@ public class AgenticAuthoringToolRegistry {
             String domainCatalogServiceKey,
             LiveOptionValueRetrievalService liveOptionValueRetrievalService,
             DomainRuleExplanationProjectionService domainRuleExplanationProjectionService,
-            DomainRuleAssistantSearchService domainRuleAssistantSearchService) {
+            DomainRuleCatalogQueryService domainRuleCatalogQueryService) {
         Map<String, AgenticAuthoringToolExecutor> registered = new LinkedHashMap<>();
         register(registered, new SearchApiResourcesToolExecutor(
                 resourceDiscoveryService, domainBindingService, operationalVerificationService));
@@ -304,8 +304,8 @@ public class AgenticAuthoringToolRegistry {
         if (domainRuleExplanationProjectionService != null) {
             register(registered, new DomainDecisionInspectionToolExecutor(domainRuleExplanationProjectionService));
         }
-        if (domainRuleAssistantSearchService != null) {
-            register(registered, new DomainRuleSearchToolExecutor(domainRuleAssistantSearchService));
+        if (domainRuleCatalogQueryService != null) {
+            register(registered, new DomainRuleSearchToolExecutor(domainRuleCatalogQueryService));
         }
         this.executors = Map.copyOf(registered);
     }
@@ -317,14 +317,14 @@ public class AgenticAuthoringToolRegistry {
                 SEARCH_DOMAIN_RULES,
                 Set.of("pre_intent_resource_discovery", "advisory_authoring"),
                 Set.of("retrieveEvidence"),
-                "praxis-config-starter:/api/praxis/config/domain-rules/definitions",
+                "praxis-config-starter:/api/praxis/config/domain-rules/definitions/catalog",
                 "read_only",
                 "governed_domain_decision_discovery",
                 "domain-decision-search-redaction.v1");
 
-        private final DomainRuleAssistantSearchService searchService;
+        private final DomainRuleCatalogQueryService searchService;
 
-        private DomainRuleSearchToolExecutor(DomainRuleAssistantSearchService searchService) {
+        private DomainRuleSearchToolExecutor(DomainRuleCatalogQueryService searchService) {
             this.searchService = Objects.requireNonNull(searchService, "searchService must not be null");
         }
 

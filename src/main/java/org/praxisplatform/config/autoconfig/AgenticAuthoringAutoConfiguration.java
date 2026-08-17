@@ -58,7 +58,7 @@ import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
 import org.praxisplatform.config.service.DomainRuleExplanationProjectionService;
-import org.praxisplatform.config.service.DomainRuleAssistantSearchService;
+import org.praxisplatform.config.service.DomainRuleCatalogQueryService;
 import org.praxisplatform.config.service.GovernedPlatformRequestAuthorizationProvider;
 import org.praxisplatform.config.service.LiveOptionValueRetrievalService;
 import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
@@ -387,7 +387,7 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectProvider<DomainCatalogIngestionService> domainCatalogIngestionService,
             ObjectProvider<LiveOptionValueRetrievalService> liveOptionValueRetrievalService,
             ObjectProvider<DomainRuleExplanationProjectionService> domainRuleExplanationProjectionService,
-            ObjectProvider<DomainRuleAssistantSearchService> domainRuleAssistantSearchService,
+            ObjectProvider<DomainRuleCatalogQueryService> domainRuleCatalogQueryService,
             @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey,
             ObjectMapper objectMapper) {
         return new AgenticAuthoringToolRegistry(
@@ -404,7 +404,7 @@ public class AgenticAuthoringAutoConfiguration {
                 domainCatalogServiceKey,
                 liveOptionValueRetrievalService.getIfAvailable(),
                 domainRuleExplanationProjectionService.getIfAvailable(),
-                domainRuleAssistantSearchService.getIfAvailable());
+                domainRuleCatalogQueryService.getIfAvailable());
     }
 
     @Bean

@@ -24,7 +24,7 @@ import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.ContextRetrievalService;
-import org.praxisplatform.config.service.DomainRuleAssistantSearchProjection;
+import org.praxisplatform.config.dto.DomainRuleCatalogResponse;
 import org.praxisplatform.config.service.LiveOptionValueCandidate;
 import org.praxisplatform.config.service.LiveOptionValueRetrievalResult;
 import org.praxisplatform.config.service.SchemaFetchResult;
@@ -2998,7 +2998,7 @@ public class AgenticAuthoringTurnEngine {
         List<AgenticAuthoringProjectKnowledgeProjection> domainKnowledge = new ArrayList<>();
         List<AgenticAuthoringDomainBindingService.BindingProjection> domainBindings = new ArrayList<>();
         List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection> verifiedOperations = new ArrayList<>();
-        DomainRuleAssistantSearchProjection domainRuleSearch = null;
+        DomainRuleCatalogResponse domainRuleSearch = null;
         int executed = 0;
         for (AgenticAuthoringToolCall toolCall : plan.toolCalls()) {
             if (toolCall == null || executed >= MAX_TOOL_CALLS_PER_TURN || eventSink.terminalReached()) {
@@ -3024,7 +3024,7 @@ public class AgenticAuthoringTurnEngine {
             if (payload != null) {
                 resourceDiscovery = payload;
             }
-            if (result.valid() && result.payload() instanceof DomainRuleAssistantSearchProjection searchProjection) {
+            if (result.valid() && result.payload() instanceof DomainRuleCatalogResponse searchProjection) {
                 domainRuleSearch = searchProjection;
             }
             if (result.payload() instanceof List<?> items) {
@@ -3057,7 +3057,7 @@ public class AgenticAuthoringTurnEngine {
 
     private AgenticAuthoringTurnOutcome completeDomainRuleSearch(
             AgenticAuthoringTurnStreamRequest request,
-            DomainRuleAssistantSearchProjection search,
+            DomainRuleCatalogResponse search,
             AgenticAuthoringTurnEventSink eventSink,
             AgenticAuthoringTurnState state) {
         if (search == null) {
@@ -3066,7 +3066,7 @@ public class AgenticAuthoringTurnEngine {
         if (eventSink.terminalReached()) {
             return AgenticAuthoringTurnOutcome.noop(state);
         }
-        List<DomainRuleAssistantSearchProjection.Candidate> candidates = search.candidates() == null
+        List<DomainRuleCatalogResponse.Candidate> candidates = search.candidates() == null
                 ? List.of()
                 : search.candidates();
         boolean english = responseLocale(request).toLowerCase(Locale.ROOT).startsWith("en");
@@ -3122,13 +3122,13 @@ public class AgenticAuthoringTurnEngine {
 
     private List<AgenticAuthoringQuickReply> domainRuleSearchQuickReplies(
             AgenticAuthoringTurnStreamRequest request,
-            List<DomainRuleAssistantSearchProjection.Candidate> candidates) {
+            List<DomainRuleCatalogResponse.Candidate> candidates) {
         if (candidates == null || candidates.isEmpty()) {
             return List.of();
         }
         boolean english = responseLocale(request).toLowerCase(Locale.ROOT).startsWith("en");
         List<AgenticAuthoringQuickReply> replies = new ArrayList<>();
-        for (DomainRuleAssistantSearchProjection.Candidate candidate : candidates) {
+        for (DomainRuleCatalogResponse.Candidate candidate : candidates) {
             if (replies.size() >= 12
                     || candidate == null
                     || candidate.definitionId() == null
@@ -3178,7 +3178,7 @@ public class AgenticAuthoringTurnEngine {
         return List.copyOf(replies);
     }
 
-    private ObjectNode domainRuleSearchNode(DomainRuleAssistantSearchProjection search) {
+    private ObjectNode domainRuleSearchNode(DomainRuleCatalogResponse search) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("schemaVersion", search.schemaVersion());
         ArrayNode candidates = node.putArray("candidates");
@@ -3194,7 +3194,7 @@ public class AgenticAuthoringTurnEngine {
         return node;
     }
 
-    private ObjectNode domainRuleSearchCandidateNode(DomainRuleAssistantSearchProjection.Candidate candidate) {
+    private ObjectNode domainRuleSearchCandidateNode(DomainRuleCatalogResponse.Candidate candidate) {
         ObjectNode node = objectMapper.createObjectNode();
         if (candidate.definitionId() != null) {
             node.put("definitionId", candidate.definitionId().toString());
@@ -8056,7 +8056,7 @@ public class AgenticAuthoringTurnEngine {
             List<AgenticAuthoringProjectKnowledgeProjection> domainKnowledge,
             List<AgenticAuthoringDomainBindingService.BindingProjection> domainBindings,
             List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection> verifiedOperations,
-            DomainRuleAssistantSearchProjection domainRuleSearch,
+            DomainRuleCatalogResponse domainRuleSearch,
             List<AiProviderInvocationTelemetry> providerInvocations) {
 
         private PreIntentToolPlanExecution {

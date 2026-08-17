@@ -2,7 +2,7 @@ package org.praxisplatform.config.autoconfig;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.praxisplatform.config.service.DomainRuleDefinitionFingerprint;
-import org.praxisplatform.config.service.DomainRuleAssistantSearchService;
+import org.praxisplatform.config.service.DomainRuleCatalogQueryService;
 import org.praxisplatform.config.service.DomainRuleExplanationProjectionService;
 import org.praxisplatform.config.service.DomainRuleService;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
@@ -20,9 +20,9 @@ public class DomainRuleExplanationAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    DomainRuleAssistantSearchService domainRuleAssistantSearchService(
+    DomainRuleCatalogQueryService domainRuleCatalogQueryService(
             DomainRuleDefinitionRepository definitionRepository) {
-        return new DomainRuleAssistantSearchService(definitionRepository);
+        return new DomainRuleCatalogQueryService(definitionRepository);
     }
 
     @Bean
