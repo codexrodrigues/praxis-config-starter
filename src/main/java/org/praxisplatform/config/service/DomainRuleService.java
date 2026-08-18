@@ -13,7 +13,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -26,6 +28,8 @@ import org.praxisplatform.config.domain.DomainRuleMaterialization;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
 import org.praxisplatform.config.dto.DomainRuleDefinitionStatusTransitionRequest;
+import org.praxisplatform.config.dto.DomainRuleFactCatalogResponse;
+import org.praxisplatform.config.dto.DomainRuleFactDescriptor;
 import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
@@ -76,6 +80,15 @@ public class DomainRuleService {
             Pattern.compile("^[A-Za-z][A-Za-z0-9._:-]{0,254}$");
     private static final Pattern STABLE_DETERMINATION_KEY =
             Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$");
+    private static final Pattern STABLE_FACT_PATH =
+            Pattern.compile("^[A-Za-z][A-Za-z0-9_.:-]{0,254}$");
+    private static final String FACT_CATALOG_SCHEMA_VERSION = "praxis.domain-rule-fact-catalog.v1";
+    private static final Set<String> FACT_VALUE_TYPES = Set.of(
+            "boolean", "string", "number", "date", "string-array", "date-array");
+    private static final Set<String> FACT_SENSITIVITIES = Set.of(
+            "NON_SENSITIVE", "PERSONAL", "SENSITIVE", "SECRET");
+    private static final Set<String> FACT_REDACTION_POLICIES = Set.of(
+            "NONE", "MASK", "HASH", "OMIT");
 
     private final DomainRuleDefinitionRepository definitionRepository;
     private final DomainRuleMaterializationRepository materializationRepository;
@@ -223,6 +236,7 @@ public class DomainRuleService {
         JsonNode requestedGovernance = request.governance();
         JsonNode requestedDefinition = request.definition();
         JsonNode requestedParameters = request.parameters();
+        validateFactCatalog(requestedDefinition);
         requireDefinitionCreationGovernance(
                 request.ruleType().trim(),
                 requestedStatus,
@@ -326,6 +340,27 @@ public class DomainRuleService {
         requireScope(definition.getTenantId(), principal.tenantId(), "tenantId");
         requireScope(definition.getEnvironment(), principal.environment(), "environment");
         return toResponse(definition);
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public DomainRuleFactCatalogResponse definitionFacts(
+            UUID definitionId, DomainRuleGovernancePrincipal principal) {
+        DomainRuleDefinitionResponse definition = definition(definitionId, principal);
+        JsonNode catalog = definition.definition() == null
+                ? objectMapper.missingNode()
+                : definition.definition().path("factCatalog");
+        validateFactCatalog(definition.definition());
+        List<DomainRuleFactDescriptor> facts = new ArrayList<>();
+        JsonNode items = catalog.path("facts");
+        if (items.isArray()) {
+            items.forEach(item -> facts.add(toFactDescriptor(item)));
+        }
+        return new DomainRuleFactCatalogResponse(
+                definition.id(),
+                definition.ruleKey(),
+                definition.version(),
+                catalog.path("schemaVersion").asText(FACT_CATALOG_SCHEMA_VERSION),
+                List.copyOf(facts));
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
@@ -3510,6 +3545,108 @@ public class DomainRuleService {
             diagnostics.put("sourceHash", materialization.getSourceHash());
         }
         return diagnostics;
+    }
+
+    private void validateFactCatalog(JsonNode definition) {
+        if (definition == null || definition.isNull() || !definition.has("factCatalog")) {
+            return;
+        }
+        JsonNode catalog = definition.path("factCatalog");
+        if (!catalog.isObject()) {
+            throw new ConfigurationIngestionException("definition.factCatalog must be an object");
+        }
+        if (!FACT_CATALOG_SCHEMA_VERSION.equals(catalog.path("schemaVersion").asText())) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog.schemaVersion must be " + FACT_CATALOG_SCHEMA_VERSION);
+        }
+        JsonNode facts = catalog.path("facts");
+        if (!facts.isArray()) {
+            throw new ConfigurationIngestionException("definition.factCatalog.facts must be an array");
+        }
+        if (facts.size() > 256) {
+            throw new ConfigurationIngestionException("definition.factCatalog.facts cannot exceed 256 entries");
+        }
+        Set<String> paths = new HashSet<>();
+        facts.forEach(item -> {
+            if (!item.isObject()) {
+                throw new ConfigurationIngestionException("definition.factCatalog facts must be objects");
+            }
+            String path = requiredFactText(item, "path");
+            if (!STABLE_FACT_PATH.matcher(path).matches()) {
+                throw new ConfigurationIngestionException("definition.factCatalog fact path is invalid: " + path);
+            }
+            if (!paths.add(path)) {
+                throw new ConfigurationIngestionException("definition.factCatalog fact path is duplicated: " + path);
+            }
+            requireFactEnum(item, "valueType", FACT_VALUE_TYPES);
+            if (!item.has("nullable") || !item.path("nullable").isBoolean()) {
+                throw new ConfigurationIngestionException(
+                        "definition.factCatalog fact nullable must be boolean: " + path);
+            }
+            requireLocalizedFactText(item, "labels", path);
+            requireLocalizedFactText(item, "descriptions", path);
+            requiredFactText(item, "providerRef");
+            JsonNode evidenceRefs = item.path("evidenceRefs");
+            if (!evidenceRefs.isArray() || evidenceRefs.isEmpty()
+                    || java.util.stream.StreamSupport.stream(evidenceRefs.spliterator(), false)
+                    .anyMatch(ref -> !ref.isTextual() || !StringUtils.hasText(ref.asText()))) {
+                throw new ConfigurationIngestionException(
+                        "definition.factCatalog fact evidenceRefs must contain non-empty references: " + path);
+            }
+            requireFactEnum(item, "sensitivity", FACT_SENSITIVITIES);
+            requireFactEnum(item, "redaction", FACT_REDACTION_POLICIES);
+        });
+    }
+
+    private DomainRuleFactDescriptor toFactDescriptor(JsonNode item) {
+        return new DomainRuleFactDescriptor(
+                item.path("path").asText(),
+                item.path("valueType").asText(),
+                item.path("nullable").asBoolean(),
+                localizedFactText(item.path("labels")),
+                localizedFactText(item.path("descriptions")),
+                item.path("providerRef").asText(),
+                java.util.stream.StreamSupport.stream(item.path("evidenceRefs").spliterator(), false)
+                        .map(JsonNode::asText)
+                        .toList(),
+                item.path("sensitivity").asText(),
+                item.path("redaction").asText());
+    }
+
+    private Map<String, String> localizedFactText(JsonNode source) {
+        Map<String, String> values = new LinkedHashMap<>();
+        source.fields().forEachRemaining(entry -> values.put(entry.getKey(), entry.getValue().asText()));
+        return Map.copyOf(values);
+    }
+
+    private String requiredFactText(JsonNode item, String field) {
+        String value = item.path(field).asText(null);
+        if (!StringUtils.hasText(value)) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact " + field + " is required");
+        }
+        return value.trim();
+    }
+
+    private void requireLocalizedFactText(JsonNode item, String field, String path) {
+        JsonNode values = item.path(field);
+        if (!values.isObject() || values.isEmpty()
+                || java.util.stream.StreamSupport.stream(
+                        java.util.Spliterators.spliteratorUnknownSize(values.fields(), 0), false)
+                .anyMatch(entry -> !StringUtils.hasText(entry.getKey())
+                        || !entry.getValue().isTextual()
+                        || !StringUtils.hasText(entry.getValue().asText()))) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact " + field + " must contain localized text: " + path);
+        }
+    }
+
+    private void requireFactEnum(JsonNode item, String field, Set<String> allowed) {
+        String value = requiredFactText(item, field);
+        if (!allowed.contains(value)) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact " + field + " must be one of " + allowed);
+        }
     }
 
     private void requireText(String value, String field) {

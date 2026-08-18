@@ -1204,6 +1204,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
 
+  /api/praxis/config/domain-rules/definitions/{definitionId}/facts:
+    get:
+      tags: [domain-rules]
+      operationId: getDomainRuleDefinitionFacts
+      summary: Retorna o vocabulário governado de facts da definição
+      description: Projeção read-only versionada, tipada, localizada e redaction-aware no escopo resolvido do principal leitor.
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: definitionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Catálogo de facts encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainRuleFactCatalogResponse'
+        '404':
+          description: Definição não encontrada no escopo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
   /api/praxis/config/domain-rules/simulations:
     post:
       tags: [domain-rules]
@@ -4380,6 +4409,61 @@ components:
               format: date-time
               nullable: true
           additionalProperties: false
+
+    DomainRuleFactCatalogResponse:
+      type: object
+      required: [definitionId, ruleKey, definitionVersion, schemaVersion, facts]
+      properties:
+        definitionId:
+          type: string
+          format: uuid
+        ruleKey:
+          type: string
+        definitionVersion:
+          type: integer
+        schemaVersion:
+          type: string
+          enum: [praxis.domain-rule-fact-catalog.v1]
+        facts:
+          type: array
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/DomainRuleFactDescriptor'
+      additionalProperties: false
+
+    DomainRuleFactDescriptor:
+      type: object
+      required: [path, valueType, nullable, labels, descriptions, providerRef, evidenceRefs, sensitivity, redaction]
+      properties:
+        path:
+          type: string
+        valueType:
+          type: string
+          enum: [boolean, string, number, date, string-array, date-array]
+        nullable:
+          type: boolean
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        descriptions:
+          type: object
+          additionalProperties:
+            type: string
+        providerRef:
+          type: string
+        evidenceRefs:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        sensitivity:
+          type: string
+          enum: [NON_SENSITIVE, PERSONAL, SENSITIVE, SECRET]
+        redaction:
+          type: string
+          enum: [NONE, MASK, HASH, OMIT]
+      additionalProperties: false
 
     DomainRuleTimelineResponse:
       type: object

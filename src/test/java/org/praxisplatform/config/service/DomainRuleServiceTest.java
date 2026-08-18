@@ -841,6 +841,81 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void exposesTypedGovernedFactCatalogFromDefinition() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("grant.amount-parameters")
+                .version(3)
+                .ruleType("selection_eligibility")
+                .status("draft")
+                .definition(objectMapper.readTree("""
+                        {
+                          "factCatalog": {
+                            "schemaVersion": "praxis.domain-rule-fact-catalog.v1",
+                            "facts": [{
+                              "path": "request.requestedAmount",
+                              "valueType": "number",
+                              "nullable": false,
+                              "labels": {"pt-BR": "Valor solicitado", "en-US": "Requested amount"},
+                              "descriptions": {"pt-BR": "Valor monetário solicitado.", "en-US": "Requested monetary amount."},
+                              "providerRef": "host:extraordinary-benefit-request",
+                              "evidenceRefs": ["ruleset:grant.amount-parameters"],
+                              "sensitivity": "SENSITIVE",
+                              "redaction": "MASK"
+                            }]
+                          }
+                        }
+                        """).toString())
+                .parameters("{}")
+                .governance("{}")
+                .build();
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+
+        var catalog = service.definitionFacts(definitionId, principal("reader"));
+
+        assertThat(catalog.schemaVersion()).isEqualTo("praxis.domain-rule-fact-catalog.v1");
+        assertThat(catalog.facts()).singleElement().satisfies(fact -> {
+            assertThat(fact.path()).isEqualTo("request.requestedAmount");
+            assertThat(fact.valueType()).isEqualTo("number");
+            assertThat(fact.labels()).containsEntry("pt-BR", "Valor solicitado");
+            assertThat(fact.sensitivity()).isEqualTo("SENSITIVE");
+            assertThat(fact.redaction()).isEqualTo("MASK");
+        });
+    }
+
+    @Test
+    void rejectsInvalidFactCatalogBeforeDefinitionPersistence() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        assertThatThrownBy(() -> service.createDefinition(new DomainRuleDefinitionRequest(
+                "grant.amount-parameters", 1, "selection_eligibility", "draft",
+                "human-resources", "extraordinary-benefit", "praxis-api-quickstart",
+                "policy-owner", "policy-owner", null, null,
+                objectMapper.readTree("""
+                        {
+                          "factCatalog": {
+                            "schemaVersion": "praxis.domain-rule-fact-catalog.v1",
+                            "facts": [{"path": "request.requestedAmount", "valueType": "money"}]
+                          }
+                        }
+                        """),
+                objectMapper.readTree("{}"), null,
+                objectMapper.readTree("{\"requiredApprovals\":[\"policy-owner\"]}"), null),
+                principal("author")))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("valueType");
+        verify(definitionRepository, org.mockito.Mockito.never()).save(any(DomainRuleDefinition.class));
+    }
+
+    @Test
     void blocksDefinitionCreationWithNonCanonicalStatus() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
