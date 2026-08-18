@@ -44,7 +44,9 @@ public class DomainRuleCatalogQueryService {
         if (limit < 1 || limit > MAX_LIMIT) {
             throw new IllegalArgumentException("limit must be between 1 and " + MAX_LIMIT);
         }
-        String normalizedQuery = optional(query, MAX_QUERY_LENGTH, "query");
+        // PostgreSQL cannot infer a text type for a null parameter used inside lower/concat
+        // and binds it as bytea. The empty string is the repository's explicit no-filter sentinel.
+        String normalizedQuery = Objects.requireNonNullElse(optional(query, MAX_QUERY_LENGTH, "query"), "");
         Page<DomainRuleDefinition> result = definitions.searchCatalogCandidates(
                 principal.tenantId().trim(),
                 principal.environment().trim(),
