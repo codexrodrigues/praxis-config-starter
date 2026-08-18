@@ -549,6 +549,13 @@ somente as ações autorizadas pelo principal e pelo escopo resolvidos no servid
 contrato aditivo é `CREATE_NEW_VERSION`; consumidores não devem inferir essa autorização a
 partir do status, de headers do browser ou de configuração local.
 
+`GET /api/praxis/config/domain-rules/definitions/{definitionId}/facts` projeta o
+vocabulário versionado de facts da definição. O catálogo contém tipo, nulabilidade,
+textos localizados, provider, evidências, sensibilidade e política de redaction;
+continua submetido ao escopo e ao papel `RULE_DEFINITION_READER`. O documento fonte
+fica em `definition.factCatalog`, participa do fingerprint imutável da definição e
+é validado antes da persistência.
+
 O assistente pode descobrir decisões existentes pela tool interna read-only
 `searchDomainRules`, escolhida semanticamente pelo LLM e limitada ao escopo e à autoridade
 `RULE_DEFINITION_READER` resolvidos no servidor. A busca retorna apenas identidades seguras;

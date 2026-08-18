@@ -611,15 +611,17 @@ class DomainRuleControllerTest {
         controller.definitions(
                 "caller-tenant", "caller-env", null, null, null, null, servletRequest);
         controller.definition(definitionId, "caller-tenant", "caller-env", servletRequest);
+        controller.definitionFacts(definitionId, "caller-tenant", "caller-env", servletRequest);
         controller.definitionTimeline(
                 definitionId, "caller-tenant", "caller-env", servletRequest);
         controller.materializations(
                 "caller-tenant", "caller-env", null, null, null, null, null, servletRequest);
 
-        verify(resolver, org.mockito.Mockito.times(4)).resolve(
+        verify(resolver, org.mockito.Mockito.times(5)).resolve(
                 servletRequest, "caller-tenant", "caller-env", "RULE_DEFINITION_READER");
         verify(service).definitions("tenant-a", "dev", null, null, null, null);
         verify(service).definition(definitionId, PRINCIPAL);
+        verify(service).definitionFacts(definitionId, PRINCIPAL);
         verify(service).definitionTimeline(definitionId, "tenant-a", "dev");
         verify(service).materializations("tenant-a", "dev", null, null, null, null, null);
     }

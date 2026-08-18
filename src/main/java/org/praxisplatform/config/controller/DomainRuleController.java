@@ -12,6 +12,7 @@ import org.praxisplatform.config.dto.DomainRuleDefinitionCapability;
 import org.praxisplatform.config.dto.DomainRuleDefinitionCapabilitiesResponse;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
 import org.praxisplatform.config.dto.DomainRuleDefinitionStatusTransitionRequest;
+import org.praxisplatform.config.dto.DomainRuleFactCatalogResponse;
 import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
 import org.praxisplatform.config.dto.DomainRuleIntakeResponse;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
@@ -156,6 +157,24 @@ public class DomainRuleController {
         DomainRuleGovernancePrincipal principal = principalResolver.resolve(
                 servletRequest, tenantId, environment, DEFINITION_READER_ROLE);
         return ResponseEntity.ok(domainRuleService.definition(definitionId, principal));
+    }
+
+    @GetMapping("/definitions/{definitionId}/facts")
+    @Operation(summary = "Read the governed fact catalog for a definition",
+            description = "Returns the typed, localized and redaction-aware fact vocabulary from the definition in the authenticated reader's server-resolved scope.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Versioned fact catalog in the server-resolved scope"),
+            @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_DEFINITION_READER"),
+            @ApiResponse(responseCode = "404", description = "Definition does not exist in the resolved scope")
+    })
+    public ResponseEntity<DomainRuleFactCatalogResponse> definitionFacts(
+            @PathVariable UUID definitionId,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, DEFINITION_READER_ROLE);
+        return ResponseEntity.ok(domainRuleService.definitionFacts(definitionId, principal));
     }
 
     @GetMapping("/definitions/{definitionId}/timeline")
