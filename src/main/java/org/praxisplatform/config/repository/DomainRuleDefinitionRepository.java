@@ -22,7 +22,7 @@ public interface DomainRuleDefinitionRepository extends JpaRepository<DomainRule
               and (:status is null or definition.status = :status)
               and (:resourceKey is null or definition.resourceKey = :resourceKey)
               and (
-                :query is null
+                :query = ''
                 or lower(definition.ruleKey) like lower(concat('%', :query, '%'))
                 or lower(coalesce(definition.contextKey, '')) like lower(concat('%', :query, '%'))
                 or lower(coalesce(definition.resourceKey, '')) like lower(concat('%', :query, '%'))

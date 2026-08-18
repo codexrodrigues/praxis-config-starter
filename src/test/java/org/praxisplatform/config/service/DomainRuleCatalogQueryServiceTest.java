@@ -81,4 +81,19 @@ class DomainRuleCatalogQueryServiceTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("principal");
     }
+
+    @Test
+    void usesTypedEmptyQuerySentinelWhenSearchTextIsAbsent() {
+        DomainRuleDefinitionRepository repository = Mockito.mock(DomainRuleDefinitionRepository.class);
+        when(repository.searchCatalogCandidates(
+                eq("tenant-a"), eq("prod"), eq(""), eq(null), eq(null), eq(null), any()))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        new DomainRuleCatalogQueryService(repository).search(
+                null, null, null, null, 0, 6,
+                new DomainRuleGovernancePrincipal("tenant-a", "reader", "prod"));
+
+        verify(repository).searchCatalogCandidates(
+                eq("tenant-a"), eq("prod"), eq(""), eq(null), eq(null), eq(null), any());
+    }
 }
