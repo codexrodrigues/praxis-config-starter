@@ -1,9 +1,11 @@
 package org.praxisplatform.config.autoconfig;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.praxisplatform.config.controller.DomainRuleCatalogController;
 import org.praxisplatform.config.service.DomainRuleDefinitionFingerprint;
 import org.praxisplatform.config.service.DomainRuleCatalogQueryService;
 import org.praxisplatform.config.service.DomainRuleExplanationProjectionService;
+import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleService;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -23,6 +25,14 @@ public class DomainRuleExplanationAutoConfiguration {
     DomainRuleCatalogQueryService domainRuleCatalogQueryService(
             DomainRuleDefinitionRepository definitionRepository) {
         return new DomainRuleCatalogQueryService(definitionRepository);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    DomainRuleCatalogController domainRuleCatalogController(
+            DomainRuleCatalogQueryService catalogQueryService,
+            DomainRuleGovernancePrincipalResolver principalResolver) {
+        return new DomainRuleCatalogController(catalogQueryService, principalResolver);
     }
 
     @Bean

@@ -27,6 +27,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringTargetResolverRegi
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
+import org.praxisplatform.config.controller.DomainRuleCatalogController;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.repository.DomainRuleEventRepository;
@@ -37,6 +38,7 @@ import org.praxisplatform.config.service.AiRegistryTemplateService;
 import org.praxisplatform.config.service.AiTurnEventService;
 import org.praxisplatform.config.service.DomainRuleDefinitionFingerprint;
 import org.praxisplatform.config.service.DomainRuleExplanationProjectionService;
+import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleService;
 import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.boot.ApplicationRunner;
@@ -83,6 +85,8 @@ class AgenticAuthoringAutoConfigurationTest {
         DomainRuleService domainRuleService = org.mockito.Mockito.mock(DomainRuleService.class);
         DomainRuleDefinitionFingerprint fingerprint =
                 org.mockito.Mockito.mock(DomainRuleDefinitionFingerprint.class);
+        DomainRuleGovernancePrincipalResolver principalResolver =
+                org.mockito.Mockito.mock(DomainRuleGovernancePrincipalResolver.class);
 
         contextRunner
                 .withBean(DomainRuleDefinitionRepository.class,
@@ -93,10 +97,12 @@ class AgenticAuthoringAutoConfigurationTest {
                         () -> org.mockito.Mockito.mock(DomainRuleEventRepository.class))
                 .withBean(DomainRuleService.class, () -> domainRuleService)
                 .withBean(DomainRuleDefinitionFingerprint.class, () -> fingerprint)
+                .withBean(DomainRuleGovernancePrincipalResolver.class, () -> principalResolver)
                 .run(context -> {
                     assertThat(context).hasSingleBean(DomainRuleService.class);
                     assertThat(context).hasSingleBean(DomainRuleDefinitionFingerprint.class);
                     assertThat(context).hasSingleBean(DomainRuleExplanationProjectionService.class);
+                    assertThat(context).hasSingleBean(DomainRuleCatalogController.class);
                 });
     }
 
