@@ -149,6 +149,7 @@ public final class AgenticAuthoringValidatorRegistry {
             "settings-value-provider-contract-present",
             "consumer-config-delegated",
             "editor-inputs-serializable",
+            "child-panel-isolates-parent-interaction",
             "diagnostics-follow-provider-state",
             "diagnostics-i18n-compatible",
             "busy-valid-dirty-visible-when-needed",
@@ -626,6 +627,7 @@ public final class AgenticAuthoringValidatorRegistry {
                      "save-prefers-provider-hook", "save-fallback-value-preserved", "save-closes-with-save-reason",
                      "reset-calls-provider-reset", "reset-event-emitted",
                      "settings-value-provider-contract-present", "consumer-config-delegated",
+                     "child-panel-isolates-parent-interaction",
                      "diagnostics-follow-provider-state", "diagnostics-i18n-compatible",
                      "busy-valid-dirty-visible-when-needed", "settings-panel-round-trip" -> {
                     // These validators assert runtime/editor protocol invariants represented by the compiled runtime contract.
