@@ -1087,6 +1087,56 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldValidateFunnelAndPyramidAsCategorySliceCharts() throws Exception {
+        JsonNode oneMetricConfig = objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "kind": "bar",
+                    "metrics": [{ "field": "volume", "axis": "primary" }]
+                  }
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("chart.type.set", "chartType", "x-ui-chart-kind", false,
+                        "chart-type-supported,chart-type-series-axis-compatible,category-slice-single-metric"),
+                plan("{}", "{ \"kind\": \"funnel\" }"),
+                oneMetricConfig,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+
+        JsonNode incompatibleConfig = objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "kind": "bar",
+                    "metrics": [
+                      { "field": "volume", "axis": "primary" },
+                      { "field": "target", "axis": "secondary" }
+                    ]
+                  }
+                }
+                """);
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("chart.type.set", "chartType", "x-ui-chart-kind", false,
+                        "chart-type-supported,chart-type-series-axis-compatible,category-slice-single-metric"),
+                plan("{}", "{ \"kind\": \"pyramid\" }"),
+                incompatibleConfig,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator chart-type-series-axis-compatible failed for chart.type.set: category slice charts cannot use secondary axes",
+                        "validator category-slice-single-metric failed for chart.type.set: pie, donut, funnel and pyramid charts require exactly one metric");
+    }
+
+    @Test
     void shouldGroundChartValidatorsInApiMetadataStatsCapabilitiesAndTargets() throws Exception {
         JsonNode config = objectMapper.readTree("""
                 {
