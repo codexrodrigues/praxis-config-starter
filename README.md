@@ -304,7 +304,11 @@ source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted t
 | `praxis.ai.authoring.consultative.api-catalog.compact-cache-ttl-ms` | `60000` | TTL for compact API catalog projections used during consultative answers. Use `0` to force fresh projection per request. |
 | `praxis.ai.authoring.consultative.api-catalog.compact-cache-max-entries` | `256` | Maximum compact projection entries retained per starter instance. Older entries are evicted before expired entries can accumulate unbounded. |
 | `praxis.ai.authoring.consultative.api-catalog.api-metadata-cache-ttl-ms` | `60000` | TTL for `api_metadata` lookups used by the consultative catalog projection. Use `0` when validating metadata ingestion changes interactively. |
-| `praxis.api-metadata.rag-publication.enabled` | `true` | Enables after-commit publication of derived API metadata RAG documents. Disable only when the structured `api_metadata` corpus must persist without vector indexing. |
+| `praxis.api-metadata.rag-publication.enabled` | `true` | Enables publication of derived API metadata RAG documents by the managed indexing worker. Disable only when the structured `api_metadata` corpus must persist without vector indexing. |
+| `praxis.api-metadata.indexing.worker-count` | `1` | Number of managed API Catalog indexing workers. Work is isolated and coalesced by tenant, environment, service and release. |
+| `praxis.api-metadata.indexing.queue-capacity` | `32` | Bounded number of distinct release scopes waiting for indexing. Saturation is persisted as `FAILED` with `INDEXING_QUEUE_SATURATED`. |
+| `praxis.api-metadata.indexing.coalesce-delay-ms` | `750` | Quiet period used to combine rapid chunk uploads for the same release into the newest persisted generation. |
+| `praxis.api-metadata.indexing.shutdown-timeout-seconds` | `10` | Graceful shutdown budget for indexing workers; interrupted `PENDING`/`PROCESSING` work is recovered on the next application start. |
 
 ## UI Config Identity Semantics
 
@@ -390,12 +394,19 @@ free-form JSON values as JSON text. The response is decoded back to the canonica
 deterministic completion and validation. Provider restrictions therefore never redefine the public
 contract. A supplied invalid or ineligible intent is rejected before this provider call.
 
-API catalog ingestion persists the canonical `api_metadata` rows before publishing the derived RAG
-corpus. RAG publication is scheduled after the database commit and can be replayed from canonical
-rows with `POST /api/praxis/config/api-catalog/rag/reconcile?releaseId=...`; operators can inspect
-readiness with `GET /api/praxis/config/api-catalog/rag/status?releaseId=...`. A vector-store outage
-or publication failure must not roll back canonical ingestion, and RAG diagnostics should be used to
-decide whether semantic retrieval is operational for that scope.
+API catalog ingestion validates and persists the canonical `api_metadata` rows in a short transaction.
+`POST /api/praxis/config/api-catalog/ingest` then returns `202 Accepted`; this means the metadata was
+accepted, not that derived indexes are ready. A bounded managed worker coalesces rapid uploads by
+`(tenant, environment, serviceKey, releaseId)` and materializes both the legacy
+`api_metadata.embedding` fallback and the canonical RAG corpus outside the HTTP transaction.
+
+Callers must poll `GET /api/praxis/config/api-catalog/rag/status?serviceKey=...&releaseId=...` with the
+same `X-Tenant-ID` and `X-Env`. `PENDING` and `PROCESSING` are non-terminal; `READY` is returned only
+when expected, legacy-indexed, published and searchable counts agree. `FAILED` includes a stable
+`failureCode` and sanitized `failureMessage`. An idempotent asynchronous rebuild can be requested with
+`POST /api/praxis/config/api-catalog/rag/reconcile?serviceKey=...&releaseId=...`; its `202` response must
+also be followed through the status endpoint. Provider or vector-store failures never roll back the
+canonical rows, and persisted unfinished work is resumed after restart.
 
 The derived index is governed by its effective embedding profile (provider, model, dimensions and
 retrieval-format version). Changing any of those values deliberately makes prior vectors ineligible

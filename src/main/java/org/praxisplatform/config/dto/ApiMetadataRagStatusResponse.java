@@ -15,13 +15,24 @@ public record ApiMetadataRagStatusResponse(
         boolean vectorStoreAvailable,
         boolean statusAvailable,
         boolean reconciled,
+        String indexingStatus,
+        long indexingRevision,
+        int indexingAttempt,
         long expectedDocumentCount,
+        long legacyIndexedDocumentCount,
+        long publishedDocumentCount,
         long actualDocumentCount,
         int sourceCount,
         Map<String, Long> chunkKindCounts,
         Map<String, Long> visibilityCounts,
         List<SourceStatus> sources,
         String latestPublishedAt,
+        String failureCode,
+        String failureMessage,
+        String requestedAt,
+        String startedAt,
+        String completedAt,
+        String updatedAt,
         List<String> warnings
 ) {
 
@@ -33,9 +44,13 @@ public record ApiMetadataRagStatusResponse(
             String resourceType,
             boolean ragPublicationEnabled,
             boolean vectorStoreAvailable,
-            RagVectorStoreService.RagCorpusReleaseStatus status) {
+            RagVectorStoreService.RagCorpusReleaseStatus status,
+            IndexingStatus indexing) {
+        boolean indexingReady = "READY".equals(indexing.status())
+                && indexing.legacyIndexedDocumentCount() == status.expectedChunkCount()
+                && indexing.publishedDocumentCount() == status.expectedChunkCount();
         return new ApiMetadataRagStatusResponse(
-                "praxis.api-metadata-rag-status/v0.1",
+                "praxis.api-metadata-rag-status/v0.2",
                 tenantId,
                 environment,
                 serviceKey,
@@ -44,16 +59,41 @@ public record ApiMetadataRagStatusResponse(
                 ragPublicationEnabled,
                 vectorStoreAvailable,
                 status.available(),
-                status.reconciled(),
+                indexingReady && status.reconciled(),
+                indexing.status(),
+                indexing.revision(),
+                indexing.attempt(),
                 status.expectedChunkCount(),
+                indexing.legacyIndexedDocumentCount(),
+                indexing.publishedDocumentCount(),
                 status.documentCount(),
                 status.sourceCount(),
                 status.chunkKindCounts(),
                 status.visibilityCounts(),
                 status.sources().stream().map(SourceStatus::from).toList(),
                 status.latestPublishedAt(),
+                indexing.failureCode(),
+                indexing.failureMessage(),
+                indexing.requestedAt(),
+                indexing.startedAt(),
+                indexing.completedAt(),
+                indexing.updatedAt(),
                 status.warnings());
     }
+
+    public record IndexingStatus(
+            String status,
+            long revision,
+            int attempt,
+            long legacyIndexedDocumentCount,
+            long publishedDocumentCount,
+            String failureCode,
+            String failureMessage,
+            String requestedAt,
+            String startedAt,
+            String completedAt,
+            String updatedAt
+    ) { }
 
     public record SourceStatus(
             String sourceId,

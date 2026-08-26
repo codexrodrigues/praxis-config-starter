@@ -3,7 +3,6 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -31,16 +30,14 @@ import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Ingesta o catalogo operacional de APIs na fonte canonica {@code api_metadata} e sincroniza a
  * superficie derivada consumida pelo RAG.
  *
- * <p>Para cada endpoint recebido, o servico normaliza o payload, gera resumo para embedding,
- * persiste ou atualiza o registro estruturado e publica um {@link Document} correspondente no
- * vector store com metadados de tenant, ambiente e release.
+ * <p>Para cada endpoint recebido, o servico normaliza e persiste o snapshot estruturado em uma
+ * transacao curta. Embeddings e documentos RAG sao materializacoes derivadas executadas depois do
+ * commit pelo coordenador limitado de indexacao.
  */
 @Service
 @RequiredArgsConstructor
@@ -55,6 +52,8 @@ public class ApiMetadataIngestionService {
     private final ObjectMapper objectMapper;
     private final EmbeddingService embeddingService;
     private final RagVectorStoreService ragVectorStoreService;
+    private final ApiMetadataIndexingStateService indexingStateService;
+    private final ApiMetadataIndexingCoordinator indexingCoordinator;
     private static final Logger ingestLog = LoggerFactory.getLogger("api-metadata-ingest");
 
     @Value("${praxis.api-metadata.rag-publication.enabled:true}")
@@ -78,20 +77,11 @@ public class ApiMetadataIngestionService {
         String generatedAt = normalize(request.getGeneratedAt());
         String serviceKey = DEFAULT_SERVICE_KEY;
         List<ApiCatalogRequest.ApiEndpointEntry> endpoints = request.getEndpoints();
-        List<String> embeddingSummaries = endpoints.stream()
-                .map(ep -> buildSummary(
-                        ep.getPath(),
-                        ep.getMethod(),
-                        toCommaSeparated(ep.getTags()),
-                        ep.getSummary(),
-                        ep.getDescription(),
-                        ep.getOperationId(),
-                        ep))
-                .toList();
-        List<List<Float>> embeddings = embedCatalogBatch(endpoints, embeddingSummaries);
+        ApiMetadataIndexingScope scope = new ApiMetadataIndexingScope(
+                resolvedTenant, resolvedEnv, serviceKey, resolvedReleaseId);
+        long indexingRevision = indexingStateService.request(scope);
 
-        for (int endpointIndex = 0; endpointIndex < endpoints.size(); endpointIndex++) {
-            ApiCatalogRequest.ApiEndpointEntry ep = endpoints.get(endpointIndex);
+        for (ApiCatalogRequest.ApiEndpointEntry ep : endpoints) {
             try {
                 String path = ep.getPath();
                 String method = ep.getMethod();
@@ -106,7 +96,6 @@ public class ApiMetadataIngestionService {
                 String parameters = safeWrite(ep.getParameters());
                 String rawJson = safeWrite(ep);
 
-                String embeddingSummary = embeddingSummaries.get(endpointIndex);
                 ingestLog.info(
                         "Ingest start: method={} path={} tags={} summaryLen={} descLen={} reqSchemaLen={} resSchemaLen={} paramsLen={}",
                         method,
@@ -117,16 +106,6 @@ public class ApiMetadataIngestionService {
                         safeLen(requestSchema),
                         safeLen(responseSchema),
                         safeLen(parameters));
-                ingestLog.info("Embedding input size={} sample='{}'",
-                        safeLen(embeddingSummary),
-                        safeSnippet(embeddingSummary));
-                List<Float> embedding = embeddings.get(endpointIndex);
-                if (embedding == null || embedding.isEmpty()) {
-                    ingestLog.warn("Embedding empty for {} {}", method, path);
-                } else {
-                    ingestLog.info("Embedding size={} for {} {}", embedding.size(), method, path);
-                }
-
                 ApiMetadata meta = upsert(
                         resolvedTenant,
                         resolvedEnv,
@@ -144,14 +123,14 @@ public class ApiMetadataIngestionService {
                         responseSchema,
                         parameters,
                         rawJson,
-                        embedding);
+                        null);
 
                 log.info("Ingested api metadata: {} {}", meta.getMethod(), meta.getPath());
-                ingestLog.info("Ingest saved: id={} method={} path={} embeddingSize={}",
+                ingestLog.info("Ingest saved: id={} method={} path={} indexingRevision={}",
                         meta.getId(),
                         meta.getMethod(),
                         meta.getPath(),
-                        embedding != null ? embedding.size() : 0);
+                        indexingRevision);
 
             } catch (Exception e) {
                 String msg = "Error ingesting endpoint: " + ep.getMethod() + " " + ep.getPath();
@@ -160,46 +139,10 @@ public class ApiMetadataIngestionService {
                 throw new ConfigurationIngestionException(msg, e);
             }
         }
-        publishRagDocumentsAfterCommit(resolvedTenant, resolvedEnv, serviceKey, resolvedReleaseId);
-    }
-
-    private List<List<Float>> embedCatalogBatch(
-            List<ApiCatalogRequest.ApiEndpointEntry> endpoints,
-            List<String> embeddingSummaries) {
-        if (embeddingSummaries.size() == 1) {
-            return List.of(embeddingService.embed(embeddingSummaries.get(0)));
-        }
-        try {
-            List<List<Float>> embeddings = embeddingService.embedAll(embeddingSummaries);
-            if (embeddings == null || embeddings.size() != embeddingSummaries.size()) {
-                throw new IllegalStateException(
-                        "Embedding provider returned "
-                                + (embeddings == null ? 0 : embeddings.size())
-                                + " vector(s) for "
-                                + embeddingSummaries.size()
-                                + " API endpoint(s).");
-            }
-            return embeddings;
-        } catch (RuntimeException batchFailure) {
-            log.warn(
-                    "API catalog batch embedding failed for {} endpoint(s); retrying individually to identify the canonical endpoint failure: {}",
-                    embeddingSummaries.size(),
-                    batchFailure.getMessage());
-            List<List<Float>> embeddings = new ArrayList<>(embeddingSummaries.size());
-            for (int index = 0; index < embeddingSummaries.size(); index++) {
-                ApiCatalogRequest.ApiEndpointEntry endpoint = endpoints.get(index);
-                try {
-                    embeddings.add(embeddingService.embed(embeddingSummaries.get(index)));
-                } catch (RuntimeException endpointFailure) {
-                    String message = "Error ingesting endpoint: "
-                            + endpoint.getMethod()
-                            + " "
-                            + endpoint.getPath();
-                    throw new ConfigurationIngestionException(message, endpointFailure);
-                }
-            }
-            return embeddings;
-        }
+        long expectedCount = repository.countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                resolvedTenant, resolvedEnv, serviceKey, resolvedReleaseId);
+        indexingStateService.updateExpectedCount(scope, indexingRevision, expectedCount);
+        indexingCoordinator.scheduleAfterCommit(scope);
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -223,6 +166,34 @@ public class ApiMetadataIngestionService {
                 resolvedReleaseId,
                 RagResourceTypes.API_METADATA,
                 expectedDocumentCount);
+        long legacyIndexedDocumentCount = repository
+                .countByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndEmbeddingIsNotNull(
+                        resolvedTenant,
+                        resolvedEnv,
+                        resolvedServiceKey,
+                        resolvedReleaseId);
+        ApiMetadataRagStatusResponse.IndexingStatus indexingStatus = indexingStateService.snapshot(
+                        new ApiMetadataIndexingScope(
+                                resolvedTenant,
+                                resolvedEnv,
+                                resolvedServiceKey,
+                                resolvedReleaseId))
+                .map(snapshot -> new ApiMetadataRagStatusResponse.IndexingStatus(
+                        snapshot.status().name(),
+                        snapshot.revision(),
+                        snapshot.attempt(),
+                        snapshot.legacyIndexedDocumentCount(),
+                        snapshot.publishedDocumentCount(),
+                        snapshot.failureCode(),
+                        snapshot.failureMessage(),
+                        instantText(snapshot.requestedAt()),
+                        instantText(snapshot.startedAt()),
+                        instantText(snapshot.completedAt()),
+                        instantText(snapshot.updatedAt())))
+                .orElseGet(() -> legacyStatus(
+                        expectedDocumentCount,
+                        legacyIndexedDocumentCount,
+                        status));
         return ApiMetadataRagStatusResponse.from(
                 resolvedTenant,
                 resolvedEnv,
@@ -231,10 +202,34 @@ public class ApiMetadataIngestionService {
                 RagResourceTypes.API_METADATA,
                 apiMetadataRagPublicationEnabled,
                 ragVectorStoreService.isAvailable(),
-                status);
+                status,
+                indexingStatus);
     }
 
-    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    private ApiMetadataRagStatusResponse.IndexingStatus legacyStatus(
+            long expectedDocumentCount,
+            long legacyIndexedDocumentCount,
+            RagVectorStoreService.RagCorpusReleaseStatus ragStatus) {
+        boolean ready = legacyIndexedDocumentCount == expectedDocumentCount && ragStatus.reconciled();
+        return new ApiMetadataRagStatusResponse.IndexingStatus(
+                ready ? "READY" : "PENDING",
+                0L,
+                0,
+                legacyIndexedDocumentCount,
+                ragStatus.documentCount(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    private String instantText(Instant value) {
+        return value == null ? null : value.toString();
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public ApiMetadataRagReconcileResponse reconcileRag(
             String tenantId,
             String environment,
@@ -244,30 +239,130 @@ public class ApiMetadataIngestionService {
         String resolvedEnv = normalizeOrDefault(environment, DEFAULT_ENVIRONMENT);
         String resolvedServiceKey = normalizeOrDefault(serviceKey, DEFAULT_SERVICE_KEY);
         String resolvedReleaseId = normalizeOrDefault(releaseId, "v1");
-        PublicationOutcome outcome = publishCanonicalRagDocuments(
-                resolvedTenant,
-                resolvedEnv,
-                resolvedServiceKey,
-                resolvedReleaseId);
+        ApiMetadataIndexingScope scope = new ApiMetadataIndexingScope(
+                resolvedTenant, resolvedEnv, resolvedServiceKey, resolvedReleaseId);
+        long revision = indexingStateService.request(scope);
+        long expectedCount = repository.countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                resolvedTenant, resolvedEnv, resolvedServiceKey, resolvedReleaseId);
+        indexingStateService.updateExpectedCount(scope, revision, expectedCount);
+        indexingCoordinator.scheduleAfterCommit(scope);
         ApiMetadataRagStatusResponse status = ragStatus(
                 resolvedTenant,
                 resolvedEnv,
                 resolvedServiceKey,
                 resolvedReleaseId);
         return new ApiMetadataRagReconcileResponse(
-                "praxis.api-metadata-rag-reconcile/v0.1",
+                "praxis.api-metadata-rag-reconcile/v0.2",
                 resolvedTenant,
                 resolvedEnv,
                 resolvedServiceKey,
                 resolvedReleaseId,
                 apiMetadataRagPublicationEnabled,
                 ragVectorStoreService.isAvailable(),
-                outcome.expectedDocumentCount(),
-                outcome.publishedDocumentCount(),
+                expectedCount,
+                0,
                 status);
     }
 
-    // Helper to keep using existing logic for now, adapted for DTO
+    public void processIndexingClaim(ApiMetadataIndexingStateService.WorkClaim claim) {
+        ApiMetadataIndexingScope scope = claim.scope();
+        try {
+            if (!apiMetadataRagPublicationEnabled) {
+                indexingStateService.fail(
+                        scope,
+                        claim.revision(),
+                        "RAG_PUBLICATION_DISABLED",
+                        "API metadata RAG publication is disabled for this runtime.");
+                return;
+            }
+            if (!ragVectorStoreService.isAvailable()) {
+                indexingStateService.fail(
+                        scope,
+                        claim.revision(),
+                        "VECTOR_STORE_UNAVAILABLE",
+                        "API metadata vector store is unavailable; request reconcile after recovery.");
+                return;
+            }
+            List<ApiMetadata> metadataRows = repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                    scope.tenantId(), scope.environment(), scope.serviceKey(), scope.releaseId());
+            List<ApiMetadata> rowsWithoutLegacyEmbedding = metadataRows.stream()
+                    .filter(row -> row.getEmbedding() == null || row.getEmbedding().isEmpty())
+                    .toList();
+            Map<Long, List<Float>> embeddingsById = embedStoredMetadata(rowsWithoutLegacyEmbedding);
+            if (!indexingStateService.commitLegacyEmbeddings(scope, claim.revision(), embeddingsById)) {
+                return;
+            }
+            PublicationOutcome outcome = publishCanonicalRagDocuments(
+                    scope.tenantId(), scope.environment(), scope.serviceKey(), scope.releaseId());
+            indexingStateService.complete(scope, claim.revision(), outcome.publishedDocumentCount());
+        } catch (RuntimeException ex) {
+            indexingStateService.fail(
+                    scope,
+                    claim.revision(),
+                    indexingFailureCode(ex),
+                    "API metadata derived indexing failed; canonical metadata remains persisted.");
+            log.warn(
+                    "API metadata indexing failed for tenant={}, env={}, serviceKey={}, release={}, revision={}: {}",
+                    scope.tenantId(),
+                    scope.environment(),
+                    scope.serviceKey(),
+                    scope.releaseId(),
+                    claim.revision(),
+                    ex.getClass().getSimpleName());
+        }
+    }
+
+    private Map<Long, List<Float>> embedStoredMetadata(List<ApiMetadata> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return Map.of();
+        }
+        List<String> summaries = rows.stream().map(this::storedEmbeddingSummary).toList();
+        List<List<Float>> embeddings;
+        try {
+            if (summaries.size() == 1) {
+                embeddings = List.of(embeddingService.embed(summaries.get(0)));
+            } else {
+                embeddings = embeddingService.embedAll(summaries);
+            }
+        } catch (RuntimeException ex) {
+            throw new ConfigurationIngestionException("API metadata embedding provider failed.", ex);
+        }
+        if (embeddings == null || embeddings.size() != rows.size()) {
+            throw new ConfigurationIngestionException(
+                    "Embedding provider returned an incompatible API metadata batch.");
+        }
+        Map<Long, List<Float>> result = new LinkedHashMap<>();
+        for (int index = 0; index < rows.size(); index++) {
+            List<Float> embedding = embeddings.get(index);
+            if (embedding == null || embedding.isEmpty()) {
+                throw new ConfigurationIngestionException(
+                        "Embedding provider returned an empty API metadata vector.");
+            }
+            result.put(rows.get(index).getId(), embedding);
+        }
+        return result;
+    }
+
+    private String storedEmbeddingSummary(ApiMetadata metadata) {
+        ApiCatalogRequest.ApiEndpointEntry endpoint = readRawEndpoint(metadata.getRawJson());
+        return endpoint == null
+                ? buildStoredSummary(metadata)
+                : buildSummary(
+                        metadata.getPath(),
+                        metadata.getMethod(),
+                        metadata.getTags(),
+                        metadata.getSummary(),
+                        metadata.getDescription(),
+                        metadata.getOperationId(),
+                        endpoint);
+    }
+
+    private String indexingFailureCode(RuntimeException ex) {
+        return ex instanceof ConfigurationIngestionException
+                ? "EMBEDDING_FAILED"
+                : "RAG_PUBLICATION_FAILED";
+    }
+
     private String buildSummary(String path, String method, String tags, String summary, String description,
                                 String operationId, ApiCatalogRequest.ApiEndpointEntry ep) {
         StringJoiner joiner = new StringJoiner(" | ");
@@ -304,14 +399,6 @@ public class ApiMetadataIngestionService {
         return value == null ? 0 : value.length();
     }
 
-    private String safeSnippet(String value) {
-        if (value == null || value.isBlank()) {
-            return "";
-        }
-        int limit = Math.min(160, value.length());
-        return value.substring(0, limit).replaceAll("\\s+", " ").trim();
-    }
-    
     private String safeWrite(Object node) {
         if (node == null) return null;
         try {
@@ -320,10 +407,6 @@ public class ApiMetadataIngestionService {
             return node.toString();
         }
     }
-
-    // Keep existing private methods that deal with JsonNodes (summarizeFields, etc) as they are utilities
-    // but remove the old ingestCatalog and old buildSummary
-
 
     private String summarizeFields(JsonNode fieldsNode) {
         if (fieldsNode == null || !fieldsNode.isArray()) return "none";
@@ -459,56 +542,6 @@ public class ApiMetadataIngestionService {
                         method)
                 .stream()
                 .max(Comparator.comparing(ApiMetadata::getId, Comparator.nullsFirst(Comparator.naturalOrder())));
-    }
-
-    private void publishRagDocumentsAfterCommit(
-            String tenantId,
-            String environment,
-            String serviceKey,
-            String releaseId) {
-        if (!apiMetadataRagPublicationEnabled) {
-            log.debug(
-                    "API metadata RAG publication disabled for tenant={}, env={}, serviceKey={}, release={}",
-                    tenantId,
-                    environment,
-                    serviceKey,
-                    releaseId);
-            return;
-        }
-        Runnable task = () -> {
-            try {
-                PublicationOutcome outcome = publishCanonicalRagDocuments(
-                        tenantId,
-                        environment,
-                        serviceKey,
-                        releaseId);
-                log.info(
-                        "Published {} API metadata RAG document(s) for tenant={}, env={}, serviceKey={}, release={}",
-                        outcome.publishedDocumentCount(),
-                        tenantId,
-                        environment,
-                        serviceKey,
-                        releaseId);
-            } catch (RuntimeException ex) {
-                log.warn(
-                        "API metadata for tenant={}, env={}, serviceKey={}, release={} was persisted, but RAG publication failed: {}",
-                        tenantId,
-                        environment,
-                        serviceKey,
-                        releaseId,
-                        ex.getMessage());
-            }
-        };
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    task.run();
-                }
-            });
-        } else {
-            task.run();
-        }
     }
 
     private PublicationOutcome publishCanonicalRagDocuments(
