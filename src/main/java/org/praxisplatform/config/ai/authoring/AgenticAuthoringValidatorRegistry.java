@@ -319,7 +319,7 @@ public final class AgenticAuthoringValidatorRegistry {
             "chart-version-supported",
             "chart-type-supported",
             "chart-type-series-axis-compatible",
-            "pie-single-metric",
+            "category-slice-single-metric",
             "combo-minimum-series",
             "series-field-exists",
             "series-field-aggregable",
@@ -802,7 +802,7 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "chart-version-supported" -> validateChartVersionSupported(operationId, planOperation, config, failures);
                 case "chart-type-supported" -> validateChartTypeSupported(operationId, planOperation, config, failures);
                 case "chart-type-series-axis-compatible" -> validateChartTypeSeriesAxisCompatible(operationId, planOperation, config, failures);
-                case "pie-single-metric" -> validateChartPieSingleMetric(operationId, planOperation, config, failures);
+                case "category-slice-single-metric" -> validateChartCategorySliceSingleMetric(operationId, planOperation, config, failures);
                 case "combo-minimum-series" -> validateChartComboMinimumSeries(operationId, planOperation, config, failures);
                 case "series-field-exists", "axis-field-exists", "bound-fields-exist",
                      "query-context-fields-exist" ->
@@ -3496,26 +3496,27 @@ public final class AgenticAuthoringValidatorRegistry {
             JsonNode config,
             List<String> failures) {
         String kind = chartKind(planOperation, config);
-        if (Set.of("pie", "donut").contains(kind) && hasSecondaryAxis(chartMetricsCandidate(planOperation, config))) {
+        if (categorySliceChartKinds().contains(kind) && hasSecondaryAxis(chartMetricsCandidate(planOperation, config))) {
             failures.add("validator chart-type-series-axis-compatible failed for " + operationId
-                    + ": pie and donut charts cannot use secondary axes");
+                    + ": category slice charts cannot use secondary axes");
         }
         String seriesKind = text(planOperation.path("input"), "seriesKind");
-        if (!seriesKind.isBlank() && Set.of("pie", "donut", "scatter").contains(kind)) {
+        if (!seriesKind.isBlank() && (categorySliceChartKinds().contains(kind) || "scatter".equals(kind))) {
             failures.add("validator chart-type-series-axis-compatible failed for " + operationId
                     + ": seriesKind is not supported by " + kind);
         }
     }
 
-    private void validateChartPieSingleMetric(
+    private void validateChartCategorySliceSingleMetric(
             String operationId,
             JsonNode planOperation,
             JsonNode config,
             List<String> failures) {
         String kind = chartKind(planOperation, config);
         JsonNode metrics = chartMetricsCandidate(planOperation, config);
-        if (Set.of("pie", "donut").contains(kind) && metrics.isArray() && metrics.size() > 1) {
-            failures.add("validator pie-single-metric failed for " + operationId + ": pie and donut charts support one metric");
+        if (categorySliceChartKinds().contains(kind) && (!metrics.isArray() || metrics.size() != 1)) {
+            failures.add("validator category-slice-single-metric failed for " + operationId
+                    + ": pie, donut, funnel and pyramid charts require exactly one metric");
         }
     }
 
@@ -4136,7 +4137,11 @@ public final class AgenticAuthoringValidatorRegistry {
     }
 
     private Set<String> chartKinds() {
-        return Set.of("bar", "combo", "horizontal-bar", "line", "pie", "donut", "area", "stacked-bar", "stacked-area", "scatter");
+        return Set.of("bar", "combo", "horizontal-bar", "line", "pie", "donut", "funnel", "pyramid", "area", "stacked-bar", "stacked-area", "scatter");
+    }
+
+    private Set<String> categorySliceChartKinds() {
+        return Set.of("pie", "donut", "funnel", "pyramid");
     }
 
     private JsonNode chartMetricsCandidate(JsonNode planOperation, JsonNode config) {
