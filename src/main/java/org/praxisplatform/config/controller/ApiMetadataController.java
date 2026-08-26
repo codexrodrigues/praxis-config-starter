@@ -17,13 +17,16 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Endpoint de ingestÃ£o do catÃ¡logo de APIs publicado para busca e recuperaÃ§Ã£o contextual.
+ * Receives canonical API Catalog snapshots and exposes the lifecycle of their derived indexes.
  *
- * <p>
- * Esta superfÃ­cie recebe snapshots do catÃ¡logo em {@code /ingest} e os delega ao
- * {@link ApiMetadataIngestionService}, preservando headers de tenant e ambiente quando fornecidos.
- * O retorno {@code 202 Accepted} indica ingestÃ£o assÃ­ncrona ou desacoplada do ciclo HTTP.
- * </p>
+ * <p>{@code POST /ingest} validates and persists the supplied metadata before returning
+ * {@code 202 Accepted}. The response does not mean that embeddings or RAG documents are ready:
+ * callers must poll {@code GET /rag/status} for the same tenant, environment, service and release
+ * until it reports {@code READY}, or handle the sanitized diagnostic reported by {@code FAILED}.
+ * Rapid requests for the same scope are coalesced into the newest persisted generation.</p>
+ *
+ * <p>{@code POST /rag/reconcile} is also asynchronous. It requests an idempotent rebuild from the
+ * canonical {@code api_metadata} rows and returns the newly pending lifecycle snapshot.</p>
  */
 @RestController
 @RequestMapping("/api/praxis/config/api-catalog")

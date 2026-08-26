@@ -12,6 +12,7 @@ param(
     [int] $StartupTimeoutSec = 180,
     [int] $UiStartupTimeoutSec = 600,
     [int] $StreamProcessingTimeoutSeconds = 180,
+    [int] $ApiCatalogIndexingTimeoutSec = 900,
     [ValidateSet("smoke", "full")]
     [string] $ValidationMode = "smoke",
     [int] $PlaywrightTestTimeoutMs = 600000,
@@ -191,6 +192,9 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $env:TENANT_ID = "desenv"
         $env:ENVIRONMENT = "local"
         $env:RELEASE_ID = "v1"
+        $env:REQUEST_TIMEOUT_MS = "60000"
+        $env:INDEXING_TIMEOUT_MS = "$($ApiCatalogIndexingTimeoutSec * 1000)"
+        $env:STATUS_POLL_MS = "1000"
         if ($ValidationMode -eq "smoke") {
             $smokeCatalogPathPrefixes = @(
                 "/api/human-resources/funcionarios",
@@ -202,17 +206,16 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             )
             $env:API_CATALOG_PATH_PREFIXES = ($smokeCatalogPathPrefixes -join ",")
             $env:CHUNK_SIZE = "20"
-            $env:TIMEOUT_MS = "180000"
             Write-Phase "Smoke mode: API catalog upload scoped to $($smokeCatalogPathPrefixes.Count) human-resources path prefixes."
         } else {
             Remove-Item Env:\API_CATALOG_PATH_PREFIXES -ErrorAction SilentlyContinue
-            Remove-Item Env:\TIMEOUT_MS -ErrorAction SilentlyContinue
             $env:CHUNK_SIZE = "20"
         }
         $env:PAUSE_MS = "0"
+        Write-Phase "API catalog chunks must be accepted within 60 seconds per request; canonical indexing must reach READY within $ApiCatalogIndexingTimeoutSec seconds."
         & cmd.exe /c "npx.cmd ts-node --project tools/tsconfig.tools.json tools/ai-registry/upload-api-catalog.ts"
-        if ($LASTEXITCODE -ne 0) { throw "API catalog ingest failed with exit code $LASTEXITCODE." }
-        Write-Phase "API catalog upload completed."
+        if ($LASTEXITCODE -ne 0) { throw "API catalog upload or canonical indexing failed with exit code $LASTEXITCODE." }
+        Write-Phase "API catalog upload and canonical indexing reached READY."
     } finally {
         Pop-Location
     }

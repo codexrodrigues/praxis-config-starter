@@ -40,7 +40,7 @@ class ApiMetadataControllerTest {
     void shouldAcceptApiMetadataRagReconciliation() {
         ApiMetadataRagStatusResponse status = statusResponse(true);
         ApiMetadataRagReconcileResponse reconcile = new ApiMetadataRagReconcileResponse(
-                "praxis.api-metadata-rag-reconcile/v0.1",
+                "praxis.api-metadata-rag-reconcile/v0.2",
                 "tenant-a",
                 "prod",
                 "default",
@@ -63,7 +63,7 @@ class ApiMetadataControllerTest {
 
     private ApiMetadataRagStatusResponse statusResponse(boolean reconciled) {
         return new ApiMetadataRagStatusResponse(
-                "praxis.api-metadata-rag-status/v0.1",
+                "praxis.api-metadata-rag-status/v0.2",
                 "tenant-a",
                 "prod",
                 "default",
@@ -73,12 +73,23 @@ class ApiMetadataControllerTest {
                 true,
                 true,
                 reconciled,
+                reconciled ? "READY" : "PENDING",
+                1L,
                 1,
-                1,
+                1L,
+                1L,
+                1L,
+                1L,
                 1,
                 Map.of("summary", 1L),
                 Map.of("allow", 1L),
                 List.of(),
+                "2026-07-11T01:00:00Z",
+                null,
+                null,
+                "2026-07-11T00:00:00Z",
+                "2026-07-11T00:00:01Z",
+                "2026-07-11T01:00:00Z",
                 "2026-07-11T01:00:00Z",
                 List.of());
     }

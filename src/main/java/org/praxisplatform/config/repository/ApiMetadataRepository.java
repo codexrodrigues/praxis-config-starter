@@ -52,6 +52,12 @@ public interface ApiMetadataRepository extends JpaRepository<ApiMetadata, Long> 
             String serviceKey,
             String releaseId);
 
+    long countByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndEmbeddingIsNotNull(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId);
+
     @Query(value = """
         SELECT
             e.id,
@@ -66,7 +72,8 @@ public interface ApiMetadataRepository extends JpaRepository<ApiMetadata, Long> 
             e.parameters,
             (1 - (e.embedding <=> CAST(:vector AS vector))) as similarityScore
         FROM api_metadata e
-        WHERE (:method IS NULL OR :method = '' OR e.method ILIKE :method)
+        WHERE e.embedding IS NOT NULL
+          AND (:method IS NULL OR :method = '' OR e.method ILIKE :method)
           AND (
               :tags IS NULL OR :tags = '' OR NOT EXISTS (
                   SELECT 1
