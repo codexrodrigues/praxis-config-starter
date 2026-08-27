@@ -22,6 +22,7 @@ import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -70,6 +71,35 @@ class AgenticAuthoringTurnEngineTest {
     private Path tempDir;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void terminalPublicationGuaranteesActionsForStructuredClarification() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        CapturingSink sink = new CapturingSink();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("intentResolution", dashboardNeedsResourceClarificationIntent(List.of()));
+        payload.put("quickReplies", List.of());
+        payload.put("canApply", false);
+
+        AgenticAuthoringTurnEventAppendResult appended = ReflectionTestUtils.invokeMethod(
+                engine,
+                "appendTerminalResult",
+                sink,
+                payload);
+
+        assertThat(appended.appendedType("result")).isTrue();
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(0));
+        assertThat(result.path("quickReplies")).hasSize(2);
+        assertThat(result.path("quickReplies").path(0).path("id").asText())
+                .isEqualTo("retry-semantic-resolution");
+        assertThat(result.path("quickReplies").path(1).path("id").asText()).isEqualTo("revise");
+    }
 
     @Test
     void guaranteesReviewMeaningForApplicablePreviewWithoutReplacingNaturalCopy() {
