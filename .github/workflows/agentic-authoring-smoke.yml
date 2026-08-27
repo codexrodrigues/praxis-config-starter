@@ -237,7 +237,7 @@ jobs:
         run: |
           mvn -q versions:set "-DnewVersion=$env:METADATA_STARTER_VERSION" -DgenerateBackupPoms=false
           mvn -B -DskipTests install
-          git restore --source=HEAD -- pom.xml
+          git restore --source=HEAD --worktree -- .
 
       - name: Install praxis-config-starter locally
         shell: pwsh
@@ -245,7 +245,7 @@ jobs:
         run: |
           mvn -q versions:set "-DnewVersion=$env:STARTER_VERSION" -DgenerateBackupPoms=false
           mvn -B -DskipTests install
-          git restore --source=HEAD -- pom.xml
+          git restore --source=HEAD --worktree -- .
 
       - name: Package praxis-api-quickstart against local starter
         shell: pwsh
