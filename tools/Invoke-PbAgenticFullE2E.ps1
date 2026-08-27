@@ -8,6 +8,7 @@ param(
     [string] $EnvFile = ".env.openai.local.ps1",
     [string] $JavaHome = $env:JAVA_HOME,
     [string] $EmbeddingProvider = "",
+    [string] $ExpectedMetadataVersion = "",
     [int] $BackendPort = 8088,
     [int] $UiPort = 4003,
     [int] $StartupTimeoutSec = 180,
@@ -74,6 +75,9 @@ function Get-GitIdentity([string] $Root, [string] $Name) {
         throw "Cannot resolve immutable Git SHA for $Name at $Root."
     }
     $dirty = @(& git -C $Root status --porcelain 2>$null).Count -gt 0
+    if ($dirty) {
+        throw "$Name checkout must be clean so its immutable SHA fully identifies the exercised source."
+    }
     return [ordered]@{ name = $Name; sha = $sha; dirty = $dirty }
 }
 
@@ -84,16 +88,17 @@ function New-EphemeralStreamSecret {
     return [Convert]::ToBase64String($bytes)
 }
 
-function Get-QuickstartConfigDependencyVersion([string] $Path) {
+function Get-QuickstartDependencyVersion([string] $Path, [string] $ArtifactId) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $outer = [IO.Compression.ZipFile]::OpenRead($Path)
     try {
+        $escapedArtifactId = [regex]::Escape($ArtifactId)
         $starterEntry = $outer.Entries |
-            Where-Object { $_.FullName -match '^BOOT-INF/lib/praxis-config-starter-[^/]+\.jar$' } |
+            Where-Object { $_.FullName -match "^BOOT-INF/lib/$escapedArtifactId-[^/]+\.jar$" } |
             Select-Object -First 1
-        if ($null -eq $starterEntry) { throw "Quickstart jar does not contain praxis-config-starter under BOOT-INF/lib." }
-        $versionMatch = [regex]::Match($starterEntry.Name, '^praxis-config-starter-(?<version>.+)\.jar$')
-        if (-not $versionMatch.Success) { throw "Cannot resolve praxis-config-starter version from Quickstart jar." }
+        if ($null -eq $starterEntry) { throw "Quickstart jar does not contain $ArtifactId under BOOT-INF/lib." }
+        $versionMatch = [regex]::Match($starterEntry.Name, "^$escapedArtifactId-(?<version>.+)\.jar$")
+        if (-not $versionMatch.Success) { throw "Cannot resolve $ArtifactId version from Quickstart jar." }
         return $versionMatch.Groups['version'].Value.Trim()
     } finally { $outer.Dispose() }
 }
@@ -485,10 +490,19 @@ if ([string]::IsNullOrWhiteSpace($JarPath)) {
 
 [xml] $starterPom = Get-Content -LiteralPath (Join-Path $starterRoot "pom.xml") -Raw
 $expectedStarterVersion = [string] $starterPom.project.version
-$jarStarterVersion = Get-QuickstartConfigDependencyVersion $JarPath
+$jarStarterVersion = Get-QuickstartDependencyVersion $JarPath "praxis-config-starter"
+$jarMetadataVersion = Get-QuickstartDependencyVersion $JarPath "praxis-metadata-starter"
 if ($jarStarterVersion -ne $expectedStarterVersion) {
     throw "Quickstart jar uses praxis-config-starter $jarStarterVersion, expected $expectedStarterVersion. Repackage it against the current starter."
 }
+if (-not [string]::IsNullOrWhiteSpace($ExpectedMetadataVersion) -and $jarMetadataVersion -ne $ExpectedMetadataVersion) {
+    throw "Quickstart jar uses praxis-metadata-starter $jarMetadataVersion, expected $ExpectedMetadataVersion. Repackage it against the declared Metadata version."
+}
+
+[xml] $quickstartPom = Get-Content -LiteralPath (Join-Path $QuickstartRoot "pom.xml") -Raw
+$quickstartVersion = [string] $quickstartPom.project.version
+$uiPackage = Get-Content -LiteralPath (Join-Path $UiRoot "package.json") -Raw | ConvertFrom-Json
+$uiWorkspaceVersion = [string] $uiPackage.version
 
 $gitIdentities = @(
     Get-GitIdentity $starterRoot "praxis-config-starter"
@@ -791,6 +805,9 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         versions = [ordered]@{
             configStarter = $expectedStarterVersion
             quickstartConfigDependency = $jarStarterVersion
+            metadataStarterDependency = $jarMetadataVersion
+            quickstart = $quickstartVersion
+            angularWorkspace = $uiWorkspaceVersion
             java = 21
             node = $nodeVersion
             playwright = $playwrightVersion

@@ -41,7 +41,7 @@ Esse runner:
 - exige que o teste negativo de interceptacao critica passe e deriva dele `criticalEndpointMocks=0`; o artifact registra tentativas e retries realmente observados;
 - desabilita trace, video e screenshot na lane live para que a evidencia publicavel permaneça estruturada e sanitizada;
 - valida e copia para `agentic-authoring-publication` apenas o resultado production-like, a auditoria de source e o resumo HTTP/SSE; nenhum log, payload, relatorio HTML ou JSON bruto do Playwright entra no artifact remoto;
-- gera segredo de stream efemero, registra SHAs/versoes sem segredos e comprova o teardown dos listeners.
+- gera segredo de stream efemero, exige checkouts limpos, registra SHAs e versoes efetivamente empacotadas sem segredos e comprova o teardown dos listeners.
 
 Testes deterministas com interceptacao ficam na config
 `praxis-page-builder-agentic-mocked.playwright.config.ts`. Seus resultados nao
@@ -196,7 +196,7 @@ Use este checklist sempre que rodar um fluxo impactado:
 - [ ] o resultado veio do backend e nao de mock local
 - [ ] o artifact declara `productionLike=true` e `criticalEndpointMocks=0`
 - [ ] capabilities declaram `source=registry` e `degraded=false`
-- [ ] os SHAs efetivos de Config, Metadata, Quickstart e Angular foram registrados
+- [ ] os SHAs efetivos de Config, Metadata, Quickstart e Angular foram registrados, todos os checkouts estavam limpos e as versoes Metadata/Config embutidas no JAR foram comprovadas
 - [ ] nao restaram listeners nas portas `8088` e `4003`
 - [ ] o preview/aplicacao refletiu o pedido feito
 - [ ] `cancel` e `probe` continuaram funcionando se o fluxo mexeu em stream

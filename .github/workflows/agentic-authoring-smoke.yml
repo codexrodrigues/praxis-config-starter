@@ -237,6 +237,7 @@ jobs:
         run: |
           mvn -q versions:set "-DnewVersion=$env:METADATA_STARTER_VERSION" -DgenerateBackupPoms=false
           mvn -B -DskipTests install
+          git restore --source=HEAD -- pom.xml
 
       - name: Install praxis-config-starter locally
         shell: pwsh
@@ -244,6 +245,7 @@ jobs:
         run: |
           mvn -q versions:set "-DnewVersion=$env:STARTER_VERSION" -DgenerateBackupPoms=false
           mvn -B -DskipTests install
+          git restore --source=HEAD -- pom.xml
 
       - name: Package praxis-api-quickstart against local starter
         shell: pwsh
@@ -312,6 +314,7 @@ jobs:
             -JavaHome "$env:JAVA_HOME" `
             -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
             -MetadataRoot "$env:GITHUB_WORKSPACE\praxis-metadata-starter" `
+            -ExpectedMetadataVersion "$env:METADATA_STARTER_VERSION" `
             -UiRoot "$env:GITHUB_WORKSPACE\praxis-ui-angular" `
             -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
             -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}') `
