@@ -986,9 +986,10 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
 
     @Test
     void keepsAmbiguousConflictingSubsetsInsideTheCompactTargetAsAClarification() throws Exception {
+        ArgumentCaptor<AiJsonSchema> schemaCaptor = ArgumentCaptor.forClass(AiJsonSchema.class);
         when(providerManagementService.generateJson(
                 any(),
-                any(AiJsonSchema.class),
+                schemaCaptor.capture(),
                 any(AiCallConfig.class),
                 eq("tenant"),
                 eq("user"),
@@ -1003,6 +1004,26 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                   "requiresGovernedAuthoring": false,
                   "assistantMessage": "Preciso confirmar como separar os dois conjuntos.",
                   "clarificationQuestions": ["Você quer duas visualizações separadas, uma para cada status?"],
+                  "quickReplies": [
+                    {
+                      "id": "separate-status-views",
+                      "kind": "confirm",
+                      "label": "Separar visualizações",
+                      "prompt": "Crie duas visualizações separadas, uma para cada status.",
+                      "description": "Mantém os conjuntos separados.",
+                      "icon": "splitscreen",
+                      "tone": "primary"
+                    },
+                    {
+                      "id": "revise-status-request",
+                      "kind": "revise",
+                      "label": "Ajustar pedido",
+                      "prompt": "Quero ajustar como os status devem ser comparados.",
+                      "description": "Permite esclarecer a comparação.",
+                      "icon": "tune",
+                      "tone": "neutral"
+                    }
+                  ],
                   "warnings": []
                 }
                 """));
@@ -1046,6 +1067,14 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(result.selectedResourcePath()).isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.clarificationQuestions())
                 .containsExactly("Você quer duas visualizações separadas, uma para cada status?");
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::id)
+                .containsExactly("separate-status-views", "revise-status-request");
+        JsonNode compactSchema = objectMapper.readTree(schemaCaptor.getValue().jsonSchema());
+        assertThat(compactSchema.path("properties").path("quickReplies").path("minItems").asInt())
+                .isEqualTo(2);
+        assertThat(compactSchema.path("properties").path("quickReplies").path("maxItems").asInt())
+                .isEqualTo(4);
         assertThat(result.warnings())
                 .contains("llm-compact-targeted-component-intent-used")
                 .contains("llm-compact-targeted-component-clarification-used");

@@ -1345,6 +1345,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 false for local component presentation/configuration. Do not invent a resource, capability or field.
                 Keep assistantMessage short and natural in the user's language. If the scope does not match, use
                 changeKind="unknown", operationKind="unknown", artifactKind="unknown" and an empty message.
+                For a scoped clarification, author 2 to 4 quickReplies for this exact question. Their labels and
+                prompts are presentation only; the governed backend will enrich any canonical continuation context.
 
                 Compact governed context:
                 %s
@@ -1375,6 +1377,30 @@ public class AgenticAuthoringLlmIntentResolverService {
         nullableString(properties, "assistantMessage");
         arrayOfStrings(properties, "clarificationQuestions");
         arrayOfStrings(properties, "warnings");
+        ObjectNode reply = objectMapper.createObjectNode();
+        reply.put("type", "object");
+        ObjectNode replyProperties = reply.putObject("properties");
+        replyProperties.putObject("id").put("type", "string");
+        replyProperties.putObject("kind").put("type", "string");
+        replyProperties.putObject("label").put("type", "string");
+        replyProperties.putObject("prompt").put("type", "string");
+        nullableString(replyProperties, "description");
+        nullableString(replyProperties, "icon");
+        nullableString(replyProperties, "tone");
+        reply.putArray("required")
+                .add("id")
+                .add("kind")
+                .add("label")
+                .add("prompt")
+                .add("description")
+                .add("icon")
+                .add("tone");
+        reply.put("additionalProperties", false);
+        properties.putObject("quickReplies")
+                .put("type", "array")
+                .put("minItems", 2)
+                .put("maxItems", 4)
+                .set("items", reply);
         root.putArray("required")
                 .add("matchesSelectedComponentScope")
                 .add("semanticIntentClass")
@@ -1385,7 +1411,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .add("requiresGovernedAuthoring")
                 .add("assistantMessage")
                 .add("clarificationQuestions")
-                .add("warnings");
+                .add("warnings")
+                .add("quickReplies");
         root.put("additionalProperties", false);
         return root.toString();
     }
@@ -1405,6 +1432,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         String artifactKind = nullableText(result, "artifactKind");
         String changeKind = nullableText(result, "changeKind");
         List<String> clarificationQuestions = strings(result.path("clarificationQuestions"));
+        List<AgenticAuthoringQuickReply> quickReplies = quickReplies(result.path("quickReplies"));
         List<String> warnings = new ArrayList<>(strings(result.path("warnings")));
         if (!warnings.contains("llm-compact-targeted-component-intent-used")) {
             warnings.add("llm-compact-targeted-component-intent-used");
@@ -1424,7 +1452,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                     null,
                     valueOrDefault(nullableText(result, "followUpKind"), "refinement"),
                     conciseAssistantMessage(nullableText(result, "assistantMessage")),
-                    List.of(),
+                    quickReplies,
                     clarificationQuestions,
                     List.copyOf(warnings),
                     null,
