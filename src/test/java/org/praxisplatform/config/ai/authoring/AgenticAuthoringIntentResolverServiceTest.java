@@ -310,6 +310,21 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(promoted).isTrue();
     }
 
+    @Test
+    void recoversGovernedRevisionRepliesWhenClarificationHasNoPresentationOptions() {
+        @SuppressWarnings("unchecked")
+        List<AgenticAuthoringQuickReply> replies = ReflectionTestUtils.invokeMethod(
+                service,
+                "ensureClarificationQuickReplies",
+                "Crie uma tela para funcionários",
+                List.of("Você quer uma tabela ou um formulário?"),
+                List.of());
+
+        assertThat(replies)
+                .extracting(AgenticAuthoringQuickReply::id)
+                .containsExactly("revise", "cancel");
+    }
+
     private AgenticAuthoringIntentResolverService tableRefinementService(
             String operationId,
             String resourcePath) {
