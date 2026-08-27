@@ -643,7 +643,12 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $env:CONFIG_ORIGIN = $uiUrl
         $env:TENANT_ID = "desenv"
         $env:ENVIRONMENT = "local"
-        $env:RELEASE_ID = "v1"
+        $apiCatalogReleaseId = if ($ValidationMode -eq "smoke") {
+            "e2e-page-builder-smoke-v1"
+        } else {
+            "v1"
+        }
+        $env:RELEASE_ID = $apiCatalogReleaseId
         $env:REQUEST_TIMEOUT_MS = "60000"
         $env:INDEXING_TIMEOUT_MS = "$($ApiCatalogIndexingTimeoutSec * 1000)"
         $env:STATUS_POLL_MS = "1000"
@@ -730,6 +735,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
     try {
         Write-Phase "Running Playwright Page Builder validation. mode=$ValidationMode retries=$Retries timeoutMs=$PlaywrightTestTimeoutMs."
         $env:PLAYWRIGHT_BASE_URL = $uiUrl
+        $env:PRAXIS_E2E_API_CATALOG_RELEASE_ID = $apiCatalogReleaseId
         $env:PRAXIS_E2E_AGENTIC_VALIDATION_MODE = $ValidationMode
         $env:PRAXIS_E2E_AGENTIC_EXECUTION_LANE = "live"
         $env:PRAXIS_E2E_JSON_REPORT_PATH = $playwrightReportPath
