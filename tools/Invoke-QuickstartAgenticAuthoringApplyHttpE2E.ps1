@@ -7,6 +7,7 @@ param(
     [string] $TenantId = "agentic-authoring-e2e",
     [string] $UserId = "codex-local",
     [string] $Environment = "local",
+    [int] $StreamProcessingTimeoutSeconds = 180,
     [string] $ComponentType = "praxis-dynamic-page",
     [string] $ComponentId = "agentic-authoring:e2e:operations-incident-form",
     [string] $UserPrompt = "Crie um formulario didatico so com os campos realmente necessarios para cadastrar incidentes de missao operacionais. Use o recurso canonico confirmado POST /api/operations/incidentes como fonte e gere a pre-visualizacao aplicavel."
@@ -142,18 +143,48 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($start.streamAccessToken)) {
         $streamQuery = "?accessToken=$([System.Uri]::EscapeDataString($start.streamAccessToken))"
     }
-    $streamContent = ""
-    try {
-        $streamResponse = Invoke-WebRequest `
-            -Method Get `
-            -Uri "$base/api/praxis/config/ai/authoring/turn/stream/$($start.streamId)$streamQuery" `
-            -Headers $headers `
-            -TimeoutSec 180
-        $streamContent = $streamResponse.Content
-    } catch {
-        $streamContent = Read-ErrorBody $_
-    }
-    $events = @(ConvertFrom-SseContent $streamContent)
+    $events = @()
+    $seenEventIds = [System.Collections.Generic.HashSet[string]]::new()
+    $lastEventId = $null
+    $connectionAttempts = 0
+    $streamDeadline = (Get-Date).AddSeconds([Math]::Max(30, $StreamProcessingTimeoutSeconds))
+    do {
+        $connectionAttempts++
+        $remainingSeconds = [Math]::Max(1, [int][Math]::Ceiling(($streamDeadline - (Get-Date)).TotalSeconds))
+        $connectionTimeoutSeconds = [Math]::Min(180, $remainingSeconds)
+        $replayQuery = $streamQuery
+        if (-not [string]::IsNullOrWhiteSpace($lastEventId)) {
+            $joiner = if ($replayQuery.Contains("?")) { "&" } else { "?" }
+            $replayQuery += "$joiner" + "lastEventId=$([System.Uri]::EscapeDataString($lastEventId))"
+        }
+        $streamContent = ""
+        try {
+            $streamResponse = Invoke-WebRequest `
+                -Method Get `
+                -Uri "$base/api/praxis/config/ai/authoring/turn/stream/$($start.streamId)$replayQuery" `
+                -Headers $headers `
+                -TimeoutSec $connectionTimeoutSeconds
+            $streamContent = $streamResponse.Content
+        } catch {
+            $streamContent = Read-ErrorBody $_
+        }
+        foreach ($event in @(ConvertFrom-SseContent $streamContent)) {
+            $eventId = "$($event.eventId)".Trim()
+            if ([string]::IsNullOrWhiteSpace($eventId) -or $seenEventIds.Add($eventId)) {
+                $events += $event
+            }
+            if (-not [string]::IsNullOrWhiteSpace($eventId)) {
+                $lastEventId = $eventId
+            }
+        }
+        $terminal = @($events | Where-Object {
+            "$($_.type)".ToLowerInvariant() -in @("result", "error", "cancelled")
+        } | Select-Object -Last 1)[0]
+        if ($null -ne $terminal) {
+            break
+        }
+    } while ((Get-Date) -lt $streamDeadline)
+
     $artifactDir = Join-Path $root "target\agentic-authoring\apply-http-e2e"
     New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
     $events |
@@ -165,7 +196,9 @@ try {
     }
     $terminal = @($events | Where-Object { "$($_.type)".ToLowerInvariant() -eq "result" } | Select-Object -Last 1)[0]
     if ($null -eq $terminal) {
-        throw "Authoring turn did not produce a terminal result event."
+        $eventTypes = @($events | ForEach-Object { "$($_.type)" } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+        $lastEvent = @($events | Select-Object -Last 1)[0]
+        throw "Authoring turn did not produce a terminal result event within $StreamProcessingTimeoutSeconds seconds. connections=$connectionAttempts events=$($events.Count) types=$($eventTypes -join ',') lastType=$($lastEvent.type) lastSeq=$($lastEvent.seq)"
     }
     $terminal |
         ConvertTo-Json -Depth 40 |
