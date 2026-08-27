@@ -694,7 +694,15 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         } `
         -TimeoutSec 90
     if ($capabilities.diagnostics.source -ne "registry" -or $capabilities.diagnostics.degraded -ne $false) {
-        throw "Component capabilities must be registry-backed and non-degraded in the production-like gate."
+        $capabilityDiagnostics = [ordered]@{
+            source = [string] $capabilities.diagnostics.source
+            degraded = [bool] $capabilities.diagnostics.degraded
+            degradationReason = [string] $capabilities.diagnostics.degradationReason
+            lastSuccessfulRegistryLoadAt = [string] $capabilities.diagnostics.lastSuccessfulRegistryLoadAt
+            catalogCount = @($capabilities.catalogs).Count
+        }
+        $sanitizedCapabilityDiagnostics = $capabilityDiagnostics | ConvertTo-Json -Compress
+        throw "Component capabilities must be registry-backed and non-degraded in the production-like gate. SanitizedDiagnostics=$sanitizedCapabilityDiagnostics"
     }
     $chartCatalog = @($capabilities.catalogs | Where-Object { $_.componentId -eq "praxis-chart" }) | Select-Object -First 1
     $chartCapabilityIds = @($chartCatalog.capabilities | ForEach-Object { $_.id })
