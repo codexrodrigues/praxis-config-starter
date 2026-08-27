@@ -7,7 +7,7 @@ param(
     [string] $TenantId = "agentic-authoring-e2e",
     [string] $UserId = "codex-local",
     [string] $Environment = "local",
-    [string] $UserPrompt = "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras"
+    [string] $UserPrompt = "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras. Use a fonte canonica /api/procurement/suppliers."
 )
 
 $ErrorActionPreference = "Stop"

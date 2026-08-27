@@ -50,10 +50,14 @@ $headers = @{
 
 $body = @{
     userPrompt = $UserPrompt
+    targetApp = "praxis-ui-angular"
+    targetComponentId = "praxis-dynamic-page-builder"
+    currentRoute = "/page-builder-ia"
+    currentPage = @{}
     provider = $Provider
     model = $model
     apiKey = $apiKey
-} | ConvertTo-Json -Compress
+} | ConvertTo-Json -Compress -Depth 8
 
 $artifactDir = Join-Path $root "target/agentic-authoring/minimal-form-plan-http-e2e"
 New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
