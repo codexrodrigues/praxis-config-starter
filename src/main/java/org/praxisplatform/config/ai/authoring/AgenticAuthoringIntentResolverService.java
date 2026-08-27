@@ -1319,9 +1319,11 @@ public class AgenticAuthoringIntentResolverService {
         if (shouldHideTechnicalAddresses(request, operationKind, artifactKind, llmRequiresGovernedAuthoring)) {
             quickReplies = sanitizeQuickReplies(quickReplies, selectedCandidate, candidates);
         }
-        boolean clarificationQuickRepliesRecovered = !questions.isEmpty() && quickReplies.isEmpty();
+        boolean clarificationRequired = !questions.isEmpty()
+                || gate != null && "clarification_required".equals(gate.status());
+        boolean clarificationQuickRepliesRecovered = clarificationRequired && quickReplies.isEmpty();
         if (clarificationQuickRepliesRecovered) {
-            quickReplies = ensureClarificationQuickReplies(effectivePrompt, questions, quickReplies);
+            quickReplies = ensureClarificationQuickReplies(effectivePrompt, clarificationRequired, quickReplies);
         }
         boolean governedDeterministicResolution = isGovernedDeterministicResolution(
                 deterministicFallbackApplied,
@@ -9219,9 +9221,9 @@ public class AgenticAuthoringIntentResolverService {
 
     private List<AgenticAuthoringQuickReply> ensureClarificationQuickReplies(
             String effectivePrompt,
-            List<String> questions,
+            boolean clarificationRequired,
             List<AgenticAuthoringQuickReply> quickReplies) {
-        if (questions == null || questions.isEmpty() || quickReplies != null && !quickReplies.isEmpty()) {
+        if (!clarificationRequired || quickReplies != null && !quickReplies.isEmpty()) {
             return quickReplies == null ? List.of() : quickReplies;
         }
         return revisionQuickReplies(effectivePrompt);

@@ -317,7 +317,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 service,
                 "ensureClarificationQuickReplies",
                 "Crie uma tela para funcionários",
-                List.of("Você quer uma tabela ou um formulário?"),
+                true,
                 List.of());
 
         assertThat(replies)
