@@ -79,6 +79,81 @@ class ApiMetadataIngestionServiceTest {
     }
 
     @Test
+    void shouldPreserveEmbeddingAndSkipDerivedIndexingForMateriallyIdenticalEndpoint() throws Exception {
+        ApiCatalogRequest request = request("release-1", "/api/users", "GET");
+        request.setGeneratedAt("2026-08-27T12:00:00Z");
+        ApiMetadata existing = metadata(41L, "/api/users", "GET", List.of(0.1f, 0.2f));
+        existing.setGeneratedAt("2026-08-26T12:00:00Z");
+        existing.setRawJson(new ObjectMapper().writeValueAsString(request.getEndpoints().get(0)));
+        ApiMetadataIndexingScope scope = new ApiMetadataIndexingScope(
+                "tenant-a", "prod", "default", "release-1");
+        when(repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                "tenant-a", "prod", "default", "release-1", "/api/users", "GET"))
+                .thenReturn(Optional.of(existing));
+        when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(indexingStateService.snapshot(scope)).thenReturn(Optional.of(indexingState(ApiMetadataIndexingStatus.READY)));
+
+        service.ingestCatalog(request, "tenant-a", "prod");
+
+        ArgumentCaptor<ApiMetadata> saved = ArgumentCaptor.forClass(ApiMetadata.class);
+        verify(repository).save(saved.capture());
+        assertThat(saved.getValue().getEmbedding()).containsExactly(0.1f, 0.2f);
+        assertThat(saved.getValue().getGeneratedAt()).isEqualTo("2026-08-27T12:00:00Z");
+        verify(indexingStateService, never()).request(any());
+        verify(indexingStateService, never()).updateExpectedCount(
+                any(), org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
+        verify(indexingCoordinator, never()).scheduleAfterCommit(any());
+        verify(repository, never()).countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void shouldScheduleRecoveryForIdenticalEndpointWhenDerivedLifecycleFailed() throws Exception {
+        ApiCatalogRequest request = request("release-1", "/api/users", "GET");
+        ApiMetadata existing = metadata(41L, "/api/users", "GET", List.of(0.1f, 0.2f));
+        existing.setRawJson(new ObjectMapper().writeValueAsString(request.getEndpoints().get(0)));
+        ApiMetadataIndexingScope scope = new ApiMetadataIndexingScope(
+                "tenant-a", "prod", "default", "release-1");
+        when(repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                "tenant-a", "prod", "default", "release-1", "/api/users", "GET"))
+                .thenReturn(Optional.of(existing));
+        when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(indexingStateService.snapshot(scope)).thenReturn(Optional.of(indexingState(ApiMetadataIndexingStatus.FAILED)));
+        when(indexingStateService.request(scope)).thenReturn(9L);
+        when(repository.countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant-a", "prod", "default", "release-1")).thenReturn(1L);
+
+        service.ingestCatalog(request, "tenant-a", "prod");
+
+        assertThat(existing.getEmbedding()).containsExactly(0.1f, 0.2f);
+        verify(indexingStateService).updateExpectedCount(scope, 9L, 1L);
+        verify(indexingCoordinator).scheduleAfterCommit(scope);
+    }
+
+    @Test
+    void shouldInvalidateEmbeddingAndScheduleIndexingForMaterialChange() throws Exception {
+        ApiCatalogRequest request = request("release-1", "/api/users", "GET");
+        ApiMetadata existing = metadata(41L, "/api/users", "GET", List.of(0.1f, 0.2f));
+        existing.setSummary("Old summary");
+        existing.setRawJson(new ObjectMapper().writeValueAsString(request.getEndpoints().get(0)));
+        ApiMetadataIndexingScope scope = new ApiMetadataIndexingScope(
+                "tenant-a", "prod", "default", "release-1");
+        when(repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                "tenant-a", "prod", "default", "release-1", "/api/users", "GET"))
+                .thenReturn(Optional.of(existing));
+        when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(indexingStateService.request(scope)).thenReturn(8L);
+        when(repository.countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant-a", "prod", "default", "release-1")).thenReturn(1L);
+
+        service.ingestCatalog(request, "tenant-a", "prod");
+
+        assertThat(existing.getEmbedding()).isNull();
+        verify(indexingStateService).updateExpectedCount(scope, 8L, 1L);
+        verify(indexingCoordinator).scheduleAfterCommit(scope);
+    }
+
+    @Test
     void shouldMaterializeLegacyEmbeddingAndCanonicalRagOutsideIngestionTransaction() {
         ApiMetadata row = metadata(41L, "/api/users", "GET", null);
         ApiMetadataIndexingScope scope = new ApiMetadataIndexingScope(
@@ -298,5 +373,22 @@ class ApiMetadataIngestionServiceTest {
         row.setRawJson("{\"path\":\"/api/users\",\"method\":\"GET\",\"summary\":\"List users\"}");
         row.setEmbedding(embedding);
         return row;
+    }
+
+    private ApiMetadataIndexingStateService.StateSnapshot indexingState(ApiMetadataIndexingStatus status) {
+        Instant now = Instant.parse("2026-08-27T12:00:00Z");
+        return new ApiMetadataIndexingStateService.StateSnapshot(
+                status,
+                7L,
+                1,
+                1L,
+                1L,
+                1L,
+                status == ApiMetadataIndexingStatus.FAILED ? "EMBEDDING_FAILED" : null,
+                status == ApiMetadataIndexingStatus.FAILED ? "Sanitized failure" : null,
+                now,
+                now,
+                now,
+                now);
     }
 }
