@@ -12454,6 +12454,13 @@ class AgenticAuthoringTurnEngineTest {
                 .isTrue();
         assertThat(result.path("decisionDiagnostics").path("secondInferenceSkipped").asBoolean())
                 .isTrue();
+        assertThat(result.path("quickReplies")).hasSize(2);
+        assertThat(result.path("quickReplies").path(0).path("id").asText())
+                .isEqualTo("retry-semantic-resolution");
+        assertThat(result.path("quickReplies").path(1).path("id").asText())
+                .isEqualTo("revise");
+        assertThat(result.path("quickReplies").path(0).path("contextHints").path("canonicalAction").asText())
+                .isEqualTo("retry_semantic_resolution");
     }
 
     @Test
