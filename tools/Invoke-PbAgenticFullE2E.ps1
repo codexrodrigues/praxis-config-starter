@@ -17,7 +17,8 @@ param(
     [ValidateSet("smoke", "full")]
     [string] $ValidationMode = "smoke",
     [int] $PlaywrightTestTimeoutMs = 0,
-    [int] $Retries = -1
+    [int] $Retries = -1,
+    [switch] $ValidateEvidenceParsersOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -133,7 +134,7 @@ function Get-PlaywrightSummaryFromReport([object] $Report) {
     return [ordered]@{
         discovered = $specs.Count
         executed = $expected + $unexpected + $flaky
-        passed = $expected
+        passed = $expected + $flaky
         skipped = $skipped
         failed = $unexpected
         flaky = $flaky
@@ -145,9 +146,68 @@ function Get-PlaywrightSummaryFromReport([object] $Report) {
 }
 
 function Get-PlaywrightSpecs([object[]] $Suites) {
+    $pending = [System.Collections.Queue]::new()
     foreach ($suite in @($Suites)) {
+        if ($null -ne $suite) { $pending.Enqueue($suite) }
+    }
+    while ($pending.Count -gt 0) {
+        $suite = $pending.Dequeue()
         foreach ($spec in @($suite.specs)) { $spec }
-        Get-PlaywrightSpecs @($suite.suites)
+        foreach ($childSuite in @($suite.suites)) {
+            if ($null -ne $childSuite) { $pending.Enqueue($childSuite) }
+        }
+    }
+}
+
+function Assert-PlaywrightSummaryParserFixture {
+    $fixture = [pscustomobject]@{
+        stats = [pscustomobject]@{
+            expected = 1
+            skipped = 1
+            unexpected = 0
+            flaky = 1
+            duration = 123
+        }
+        suites = @(
+            [pscustomobject]@{
+                specs = @(
+                    [pscustomobject]@{
+                        title = "expected"
+                        tests = @([pscustomobject]@{
+                            status = "expected"
+                            results = @([pscustomobject]@{ retry = 0 })
+                        })
+                    }
+                )
+                suites = @(
+                    [pscustomobject]@{
+                        specs = @(
+                            [pscustomobject]@{
+                                title = "flaky"
+                                tests = @([pscustomobject]@{
+                                    status = "flaky"
+                                    results = @(
+                                        [pscustomobject]@{ retry = 0 },
+                                        [pscustomobject]@{ retry = 1 }
+                                    )
+                                })
+                            },
+                            [pscustomobject]@{
+                                title = "skipped"
+                                tests = @([pscustomobject]@{ status = "skipped"; results = @() })
+                            }
+                        )
+                        suites = $null
+                    }
+                )
+            }
+        )
+    }
+    $summary = Get-PlaywrightSummaryFromReport $fixture
+    if ($summary.discovered -ne 3 -or $summary.executed -ne 2 -or $summary.passed -ne 2 -or
+        $summary.skipped -ne 1 -or $summary.failed -ne 0 -or $summary.flaky -ne 1 -or
+        $summary.attempts -ne 3 -or $summary.retryAttempts -ne 1) {
+        throw "Playwright summary parser fixture diverged from the expected nested/flaky result."
     }
 }
 
@@ -340,6 +400,12 @@ function Invoke-DomainCatalogIngest {
         source = "/schemas/domain"
         ingested = $true
     }
+}
+
+if ($ValidateEvidenceParsersOnly.IsPresent) {
+    Assert-PlaywrightSummaryParserFixture
+    Write-Output "Invoke-PbAgenticFullE2E: Playwright summary parser fixture passed."
+    exit 0
 }
 
 $starterRoot = Split-Path -Parent $PSScriptRoot

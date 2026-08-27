@@ -138,7 +138,9 @@ jobs:
       - name: Validate sanitized evidence exporter
         shell: pwsh
         working-directory: praxis-config-starter
-        run: .\tools\e2e\Test-ExportAgenticProductionLikeEvidence.ps1
+        run: |
+          .\tools\e2e\Test-ExportAgenticProductionLikeEvidence.ps1
+          .\tools\Invoke-PbAgenticFullE2E.ps1 -ValidateEvidenceParsersOnly
 
       - name: Checkout praxis-api-quickstart
         uses: actions/checkout@v5
