@@ -17,8 +17,8 @@
         "project-knowledge-revert-and-apply",
         "live-llm-flow-1"
       ],
-      "expectedDiscovered": 11,
-      "minimumExecuted": 6,
+      "expectedDiscovered": 13,
+      "minimumExecuted": 8,
       "expectedSkipped": 5,
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
@@ -35,8 +35,8 @@
         "live-llm-flow-1",
         "live-llm-flow-2"
       ],
-      "expectedDiscovered": 11,
-      "minimumExecuted": 8,
+      "expectedDiscovered": 13,
+      "minimumExecuted": 10,
       "expectedSkipped": 3,
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",

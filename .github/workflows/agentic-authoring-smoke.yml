@@ -24,17 +24,17 @@ on:
       quickstart_ref:
         description: 'Immutable praxis-api-quickstart commit SHA to test against.'
         required: true
-        default: cbc5cec318a77e998e786e486861a3c92727519e
+        default: cdb9ef3ae29155ec676149fec21d1147979b8211
         type: string
       metadata_ref:
         description: 'Immutable praxis-metadata-starter commit SHA to install locally.'
         required: true
-        default: 567b35bce2fa229bb06c5662c57fc96902e04f09
+        default: 83e32d40e8a6338953580616c762f4722fa3b4f6
         type: string
       ui_ref:
         description: 'Immutable praxis-ui-angular commit SHA used by the page-builder E2E gate.'
         required: true
-        default: 03786b9513b10b37898035dfa71f1598db3b87df
+        default: 62d483c3038bfe9618140dfde32cf95cdafbed66
         type: string
       run_page_builder_full_e2e:
         description: 'Run the page-builder agentic Playwright gate after the HTTP/SSE smoke.'
@@ -134,6 +134,11 @@ jobs:
           }
           $matrix = Get-Content -LiteralPath tools/e2e/page-builder-agentic-gate-matrix.json -Raw | ConvertFrom-Json
           "PB_STREAM_PROCESSING_TIMEOUT_SECONDS=$($matrix.defaults.streamProcessingTimeoutSeconds)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Validate sanitized evidence exporter
+        shell: pwsh
+        working-directory: praxis-config-starter
+        run: .\tools\e2e\Test-ExportAgenticProductionLikeEvidence.ps1
 
       - name: Checkout praxis-api-quickstart
         uses: actions/checkout@v5
@@ -311,17 +316,23 @@ jobs:
             -UiStartupTimeoutSec ([int]'${{ inputs.page_builder_ui_startup_timeout_seconds }}') `
             -ValidationMode '${{ inputs.page_builder_e2e_mode }}'
 
+      - name: Build sanitized production-like evidence
+        if: inputs.run_page_builder_full_e2e == true
+        shell: pwsh
+        working-directory: praxis-config-starter
+        run: |
+          .\tools\Export-AgenticProductionLikeEvidence.ps1 `
+            -StarterRoot "$env:GITHUB_WORKSPACE\praxis-config-starter" `
+            -HttpArtifactRoot "$env:GITHUB_WORKSPACE\artifacts\ai-sse-smoke" `
+            -OutputRoot "$env:GITHUB_WORKSPACE\praxis-config-starter\artifacts\agentic-authoring-publication"
+
       - name: Upload smoke artifacts
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: agentic-authoring-smoke-artifacts
           path: |
-            artifacts/ai-sse-smoke/**
-            praxis-config-starter/target/agentic-authoring/**
-            artifacts/page-builder-agentic-e2e/**
-            praxis-config-starter/artifacts/page-builder-agentic-e2e/**
-            praxis-api-quickstart/logs/**
-            praxis-ui-angular/test-results/**
-            praxis-ui-angular/tools/e2e/playwright/playwright-agentic-production-like-report/**
+            artifacts/ai-sse-smoke/**/summary.json
+            praxis-config-starter/artifacts/agentic-authoring-publication/**
           if-no-files-found: ignore
+          retention-days: 14

@@ -4,9 +4,9 @@ param(
     [string] $Ref = "main",
     [ValidateSet("openai", "gemini")]
     [string] $Provider = "openai",
-    [string] $QuickstartRef = "cbc5cec318a77e998e786e486861a3c92727519e",
-    [string] $MetadataRef = "567b35bce2fa229bb06c5662c57fc96902e04f09",
-    [string] $UiRef = "03786b9513b10b37898035dfa71f1598db3b87df",
+    [string] $QuickstartRef = "cdb9ef3ae29155ec676149fec21d1147979b8211",
+    [string] $MetadataRef = "83e32d40e8a6338953580616c762f4722fa3b4f6",
+    [string] $UiRef = "62d483c3038bfe9618140dfde32cf95cdafbed66",
     [int] $QuickstartStartupTimeoutSeconds = 180,
     [switch] $RunPageBuilderFullE2E,
     [ValidateSet("smoke", "full")]

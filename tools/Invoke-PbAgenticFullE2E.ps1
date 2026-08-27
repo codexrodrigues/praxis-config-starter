@@ -242,6 +242,49 @@ function Wait-Url([string] $Url, [int] $TimeoutSec, [string] $Name) {
     throw "$Name did not become reachable before timeout: $Url"
 }
 
+function Wait-AiRegistryReady(
+    [string] $BaseUrl,
+    [string] $Origin,
+    [string] $ExpectedSnapshotHash,
+    [int] $TimeoutSec
+) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    do {
+        try {
+            $health = Invoke-RestMethod `
+                -Method Get `
+                -Uri "$BaseUrl/api/praxis/config/ai-registry/health" `
+                -Headers @{
+                    "Origin" = $Origin
+                    "X-Tenant-ID" = "desenv"
+                    "X-User-ID" = "demo"
+                    "X-Env" = "local"
+                } `
+                -TimeoutSec 10
+            $bootstrap = $health.bootstrap
+            $completed = -not [string]::IsNullOrWhiteSpace([string] $bootstrap.completedAt)
+            $acceptedOutcome = $bootstrap.succeeded -eq $true -or (
+                $bootstrap.skipped -eq $true -and $bootstrap.skipReason -eq "snapshot-current"
+            )
+            if ($health.ready -eq $true -and $completed -and $acceptedOutcome -and
+                $bootstrap.snapshotHash -eq $ExpectedSnapshotHash) {
+                return [ordered]@{
+                    ready = $true
+                    snapshotHash = $ExpectedSnapshotHash
+                    bootstrapOutcome = if ($bootstrap.succeeded -eq $true) { "succeeded" } else { "snapshot-current" }
+                }
+            }
+            if ($completed -and -not [string]::IsNullOrWhiteSpace([string] $bootstrap.error)) {
+                throw "AI Registry bootstrap completed with a sanitized failure."
+            }
+        } catch {
+            if ($_.Exception.Message -eq "AI Registry bootstrap completed with a sanitized failure.") { throw }
+        }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+    throw "AI Registry did not become ready with the expected immutable snapshot hash."
+}
+
 function Stop-ProcAndPort($Process, [int] $Port) {
     if ($null -eq $Process) {
         return
@@ -292,6 +335,11 @@ function Invoke-DomainCatalogIngest {
         -Body $body `
         -TimeoutSec 900 | Out-Null
     Write-Phase "Governed domain catalog ingest completed."
+    return [ordered]@{
+        schemaVersion = [string] $catalog.schemaVersion
+        source = "/schemas/domain"
+        ingested = $true
+    }
 }
 
 $starterRoot = Split-Path -Parent $PSScriptRoot
@@ -410,6 +458,9 @@ $playwrightReportPath = Join-Path $artifactRoot "playwright-results.json"
 $gateFailure = $null
 $pgvectorEvidence = $null
 $loopbackVerified = $false
+$aiRegistryEvidence = $null
+$domainCatalogEvidence = $null
+$apiCatalogEvidence = $null
 
 try {
     Write-Phase "Starting Page Builder agentic E2E gate. provider=$Provider validationMode=$ValidationMode backend=$backendUrl ui=$uiUrl artifactRoot=$artifactRoot."
@@ -485,7 +536,12 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
     Assert-LoopbackListener $BackendPort "Quickstart backend"
     Write-Phase "Quickstart backend is healthy."
 
-    Invoke-DomainCatalogIngest $backendUrl $uiUrl "desenv" "local"
+    $registrySnapshotPath = Join-Path $starterRoot "src\main\resources\ai-registry\registry-snapshot.json"
+    $expectedRegistrySnapshotHash = (Get-FileHash -LiteralPath $registrySnapshotPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Write-Phase "Verifying canonical AI Registry bootstrap and immutable snapshot hash."
+    $aiRegistryEvidence = Wait-AiRegistryReady $backendUrl $uiUrl $expectedRegistrySnapshotHash $StartupTimeoutSec
+
+    $domainCatalogEvidence = Invoke-DomainCatalogIngest $backendUrl $uiUrl "desenv" "local"
 
     Push-Location $UiRoot
     try {
@@ -520,6 +576,11 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         & cmd.exe /c "npx.cmd ts-node --project tools/tsconfig.tools.json tools/ai-registry/upload-api-catalog.ts"
         if ($LASTEXITCODE -ne 0) { throw "API catalog upload or canonical indexing failed with exit code $LASTEXITCODE." }
         Write-Phase "API catalog upload and canonical indexing reached READY."
+        $apiCatalogEvidence = [ordered]@{
+            source = "/schemas/catalog"
+            indexingState = "READY"
+            scope = if ($ValidationMode -eq "smoke") { "human-resources-smoke" } else { "full" }
+        }
     } finally {
         Pop-Location
     }
@@ -671,9 +732,17 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         }
         contractHash = $contractHash
         capabilities = $capabilitiesEvidence
+        aiRegistry = $aiRegistryEvidence
+        catalogs = [ordered]@{
+            domain = $domainCatalogEvidence
+            api = $apiCatalogEvidence
+        }
         matrix = [ordered]@{
             schemaVersion = $gateMatrix.schemaVersion
             scenarios = @($modeMatrix.scenarios)
+            expectedDiscovered = [int] $modeMatrix.expectedDiscovered
+            minimumExecuted = [int] $modeMatrix.minimumExecuted
+            expectedSkipped = [int] $modeMatrix.expectedSkipped
             streamProcessingTimeoutSeconds = $StreamProcessingTimeoutSeconds
             playwrightTestTimeoutMs = $PlaywrightTestTimeoutMs
             retries = $Retries

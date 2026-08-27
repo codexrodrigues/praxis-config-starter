@@ -37,8 +37,10 @@ Esse runner:
 - usa `-ValidationMode smoke` como gate de release e reserva `-ValidationMode full` para investigacao deliberada da matriz completa.
 - le timeouts, retries e contagens esperadas de `tools/e2e/page-builder-agentic-gate-matrix.json`;
 - rejeita provider/embeddings mock, datasource nao PostgreSQL, JAR divergente, contrato Config/Angular divergente, capabilities degradadas e interceptacao de endpoint critico;
+- exige AI Registry `ready` com o hash do snapshot Config versionado, Domain Catalog ingerido e API Catalog com indexacao canonica `READY`;
 - exige que o teste negativo de interceptacao critica passe e deriva dele `criticalEndpointMocks=0`; o artifact registra tentativas e retries realmente observados;
 - desabilita trace, video e screenshot na lane live para que a evidencia publicavel permaneça estruturada e sanitizada;
+- valida e copia para `agentic-authoring-publication` apenas o resultado production-like, a auditoria de source e o resumo HTTP/SSE; nenhum log, payload, relatorio HTML ou JSON bruto do Playwright entra no artifact remoto;
 - gera segredo de stream efemero, registra SHAs/versoes sem segredos e comprova o teardown dos listeners.
 
 Testes deterministas com interceptacao ficam na config
