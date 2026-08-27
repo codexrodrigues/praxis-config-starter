@@ -1,11 +1,14 @@
 package org.praxisplatform.config.service;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -19,6 +22,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.domain.ApiMetadataIndexingStatus;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.dao.InvalidDataAccessResourceUsageException;
 
 @ExtendWith(MockitoExtension.class)
 @Tag("unit")
@@ -102,6 +106,34 @@ class ApiMetadataIndexingCoordinatorTest {
         coordinator.recoverInterruptedIndexing();
 
         verify(ingestionService, timeout(1000)).processIndexingClaim(claim);
+    }
+
+    @Test
+    void shouldKeepPostgresHostsAvailableWhenTheOptionalIndexingMigrationIsAbsent() {
+        when(stateService.recoverInterrupted()).thenThrow(new InvalidDataAccessResourceUsageException(
+                "missing indexing state", new SQLException("relation does not exist", "42P01")));
+        coordinator = coordinator(1, 4);
+
+        assertDoesNotThrow(coordinator::recoverInterruptedIndexing);
+    }
+
+    @Test
+    void shouldKeepEmptyH2HostsAvailableWhenFlywayIsDeliberatelyDisabled() {
+        when(stateService.recoverInterrupted()).thenThrow(new InvalidDataAccessResourceUsageException(
+                "missing indexing state", new SQLException("table not found", "42S04")));
+        coordinator = coordinator(1, 4);
+
+        assertDoesNotThrow(coordinator::recoverInterruptedIndexing);
+    }
+
+    @Test
+    void shouldFailStartupRecoveryForDatabaseErrorsOtherThanAMissingTable() {
+        InvalidDataAccessResourceUsageException failure = new InvalidDataAccessResourceUsageException(
+                "permission denied", new SQLException("permission denied", "42501"));
+        when(stateService.recoverInterrupted()).thenThrow(failure);
+        coordinator = coordinator(1, 4);
+
+        assertThrows(InvalidDataAccessResourceUsageException.class, coordinator::recoverInterruptedIndexing);
     }
 
     @Test
