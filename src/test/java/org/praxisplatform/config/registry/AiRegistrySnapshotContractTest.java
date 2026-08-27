@@ -19,13 +19,13 @@ import org.springframework.core.io.ClassPathResource;
 class AiRegistrySnapshotContractTest {
 
     private static final String EXPECTED_SNAPSHOT_HASH =
-            "257a243689b1a6461accfafa5b5164146e49cf51c7e869a5af0cad4ad3c3d520";
+            "886458ab98645dafa6406349c62f57f85a36a8dbe92390a3136c710337b36808";
     private static final String EXPECTED_VERSION = "1.0.0";
-    private static final String EXPECTED_GENERATED_AT = "2026-08-26T20:43:41.676Z";
+    private static final String EXPECTED_GENERATED_AT = "2026-08-27T23:20:55.127Z";
     private static final int EXPECTED_COMPONENT_COUNT = 106;
     private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 96;
     private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 106;
-    private static final int EXPECTED_CHUNK_COUNT = 2486;
+    private static final int EXPECTED_CHUNK_COUNT = 2495;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -75,6 +75,34 @@ class AiRegistrySnapshotContractTest {
         assertThat(authoringManifestCount(components)).isEqualTo(EXPECTED_AUTHORING_MANIFEST_COUNT);
         assertThat(chunkedComponentCount(components)).isEqualTo(EXPECTED_CHUNKED_COMPONENT_COUNT);
         assertThat(chunkCount(components)).isEqualTo(EXPECTED_CHUNK_COUNT);
+    }
+
+    @Test
+    void analyticsPresentationPublishesGovernedKpiAuthoring() throws IOException {
+        JsonNode presentation = readSnapshot()
+                .path("components")
+                .path("praxis-analytics-presentation");
+        JsonNode manifest = presentation.path("authoringManifest");
+        JsonNode preferFamily = findByOperationId(
+                manifest.path("operations"),
+                "analytics.presentation.prefer-family");
+
+        assertThat(preferFamily)
+                .as("analytics presentation must publish its family preference operation")
+                .isNotNull();
+        assertThat(preferFamily.path("inputSchema").path("properties").path("family").path("enum"))
+                .containsExactly(
+                        objectMapper.valueToTree("chart"),
+                        objectMapper.valueToTree("analytic-table"),
+                        objectMapper.valueToTree("kpi"));
+        assertThat(manifest.path("presentationAffordances")
+                .path("affordances")
+                .get(0)
+                .path("options"))
+                .containsExactly(
+                        objectMapper.valueToTree("chart"),
+                        objectMapper.valueToTree("analytic-table"),
+                        objectMapper.valueToTree("kpi"));
     }
 
     @Test
@@ -342,6 +370,15 @@ class AiRegistrySnapshotContractTest {
     private JsonNode findById(JsonNode entries, String id) {
         for (JsonNode entry : entries) {
             if (id.equals(entry.path("id").asText())) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    private JsonNode findByOperationId(JsonNode entries, String operationId) {
+        for (JsonNode entry : entries) {
+            if (operationId.equals(entry.path("operationId").asText())) {
                 return entry;
             }
         }
