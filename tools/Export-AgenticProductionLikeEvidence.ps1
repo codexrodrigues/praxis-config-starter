@@ -54,6 +54,8 @@ Assert-True (-not [string]::IsNullOrWhiteSpace([string] $result.embeddingProvide
 Assert-True (-not [string]::IsNullOrWhiteSpace([string] $result.model)) "A sanitized provider model identifier is required."
 Assert-True ($result.versions.java -eq 21 -and -not [string]::IsNullOrWhiteSpace([string] $result.versions.node)) "Runtime version evidence is incomplete."
 Assert-True (-not [string]::IsNullOrWhiteSpace([string] $result.versions.playwright) -and -not [string]::IsNullOrWhiteSpace([string] $result.versions.chromium)) "Browser version evidence is incomplete."
+Assert-True (-not [string]::IsNullOrWhiteSpace([string] $result.versions.metadataStarterDependency) -and -not [string]::IsNullOrWhiteSpace([string] $result.versions.quickstart) -and -not [string]::IsNullOrWhiteSpace([string] $result.versions.angularWorkspace)) "Maven/npm version evidence is incomplete."
+Assert-True ($result.versions.configStarter -eq $result.versions.quickstartConfigDependency) "Quickstart did not package the exercised Config version."
 Assert-True (([string] $result.contractHash) -match '^[0-9a-f]{64}$') "The Config/Angular contract hash is missing."
 Assert-True ($null -eq $result.failureType) "A successful publication cannot retain a gate failure."
 Assert-True ($result.sourceAudit.passed -eq $true -and $sourceAudit.passed -eq $true) "The real-source audit did not pass."
@@ -64,6 +66,11 @@ Assert-True ([int] $result.playwright.failed -eq 0 -and [int] $result.playwright
 Assert-True (@($result.git).Count -eq 4) "The four immutable repository identities are required."
 foreach ($identity in @($result.git)) {
     Assert-True (([string] $identity.sha) -match '^[0-9a-f]{40}$') "Invalid immutable SHA for $($identity.name)."
+    Assert-True (([string] $identity.treeSha) -match '^[0-9a-f]{40}$') "Invalid immutable tree SHA for $($identity.name)."
+    Assert-True ([string] $identity.materialization -in @('working-tree', 'git-archive')) "Invalid source materialization for $($identity.name)."
+    if ($identity.dirty -eq $true) {
+        Assert-True ($identity.name -eq 'praxis-metadata-starter' -and $identity.materialization -eq 'git-archive') "Only Metadata may have a normalized checkout, and only when the exact git archive is exercised."
+    }
 }
 Assert-True ($httpSummary.health -eq "UP" -and $httpSummary.terminalSeen -eq $true -and $httpSummary.replayChecked -eq $true) "HTTP/SSE evidence is incomplete."
 Assert-True ($httpSummary.provider -ne "mock") "HTTP/SSE evidence used a mock provider."

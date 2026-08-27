@@ -69,16 +69,28 @@ function Assert-PostgresUrl([string] $Name, [string] $Value) {
     }
 }
 
-function Get-GitIdentity([string] $Root, [string] $Name) {
+function Get-GitIdentity([string] $Root, [string] $Name, [string] $Materialization = "working-tree") {
     $sha = (& git -C $Root rev-parse HEAD 2>$null).Trim()
     if ($LASTEXITCODE -ne 0 -or $sha -notmatch "^[0-9a-f]{40}$") {
         throw "Cannot resolve immutable Git SHA for $Name at $Root."
     }
-    $dirty = @(& git -C $Root status --porcelain 2>$null).Count -gt 0
-    if ($dirty) {
-        throw "$Name checkout must be clean so its immutable SHA fully identifies the exercised source."
+    $changes = @(& git -C $Root status --porcelain 2>$null)
+    $dirty = $changes.Count -gt 0
+    if ($dirty -and $Materialization -eq "working-tree") {
+        $paths = ($changes | ForEach-Object { $_.Substring([Math]::Min(3, $_.Length)) }) -join ", "
+        throw "$Name checkout must be clean so its immutable SHA fully identifies the exercised source. changedPaths=$paths"
     }
-    return [ordered]@{ name = $Name; sha = $sha; dirty = $dirty }
+    $treeSha = (& git -C $Root rev-parse 'HEAD^{tree}' 2>$null).Trim()
+    if ($LASTEXITCODE -ne 0 -or $treeSha -notmatch "^[0-9a-f]{40}$") {
+        throw "Cannot resolve immutable Git tree SHA for $Name at $Root."
+    }
+    return [ordered]@{
+        name = $Name
+        sha = $sha
+        treeSha = $treeSha
+        materialization = $Materialization
+        dirty = $dirty
+    }
 }
 
 function New-EphemeralStreamSecret {
@@ -506,7 +518,7 @@ $uiWorkspaceVersion = [string] $uiPackage.version
 
 $gitIdentities = @(
     Get-GitIdentity $starterRoot "praxis-config-starter"
-    Get-GitIdentity $MetadataRoot "praxis-metadata-starter"
+    Get-GitIdentity $MetadataRoot "praxis-metadata-starter" "git-archive"
     Get-GitIdentity $QuickstartRoot "praxis-api-quickstart"
     Get-GitIdentity $UiRoot "praxis-ui-angular"
 )

@@ -235,17 +235,33 @@ jobs:
         shell: pwsh
         working-directory: praxis-metadata-starter
         run: |
-          mvn -q versions:set "-DnewVersion=$env:METADATA_STARTER_VERSION" -DgenerateBackupPoms=false
-          mvn -B -DskipTests install
-          git restore --source=HEAD --worktree -- .
+          $buildRoot = Join-Path $env:RUNNER_TEMP 'praxis-metadata-build'
+          $archive = Join-Path $env:RUNNER_TEMP 'praxis-metadata-build.zip'
+          git archive --format=zip --output="$archive" HEAD
+          Expand-Archive -LiteralPath $archive -DestinationPath $buildRoot
+          Push-Location $buildRoot
+          try {
+            mvn -q versions:set "-DnewVersion=$env:METADATA_STARTER_VERSION" -DgenerateBackupPoms=false
+            mvn -B -DskipTests install
+          } finally {
+            Pop-Location
+          }
 
       - name: Install praxis-config-starter locally
         shell: pwsh
         working-directory: praxis-config-starter
         run: |
-          mvn -q versions:set "-DnewVersion=$env:STARTER_VERSION" -DgenerateBackupPoms=false
-          mvn -B -DskipTests install
-          git restore --source=HEAD --worktree -- .
+          $buildRoot = Join-Path $env:RUNNER_TEMP 'praxis-config-build'
+          $archive = Join-Path $env:RUNNER_TEMP 'praxis-config-build.zip'
+          git archive --format=zip --output="$archive" HEAD
+          Expand-Archive -LiteralPath $archive -DestinationPath $buildRoot
+          Push-Location $buildRoot
+          try {
+            mvn -q versions:set "-DnewVersion=$env:STARTER_VERSION" -DgenerateBackupPoms=false
+            mvn -B -DskipTests install
+          } finally {
+            Pop-Location
+          }
 
       - name: Package praxis-api-quickstart against local starter
         shell: pwsh
@@ -263,6 +279,30 @@ jobs:
         shell: pwsh
         working-directory: praxis-ui-angular
         run: npx playwright install chromium
+
+      - name: Verify immutable source checkouts remain clean
+        if: inputs.run_page_builder_full_e2e == true
+        shell: pwsh
+        run: |
+          $roots = @(
+            'praxis-config-starter',
+            'praxis-api-quickstart',
+            'praxis-ui-angular'
+          )
+          foreach ($root in $roots) {
+            $changes = @(& git -C "$env:GITHUB_WORKSPACE\$root" status --porcelain)
+            if ($changes.Count -gt 0) {
+              Write-Host "Dirty checkout: $root"
+              $changes | ForEach-Object { Write-Host $_ }
+              throw "$root changed before the production-like gate."
+            }
+          }
+          $metadataSha = (& git -C "$env:GITHUB_WORKSPACE\praxis-metadata-starter" rev-parse HEAD).Trim()
+          $metadataTreeSha = (& git -C "$env:GITHUB_WORKSPACE\praxis-metadata-starter" rev-parse 'HEAD^{tree}').Trim()
+          if ($metadataSha -ne '${{ inputs.metadata_ref }}' -or $metadataTreeSha -notmatch '^[0-9a-f]{40}$') {
+            throw 'Metadata git-archive source identity does not match the immutable workflow input.'
+          }
+          Write-Host "Metadata will be exercised from immutable git archive: commit=$metadataSha tree=$metadataTreeSha"
 
       - name: Run quickstart authoring HTTP/SSE smoke suite
         if: inputs.run_quickstart_http_smoke == true

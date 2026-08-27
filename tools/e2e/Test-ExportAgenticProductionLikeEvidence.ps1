@@ -10,9 +10,12 @@ $outputRoot = Join-Path $root "published"
 
 try {
     New-Item -ItemType Directory -Force -Path $e2eRoot, $httpRunRoot | Out-Null
-    $identities = @("config", "metadata", "quickstart", "angular") | ForEach-Object {
-        [ordered]@{ name = $_; sha = ("a" * 40); dirty = $false }
-    }
+    $identities = @(
+        [ordered]@{ name = "praxis-config-starter"; sha = ("a" * 40); treeSha = ("d" * 40); materialization = "working-tree"; dirty = $false }
+        [ordered]@{ name = "praxis-metadata-starter"; sha = ("a" * 40); treeSha = ("d" * 40); materialization = "git-archive"; dirty = $true }
+        [ordered]@{ name = "praxis-api-quickstart"; sha = ("a" * 40); treeSha = ("d" * 40); materialization = "working-tree"; dirty = $false }
+        [ordered]@{ name = "praxis-ui-angular"; sha = ("a" * 40); treeSha = ("d" * 40); materialization = "working-tree"; dirty = $false }
+    )
     [ordered]@{
         schemaVersion = "praxis.page-builder-agentic-production-like-result/v1"
         productionLike = $true
@@ -33,7 +36,7 @@ try {
             domain = [ordered]@{ ingested = $true; schemaVersion = "praxis.domain-catalog/v0.2" }
             api = [ordered]@{ indexingState = "READY" }
         }
-        versions = [ordered]@{ java = 21; node = "v20"; playwright = "1.55"; chromium = "140" }
+        versions = [ordered]@{ configStarter = "1.0.0"; quickstartConfigDependency = "1.0.0"; metadataStarterDependency = "8.0.0"; quickstart = "1.0.0"; angularWorkspace = "1.0.0"; java = 21; node = "v20"; playwright = "1.55"; chromium = "140" }
         contractHash = ("c" * 64)
         failureType = $null
         sourceAudit = [ordered]@{ passed = $true }
@@ -62,6 +65,18 @@ try {
         $failedClosed = $_.Exception.Message -match "Critical endpoint mocks must be zero"
     }
     if (-not $failedClosed) { throw "Exporter did not fail closed for criticalEndpointMocks=1." }
+
+    $invalidMaterializationOutput = Join-Path $root "invalid-materialization-published"
+    $invalidResult.criticalEndpointMocks = 0
+    $invalidResult.git[1].materialization = "working-tree"
+    $invalidResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -HttpArtifactRoot $httpArtifactRoot -OutputRoot $invalidMaterializationOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "Only Metadata may have a normalized checkout"
+    }
+    if (-not $failedClosed) { throw "Exporter did not fail closed for dirty Metadata without git-archive materialization." }
 
     Write-Output "Export-AgenticProductionLikeEvidence: positive and negative fixtures passed."
 } finally {
