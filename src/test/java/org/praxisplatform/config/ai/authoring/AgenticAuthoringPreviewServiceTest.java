@@ -6117,6 +6117,7 @@ class AgenticAuthoringPreviewServiceTest {
                 "matched governed employee resource",
                 List.of("semantic-retrieval", "tool-search-api-resources"));
         ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", true);
         constraints.putArray("filters").addObject()
                 .put("field", "departamentoIdsIn")
                 .put("operator", "in")

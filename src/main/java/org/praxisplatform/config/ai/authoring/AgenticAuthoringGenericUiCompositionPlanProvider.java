@@ -338,9 +338,13 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         AgenticAuthoringSemanticDecision decision = request == null || request.intentResolution() == null
                 ? null
                 : request.intentResolution().semanticDecision();
-        JsonNode authoredFilters = decision == null || decision.constraints() == null
+        JsonNode constraints = decision == null || decision.constraints() == null
                 ? MissingNode.getInstance()
-                : decision.constraints().path("filters");
+                : decision.constraints();
+        if (!constraints.path("appliesToDataSelection").asBoolean(false)) {
+            return;
+        }
+        JsonNode authoredFilters = constraints.path("filters");
         if (!authoredFilters.isArray() || authoredFilters.isEmpty()) {
             return;
         }
