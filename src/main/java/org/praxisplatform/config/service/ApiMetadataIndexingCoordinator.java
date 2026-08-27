@@ -1,6 +1,7 @@
 package org.praxisplatform.config.service;
 
 import jakarta.annotation.PreDestroy;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
@@ -9,14 +10,15 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.domain.ApiMetadataIndexingStatus;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.dao.InvalidDataAccessResourceUsageException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -92,7 +94,32 @@ public class ApiMetadataIndexingCoordinator {
 
     @EventListener(ApplicationReadyEvent.class)
     public void recoverInterruptedIndexing() {
-        stateService.recoverInterrupted().forEach(this::schedule);
+        try {
+            stateService.recoverInterrupted().forEach(this::schedule);
+        } catch (InvalidDataAccessResourceUsageException ex) {
+            if (!isMissingIndexingStateTable(ex)) {
+                throw ex;
+            }
+            log.warn(
+                    "API metadata indexing recovery was skipped because migration V59 is not present. "
+                            + "The host can continue, but API Catalog indexing requires the canonical Config migrations.");
+        }
+    }
+
+    private boolean isMissingIndexingStateTable(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof SQLException sqlException) {
+                String sqlState = sqlException.getSQLState();
+                return "42P01".equals(sqlState)
+                        || "42S02".equals(sqlState)
+                        || "42S04".equals(sqlState)
+                        || "42102".equals(sqlState)
+                        || "42104".equals(sqlState);
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private void drain(ApiMetadataIndexingScope scope) {
