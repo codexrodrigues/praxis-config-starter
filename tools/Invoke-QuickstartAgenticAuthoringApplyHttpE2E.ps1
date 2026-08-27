@@ -207,14 +207,53 @@ try {
         throw "Authoring terminal result did not include streamId and eventId lineage."
     }
     if (-not [bool] $terminal.payload.canApply) {
-        $blockReason = "$($terminal.payload.decisionDiagnostics.terminalPreviewApplyBlockReason)"
+        $decisionDiagnostics = $terminal.payload.decisionDiagnostics
+        $intentDiagnostics = $terminal.payload.intentResolution
+        $previewDiagnostics = $terminal.payload.preview
+        $blockReason = "$($decisionDiagnostics.terminalPreviewApplyBlockReason)"
         if ([string]::IsNullOrWhiteSpace($blockReason)) {
-            $blockReason = "$($terminal.payload.decisionDiagnostics.reviewReason)"
+            $blockReason = "$($decisionDiagnostics.reviewReason)"
         }
         if ([string]::IsNullOrWhiteSpace($blockReason)) {
-            $blockReason = "unspecified-terminal-apply-block"
+            $blockReason = "$($decisionDiagnostics.semanticDecisionReviewReason)"
         }
-        throw "Authoring turn result is not applicable: $blockReason"
+        if ([string]::IsNullOrWhiteSpace($blockReason)) {
+            $blockReason = "$($decisionDiagnostics.toolLoopTerminalReason)"
+        }
+        if ([string]::IsNullOrWhiteSpace($blockReason)) {
+            $blockReason = if ([bool] $decisionDiagnostics.requiresReview) {
+                "review-required-without-reason"
+            } else {
+                "unspecified-terminal-apply-block"
+            }
+        }
+        $sanitizedBlockDiagnostics = [ordered]@{
+            canApply = [bool] $terminal.payload.canApply
+            operationKind = "$($intentDiagnostics.operationKind)"
+            artifactKind = "$($intentDiagnostics.artifactKind)"
+            changeKind = "$($intentDiagnostics.changeKind)"
+            intentValid = [bool] $intentDiagnostics.valid
+            intentGateStatus = "$($intentDiagnostics.gate.status)"
+            intentFailureCodes = @($intentDiagnostics.failureCodes)
+            selectedResourcePath = "$($intentDiagnostics.selectedCandidate.resourcePath)"
+            previewValid = [bool] $previewDiagnostics.valid
+            previewFailureCodes = @($previewDiagnostics.failureCodes)
+            previewWarnings = @($previewDiagnostics.warnings)
+            terminalPreviewApplyEligible = [bool] $decisionDiagnostics.terminalPreviewApplyEligible
+            terminalApplyTargetEligible = [bool] $decisionDiagnostics.terminalApplyTargetEligible
+            requiresReview = [bool] $decisionDiagnostics.requiresReview
+            reviewReason = "$($decisionDiagnostics.reviewReason)"
+            semanticDecisionReviewRequired = [bool] $decisionDiagnostics.semanticDecisionReviewRequired
+            semanticDecisionReviewReason = "$($decisionDiagnostics.semanticDecisionReviewReason)"
+            semanticDecisionReviewGroundedByPreview = [bool] $decisionDiagnostics.semanticDecisionReviewGroundedByPreview
+            toolLoopCompleted = [bool] $decisionDiagnostics.toolLoopCompleted
+            toolLoopTerminalReason = "$($decisionDiagnostics.toolLoopTerminalReason)"
+            llmResolved = [bool] $decisionDiagnostics.llmResolved
+            keywordFallbackApplied = [bool] $decisionDiagnostics.keywordFallbackApplied
+            previewResourceSchemaVerified = [bool] $decisionDiagnostics.previewResourceSchemaVerified
+        }
+        $sanitizedBlockDiagnosticsJson = $sanitizedBlockDiagnostics | ConvertTo-Json -Compress -Depth 8
+        throw "Authoring turn result is not applicable: $blockReason SanitizedDiagnostics=$sanitizedBlockDiagnosticsJson"
     }
     $preview = $terminal.payload.preview
     $intent = $terminal.payload.intentResolution
