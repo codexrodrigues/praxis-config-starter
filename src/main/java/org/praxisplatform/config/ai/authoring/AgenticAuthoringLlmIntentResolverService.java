@@ -2736,6 +2736,8 @@ public class AgenticAuthoringLlmIntentResolverService {
         reply.put("additionalProperties", false);
         properties.putObject("quickReplies")
                 .put("type", "array")
+                .put("minItems", 2)
+                .put("maxItems", 4)
                 .set("items", reply);
 
         ArrayNode required = root.putArray("required");

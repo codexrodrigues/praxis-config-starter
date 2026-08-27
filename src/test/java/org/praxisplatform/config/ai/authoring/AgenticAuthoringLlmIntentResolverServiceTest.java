@@ -2618,10 +2618,11 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     @Test
     void resolveSendsStructuredContextBundleAndToolCatalogToProvider() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiJsonSchema> schemaCaptor = ArgumentCaptor.forClass(AiJsonSchema.class);
         ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
         when(providerManagementService.generateJson(
                 promptCaptor.capture(),
-                any(AiJsonSchema.class),
+                schemaCaptor.capture(),
                 configCaptor.capture(),
                 eq("tenant"),
                 eq("user"),
@@ -2751,6 +2752,10 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(prompt).contains("resourceSearchQuery");
         assertThat(prompt).contains("visualizationDecision");
         assertThat(prompt).contains("layoutKind` to `single_chart`");
+        JsonNode outputSchema = objectMapper.readTree(schemaCaptor.getValue().jsonSchema());
+        JsonNode quickRepliesSchema = outputSchema.path("properties").path("quickReplies");
+        assertThat(quickRepliesSchema.path("minItems").asInt()).isEqualTo(2);
+        assertThat(quickRepliesSchema.path("maxItems").asInt()).isEqualTo(4);
         assertThat(result.visualizationDecision()).isNotNull();
         assertThat(result.visualizationDecision().primaryComponent()).isEqualTo("praxis-chart");
         assertThat(result.visualizationDecision().axes()).hasSize(1);
