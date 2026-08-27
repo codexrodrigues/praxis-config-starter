@@ -23,6 +23,7 @@ public class ApiMetadataIndexingState {
     private Long id;
 
     @Version
+    @Column(name = "lock_version", nullable = false)
     private long lockVersion;
 
     @Column(name = "tenant_id", nullable = false)
