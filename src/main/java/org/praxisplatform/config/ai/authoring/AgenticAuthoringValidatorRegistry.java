@@ -3496,7 +3496,8 @@ public final class AgenticAuthoringValidatorRegistry {
             JsonNode config,
             List<String> failures) {
         String kind = chartKind(planOperation, config);
-        if (categorySliceChartKinds().contains(kind) && hasSecondaryAxis(chartMetricsCandidate(planOperation, config))) {
+        JsonNode metrics = chartMetricsCandidate(planOperation, config);
+        if (categorySliceChartKinds().contains(kind) && hasSecondaryAxis(metrics)) {
             failures.add("validator chart-type-series-axis-compatible failed for " + operationId
                     + ": category slice charts cannot use secondary axes");
         }
@@ -3504,6 +3505,16 @@ public final class AgenticAuthoringValidatorRegistry {
         if (!seriesKind.isBlank() && (categorySliceChartKinds().contains(kind) || "scatter".equals(kind))) {
             failures.add("validator chart-type-series-axis-compatible failed for " + operationId
                     + ": seriesKind is not supported by " + kind);
+        }
+        if ("scatter".equals(kind)) {
+            int metricCount = metrics.isArray() ? metrics.size() : 0;
+            if ("series.add".equals(operationId) && !text(planOperation.path("input"), "field").isBlank()) {
+                metricCount++;
+            }
+            if (metricCount < 1 || metricCount > 2) {
+                failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                        + ": scatter charts require one or two metrics");
+            }
         }
     }
 

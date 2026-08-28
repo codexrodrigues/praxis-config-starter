@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -409,7 +410,32 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("\"requiresGovernedAuthoring\"")
                 .contains("\"required\"")
                 .contains("requiresGovernedAuthoring");
-        assertStrictSchemaCompatible(objectMapper.readTree(schemaCaptor.getValue().jsonSchema()), "$");
+        JsonNode outputSchema = objectMapper.readTree(schemaCaptor.getValue().jsonSchema());
+        assertStrictSchemaCompatible(outputSchema, "$");
+        List<String> chartTypes = new ArrayList<>();
+        outputSchema.path("properties")
+                .path("visualizationDecision")
+                .path("properties")
+                .path("axes")
+                .path("items")
+                .path("properties")
+                .path("chartType")
+                .path("enum")
+                .forEach(value -> chartTypes.add(value.asText()));
+        assertThat(chartTypes)
+                .containsExactly(
+                        "bar",
+                        "combo",
+                        "horizontal-bar",
+                        "line",
+                        "pie",
+                        "donut",
+                        "area",
+                        "stacked-bar",
+                        "stacked-area",
+                        "scatter",
+                        "funnel",
+                        "pyramid");
         assertThat(result.requiresGovernedAuthoring()).isFalse();
         assertThat(result.artifactKind()).isEqualTo("chart");
         assertThat(result.selectedResourcePath())
