@@ -435,7 +435,8 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                         "stacked-area",
                         "scatter",
                         "funnel",
-                        "pyramid");
+                        "pyramid",
+                        "treemap");
         assertThat(result.requiresGovernedAuthoring()).isFalse();
         assertThat(result.artifactKind()).isEqualTo("chart");
         assertThat(result.selectedResourcePath())
