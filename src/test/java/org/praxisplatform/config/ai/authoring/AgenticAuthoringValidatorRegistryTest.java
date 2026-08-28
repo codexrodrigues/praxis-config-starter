@@ -1137,6 +1137,82 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldValidateScatterWithOneOrTwoMetricsAndRejectEffectiveThirdMetric() throws Exception {
+        JsonNode oneMetricConfig = objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "kind": "scatter",
+                    "dimensions": [{ "field": "salary" }],
+                    "metrics": [{ "field": "discount", "aggregation": "avg" }]
+                  }
+                }
+                """);
+        JsonNode twoMetricConfig = objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "kind": "scatter",
+                    "dimensions": [{ "field": "department" }],
+                    "metrics": [
+                      { "field": "employees", "aggregation": "distinct-count" },
+                      { "field": "absenceDays", "aggregation": "sum" }
+                    ]
+                  }
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("chart.type.set", "chartType", "x-ui-chart-kind", false,
+                        "chart-type-series-axis-compatible"),
+                plan("{}", "{ \"kind\": \"scatter\" }"),
+                oneMetricConfig,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("chart.type.set", "chartType", "x-ui-chart-kind", false,
+                        "chart-type-series-axis-compatible"),
+                plan("{}", "{ \"kind\": \"scatter\" }"),
+                twoMetricConfig,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("series.add", "series", "x-ui-chart-metric-by-field", false,
+                        "chart-type-series-axis-compatible"),
+                plan("{}", "{ \"field\": \"averageDuration\", \"aggregation\": \"avg\" }"),
+                twoMetricConfig,
+                failures,
+                new ArrayList<>());
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", false,
+                        "chart-type-series-axis-compatible"),
+                plan("{}", """
+                        {
+                          "sourceKind": "praxis.stats",
+                          "metrics": [
+                            { "field": "employees" },
+                            { "field": "absenceDays" },
+                            { "field": "averageDuration" }
+                          ]
+                        }
+                        """),
+                twoMetricConfig,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).containsExactly(
+                "validator chart-type-series-axis-compatible failed for series.add: scatter charts require one or two metrics",
+                "validator chart-type-series-axis-compatible failed for data.resource.bind: scatter charts require one or two metrics");
+    }
+
+    @Test
     void shouldGroundChartValidatorsInApiMetadataStatsCapabilitiesAndTargets() throws Exception {
         JsonNode config = objectMapper.readTree("""
                 {

@@ -2881,7 +2881,19 @@ public class AgenticAuthoringLlmIntentResolverService {
         axisProperties.putObject("concept").put("type", "string");
         axisProperties.putObject("field").put("type", "string");
         axisProperties.putObject("label").put("type", "string");
-        stringEnum(axisProperties, "chartType", List.of("bar", "horizontal-bar", "line", "area", "pie", "donut"));
+        stringEnum(axisProperties, "chartType", List.of(
+                "bar",
+                "combo",
+                "horizontal-bar",
+                "line",
+                "pie",
+                "donut",
+                "area",
+                "stacked-bar",
+                "stacked-area",
+                "scatter",
+                "funnel",
+                "pyramid"));
         stringEnum(axisProperties, "orientation", List.of("vertical", "horizontal", "temporal"));
         stringEnum(axisProperties, "metricAggregation", List.of("count", "sum", "avg", "min", "max"));
         nullableString(axisProperties, "metricField");
