@@ -817,7 +817,7 @@ public class AgenticAuthoringTurnEngine {
             if (toolLoopResult != null) {
                 resultPayload.put("toolLoopTrace", safeToolLoopTrace(toolLoopResult));
             }
-            AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+            AgenticAuthoringTurnEventAppendResult terminalResult = appendTerminalResult(eventSink, resultPayload);
             return terminalResult.appendedType("result")
                     ? AgenticAuthoringTurnOutcome.completed(state)
                     : AgenticAuthoringTurnOutcome.noop(state);
@@ -1228,7 +1228,7 @@ public class AgenticAuthoringTurnEngine {
         resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
                 "result:consultative_post_intent:" + safeText(answer.category()),
                 false));
-        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        AgenticAuthoringTurnEventAppendResult terminalResult = appendTerminalResult(eventSink, resultPayload);
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
@@ -1284,15 +1284,13 @@ public class AgenticAuthoringTurnEngine {
         resultPayload.put("preview", nonMaterializedPreview(request));
         resultPayload.put("assistantMessage", publicAssistantMessage(assistantMessage, request));
         resultPayload.put("assistantContent", intentResolution.assistantContent());
-        resultPayload.put("quickReplies", intentResolution.quickReplies() == null
-                ? List.of()
-                : intentResolution.quickReplies());
+        resultPayload.put("quickReplies", terminalClarificationQuickReplies(intentResolution));
         resultPayload.put("canApply", false);
         resultPayload.put("decisionDiagnostics", decisionDiagnostics);
         resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
                 "result:scoped_semantic_clarification",
                 false));
-        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        AgenticAuthoringTurnEventAppendResult terminalResult = appendTerminalResult(eventSink, resultPayload);
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
@@ -1311,6 +1309,52 @@ public class AgenticAuthoringTurnEngine {
         return resolution.semanticDecision() != null
                 && resolution.semanticDecision().selectedResource() != null
                 && StringUtils.hasText(resolution.semanticDecision().selectedResource().resourcePath());
+    }
+
+    private List<AgenticAuthoringQuickReply> terminalClarificationQuickReplies(
+            AgenticAuthoringIntentResolutionResult resolution) {
+        if (resolution != null && resolution.quickReplies() != null && !resolution.quickReplies().isEmpty()) {
+            return resolution.quickReplies();
+        }
+        ObjectNode retryHints = objectMapper.createObjectNode();
+        retryHints.put("source", "authoring-turn-terminal-clarification");
+        retryHints.put("canonicalAction", "retry_semantic_resolution");
+        return List.of(
+                new AgenticAuthoringQuickReply(
+                        "retry-semantic-resolution",
+                        "retry",
+                        "Tentar novamente",
+                        "Tente resolver novamente a mesma solicitação com o contexto governado disponível.",
+                        "Repete a resolução sem assumir uma intenção localmente.",
+                        "refresh",
+                        "primary",
+                        retryHints),
+                new AgenticAuthoringQuickReply(
+                        "revise",
+                        "revise",
+                        "Revisar solicitação",
+                        "Quero revisar a solicitação antes de tentar novamente."));
+    }
+
+    private AgenticAuthoringTurnEventAppendResult appendTerminalResult(
+            AgenticAuthoringTurnEventSink eventSink,
+            Object payload) {
+        if (payload instanceof Map<?, ?> payloadMap
+                && payloadMap.get("intentResolution") instanceof AgenticAuthoringIntentResolutionResult resolution
+                && requiresTerminalClarificationReplies(resolution)
+                && (!(payloadMap.get("quickReplies") instanceof List<?> replies) || replies.isEmpty())) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> mutablePayload = (Map<String, Object>) payloadMap;
+            mutablePayload.put("quickReplies", terminalClarificationQuickReplies(resolution));
+        }
+        return eventSink.append("result", payload);
+    }
+
+    private boolean requiresTerminalClarificationReplies(AgenticAuthoringIntentResolutionResult resolution) {
+        return resolution != null
+                && (resolution.pendingClarification() != null
+                        || resolution.clarificationQuestions() != null
+                                && !resolution.clarificationQuestions().isEmpty());
     }
 
     private boolean requiresExecutableResourceGrounding(
@@ -1446,15 +1490,13 @@ public class AgenticAuthoringTurnEngine {
         resultPayload.put("preview", nonMaterializedPreview(request));
         resultPayload.put("assistantMessage", publicAssistantMessage(intentResolution.assistantMessage(), request));
         resultPayload.put("assistantContent", intentResolution.assistantContent());
-        resultPayload.put("quickReplies", intentResolution.quickReplies() == null
-                ? List.of()
-                : intentResolution.quickReplies());
+        resultPayload.put("quickReplies", terminalClarificationQuickReplies(intentResolution));
         resultPayload.put("canApply", false);
         resultPayload.put("decisionDiagnostics", decisionDiagnostics);
         resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
                 "result:provider_failure_clarification",
                 false));
-        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        AgenticAuthoringTurnEventAppendResult terminalResult = appendTerminalResult(eventSink, resultPayload);
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
@@ -1516,7 +1558,7 @@ public class AgenticAuthoringTurnEngine {
         resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
                 available ? "result:declared_client_action" : "result:client_action_unavailable",
                 false));
-        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        AgenticAuthoringTurnEventAppendResult terminalResult = appendTerminalResult(eventSink, resultPayload);
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
@@ -1620,7 +1662,7 @@ public class AgenticAuthoringTurnEngine {
         resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
                 "result:platform_guidance_from_resolved_intent",
                 false));
-        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        AgenticAuthoringTurnEventAppendResult terminalResult = appendTerminalResult(eventSink, resultPayload);
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(
                         route == null ? "advisory_authoring" : route.routeClass()))
@@ -1694,7 +1736,7 @@ public class AgenticAuthoringTurnEngine {
         resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
                 "result:grounded_domain_discovery_clarification",
                 false));
-        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        AgenticAuthoringTurnEventAppendResult terminalResult = appendTerminalResult(eventSink, resultPayload);
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
@@ -1853,7 +1895,7 @@ public class AgenticAuthoringTurnEngine {
         resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
                 "result:grounded_resource_discovery_clarification",
                 false));
-        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        AgenticAuthoringTurnEventAppendResult terminalResult = appendTerminalResult(eventSink, resultPayload);
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
@@ -3113,7 +3155,7 @@ public class AgenticAuthoringTurnEngine {
         resultPayload.set("streamEventDiagnostics", objectMapper.valueToTree(streamEventDiagnostics(
                 "result:domain_rule_search",
                 false)));
-        AgenticAuthoringTurnEventAppendResult terminalResult = eventSink.append("result", resultPayload);
+        AgenticAuthoringTurnEventAppendResult terminalResult = appendTerminalResult(eventSink, resultPayload);
         AgenticAuthoringTurnState terminalState = state.withRouteClass("advisory_authoring");
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(terminalState)

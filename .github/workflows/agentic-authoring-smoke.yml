@@ -22,19 +22,19 @@ on:
         default: ''
         type: string
       quickstart_ref:
-        description: 'praxis-api-quickstart ref to test against.'
-        required: false
-        default: main
+        description: 'Immutable praxis-api-quickstart commit SHA to test against.'
+        required: true
+        default: cdb9ef3ae29155ec676149fec21d1147979b8211
         type: string
       metadata_ref:
-        description: 'praxis-metadata-starter ref to install locally for metadata/domain catalog contracts.'
-        required: false
-        default: main
+        description: 'Immutable praxis-metadata-starter commit SHA to install locally.'
+        required: true
+        default: 83e32d40e8a6338953580616c762f4722fa3b4f6
         type: string
       ui_ref:
-        description: 'praxis-ui-angular ref to test against when the page-builder E2E gate is enabled.'
-        required: false
-        default: main
+        description: 'Immutable praxis-ui-angular commit SHA used by the page-builder E2E gate.'
+        required: true
+        default: 2882822b4b6202aa94665d2ba5769ee369fe559b
         type: string
       run_page_builder_full_e2e:
         description: 'Run the page-builder agentic Playwright gate after the HTTP/SSE smoke.'
@@ -53,11 +53,6 @@ on:
         description: 'Timeout for the Page Builder Playwright gate step.'
         required: false
         default: '30'
-        type: string
-      page_builder_playwright_test_timeout_ms:
-        description: 'Per-test timeout passed to the Page Builder Playwright gate. Use 0 to keep the spec default.'
-        required: false
-        default: '600000'
         type: string
       run_quickstart_http_smoke:
         description: 'Run the quickstart agentic authoring HTTP/SSE smoke.'
@@ -84,11 +79,6 @@ on:
         required: false
         default: false
         type: boolean
-      stream_processing_timeout_seconds:
-        description: 'Backend LLM stream processing timeout used by HTTP smoke and page-builder E2E.'
-        required: false
-        default: '180'
-        type: string
       quickstart_startup_timeout_seconds:
         description: 'Quickstart startup timeout used by HTTP smoke, domain catalog smoke and page-builder E2E.'
         required: false
@@ -127,6 +117,30 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: praxis-config-starter
+
+      - name: Validate immutable refs and load canonical gate matrix
+        shell: pwsh
+        working-directory: praxis-config-starter
+        run: |
+          $refs = @{
+            quickstart = '${{ inputs.quickstart_ref }}'
+            metadata = '${{ inputs.metadata_ref }}'
+            ui = '${{ inputs.ui_ref }}'
+          }
+          foreach ($entry in $refs.GetEnumerator()) {
+            if ($entry.Value -notmatch '^[0-9a-fA-F]{40}$') {
+              throw "$($entry.Key) ref must be an immutable 40-character commit SHA."
+            }
+          }
+          $matrix = Get-Content -LiteralPath tools/e2e/page-builder-agentic-gate-matrix.json -Raw | ConvertFrom-Json
+          "PB_STREAM_PROCESSING_TIMEOUT_SECONDS=$($matrix.defaults.streamProcessingTimeoutSeconds)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Validate sanitized evidence exporter
+        shell: pwsh
+        working-directory: praxis-config-starter
+        run: |
+          .\tools\e2e\Test-ExportAgenticProductionLikeEvidence.ps1
+          .\tools\Invoke-PbAgenticFullE2E.ps1 -ValidateEvidenceParsersOnly
 
       - name: Checkout praxis-api-quickstart
         uses: actions/checkout@v5
@@ -221,15 +235,33 @@ jobs:
         shell: pwsh
         working-directory: praxis-metadata-starter
         run: |
-          mvn -q versions:set "-DnewVersion=$env:METADATA_STARTER_VERSION" -DgenerateBackupPoms=false
-          mvn -B -DskipTests install
+          $buildRoot = Join-Path $env:RUNNER_TEMP 'praxis-metadata-build'
+          $archive = Join-Path $env:RUNNER_TEMP 'praxis-metadata-build.zip'
+          git archive --format=zip --output="$archive" HEAD
+          Expand-Archive -LiteralPath $archive -DestinationPath $buildRoot
+          Push-Location $buildRoot
+          try {
+            mvn -q versions:set "-DnewVersion=$env:METADATA_STARTER_VERSION" -DgenerateBackupPoms=false
+            mvn -B -DskipTests install
+          } finally {
+            Pop-Location
+          }
 
       - name: Install praxis-config-starter locally
         shell: pwsh
         working-directory: praxis-config-starter
         run: |
-          mvn -q versions:set "-DnewVersion=$env:STARTER_VERSION" -DgenerateBackupPoms=false
-          mvn -B -DskipTests install
+          $buildRoot = Join-Path $env:RUNNER_TEMP 'praxis-config-build'
+          $archive = Join-Path $env:RUNNER_TEMP 'praxis-config-build.zip'
+          git archive --format=zip --output="$archive" HEAD
+          Expand-Archive -LiteralPath $archive -DestinationPath $buildRoot
+          Push-Location $buildRoot
+          try {
+            mvn -q versions:set "-DnewVersion=$env:STARTER_VERSION" -DgenerateBackupPoms=false
+            mvn -B -DskipTests install
+          } finally {
+            Pop-Location
+          }
 
       - name: Package praxis-api-quickstart against local starter
         shell: pwsh
@@ -248,6 +280,30 @@ jobs:
         working-directory: praxis-ui-angular
         run: npx playwright install chromium
 
+      - name: Verify immutable source checkouts remain clean
+        if: inputs.run_page_builder_full_e2e == true
+        shell: pwsh
+        run: |
+          $roots = @(
+            'praxis-config-starter',
+            'praxis-api-quickstart',
+            'praxis-ui-angular'
+          )
+          foreach ($root in $roots) {
+            $changes = @(& git -C "$env:GITHUB_WORKSPACE\$root" status --porcelain)
+            if ($changes.Count -gt 0) {
+              Write-Host "Dirty checkout: $root"
+              $changes | ForEach-Object { Write-Host $_ }
+              throw "$root changed before the production-like gate."
+            }
+          }
+          $metadataSha = (& git -C "$env:GITHUB_WORKSPACE\praxis-metadata-starter" rev-parse HEAD).Trim()
+          $metadataTreeSha = (& git -C "$env:GITHUB_WORKSPACE\praxis-metadata-starter" rev-parse 'HEAD^{tree}').Trim()
+          if ($metadataSha -ne '${{ inputs.metadata_ref }}' -or $metadataTreeSha -notmatch '^[0-9a-f]{40}$') {
+            throw 'Metadata git-archive source identity does not match the immutable workflow input.'
+          }
+          Write-Host "Metadata will be exercised from immutable git archive: commit=$metadataSha tree=$metadataTreeSha"
+
       - name: Run quickstart authoring HTTP/SSE smoke suite
         if: inputs.run_quickstart_http_smoke == true
         shell: pwsh
@@ -259,7 +315,7 @@ jobs:
             QuickstartRoot = "$env:GITHUB_WORKSPACE\praxis-api-quickstart"
             EnvFile = "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1"
             StartupTimeoutSec = [int]'${{ inputs.quickstart_startup_timeout_seconds }}'
-            StreamProcessingTimeoutSeconds = [int]'${{ inputs.stream_processing_timeout_seconds }}'
+            StreamProcessingTimeoutSeconds = [int]$env:PB_STREAM_PROCESSING_TIMEOUT_SECONDS
           }
           if ('${{ inputs.domain_rule_lifecycle_only }}' -eq 'true') {
             $smokeArgs.DomainRuleLifecycleOnly = $true
@@ -297,13 +353,23 @@ jobs:
             -Provider '${{ inputs.provider }}' `
             -JavaHome "$env:JAVA_HOME" `
             -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
+            -MetadataRoot "$env:GITHUB_WORKSPACE\praxis-metadata-starter" `
+            -ExpectedMetadataVersion "$env:METADATA_STARTER_VERSION" `
             -UiRoot "$env:GITHUB_WORKSPACE\praxis-ui-angular" `
             -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
             -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}') `
             -UiStartupTimeoutSec ([int]'${{ inputs.page_builder_ui_startup_timeout_seconds }}') `
-            -StreamProcessingTimeoutSeconds ([int]'${{ inputs.stream_processing_timeout_seconds }}') `
-            -ValidationMode '${{ inputs.page_builder_e2e_mode }}' `
-            -PlaywrightTestTimeoutMs ([int]'${{ inputs.page_builder_playwright_test_timeout_ms }}')
+            -ValidationMode '${{ inputs.page_builder_e2e_mode }}'
+
+      - name: Build sanitized production-like evidence
+        if: inputs.run_page_builder_full_e2e == true
+        shell: pwsh
+        working-directory: praxis-config-starter
+        run: |
+          .\tools\Export-AgenticProductionLikeEvidence.ps1 `
+            -StarterRoot "$env:GITHUB_WORKSPACE\praxis-config-starter" `
+            -HttpArtifactRoot "$env:GITHUB_WORKSPACE\artifacts\ai-sse-smoke" `
+            -OutputRoot "$env:GITHUB_WORKSPACE\praxis-config-starter\artifacts\agentic-authoring-publication"
 
       - name: Upload smoke artifacts
         if: always()
@@ -311,11 +377,7 @@ jobs:
         with:
           name: agentic-authoring-smoke-artifacts
           path: |
-            artifacts/ai-sse-smoke/**
-            praxis-config-starter/target/agentic-authoring/**
-            artifacts/page-builder-agentic-e2e/**
-            praxis-config-starter/artifacts/page-builder-agentic-e2e/**
-            praxis-api-quickstart/logs/**
-            praxis-ui-angular/test-results/**
-            praxis-ui-angular/tools/e2e/playwright/playwright-agentic-report/**
+            artifacts/ai-sse-smoke/**/summary.json
+            praxis-config-starter/artifacts/agentic-authoring-publication/**
           if-no-files-found: ignore
+          retention-days: 14

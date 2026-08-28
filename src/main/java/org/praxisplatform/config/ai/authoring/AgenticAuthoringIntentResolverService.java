@@ -1319,6 +1319,12 @@ public class AgenticAuthoringIntentResolverService {
         if (shouldHideTechnicalAddresses(request, operationKind, artifactKind, llmRequiresGovernedAuthoring)) {
             quickReplies = sanitizeQuickReplies(quickReplies, selectedCandidate, candidates);
         }
+        boolean clarificationRequired = !questions.isEmpty()
+                || gate != null && "clarification_required".equals(gate.status());
+        boolean clarificationQuickRepliesRecovered = clarificationRequired && quickReplies.isEmpty();
+        if (clarificationQuickRepliesRecovered) {
+            quickReplies = ensureClarificationQuickReplies(effectivePrompt, clarificationRequired, quickReplies);
+        }
         boolean governedDeterministicResolution = isGovernedDeterministicResolution(
                 deterministicFallbackApplied,
                 gate,
@@ -1361,6 +1367,9 @@ public class AgenticAuthoringIntentResolverService {
         }
         if (platformGuidanceQuickRepliesMaterialized) {
             warnings = withWarning(warnings, "platform-guidance-quick-replies-materialized");
+        }
+        if (clarificationQuickRepliesRecovered) {
+            warnings = withWarning(warnings, "clarification-quick-replies-recovered");
         }
         if (conversationHistoryIsolatedForBlankCreate) {
             warnings = withWarning(warnings, "llm-conversation-history-isolated-for-blank-create");
@@ -9208,6 +9217,16 @@ public class AgenticAuthoringIntentResolverService {
                         "suggestion",
                         "Master detail",
                         "Crie uma pagina master-detail com uma lista de resumo e uma area de detalhe vinculada."));
+    }
+
+    private List<AgenticAuthoringQuickReply> ensureClarificationQuickReplies(
+            String effectivePrompt,
+            boolean clarificationRequired,
+            List<AgenticAuthoringQuickReply> quickReplies) {
+        if (!clarificationRequired || quickReplies != null && !quickReplies.isEmpty()) {
+            return quickReplies == null ? List.of() : quickReplies;
+        }
+        return revisionQuickReplies(effectivePrompt);
     }
 
     private List<AgenticAuthoringQuickReply> governedLlmQuickReplies(

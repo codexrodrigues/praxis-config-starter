@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.praxisplatform.config.domain.ApiMetadata;
+import org.praxisplatform.config.domain.ApiMetadataIndexingStatus;
 import org.praxisplatform.config.dto.ApiCatalogRequest;
 import org.praxisplatform.config.dto.ApiMetadataRagReconcileResponse;
 import org.praxisplatform.config.dto.ApiMetadataRagStatusResponse;
@@ -79,7 +80,7 @@ public class ApiMetadataIngestionService {
         List<ApiCatalogRequest.ApiEndpointEntry> endpoints = request.getEndpoints();
         ApiMetadataIndexingScope scope = new ApiMetadataIndexingScope(
                 resolvedTenant, resolvedEnv, serviceKey, resolvedReleaseId);
-        long indexingRevision = indexingStateService.request(scope);
+        boolean indexingRequired = false;
 
         for (ApiCatalogRequest.ApiEndpointEntry ep : endpoints) {
             try {
@@ -106,7 +107,7 @@ public class ApiMetadataIngestionService {
                         safeLen(requestSchema),
                         safeLen(responseSchema),
                         safeLen(parameters));
-                ApiMetadata meta = upsert(
+                UpsertOutcome outcome = upsert(
                         resolvedTenant,
                         resolvedEnv,
                         serviceKey,
@@ -122,15 +123,16 @@ public class ApiMetadataIngestionService {
                         requestSchema,
                         responseSchema,
                         parameters,
-                        rawJson,
-                        null);
+                        rawJson);
+                ApiMetadata meta = outcome.metadata();
+                indexingRequired |= outcome.indexingRequired();
 
                 log.info("Ingested api metadata: {} {}", meta.getMethod(), meta.getPath());
-                ingestLog.info("Ingest saved: id={} method={} path={} indexingRevision={}",
+                ingestLog.info("Ingest saved: id={} method={} path={} indexingRequired={}",
                         meta.getId(),
                         meta.getMethod(),
                         meta.getPath(),
-                        indexingRevision);
+                        outcome.indexingRequired());
 
             } catch (Exception e) {
                 String msg = "Error ingesting endpoint: " + ep.getMethod() + " " + ep.getPath();
@@ -139,10 +141,26 @@ public class ApiMetadataIngestionService {
                 throw new ConfigurationIngestionException(msg, e);
             }
         }
+        if (!indexingRequired && !requiresIndexingRecovery(scope)) {
+            log.info(
+                    "API metadata ingest is materially unchanged; derived indexing remains current for tenant={}, env={}, serviceKey={}, release={}",
+                    resolvedTenant,
+                    resolvedEnv,
+                    serviceKey,
+                    resolvedReleaseId);
+            return;
+        }
+        long indexingRevision = indexingStateService.request(scope);
         long expectedCount = repository.countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
                 resolvedTenant, resolvedEnv, serviceKey, resolvedReleaseId);
         indexingStateService.updateExpectedCount(scope, indexingRevision, expectedCount);
         indexingCoordinator.scheduleAfterCommit(scope);
+    }
+
+    private boolean requiresIndexingRecovery(ApiMetadataIndexingScope scope) {
+        return indexingStateService.snapshot(scope)
+                .map(snapshot -> snapshot.status() == ApiMetadataIndexingStatus.FAILED)
+                .orElse(true);
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -468,7 +486,7 @@ public class ApiMetadataIngestionService {
         return "inline";
     }
 
-    private ApiMetadata upsert(
+    private UpsertOutcome upsert(
             String tenantId,
             String environment,
             String serviceKey,
@@ -484,8 +502,7 @@ public class ApiMetadataIngestionService {
             String requestSchema,
             String responseSchema,
             String parameters,
-            String rawJson,
-            List<Float> embedding) {
+            String rawJson) {
         Optional<ApiMetadata> existing =
                 repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
                                 tenantId,
@@ -502,6 +519,22 @@ public class ApiMetadataIngestionService {
                                 operationId,
                                 method));
         ApiMetadata meta = existing.orElse(new ApiMetadata());
+        boolean indexingRequired = existing.isEmpty()
+                || meta.getEmbedding() == null
+                || meta.getEmbedding().isEmpty()
+                || !materiallyEquivalent(
+                        meta,
+                        releaseVersion,
+                        path,
+                        method,
+                        tags,
+                        summary,
+                        description,
+                        operationId,
+                        requestSchema,
+                        responseSchema,
+                        parameters,
+                        rawJson);
         meta.setTenantId(tenantId);
         meta.setEnvironment(environment);
         meta.setServiceKey(serviceKey);
@@ -518,8 +551,36 @@ public class ApiMetadataIngestionService {
         meta.setResponseSchema(responseSchema);
         meta.setParameters(parameters);
         meta.setRawJson(rawJson);
-        meta.setEmbedding(embedding);
-        return repository.save(meta);
+        if (indexingRequired) {
+            meta.setEmbedding(null);
+        }
+        return new UpsertOutcome(repository.save(meta), indexingRequired);
+    }
+
+    private boolean materiallyEquivalent(
+            ApiMetadata existing,
+            String releaseVersion,
+            String path,
+            String method,
+            String tags,
+            String summary,
+            String description,
+            String operationId,
+            String requestSchema,
+            String responseSchema,
+            String parameters,
+            String rawJson) {
+        return Objects.equals(existing.getReleaseVersion(), releaseVersion)
+                && Objects.equals(existing.getPath(), path)
+                && Objects.equals(existing.getMethod(), method)
+                && Objects.equals(existing.getTags(), tags)
+                && Objects.equals(existing.getSummary(), summary)
+                && Objects.equals(existing.getDescription(), description)
+                && Objects.equals(existing.getOperationId(), operationId)
+                && Objects.equals(existing.getRequestSchema(), requestSchema)
+                && Objects.equals(existing.getResponseSchema(), responseSchema)
+                && Objects.equals(existing.getParameters(), parameters)
+                && Objects.equals(existing.getRawJson(), rawJson);
     }
 
     private Optional<ApiMetadata> findExistingByStableOperationIdentity(
@@ -724,5 +785,8 @@ public class ApiMetadataIngestionService {
     }
 
     private record PublicationOutcome(long expectedDocumentCount, long publishedDocumentCount) {
+    }
+
+    private record UpsertOutcome(ApiMetadata metadata, boolean indexingRequired) {
     }
 }

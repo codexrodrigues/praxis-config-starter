@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "praxis.page-builder-agentic-gate-matrix/v1",
+  "defaults": {
+    "streamProcessingTimeoutSeconds": 360,
+    "playwrightTestTimeoutMs": 600000,
+    "retries": 1
+  },
+  "evidence": {
+    "criticalInterceptionGuardTest": "Guard live rejeita interceptacao de endpoint critico antes do registro"
+  },
+  "modes": {
+    "smoke": {
+      "description": "Release gate with one live LLM authoring journey plus real dependency and transport proofs.",
+      "scenarios": [
+        "critical-interception-guard",
+        "governed-capabilities-provenance",
+        "project-knowledge-revert-and-apply",
+        "live-llm-flow-1"
+      ],
+      "expectedDiscovered": 13,
+      "minimumExecuted": 8,
+      "expectedSkipped": 5,
+      "requiredPassedTests": [
+        "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "Auditoria live: capabilities reais possuem proveniência governada e não degradada"
+      ]
+    },
+    "full": {
+      "description": "Deliberate live LLM matrix with all non-mocked browser scenarios.",
+      "scenarios": [
+        "critical-interception-guard",
+        "governed-capabilities-provenance",
+        "project-knowledge-revert-and-apply",
+        "human-refinement-pr7",
+        "live-llm-flow-1",
+        "live-llm-flow-2"
+      ],
+      "expectedDiscovered": 13,
+      "minimumExecuted": 10,
+      "expectedSkipped": 3,
+      "requiredPassedTests": [
+        "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "Auditoria live: capabilities reais possuem proveniência governada e não degradada"
+      ]
+    }
+  }
+}

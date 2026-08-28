@@ -43,7 +43,7 @@ aplicacao de config e streaming SSE.
 
 Fluxo recomendado:
 1) Entrar em **Actions -> Agentic Authoring HTTP Smoke -> Run workflow**.
-2) Executar com `provider=openai` e manter o `quickstart_ref` padrao do workflow, salvo quando a validacao exigir explicitamente outro ref.
+2) Executar com `provider=openai` e confirmar os SHAs imutaveis sugeridos para Quickstart, Metadata e Angular. Branches como `main` nao sao aceitas pelo gate.
 3) Para releases que alterem authoring, page-builder, manifestos executaveis, SSE ou compilacao de patches, marcar `run_page_builder_full_e2e=true` e manter `page_builder_e2e_mode=smoke`.
 4) Confirmar que o job `Quickstart HTTP/SSE smoke` terminou com sucesso. Quando `run_page_builder_full_e2e=true`, confirmar tambem que o gate Playwright do page-builder terminou com sucesso e publicou artefatos de diagnostico.
 5) Somente depois executar **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow** para criar a tag.
@@ -59,7 +59,13 @@ O smoke manual:
 - usa uma projecao transitória estrita do schema somente na fronteira do provedor e valida o documento decodificado contra o contrato canônico do `MinimalFormPlan`;
 - valida `minimal-form-plan`, `compiled-form-patch`, `page-preview`, `page-apply`, SSE, replay e cleanup.
 - quando `run_page_builder_full_e2e=true`, valida tambem o fluxo agentic do page-builder com browser real; use `page_builder_e2e_mode=smoke` como gate de release e `page_builder_e2e_mode=full` apenas para investigacoes deliberadas da matriz completa;
-- usa `praxis.ai.stream.processing-timeout-seconds=360` por padrao para acomodar turnos reais com discovery, RAG, multiplas chamadas LLM e materializacao.
+- usa os defaults de `tools/e2e/page-builder-agentic-gate-matrix.json`, atualmente com `praxis.ai.stream.processing-timeout-seconds=360`, para acomodar turnos reais com discovery, RAG, multiplas chamadas LLM e materializacao;
+- instala Metadata e Config a partir de copias temporarias exatas de `git archive HEAD`, sem diretorio `.git`; Config/Quickstart/Angular falham antes de usar o provider se seus working trees estiverem dirty, enquanto Metadata registra commit + tree SHA e declara `materialization=git-archive`, pois seu checkout historico normaliza line endings que nao participam do build;
+- executa apenas a config Playwright `production-like`, que bloqueia mocks de endpoints criticos, exige capabilities provenientes do registry e produz JSON com discovered/executed/skipped/failed, tentativas/retries reais, SHAs de checkouts limpos, versoes efetivas de Config/Metadata/Quickstart/Angular, provider/model sanitizado e cleanup;
+- confirma o bootstrap real do AI Registry pelo hash SHA-256 do snapshot versionado, a ingestao real do Domain Catalog e o estado `READY` do indice canonico do API Catalog;
+- publica `criticalEndpointMocks=0` somente quando o teste negativo da matriz comprovar que a interceptacao critica foi rejeitada antes do registro; trace, video e screenshot permanecem desabilitados na lane live;
+- publica no artifact remoto somente `summary.json` do HTTP/SSE e a pasta sanitizada `agentic-authoring-publication`; logs, payloads, relatorio HTML, traces, videos, screenshots e o JSON bruto do Playwright permanecem locais ao runner;
+- mantem cenarios com mocks em uma config separada, sem contabiliza-los como gate live.
 
 Para reproduzir localmente, primeiro empacote o quickstart e depois rode:
 

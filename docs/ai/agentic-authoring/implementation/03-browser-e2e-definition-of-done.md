@@ -26,16 +26,26 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -Provider openai `
   -QuickstartRoot ..\praxis-api-quickstart `
   -UiRoot ..\praxis-ui-angular `
-  -StreamProcessingTimeoutSeconds 180 `
   -ValidationMode smoke
 ```
 
 Esse runner:
 
-- sobe o quickstart em `http://localhost:8088`;
+- sobe o quickstart exclusivamente em `http://127.0.0.1:8088`;
 - sobe o Angular em `http://localhost:4003`;
-- executa `npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-validation.playwright.config.ts`;
+- executa `npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-production-like.playwright.config.ts`;
 - usa `-ValidationMode smoke` como gate de release e reserva `-ValidationMode full` para investigacao deliberada da matriz completa.
+- le timeouts, retries e contagens esperadas de `tools/e2e/page-builder-agentic-gate-matrix.json`;
+- rejeita provider/embeddings mock, datasource nao PostgreSQL, JAR divergente, contrato Config/Angular divergente, capabilities degradadas e interceptacao de endpoint critico;
+- exige AI Registry `ready` com o hash do snapshot Config versionado, Domain Catalog ingerido e API Catalog com indexacao canonica `READY`;
+- exige que o teste negativo de interceptacao critica passe e deriva dele `criticalEndpointMocks=0`; o artifact registra tentativas e retries realmente observados;
+- desabilita trace, video e screenshot na lane live para que a evidencia publicavel permaneça estruturada e sanitizada;
+- valida e copia para `agentic-authoring-publication` apenas o resultado production-like, a auditoria de source e o resumo HTTP/SSE; nenhum log, payload, relatorio HTML ou JSON bruto do Playwright entra no artifact remoto;
+- gera segredo de stream efemero, exige working trees limpos para fontes exercitadas diretamente, materializa Metadata da arvore exata de `git archive`, registra commit/tree SHAs e versoes efetivamente empacotadas sem segredos e comprova o teardown dos listeners.
+
+Testes deterministas com interceptacao ficam na config
+`praxis-page-builder-agentic-mocked.playwright.config.ts`. Seus resultados nao
+podem ser somados ao artifact production-like.
 
 Em macOS/Linux, o runner local gerenciado equivalente vive no workspace
 Angular e orquestra Config Starter, Quickstart, catalogos, Angular, Playwright e
@@ -184,6 +194,10 @@ Use este checklist sempre que rodar um fluxo impactado:
 - [ ] houve progresso observavel no assistente
 - [ ] houve evento terminal coerente
 - [ ] o resultado veio do backend e nao de mock local
+- [ ] o artifact declara `productionLike=true` e `criticalEndpointMocks=0`
+- [ ] capabilities declaram `source=registry` e `degraded=false`
+- [ ] os SHAs efetivos de Config, Metadata, Quickstart e Angular foram registrados; working trees exercitados estavam limpos; Metadata registra tree SHA/materializacao `git-archive`; e as versoes Metadata/Config embutidas no JAR foram comprovadas
+- [ ] nao restaram listeners nas portas `8088` e `4003`
 - [ ] o preview/aplicacao refletiu o pedido feito
 - [ ] `cancel` e `probe` continuaram funcionando se o fluxo mexeu em stream
 - [ ] nao houve regressao visual obvia no painel do assistente

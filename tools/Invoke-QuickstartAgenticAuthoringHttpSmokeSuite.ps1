@@ -250,7 +250,9 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
     $plan = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringPlanHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $compile = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringCompileHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $preview = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringPreviewHttpE2E.ps1") @commonArgs | ConvertFrom-Json
-    $apply = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringApplyHttpE2E.ps1") @commonArgs | ConvertFrom-Json
+    $applyArgs = @{} + $commonArgs
+    $applyArgs.StreamProcessingTimeoutSeconds = $StreamProcessingTimeoutSeconds
+    $apply = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringApplyHttpE2E.ps1") @applyArgs | ConvertFrom-Json
     $stream = & (Join-Path $PSScriptRoot "Invoke-QuickstartAiPatchStreamHttpE2E.ps1") `
         -BaseUrl $base `
         -Origin $Origin `

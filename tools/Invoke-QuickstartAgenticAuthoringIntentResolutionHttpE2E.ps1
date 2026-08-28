@@ -7,7 +7,7 @@ param(
     [string] $TenantId = "agentic-authoring-e2e",
     [string] $UserId = "codex-local",
     [string] $Environment = "local",
-    [string] $UserPrompt = "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras"
+    [string] $UserPrompt = "Crie uma regra para fornecedor bloqueado nao poder ser selecionado em compras. Use a fonte canonica /api/procurement/suppliers."
 )
 
 $ErrorActionPreference = "Stop"
@@ -213,50 +213,64 @@ $apiCatalogGrounding | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $a
 $result | ConvertTo-Json -Depth 16 | Set-Content -Path (Join-Path $artifactDir "result.json") -Encoding UTF8
 Write-Host "Intent resolution smoke artifacts written to $artifactDir"
 
+$sanitizedDiagnostics = [ordered]@{
+    gateStatus = $result.gateStatus
+    failureCodes = @($result.failureCodes)
+    selectedResourcePath = $result.selectedResourcePath
+    componentEditPlanPresent = $result.componentEditPlanPresent
+    pagePreviewValid = $result.pagePreviewValid
+    pagePreviewFailureCodes = @($result.pagePreviewFailureCodes)
+    pagePreviewWarnings = @($result.pagePreviewWarnings)
+    pagePreviewSharedRuleRouteBlocked = $result.pagePreviewSharedRuleRouteBlocked
+    pagePreviewUiCompositionPlanPresent = $result.pagePreviewUiCompositionPlanPresent
+    pagePreviewCompiledFormPatchPresent = $result.pagePreviewCompiledFormPatchPresent
+}
+$sanitizedDiagnosticsJson = $sanitizedDiagnostics | ConvertTo-Json -Compress -Depth 8
+
 if ($result.health -ne "UP") {
-    throw "Quickstart health is not UP."
+    throw "Quickstart health is not UP. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if ($result.valid) {
-    throw "Intent resolution should not be valid for governed shared-rule authoring route."
+    throw "Intent resolution should not be valid for governed shared-rule authoring route. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if ($result.gateStatus -ne "route_required") {
-    throw "Expected intent-resolution gate.status=route_required, got '$($result.gateStatus)'."
+    throw "Expected intent-resolution gate.status=route_required, got '$($result.gateStatus)'. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if ($result.failureCodes -notcontains "shared-rule-authoring-required") {
-    throw "Intent resolution did not report shared-rule-authoring-required."
+    throw "Intent resolution did not report shared-rule-authoring-required. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if ($result.selectedResourcePath -ne "/api/procurement/suppliers") {
-    throw "Expected procurement suppliers candidate, got '$($result.selectedResourcePath)'."
+    throw "Expected procurement suppliers candidate, got '$($result.selectedResourcePath)'. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if ($result.assistantMessage -notlike "*/api/praxis/config/domain-rules*") {
-    throw "Assistant message did not route to /api/praxis/config/domain-rules."
+    throw "Assistant message did not route to /api/praxis/config/domain-rules. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if ($result.assistantMessage -notlike "*/api/praxis/config/domain-rules/intake*") {
-    throw "Assistant message did not name the canonical domain-rules intake endpoint."
+    throw "Assistant message did not name the canonical domain-rules intake endpoint. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if ($result.assistantMessage -notlike "*/api/praxis/config/domain-rules/simulations*") {
-    throw "Assistant message did not name the canonical domain-rules simulations endpoint."
+    throw "Assistant message did not name the canonical domain-rules simulations endpoint. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if ($result.componentEditPlanPresent) {
-    throw "Intent resolution returned componentEditPlan for a governed business-rule route."
+    throw "Intent resolution returned componentEditPlan for a governed business-rule route. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if ($result.pagePreviewValid) {
-    throw "Page preview should not be valid for governed shared-rule authoring route."
+    throw "Page preview should not be valid for governed shared-rule authoring route. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if ($result.pagePreviewFailureCodes -notcontains "intent-resolution-shared-rule-route-required") {
-    throw "Page preview did not report intent-resolution-shared-rule-route-required."
+    throw "Page preview did not report intent-resolution-shared-rule-route-required. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if ($result.pagePreviewWarnings -notcontains "preview-skipped-invalid-intent-resolution") {
-    throw "Page preview did not report preview-skipped-invalid-intent-resolution."
+    throw "Page preview did not report preview-skipped-invalid-intent-resolution. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if ($result.pagePreviewUiCompositionPlanPresent) {
-    throw "Page preview returned uiCompositionPlan for a governed business-rule route."
+    throw "Page preview returned uiCompositionPlan for a governed business-rule route. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if ($result.pagePreviewCompiledFormPatchPresent) {
-    throw "Page preview returned compiledFormPatch for a governed business-rule route."
+    throw "Page preview returned compiledFormPatch for a governed business-rule route. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 if (-not $result.pagePreviewSharedRuleRouteBlocked) {
-    throw "Page preview did not preserve the canonical shared-rule routing block."
+    throw "Page preview did not preserve the canonical shared-rule routing block. SanitizedDiagnostics=$sanitizedDiagnosticsJson"
 }
 
 $result | ConvertTo-Json -Depth 6

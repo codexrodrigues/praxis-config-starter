@@ -7,7 +7,7 @@ param(
     [string] $TenantId = "agentic-authoring-e2e",
     [string] $UserId = "codex-local",
     [string] $Environment = "local",
-    [string] $UserPrompt = "Crie um formulario didatico so com os campos realmente necessarios para cadastrar incidentes de missao operacionais. Use a fonte Incidentes de Missao."
+    [string] $UserPrompt = "Crie um formulario didatico so com os campos realmente necessarios para cadastrar incidentes de missao operacionais. Use a fonte canonica /api/operations/incidentes."
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,10 +50,14 @@ $headers = @{
 
 $body = @{
     userPrompt = $UserPrompt
+    targetApp = "praxis-ui-angular"
+    targetComponentId = "praxis-dynamic-page-builder"
+    currentRoute = "/page-builder-ia"
+    currentPage = @{}
     provider = $Provider
     model = $model
     apiKey = $apiKey
-} | ConvertTo-Json -Compress
+} | ConvertTo-Json -Compress -Depth 8
 
 $health = Invoke-RestMethod -Method Get -Uri "$base/actuator/health" -TimeoutSec 10
 $preview = Invoke-RestMethod `
@@ -85,7 +89,7 @@ if (-not $result.valid) {
     throw "Agentic authoring page preview is not valid: $($result.failureCodes -join ', ')"
 }
 if ($result.fields -notcontains "descricao" -or $result.fields -notcontains "ocorridoEm") {
-    throw "Page preview MinimalFormPlan did not include the required incident fields descricao and ocorridoEm."
+    throw "Page preview MinimalFormPlan did not include the required incident fields descricao and ocorridoEm. Actual fields: $($result.fields -join ', ')"
 }
 if ($result.fields -contains "titulo") {
     throw "Page preview MinimalFormPlan invented titulo outside the incident create schema."

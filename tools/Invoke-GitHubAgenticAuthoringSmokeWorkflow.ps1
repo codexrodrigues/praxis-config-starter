@@ -4,16 +4,14 @@ param(
     [string] $Ref = "main",
     [ValidateSet("openai", "gemini")]
     [string] $Provider = "openai",
-    [string] $QuickstartRef = "main",
-    [string] $MetadataRef = "main",
-    [string] $UiRef = "main",
-    [int] $StreamProcessingTimeoutSeconds = 180,
+    [string] $QuickstartRef = "cdb9ef3ae29155ec676149fec21d1147979b8211",
+    [string] $MetadataRef = "83e32d40e8a6338953580616c762f4722fa3b4f6",
+    [string] $UiRef = "2882822b4b6202aa94665d2ba5769ee369fe559b",
     [int] $QuickstartStartupTimeoutSeconds = 180,
     [switch] $RunPageBuilderFullE2E,
     [ValidateSet("smoke", "full")]
     [string] $PageBuilderE2EMode = "smoke",
     [int] $PageBuilderE2ETimeoutMinutes = 30,
-    [int] $PageBuilderPlaywrightTestTimeoutMs = 600000,
     [string] $Token = "",
     [int] $PollIntervalSec = 15,
     [int] $TimeoutSec = 1800,
@@ -21,6 +19,16 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+foreach ($downstreamRef in @{
+    QuickstartRef = $QuickstartRef
+    MetadataRef = $MetadataRef
+    UiRef = $UiRef
+}.GetEnumerator()) {
+    if ($downstreamRef.Value -notmatch '^[0-9a-fA-F]{40}$') {
+        throw "$($downstreamRef.Key) must be an immutable 40-character commit SHA."
+    }
+}
 
 if ([string]::IsNullOrWhiteSpace($Token)) {
     $Token = $env:GH_TOKEN
@@ -56,8 +64,6 @@ $dispatchBody = @{
         run_page_builder_full_e2e = [bool] $RunPageBuilderFullE2E.IsPresent
         page_builder_e2e_mode = $PageBuilderE2EMode
         page_builder_e2e_timeout_minutes = [string] $PageBuilderE2ETimeoutMinutes
-        page_builder_playwright_test_timeout_ms = [string] $PageBuilderPlaywrightTestTimeoutMs
-        stream_processing_timeout_seconds = [string] $StreamProcessingTimeoutSeconds
         quickstart_startup_timeout_seconds = [string] $QuickstartStartupTimeoutSeconds
     }
 } | ConvertTo-Json -Depth 6 -Compress
@@ -81,7 +87,6 @@ if ($NoWait.IsPresent) {
         runPageBuilderFullE2E = [bool] $RunPageBuilderFullE2E.IsPresent
         pageBuilderE2EMode = $PageBuilderE2EMode
         pageBuilderE2ETimeoutMinutes = $PageBuilderE2ETimeoutMinutes
-        pageBuilderPlaywrightTestTimeoutMs = $PageBuilderPlaywrightTestTimeoutMs
         quickstartStartupTimeoutSeconds = $QuickstartStartupTimeoutSeconds
         dispatched = $true
         waiting = $false
@@ -133,7 +138,6 @@ $result = [pscustomobject]@{
     runPageBuilderFullE2E = [bool] $RunPageBuilderFullE2E.IsPresent
     pageBuilderE2EMode = $PageBuilderE2EMode
     pageBuilderE2ETimeoutMinutes = $PageBuilderE2ETimeoutMinutes
-    pageBuilderPlaywrightTestTimeoutMs = $PageBuilderPlaywrightTestTimeoutMs
     quickstartStartupTimeoutSeconds = $QuickstartStartupTimeoutSeconds
     status = $run.status
     conclusion = $run.conclusion

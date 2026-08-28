@@ -785,6 +785,77 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void doesNotMaterializeDescriptiveConstraintsAsCrudDataSelection() {
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "employee_identity_card",
+                "operational-crud",
+                "praxis-crud",
+                List.of(),
+                false,
+                true,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringIntentResolutionResult operationalIntent = intent(
+                "create", "page", "create_artifact", "/api/human-resources/vw-perfil-heroi", visualizationDecision);
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.putArray("filters")
+                .addObject()
+                .put("field", "identity")
+                .put("operator", "eq")
+                .put("value", "funcionario");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Monte uma ficha de identidade de funcionario usando Perfis 360",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                withConstraints(operationalIntent, constraints)))
+                .orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        JsonNode inputs = findWidgetInputs(plan, "praxis-crud");
+        assertThat(inputs.path("metadata").has("queryContext")).isFalse();
+        assertThat(plan.path("diagnostics").path("queryConstraintsRequested").asBoolean()).isFalse();
+    }
+
+    @Test
+    void doesNotMaterializeFiltersWhenSemanticDecisionExplicitlyRejectsDataSelection() {
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "employee_identity_card",
+                "operational-crud",
+                "praxis-crud",
+                List.of(),
+                false,
+                true,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringIntentResolutionResult operationalIntent = intent(
+                "create", "page", "create_artifact", "/api/human-resources/vw-perfil-heroi", visualizationDecision);
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", false);
+        constraints.putArray("filters")
+                .addObject()
+                .put("field", "identity")
+                .put("operator", "eq")
+                .put("value", "funcionario");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Monte uma ficha de identidade de funcionario usando Perfis 360",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                withConstraints(operationalIntent, constraints)))
+                .orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        JsonNode inputs = findWidgetInputs(plan, "praxis-crud");
+        assertThat(inputs.path("metadata").has("queryContext")).isFalse();
+        assertThat(plan.path("diagnostics").path("queryConstraintsRequested").asBoolean()).isFalse();
+    }
+
+    @Test
     void materializesMasterDetailPageWithFullWidthPresentationCanvas() {
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "quero criar algo que mostre informacoes dos empregados",
