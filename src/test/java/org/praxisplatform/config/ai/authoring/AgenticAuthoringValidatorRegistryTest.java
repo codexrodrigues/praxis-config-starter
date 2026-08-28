@@ -1087,7 +1087,7 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
-    void shouldValidateFunnelAndPyramidAsCategorySliceCharts() throws Exception {
+    void shouldValidateFunnelPyramidAndTreemapAsCategorySliceCharts() throws Exception {
         JsonNode oneMetricConfig = objectMapper.readTree("""
                 {
                   "chartDocument": {
@@ -1102,7 +1102,7 @@ class AgenticAuthoringValidatorRegistryTest {
                 "praxis-chart",
                 operation("chart.type.set", "chartType", "x-ui-chart-kind", false,
                         "chart-type-supported,chart-type-series-axis-compatible,category-slice-single-metric"),
-                plan("{}", "{ \"kind\": \"funnel\" }"),
+                plan("{}", "{ \"kind\": \"treemap\" }"),
                 oneMetricConfig,
                 failures,
                 new ArrayList<>());
@@ -1133,7 +1133,7 @@ class AgenticAuthoringValidatorRegistryTest {
         assertThat(failures)
                 .contains(
                         "validator chart-type-series-axis-compatible failed for chart.type.set: category slice charts cannot use secondary axes",
-                        "validator category-slice-single-metric failed for chart.type.set: pie, donut, funnel and pyramid charts require exactly one metric");
+                        "validator category-slice-single-metric failed for chart.type.set: pie, donut, funnel, pyramid and treemap charts require exactly one metric");
     }
 
     @Test

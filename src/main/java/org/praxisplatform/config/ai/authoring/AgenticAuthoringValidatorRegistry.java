@@ -3527,7 +3527,7 @@ public final class AgenticAuthoringValidatorRegistry {
         JsonNode metrics = chartMetricsCandidate(planOperation, config);
         if (categorySliceChartKinds().contains(kind) && (!metrics.isArray() || metrics.size() != 1)) {
             failures.add("validator category-slice-single-metric failed for " + operationId
-                    + ": pie, donut, funnel and pyramid charts require exactly one metric");
+                    + ": pie, donut, funnel, pyramid and treemap charts require exactly one metric");
         }
     }
 
@@ -4148,11 +4148,11 @@ public final class AgenticAuthoringValidatorRegistry {
     }
 
     private Set<String> chartKinds() {
-        return Set.of("bar", "combo", "horizontal-bar", "line", "pie", "donut", "funnel", "pyramid", "area", "stacked-bar", "stacked-area", "scatter");
+        return Set.of("bar", "combo", "horizontal-bar", "line", "pie", "donut", "funnel", "pyramid", "treemap", "area", "stacked-bar", "stacked-area", "scatter");
     }
 
     private Set<String> categorySliceChartKinds() {
-        return Set.of("pie", "donut", "funnel", "pyramid");
+        return Set.of("pie", "donut", "funnel", "pyramid", "treemap");
     }
 
     private JsonNode chartMetricsCandidate(JsonNode planOperation, JsonNode config) {
