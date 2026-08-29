@@ -1137,6 +1137,107 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
+    void shouldValidateCanonicalGaugeScalarAndScaleContracts() throws Exception {
+        JsonNode validGaugeDocument = objectMapper.readTree("""
+                {
+                  "version": "0.1.0",
+                  "kind": "gauge",
+                  "source": {
+                    "kind": "praxis.stats",
+                    "resource": "/api/procurement/vw-supplier-procurement-funnel/stats",
+                    "operation": "group-by",
+                    "options": { "limit": 1 }
+                  },
+                  "dimensions": [{ "field": "stage" }],
+                  "metrics": [{ "field": "conversionRate", "aggregation": "avg" }],
+                  "gauge": { "scale": { "min": 0, "max": 1 } }
+                }
+                """);
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "gauge",
+                    "source": {
+                      "kind": "praxis.stats",
+                      "resource": "/api/procurement/vw-supplier-procurement-funnel/stats",
+                      "operation": "group-by",
+                      "options": { "limit": 1 }
+                    },
+                    "dimensions": [{ "field": "stage" }],
+                    "metrics": [{ "field": "conversionRate", "aggregation": "avg" }],
+                    "gauge": { "scale": { "min": 0, "max": 1 } }
+                  }
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("chart.document.set", "dataBinding", "x-ui-chart-document-root", false,
+                        "chart-type-supported,gauge-scalar-contract,gauge-scale-valid"),
+                plan("{}", validGaugeDocument.toString()),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("gauge.scale.configure", "gaugeScale", "x-ui-chart-gauge-scale", false,
+                        "gauge-scale-valid,gauge-scalar-contract"),
+                plan("{}", "{ \"min\": 0, \"max\": 1 }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("gauge.scale.configure", "gaugeScale", "x-ui-chart-gauge-scale", false,
+                        "gauge-scale-valid,gauge-scalar-contract"),
+                plan("{}", "{ \"min\": 1, \"max\": 1 }"),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", false,
+                        "gauge-scalar-contract"),
+                plan("{}", """
+                        {
+                          "sourceKind": "praxis.stats",
+                          "resource": "/api/procurement/vw-supplier-procurement-funnel/stats",
+                          "operation": "timeseries",
+                          "limit": 2,
+                          "dimensions": [],
+                          "metrics": [
+                            { "field": "conversionRate", "aggregation": "avg" },
+                            { "field": "volume", "aggregation": "sum" }
+                          ]
+                        }
+                        """),
+                config,
+                failures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("series.add", "series", "x-ui-chart-metric-by-field", false,
+                        "gauge-scalar-contract"),
+                plan("{}", "{ \"field\": \"volume\", \"aggregation\": \"sum\" }"),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures)
+                .contains(
+                        "validator gauge-scale-valid failed for gauge.scale.configure: gauge scale requires finite min and max values with max greater than min",
+                        "validator gauge-scalar-contract failed for data.resource.bind: gauge charts require at least one dimension",
+                        "validator gauge-scalar-contract failed for data.resource.bind: gauge charts require exactly one metric",
+                        "validator gauge-scalar-contract failed for data.resource.bind: praxis.stats gauge charts require group-by with source.options.limit=1",
+                        "validator gauge-scalar-contract failed for series.add: gauge charts require exactly one metric");
+    }
+
+    @Test
     void shouldValidateScatterWithOneOrTwoMetricsAndRejectEffectiveThirdMetric() throws Exception {
         JsonNode oneMetricConfig = objectMapper.readTree("""
                 {

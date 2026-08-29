@@ -5717,14 +5717,25 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         source.put("kind", sourceKind);
         copyIfPresent(input, source, "resource");
         copyIfPresent(input, source, "operation");
+        ObjectNode sourceOptions = null;
+        if (input.has("limit")) {
+            sourceOptions = source.putObject("options");
+            sourceOptions.set("limit", input.path("limit").deepCopy());
+        }
         if (input.has("comparisonPeriod")) {
-            source.putObject("options").set("comparisonPeriod", input.path("comparisonPeriod").deepCopy());
+            if (sourceOptions == null) {
+                sourceOptions = source.putObject("options");
+            }
+            sourceOptions.set("comparisonPeriod", input.path("comparisonPeriod").deepCopy());
         }
 
         ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
         compiled.put("op", "bind-chart-data-resource");
         compiled.put("path", "chartDocument");
         addWriteDelta(compiled, "chartDocument.source", source);
+        if (input.has("limit")) {
+            addWriteDelta(compiled, "chartDocument.source.options.limit", input.path("limit"));
+        }
         if (input.has("comparisonPeriod")) {
             addWriteDelta(compiled, "chartDocument.source.options.comparisonPeriod", input.path("comparisonPeriod"));
         }

@@ -172,6 +172,19 @@ class AgenticAuthoringTargetResolverRegistryTest {
     }
 
     @Test
+    void shouldTreatGaugeScaleAsCanonicalOptionalChartRoot() throws Exception {
+        AgenticAuthoringResolvedTarget result = registry.resolve(
+                "praxis-chart",
+                operation("gauge.scale.configure", "gaugeScale", "x-ui-chart-gauge-scale", "fail", false),
+                objectMapper.createObjectNode(),
+                objectMapper.readTree("{ \"chartDocument\": { \"kind\": \"gauge\" } }"));
+
+        assertThat(result.status()).isEqualTo("not-required");
+        assertThat(result.kind()).isEqualTo("gaugeScale");
+        assertThat(result.resolver()).isEqualTo("x-ui-chart-gauge-scale");
+    }
+
+    @Test
     void shouldTreatPointClickAuthoringResolverAsCanonicalOptionalChartRoot() throws Exception {
         AgenticAuthoringResolvedTarget result = registry.resolve(
                 "praxis-chart",

@@ -2894,7 +2894,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 "scatter",
                 "funnel",
                 "pyramid",
-                "treemap"));
+                "treemap",
+                "gauge"));
         stringEnum(axisProperties, "orientation", List.of("vertical", "horizontal", "temporal"));
         stringEnum(axisProperties, "metricAggregation", List.of("count", "sum", "avg", "min", "max"));
         nullableString(axisProperties, "metricField");
