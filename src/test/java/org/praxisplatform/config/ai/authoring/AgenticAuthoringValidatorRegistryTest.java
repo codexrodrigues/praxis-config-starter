@@ -2420,6 +2420,86 @@ class AgenticAuthoringValidatorRegistryTest {
                         "validator no-local-child-input-write failed for childOperation.delegate: child config must be delegated");
     }
 
+    @Test
+    void shouldRecognizePageBuilderTargetRegistryValidatorsOnlyAtTheCanonicalRuntimeBoundary() throws Exception {
+        JsonNode operation = objectMapper.readTree("""
+                {
+                  "operationId": "page.preview.apply",
+                  "effects": [{
+                    "kind": "compile-domain-patch",
+                    "handler": "page-builder-preview-apply",
+                    "handlerContract": {
+                      "reads": [
+                        "UiCompositionPlan",
+                        "PageBuilderAiAdapter.applyUiCompositionPlan",
+                        "ComponentMetadataRegistry"
+                      ],
+                      "failureModes": [
+                        "target-registry-missing",
+                        "component-not-registered",
+                        "component-not-materializable"
+                      ]
+                    }
+                  }],
+                  "validators": [
+                    "ui-composition-target-registry-available",
+                    "ui-composition-components-materializable"
+                  ]
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-page-builder",
+                operation,
+                plan("{}", "{ \"previewId\": \"preview-current\" }"),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(AgenticAuthoringValidatorRegistry.supportsValidator(
+                "ui-composition-target-registry-available")).isTrue();
+        assertThat(AgenticAuthoringValidatorRegistry.supportsValidator(
+                "ui-composition-components-materializable")).isTrue();
+        assertThat(failures).isEmpty();
+    }
+
+    @Test
+    void shouldRejectPageBuilderTargetRegistryValidatorsWithoutTheCanonicalRuntimeBoundary() throws Exception {
+        JsonNode operation = objectMapper.readTree("""
+                {
+                  "operationId": "page.preview.apply",
+                  "effects": [{
+                    "kind": "compile-domain-patch",
+                    "handler": "page-builder-preview-apply",
+                    "handlerContract": {
+                      "reads": ["UiCompositionPlan"],
+                      "failureModes": ["preview-result-invalid"]
+                    }
+                  }],
+                  "validators": [
+                    "ui-composition-target-registry-available",
+                    "ui-composition-components-materializable"
+                  ]
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-page-builder",
+                operation,
+                plan("{}", "{ \"previewId\": \"preview-current\" }"),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).containsExactlyInAnyOrder(
+                "validator ui-composition-target-registry-available failed for page.preview.apply: "
+                        + "canonical page-builder target-registry preflight delegation is required",
+                "validator ui-composition-components-materializable failed for page.preview.apply: "
+                        + "canonical page-builder target-registry preflight delegation is required");
+    }
+
     private JsonNode operationWithSchema(String inputSchemaJson) throws Exception {
         return objectMapper.readTree("""
                 {

@@ -273,6 +273,8 @@ public final class AgenticAuthoringValidatorRegistry {
             "state-json-valid",
             "composition-state-links-still-valid",
             "preview-result-valid",
+            "ui-composition-target-registry-available",
+            "ui-composition-components-materializable",
             "compiled-page-patch-present",
             "no-envelope-runtime-persistence",
             "runtime-page-valid",
@@ -780,6 +782,22 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "state-path-valid" -> validatePageBuilderStatePath(operationId, planOperation, failures);
                 case "state-layer-valid" -> validatePageBuilderStateLayer(operationId, planOperation, failures);
                 case "preview-result-valid", "compiled-page-patch-present" -> validatePageBuilderPreviewPatch(operationId, planOperation, config, failures);
+                case "ui-composition-target-registry-available" ->
+                        validatePageBuilderRuntimePreflightDelegation(
+                                componentId,
+                                operation,
+                                validatorId,
+                                "ComponentMetadataRegistry",
+                                List.of("target-registry-missing"),
+                                failures);
+                case "ui-composition-components-materializable" ->
+                        validatePageBuilderRuntimePreflightDelegation(
+                                componentId,
+                                operation,
+                                validatorId,
+                                "PageBuilderAiAdapter.applyUiCompositionPlan",
+                                List.of("component-not-registered", "component-not-materializable"),
+                                failures);
                 case "page-identity-complete" -> validatePageBuilderPageIdentity(operationId, planOperation, failures);
                 case "etag-policy-valid" -> validatePageBuilderEtag(operationId, planOperation, failures);
                 case "no-local-child-input-write" -> validatePageBuilderNoLocalChildInputWrite(operationId, planOperation, failures);
@@ -3221,6 +3239,39 @@ public final class AgenticAuthoringValidatorRegistry {
         if (!page.isObject()) {
             failures.add("validator compiled-page-patch-present failed for " + operationId + ": compiledFormPatch.patch.page is required");
         }
+    }
+
+    private void validatePageBuilderRuntimePreflightDelegation(
+            String componentId,
+            JsonNode operation,
+            String validatorId,
+            String requiredRead,
+            List<String> requiredFailureModes,
+            List<String> failures) {
+        String operationId = text(operation, "operationId");
+        JsonNode delegatedEffect = MissingNode.getInstance();
+        for (JsonNode effect : operation.path("effects")) {
+            if ("compile-domain-patch".equals(text(effect, "kind"))
+                    && "page-builder-preview-apply".equals(text(effect, "handler"))) {
+                delegatedEffect = effect;
+                break;
+            }
+        }
+
+        JsonNode handlerContract = delegatedEffect.path("handlerContract");
+        boolean delegatedToCanonicalRuntime = "praxis-page-builder".equals(componentId)
+                && "page.preview.apply".equals(operationId)
+                && arrayContainsText(handlerContract.path("reads"), requiredRead)
+                && requiredFailureModes.stream()
+                        .allMatch(failureMode -> arrayContainsText(handlerContract.path("failureModes"), failureMode));
+        if (!delegatedToCanonicalRuntime) {
+            failures.add("validator " + validatorId + " failed for " + operationId
+                    + ": canonical page-builder target-registry preflight delegation is required");
+        }
+        // The Angular Component type is intentionally not serialized into backend validation context.
+        // Materializability remains enforced by preflightUiCompositionPlan against the target host's
+        // ComponentMetadataRegistry; this check fails closed if another operation tries to borrow the
+        // validator without that exact executable runtime boundary.
     }
 
     private void validatePageBuilderPageIdentity(String operationId, JsonNode planOperation, List<String> failures) {
