@@ -129,7 +129,7 @@ class AgenticAuthoringValidatorRegistryTest {
     }
 
     @Test
-    void shouldValidateFilterAndGroupingFieldsAgainstConfig() throws Exception {
+    void shouldValidateIncrementalFilterFieldsAgainstConfig() throws Exception {
         List<String> failures = new ArrayList<>();
 
         registry.executeOperationValidators(
@@ -152,6 +152,100 @@ class AgenticAuthoringValidatorRegistryTest {
 
         assertThat(failures)
                 .contains("validator fields-exist failed for filter.advanced.configure: unknown field missing");
+    }
+
+    @Test
+    void shouldValidateStandaloneFilterRootFieldsFromDeclaredValidatorRegardlessOfOperationPrefix() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-filter",
+                operationWithValidators("settings.configure", false, "filter-fields-exist"),
+                plan("{}", """
+                        {
+                          "alwaysVisibleFields": ["employeeName"],
+                          "selectedFieldIds": ["department", "missing"]
+                        }
+                        """),
+                objectMapper.readTree("""
+                        {
+                          "filterRequestFieldMetadata": [
+                            { "name": "employeeName" },
+                            { "name": "department" }
+                          ]
+                        }
+                        """),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).containsExactly(
+                "validator fields-exist failed for settings.configure: unknown field missing");
+    }
+
+    @Test
+    void shouldKeepGroupingValidatorScopedToIncrementalFieldsInsteadOfStandaloneFilterArrays() throws Exception {
+        List<String> failures = new ArrayList<>();
+        JsonNode operation = operationWithValidators(
+                "grouping.configure",
+                false,
+                "grouping-fields-exist");
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "department" }
+                  ]
+                }
+                """);
+
+        registry.executeOperationValidators(
+                "praxis-table",
+                operation,
+                plan("{}", """
+                        {
+                          "alwaysVisibleFields": ["missingStandaloneField"],
+                          "selectedFieldIds": ["anotherMissingStandaloneField"]
+                        }
+                        """),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+
+        registry.executeOperationValidators(
+                "praxis-table",
+                operation,
+                plan("{}", """
+                        {
+                          "fields": ["department", "missingGroupingField"]
+                        }
+                        """),
+                config,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).containsExactly(
+                "validator fields-exist failed for grouping.configure: unknown field missingGroupingField");
+    }
+
+    @Test
+    void shouldNotFailFilterFieldValidationWhenTheOperationDoesNotDeclareFieldArrays() throws Exception {
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-filter",
+                operationWithValidators("filter.settings.configure", false, "filter-fields-exist"),
+                plan("{}", """
+                        {
+                          "changeDebounceMs": 450,
+                          "advancedOpenMode": "drawer"
+                        }
+                        """),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
     }
 
     @Test

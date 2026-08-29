@@ -393,6 +393,52 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesStandaloneFilterRootFieldsThroughTheSelectedManifestValidator() throws Exception {
+        String componentId = "praxis-filter";
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                componentId,
+                standaloneFilterFieldValidationPayload());
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "resourcePath": "/api/human-resources/employees",
+                    "hostOwnedInput": { "trace": true }
+                  },
+                  "validationContext": {
+                    "filterRequestFieldMetadata": [
+                      { "name": "employeeName" },
+                      { "name": "department" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "filter.settings.configure",
+                    "target": {},
+                    "input": {
+                      "alwaysVisibleFields": ["employeeName"],
+                      "selectedFieldIds": ["department"],
+                      "changeDebounceMs": 450
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                componentId,
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        JsonNode proposedConfig = result.patch().path("proposedConfig");
+        assertThat(proposedConfig.path("alwaysVisibleFields").toString())
+                .isEqualTo("[\"employeeName\"]");
+        assertThat(proposedConfig.path("selectedFieldIds").toString())
+                .isEqualTo("[\"department\"]");
+        assertThat(proposedConfig.path("changeDebounceMs").asInt()).isEqualTo(450);
+        assertThat(proposedConfig.path("hostOwnedInput").path("trace").asBoolean()).isTrue();
+        assertThat(proposedConfig.has("filterRequestFieldMetadata")).isFalse();
+    }
+
+    @Test
     void compilesRemoveByKeyEffectIntoProposedConfig() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(validPayload());
         JsonNode request = objectMapper.readTree("""
@@ -2424,6 +2470,72 @@ class AgenticAuthoringManifestServiceTest {
                               "behavior.filtering.enabled",
                               "behavior.filtering.advancedFilters.enabled",
                               "behavior.filtering.advancedFilters.settings"
+                            ],
+                            "preconditions": ["config-initialized"],
+                            "validators": ["filter-fields-exist", "editor-round-trip-preserve"],
+                            "submissionImpact": "config-only"
+                          }
+                        ],
+                        "validators": [
+                          { "validatorId": "filter-fields-exist" },
+                          { "validatorId": "editor-round-trip-preserve" }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """;
+    }
+
+    private String standaloneFilterFieldValidationPayload() {
+        return """
+                {
+                  "componentDefinition": {
+                    "jsonSchema": {
+                      "authoringManifest": {
+                        "schemaVersion": "1.0.0",
+                        "componentId": "praxis-filter",
+                        "manifestVersion": "1.0.0",
+                        "editableTargets": [
+                          { "kind": "filterSettings", "resolver": "filter-config" }
+                        ],
+                        "operations": [
+                          {
+                            "operationId": "filter.settings.configure",
+                            "scope": "global",
+                            "target": {
+                              "kind": "filterSettings",
+                              "resolver": "filter-config",
+                              "ambiguityPolicy": "fail",
+                              "required": false
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "minProperties": 1,
+                              "additionalProperties": false,
+                              "properties": {
+                                "alwaysVisibleFields": {
+                                  "type": "array",
+                                  "items": { "type": "string" }
+                                },
+                                "selectedFieldIds": {
+                                  "type": "array",
+                                  "items": { "type": "string" }
+                                },
+                                "changeDebounceMs": {
+                                  "type": "number",
+                                  "minimum": 100,
+                                  "maximum": 1000
+                                }
+                              }
+                            },
+                            "effects": [
+                              { "kind": "merge-object", "path": "" }
+                            ],
+                            "affectedPaths": [
+                              "alwaysVisibleFields",
+                              "selectedFieldIds",
+                              "changeDebounceMs"
                             ],
                             "preconditions": ["config-initialized"],
                             "validators": ["filter-fields-exist", "editor-round-trip-preserve"],

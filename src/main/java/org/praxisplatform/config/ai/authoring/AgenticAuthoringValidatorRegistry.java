@@ -657,8 +657,10 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "computed-value-envelope-valid" -> {
                     // The closed input schema enforces expression/literal envelope shape; JsonLogic content is validated above.
                 }
-                case "grouping-fields-exist", "filter-fields-exist" ->
-                        validateInputFieldsExist(operationId, planOperation.path("input"), config, failures);
+                case "grouping-fields-exist" ->
+                        validateInputFieldsExist(operationId, planOperation.path("input"), config, failures, false);
+                case "filter-fields-exist" ->
+                        validateInputFieldsExist(operationId, planOperation.path("input"), config, failures, true);
                 case "control-type-unique" -> validateDynamicControlTypeUnique(operationId, planOperation, config, failures);
                 case "runtime-component-resolves" -> validateDynamicRuntimeComponentResolves(operationId, planOperation, config, failures);
                 case "field-metadata-compatible", "metadata-capability-aligned" -> validateDynamicFieldMetadataCompatible(operationId, planOperation, failures);
@@ -4628,17 +4630,18 @@ public final class AgenticAuthoringValidatorRegistry {
         return firstNonBlank(text(target, "field"), text(target, "id"), text(target, "name"), text(target, "value"));
     }
 
-    private void validateInputFieldsExist(String operationId, JsonNode input, JsonNode config, List<String> failures) {
-        Set<String> existing = filterOperation(operationId) ? knownFilterFields(config) : knownTableFields(config);
-        for (String field : inputFields(input)) {
+    private void validateInputFieldsExist(
+            String operationId,
+            JsonNode input,
+            JsonNode config,
+            List<String> failures,
+            boolean filterFields) {
+        Set<String> existing = filterFields ? knownFilterFields(config) : knownTableFields(config);
+        for (String field : inputFields(input, filterFields)) {
             if (!field.isBlank() && !existing.contains(field)) {
                 failures.add("validator fields-exist failed for " + operationId + ": unknown field " + field);
             }
         }
-    }
-
-    private boolean filterOperation(String operationId) {
-        return operationId != null && operationId.startsWith("filter.");
     }
 
     private Set<String> knownTableFields(JsonNode config) {
@@ -4720,7 +4723,7 @@ public final class AgenticAuthoringValidatorRegistry {
         }
     }
 
-    private List<String> inputFields(JsonNode input) {
+    private List<String> inputFields(JsonNode input, boolean includeStandaloneFilterSettings) {
         List<String> fields = new ArrayList<>();
         JsonNode fieldsNode = input.path("fields");
         if (fieldsNode.isArray()) {
@@ -4735,6 +4738,12 @@ public final class AgenticAuthoringValidatorRegistry {
             JsonNode array = settings.path(fieldArray);
             if (array.isArray()) {
                 array.forEach(fieldName -> fields.add(fieldName.asText("")));
+            }
+            if (includeStandaloneFilterSettings) {
+                JsonNode rootArray = input.path(fieldArray);
+                if (rootArray.isArray()) {
+                    rootArray.forEach(fieldName -> fields.add(fieldName.asText("")));
+                }
             }
         }
         return fields;
