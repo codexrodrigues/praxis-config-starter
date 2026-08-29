@@ -321,6 +321,8 @@ public final class AgenticAuthoringValidatorRegistry {
             "chart-type-series-axis-compatible",
             "category-slice-single-metric",
             "combo-minimum-series",
+            "gauge-scalar-contract",
+            "gauge-scale-valid",
             "series-field-exists",
             "series-field-aggregable",
             "series-id-unique",
@@ -804,6 +806,8 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "chart-type-series-axis-compatible" -> validateChartTypeSeriesAxisCompatible(operationId, planOperation, config, failures);
                 case "category-slice-single-metric" -> validateChartCategorySliceSingleMetric(operationId, planOperation, config, failures);
                 case "combo-minimum-series" -> validateChartComboMinimumSeries(operationId, planOperation, config, failures);
+                case "gauge-scalar-contract" -> validateChartGaugeScalarContract(operationId, planOperation, config, failures);
+                case "gauge-scale-valid" -> validateChartGaugeScale(operationId, planOperation, config, failures);
                 case "series-field-exists", "axis-field-exists", "bound-fields-exist",
                      "query-context-fields-exist" ->
                         validateChartInputFieldsExist(operationId, planOperation, config, failures);
@@ -3543,6 +3547,90 @@ public final class AgenticAuthoringValidatorRegistry {
         }
     }
 
+    private void validateChartGaugeScalarContract(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        if (!"gauge".equals(chartKind(planOperation, config))) {
+            return;
+        }
+
+        JsonNode input = planOperation.path("input");
+        JsonNode dimensions = firstPresent(input, "dimensions");
+        if (dimensions.isMissingNode()) {
+            dimensions = config.path("chartDocument").path("dimensions");
+        }
+        if (!dimensions.isArray() || dimensions.isEmpty()) {
+            failures.add("validator gauge-scalar-contract failed for " + operationId
+                    + ": gauge charts require at least one dimension");
+        }
+
+        JsonNode metrics = chartMetricsCandidate(planOperation, config);
+        int metricCount = metrics.isArray() ? metrics.size() : 0;
+        if ("series.add".equals(operationId) && !text(input, "field").isBlank()) {
+            metricCount++;
+        }
+        if (metricCount != 1) {
+            failures.add("validator gauge-scalar-contract failed for " + operationId
+                    + ": gauge charts require exactly one metric");
+        }
+
+        String sourceKind = firstNonBlank(
+                text(input, "sourceKind"),
+                text(input.path("source"), "kind"),
+                text(config.path("chartDocument").path("source"), "kind"));
+        if (!"praxis.stats".equals(sourceKind)) {
+            return;
+        }
+
+        String statsOperation = firstNonBlank(
+                text(input, "operation"),
+                text(input.path("source"), "operation"),
+                text(config.path("chartDocument").path("source"), "operation"));
+        JsonNode limit = input.has("limit")
+                ? input.path("limit")
+                : input.path("source").path("options").path("limit");
+        if (limit.isMissingNode()) {
+            limit = config.path("chartDocument").path("source").path("options").path("limit");
+        }
+        if (!"group-by".equals(statsOperation) || !limit.isIntegralNumber() || limit.asInt() != 1) {
+            failures.add("validator gauge-scalar-contract failed for " + operationId
+                    + ": praxis.stats gauge charts require group-by with source.options.limit=1");
+        }
+    }
+
+    private void validateChartGaugeScale(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        if (!"gauge".equals(chartKind(planOperation, config))) {
+            return;
+        }
+
+        JsonNode input = planOperation.path("input");
+        JsonNode scale;
+        if ("gauge.scale.configure".equals(operationId)) {
+            scale = input;
+        } else if (input.path("gauge").path("scale").isObject()) {
+            scale = input.path("gauge").path("scale");
+        } else {
+            scale = config.path("chartDocument").path("gauge").path("scale");
+        }
+
+        JsonNode min = scale.path("min");
+        JsonNode max = scale.path("max");
+        if (!isFiniteNumber(min) || !isFiniteNumber(max) || max.asDouble() <= min.asDouble()) {
+            failures.add("validator gauge-scale-valid failed for " + operationId
+                    + ": gauge scale requires finite min and max values with max greater than min");
+        }
+    }
+
+    private boolean isFiniteNumber(JsonNode value) {
+        return value != null && value.isNumber() && Double.isFinite(value.asDouble());
+    }
+
     private void validateChartInputFieldsExist(
             String operationId,
             JsonNode planOperation,
@@ -4148,7 +4236,7 @@ public final class AgenticAuthoringValidatorRegistry {
     }
 
     private Set<String> chartKinds() {
-        return Set.of("bar", "combo", "horizontal-bar", "line", "pie", "donut", "funnel", "pyramid", "treemap", "area", "stacked-bar", "stacked-area", "scatter");
+        return Set.of("bar", "combo", "horizontal-bar", "line", "pie", "donut", "funnel", "pyramid", "treemap", "gauge", "area", "stacked-bar", "stacked-area", "scatter");
     }
 
     private Set<String> categorySliceChartKinds() {

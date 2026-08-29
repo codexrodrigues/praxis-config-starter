@@ -2854,6 +2854,68 @@ class AgenticAuthoringEffectCompilerRegistryTest {
     }
 
     @Test
+    void shouldPreserveGaugeLimitAndCompileCanonicalScaleSetValue() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "gauge",
+                    "source": { "kind": "derived" },
+                    "dimensions": [{ "field": "stage" }],
+                    "metrics": [{ "field": "conversionRate", "aggregation": "avg" }],
+                    "gauge": { "scale": { "min": 0, "max": 100 } }
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operationWithHandler("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", false,
+                        "compile-domain-patch", "chart-data-resource-bind",
+                        "chartDocument.source", "chartDocument.source.options.limit",
+                        "chartDocument.dimensions[]", "chartDocument.metrics[]"),
+                plan("{}", """
+                        {
+                          "sourceKind": "praxis.stats",
+                          "resource": "/api/procurement/vw-supplier-procurement-funnel/stats",
+                          "operation": "group-by",
+                          "limit": 1,
+                          "dimensions": [{ "field": "stage" }],
+                          "metrics": [{ "field": "conversionRate", "aggregation": "avg" }]
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operation("gauge.scale.configure", "gaugeScale", "x-ui-chart-gauge-scale", false,
+                        "set-value", "chartDocument.gauge.scale", "", "chartDocument.gauge.scale"),
+                plan("{}", "{ \"min\": 0, \"max\": 1 }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(2);
+        assertThat(patchOperations.get(0).path("writeDeltas"))
+                .extracting(node -> node.path("path").asText())
+                .contains("chartDocument.source.options.limit");
+        assertThat(patchOperations.get(0).path("value").path("source").path("options").path("limit").asInt())
+                .isEqualTo(1);
+        assertThat(patchOperations.get(1).path("op").asText()).isEqualTo("set-value");
+        assertThat(patchOperations.get(1).path("path").asText()).isEqualTo("chartDocument.gauge.scale");
+        assertThat(proposedConfig.path("chartDocument").path("source").path("options").path("limit").asInt())
+                .isEqualTo(1);
+        assertThat(proposedConfig.path("chartDocument").path("gauge").path("scale").path("max").asInt())
+                .isEqualTo(1);
+    }
+
+    @Test
     void shouldRejectChartDomainCompilerWritesOutsideAffectedPaths() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {
