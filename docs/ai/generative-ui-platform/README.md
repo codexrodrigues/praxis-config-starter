@@ -91,6 +91,7 @@ Read these in order when opening a new Codex session:
 8. [Orchestrator rules](ORCHESTRATOR.md)
 9. The active phase in [`phases/`](phases/phase-01-component-inventory.md)
 10. [Review checklist](REVIEW-CHECKLIST.md)
+11. [Governed UI composition factory readiness](UI-COMPOSITION-FACTORY-READINESS.md)
 
 The ready-to-copy prompt for the next session is
 [`prompts/phase-01-execute.prompt.md`](prompts/phase-01-execute.prompt.md). Its independent review
