@@ -97,8 +97,8 @@ class AgenticAuthoringUiCompositionPlanCompilerTest {
         assertThat(page.at("/widgets/0/definition/id").asText()).isEqualTo("praxis-chart");
         assertThat(page.at("/widgets/0/definition/outputs/selectionChange").asText()).isEqualTo("emit");
         assertThat(page.at("/widgets/1/definition/outputs/selectionChange").asText()).isEqualTo("emit");
-        assertThat(page.at("/canvas/items/comparison-chart/rowSpan").asInt()).isEqualTo(5);
-        assertThat(page.at("/canvas/items/critical-employees/row").asInt()).isEqualTo(6);
+        assertThat(page.at("/canvas/items/comparison-chart/rowSpan").asInt()).isEqualTo(4);
+        assertThat(page.at("/canvas/items/critical-employees/row").asInt()).isEqualTo(5);
         assertThat(page.at("/composition/links/0/to/ref/widget").asText()).isEqualTo("critical-employees");
         assertThat(page.at("/composition/links/0/transform/mode").asText()).isEqualTo("object-fragment");
         assertThat(page.at("/composition/links/0/transform/steps/0/kind").asText()).isEqualTo("object-template");
@@ -827,5 +827,142 @@ class AgenticAuthoringUiCompositionPlanCompilerTest {
                 """);
         assertThat(AgenticAuthoringCompiledPagePatchValidator.terminalApplyBlockReason(invalidSlotAssignment))
                 .isEqualTo("compiled-page-slot-assignment-invalid");
+    }
+
+    @Test
+    void rejectsEveryOwnerDefinedMasterDetailSemanticErrorWithStablePaths() throws Exception {
+        assertMasterDetailDiagnostics(
+                """
+                {
+                  "version":"1.0","kind":"praxis.ui-composition-plan",
+                  "layoutPreset":"employee-workspace",
+                  "layoutPresetOptions":{"presetFamily":"unknown-master-detail-family"},
+                  "widgets":[
+                    {"key":"master","componentId":"custom-a","role":"master"},
+                    {"key":"detail","componentId":"custom-b","role":"detail"}
+                  ]
+                }
+                """,
+                "master-detail-preset-family-unknown@layoutPresetOptions.presetFamily");
+        assertMasterDetailDiagnostics(
+                """
+                {
+                  "version":"1.0","kind":"praxis.ui-composition-plan",
+                  "layoutPreset":"master-detail-dashboard",
+                  "slotAssignments":{"master":"invented-slot"},
+                  "widgets":[
+                    {"key":"master","componentId":"custom-a","role":"master"},
+                    {"key":"detail","componentId":"custom-b","role":"detail"}
+                  ]
+                }
+                """,
+                "master-detail-slot-unknown@slotAssignments.master");
+        assertMasterDetailDiagnostics(
+                """
+                {
+                  "version":"1.0","kind":"praxis.ui-composition-plan",
+                  "layoutPreset":"master-detail-dashboard",
+                  "slotAssignments":{"conflict":"detail-table"},
+                  "widgets":[
+                    {"key":"conflict","componentId":"custom-a","role":"master"},
+                    {"key":"master","componentId":"custom-b","role":"master"}
+                  ]
+                }
+                """,
+                "master-detail-role-slot-conflict@slotAssignments.conflict");
+        assertMasterDetailDiagnostics(
+                """
+                {
+                  "version":"1.0","kind":"praxis.ui-composition-plan",
+                  "layoutPreset":"master-detail-dashboard",
+                  "widgets":[
+                    {"key":"master-a","componentId":"custom-a","role":"master"},
+                    {"key":"master-b","componentId":"custom-b","role":"master"}
+                  ]
+                }
+                """,
+                "master-detail-master-ambiguous@widgets",
+                "master-detail-detail-required@widgets");
+        assertMasterDetailDiagnostics(
+                """
+                {
+                  "version":"1.0","kind":"praxis.ui-composition-plan",
+                  "layoutPreset":"master-detail-dashboard",
+                  "widgets":[{"key":"detail","componentId":"custom-a","role":"detail"}]
+                }
+                """,
+                "master-detail-master-required@widgets");
+        assertMasterDetailDiagnostics(
+                """
+                {
+                  "version":"1.0","kind":"praxis.ui-composition-plan",
+                  "layoutPreset":"analytics-overview",
+                  "widgets":[
+                    {"key":"master","componentId":"custom-a","role":"master"},
+                    {"key":"detail","componentId":"custom-b","role":"detail"}
+                  ]
+                }
+                """,
+                "master-detail-preset-conflict@layoutPreset");
+        assertMasterDetailDiagnostics(
+                """
+                {
+                  "version":"1.0","kind":"praxis.ui-composition-plan",
+                  "layoutPreset":"master-detail-dashboard",
+                  "slotAssignments":{"detail-a":"detail-table","detail-b":"detail-table"},
+                  "widgets":[
+                    {"key":"master","componentId":"custom-a","role":"master"},
+                    {"key":"detail-a","componentId":"custom-b","role":"detail"},
+                    {"key":"detail-b","componentId":"custom-c","role":"detail"}
+                  ]
+                }
+                """,
+                "master-detail-slot-cardinality-exceeded@slotAssignments");
+    }
+
+    @Test
+    void preservesOwnerDefinedMasterDetailFallbackWarningsAndIncrementsBuilderIdentity() throws Exception {
+        JsonNode plan = objectMapper.readTree("""
+                {
+                  "version":"1.0","kind":"praxis.ui-composition-plan",
+                  "layoutPreset":"master-detail-dashboard",
+                  "widgets":[
+                    {"key":"master","componentId":"custom-master","role":"master"},
+                    {"key":"detail-a","componentId":"custom-a","role":"detail"},
+                    {"key":"detail-b","componentId":"custom-b","role":"detail"},
+                    {"key":"detail-c","componentId":"custom-c","role":"detail"},
+                    {"key":"detail-d","componentId":"custom-d","role":"detail"},
+                    {"key":"detail-e","componentId":"custom-e","role":"detail"},
+                    {"key":"extension","componentId":"custom-extension"}
+                  ]
+                }
+                """);
+
+        AgenticAuthoringUiCompositionPlanCompiler.CompileResult result =
+                compiler.compile(plan, objectMapper.createObjectNode());
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.compiledFormPatch().path("builderVersion").asText())
+                .isEqualTo(AgenticAuthoringUiCompositionPlanCompiler.BUILDER_VERSION);
+        assertThat(result.diagnostics())
+                .extracting(diagnostic -> diagnostic.code() + "@" + diagnostic.path())
+                .containsExactly(
+                        "master-detail-widget-role-fallback@widgets.6.role",
+                        "master-detail-detail-slot-fallback@widgets.5.role");
+        assertThat(result.compiledFormPatch().path("warnings"))
+                .extracting(JsonNode::asText)
+                .contains(
+                        "master-detail-widget-role-fallback",
+                        "master-detail-detail-slot-fallback");
+    }
+
+    private void assertMasterDetailDiagnostics(String planJson, String... expected) throws Exception {
+        AgenticAuthoringUiCompositionPlanCompiler.CompileResult result =
+                compiler.compile(objectMapper.readTree(planJson), objectMapper.createObjectNode());
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.diagnostics())
+                .extracting(diagnostic -> diagnostic.code() + "@" + diagnostic.path())
+                .containsExactly(expected);
     }
 }
