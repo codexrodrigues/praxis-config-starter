@@ -3214,6 +3214,76 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void serverIssuedDashboardActionPublishesExecutableResourceChoicesWhenCandidatesAreAmbiguous() {
+        AgenticAuthoringSemanticDecision actionDecision = AgenticAuthoringSemanticDecision.from(
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        null,
+                        List.of(),
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        "conversation-1",
+                        "turn-guidance:platform-create-admin-dashboard",
+                        "Criar painel administrativo",
+                        "Criar painel administrativo",
+                        "Backend-issued platform capability action.")
+                .withConstraints(objectMapper.createObjectNode()
+                        .put("source", "server-issued-quick-reply")
+                        .put("quickReplyId", "platform-create-admin-dashboard")
+                        .put("continuationOf", "platform_capability_catalog")
+                        .put("resourceGroundingRequired", true)
+                        .set("conceptKeys", objectMapper.createArrayNode()));
+        AgenticAuthoringCandidate employeeCandidate = candidateWithEvidence(
+                "/api/human-resources/funcionarios",
+                0.91d,
+                List.of("domain-catalog-grounding", "semantic-retrieval", "schema-grounding-verified"));
+        AgenticAuthoringCandidate departmentCandidate = candidateWithEvidence(
+                "/api/human-resources/departamentos",
+                0.90d,
+                List.of("domain-catalog-grounding", "semantic-retrieval", "schema-grounding-verified"));
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Criar painel administrativo",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        "conversation-1",
+                        "turn-resource-discovery",
+                        List.of(),
+                        null,
+                        List.of(),
+                        resourceDiscoveryContext(
+                                "dashboard",
+                                List.of(employeeCandidate, departmentCandidate)),
+                        actionDecision));
+
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.semanticDecision()).isNotNull();
+        assertThat(result.quickReplies()).hasSizeGreaterThanOrEqualTo(2);
+        assertThat(result.quickReplies()).allSatisfy(reply -> {
+            assertThat(reply.contextHints().path("source").asText()).isEqualTo("resourceDiscovery");
+            assertThat(reply.semanticDecision().path("selectedResource").path("resourcePath").asText())
+                    .startsWith("/api/human-resources/");
+            assertThat(reply.semanticDecision().path("previousDecisionId").asText())
+                    .isEqualTo(result.semanticDecision().decisionId());
+            assertThat(reply.semanticDecision().path("refinementOf").asText())
+                    .isEqualTo(result.semanticDecision().decisionId());
+            assertThat(reply.semanticDecision().path("constraints").path("continuationOf").asText())
+                    .isEqualTo("resource_discovery");
+        });
+    }
+
+    @Test
     void selectedDomainDecisionExplanationRemainsEligibleWithoutResourceOrAuthoringCandidate() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);

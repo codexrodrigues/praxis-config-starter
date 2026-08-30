@@ -1518,6 +1518,10 @@ public class AgenticAuthoringIntentResolverService {
                     .withParentLineage(activeDecision);
         }
         quickReplies = withPlatformQuickReplySemanticDecisions(semanticDecision, quickReplies);
+        quickReplies = withResourceCandidateQuickReplySemanticDecisions(
+                semanticDecision,
+                quickReplies,
+                presentationCandidates);
         llmDiagnostics = withResolutionTelemetry(
                 llmDiagnostics,
                 shouldResolveLlmIntent,
@@ -9952,6 +9956,86 @@ public class AgenticAuthoringIntentResolverService {
                 reply.value());
     }
 
+    private List<AgenticAuthoringQuickReply> withResourceCandidateQuickReplySemanticDecisions(
+            AgenticAuthoringSemanticDecision parentDecision,
+            List<AgenticAuthoringQuickReply> quickReplies,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (parentDecision == null || quickReplies == null || quickReplies.isEmpty()
+                || candidates == null || candidates.isEmpty()) {
+            return quickReplies == null ? List.of() : quickReplies;
+        }
+        return quickReplies.stream()
+                .map(reply -> withResourceCandidateQuickReplySemanticDecision(
+                        parentDecision,
+                        reply,
+                        candidates))
+                .toList();
+    }
+
+    private AgenticAuthoringQuickReply withResourceCandidateQuickReplySemanticDecision(
+            AgenticAuthoringSemanticDecision parentDecision,
+            AgenticAuthoringQuickReply reply,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (reply == null || reply.semanticDecision() != null || reply.contextHints() == null
+                || !"resourceDiscovery".equals(reply.contextHints().path("source").asText(""))) {
+            return reply;
+        }
+        String resourcePath = reply.contextHints().path("resourcePath").asText("");
+        String operation = reply.contextHints().path("operation").asText("");
+        AgenticAuthoringCandidate candidate = candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(item -> resourcePath.equals(valueOrDefault(item.resourcePath(), "")))
+                .filter(item -> operation.isBlank()
+                        || operation.equalsIgnoreCase(valueOrDefault(item.operation(), "")))
+                .findFirst()
+                .orElse(null);
+        if (candidate == null) {
+            return reply;
+        }
+
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("source", "server-issued-quick-reply");
+        constraints.put("quickReplyId", reply.id());
+        constraints.put("continuationOf", "resource_discovery");
+        constraints.put("resourceGroundingRequired", true);
+        JsonNode parentConceptKeys = parentDecision.constraints() == null
+                ? objectMapper.missingNode()
+                : parentDecision.constraints().path("conceptKeys");
+        constraints.set("conceptKeys", parentConceptKeys.isArray()
+                ? parentConceptKeys.deepCopy()
+                : objectMapper.createArrayNode());
+
+        AgenticAuthoringSemanticDecision childDecision = AgenticAuthoringSemanticDecision.from(
+                        parentDecision.operationKind(),
+                        parentDecision.artifactKind(),
+                        parentDecision.changeKind(),
+                        candidate,
+                        List.of(candidate),
+                        parentDecision.visualizationDecision(),
+                        List.of(),
+                        null,
+                        null,
+                        parentDecision,
+                        valueOrDefault(parentDecision.conversationId(), ""),
+                        valueOrDefault(parentDecision.turnId(), "") + ":" + reply.id(),
+                        valueOrDefault(reply.prompt(), ""),
+                        valueOrDefault(parentDecision.activeObjective(), valueOrDefault(reply.prompt(), "")),
+                        "The user may select this governed resource for the active executable decision.")
+                .withConstraints(constraints)
+                .withParentLineage(parentDecision);
+        return new AgenticAuthoringQuickReply(
+                reply.id(),
+                reply.kind(),
+                reply.label(),
+                reply.prompt(),
+                reply.description(),
+                reply.icon(),
+                reply.tone(),
+                reply.contextHints(),
+                objectMapper.valueToTree(childDecision),
+                reply.value());
+    }
+
     private ObjectNode dashboardContextHints(
             String effectivePrompt,
             AgenticAuthoringCandidate selectedCandidate) {
@@ -10039,6 +10123,8 @@ public class AgenticAuthoringIntentResolverService {
         return visibleCandidates.stream()
                 .map(candidate -> {
                     ObjectNode contextHints = objectMapper.createObjectNode();
+                    contextHints.put("schemaVersion", "praxis-agentic-authoring-resource-discovery-choice.v1");
+                    contextHints.put("source", "resourceDiscovery");
                     contextHints.put("resourcePath", candidate.resourcePath());
                     contextHints.put("submitUrl", candidate.submitUrl());
                     contextHints.put("operation", candidate.operation());

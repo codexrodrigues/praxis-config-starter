@@ -802,6 +802,11 @@ os chips e cada `quickReplies[].semanticDecision` aponta para ela por
 `previousDecisionId` e `refinementOf`. A selecao de uma acao produz nova
 decisao; se ainda faltar business subject, ela permanece `canApply=false`,
 executa discovery governado e publica escolhas de recurso como novas filhas.
+Quando o discovery retornar varios candidatos, cada opcao publicada deve carregar
+uma `semanticDecision` filha completa com `selectedResource`; `contextHints`
+tecnicos sao apenas apresentacao e nunca substituem essa autoridade. Isso permite
+que o hardening descarte `resourcePath` vindo do browser sem perder a selecao
+emitida pelo proprio backend.
 Somente candidatos devolvidos pela tool no turno corrente ou uma decisao de
 recurso previamente emitida pelo backend podem entrar na resolucao. Um bloco
 `contextHints.resourceDiscovery` enviado pelo browser e descartado antes da
