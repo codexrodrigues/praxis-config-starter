@@ -262,6 +262,11 @@ jobs:
           } finally {
             Pop-Location
           }
+          $localStarterJar = Join-Path $buildRoot "target\praxis-config-starter-$env:STARTER_VERSION.jar"
+          if (-not (Test-Path -LiteralPath $localStarterJar -PathType Leaf)) {
+            throw "Built praxis-config-starter jar not found at '$localStarterJar'."
+          }
+          "LOCAL_STARTER_JAR=$localStarterJar" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Package praxis-api-quickstart against local starter
         shell: pwsh
@@ -356,6 +361,7 @@ jobs:
             -MetadataRoot "$env:GITHUB_WORKSPACE\praxis-metadata-starter" `
             -ExpectedMetadataVersion "$env:METADATA_STARTER_VERSION" `
             -UiRoot "$env:GITHUB_WORKSPACE\praxis-ui-angular" `
+            -LocalStarterJarPath "$env:LOCAL_STARTER_JAR" `
             -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
             -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}') `
             -UiStartupTimeoutSec ([int]'${{ inputs.page_builder_ui_startup_timeout_seconds }}') `
