@@ -78,7 +78,9 @@ Assert-True ([int] $result.playwright.failed -eq 0 -and [int] $result.playwright
 $scenarioEvidence = @($result.scenarioEvidence)
 $receiptRequirements = @($result.matrix.receiptRequirements)
 $requiresMissionReceipt = @($result.matrix.scenarios) -contains 'live-resource-workspace-command'
-Assert-True (-not $requiresMissionReceipt -or $scenarioEvidence.Count -eq 1) "The live mission scenario requires exactly one sanitized scenario receipt."
+Assert-True (-not $requiresMissionReceipt -or @($scenarioEvidence | Where-Object {
+    $_.scenarioId -eq 'live-resource-workspace-command'
+}).Count -eq 1) "The live mission scenario requires exactly one sanitized scenario receipt."
 Assert-True ($scenarioEvidence.Count -eq $receiptRequirements.Count) "Scenario evidence count diverges from the matrix receipt requirements."
 foreach ($evidence in $scenarioEvidence) {
     Assert-PraxisPageBuilderScenarioEvidence $evidence
