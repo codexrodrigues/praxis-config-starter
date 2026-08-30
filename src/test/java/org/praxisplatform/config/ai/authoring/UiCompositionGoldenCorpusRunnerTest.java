@@ -24,7 +24,15 @@ class UiCompositionGoldenCorpusRunnerTest {
                 UiCompositionGoldenCorpusRunner.DEFAULT_REPORT);
 
         assertThat(report.path("globalFailures")).isEmpty();
-        assertThat(report.path("cases")).hasSize(9);
+        assertThat(report.path("cases")).hasSize(18);
+        assertThat(report.path("corpusSha256").asText()).matches("[a-f0-9]{64}");
+        assertThat(report.path("schemaSha256").asText()).matches("[a-f0-9]{64}");
+        assertThat(report.at("/compilerIdentity/id").asText())
+                .isEqualTo("config-ui-composition-plan-compiler");
+        assertThat(report.at("/compilerIdentity/builderVersion").asText())
+                .isEqualTo("config-ui-composition-plan-compiler@1.2.0");
+        assertThat(report.at("/compilerIdentity/implementationSha256").asText())
+                .matches("[a-f0-9]{64}");
         assertThat(report.path("passed").asBoolean())
                 .withFailMessage("Java golden report: %s", report)
                 .isTrue();

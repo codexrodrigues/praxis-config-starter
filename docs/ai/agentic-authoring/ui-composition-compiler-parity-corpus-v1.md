@@ -19,9 +19,9 @@ second copy of expected output.
   `praxis-ui-angular/tools/ai-registry/ui-composition-golden-corpus-runner.ts`.
 
 The corpus is not a registry, runtime source of truth, template store or business-rule catalog. Its
-target profile is a small attestation fixture derived from a named UI certification train. The
-profile carries a canonical SHA-256 fingerprint and references the owner-repository evidence used
-to construct it.
+target profile pins claims, release-train identity and hashed owner-repository evidence. Components,
+ports and actions are discovered from the official Angular providers at execution time; the corpus
+does not maintain a second component catalog.
 
 ## Adherence inventory
 
@@ -50,9 +50,16 @@ Both engines validate or resolve the same plan, compile it, and compare:
 - canonical projection SHA-256;
 - stable diagnostic identity (`code`, `path`, `severity`, `provenance`).
 
+Corpus v1.1 carries 18 cases. Its adversarial master-detail coverage mirrors the TypeScript owner:
+unknown preset/slot, role-slot conflict, missing or ambiguous master, missing detail, preset
+conflict, slot cardinality, widget-role fallback and detail-slot fallback. The Java builder identity
+is pinned as `config-ui-composition-plan-compiler@1.2.0`.
+
 Known Java/TypeScript spelling or path differences are explicit per expected diagnostic. The
-runners may not normalize an unexpected divergence into success. The TypeScript runner optionally
-loads the Java report and compares every case's phase, outcome and projection hash.
+runners may not normalize an unexpected divergence into success. Reports publish canonical
+`corpusSha256`, `schemaSha256` and compiler identity (including implementation hash). The TypeScript
+peer handshake validates those identities before comparing every case's phase, outcome and
+projection hash.
 
 Projection canonicalization sorts object keys recursively, preserves array order and semantic
 `null`, serializes UTF-8 JSON and hashes with SHA-256. Template configuration continues to use the
@@ -67,8 +74,11 @@ selected frozen target profile. It checks:
 - target component and semantic port availability;
 - declared capabilities and global actions;
 - exact template revision (`registryKey`, `version`, `ETag`, `configSha256`);
-- the real `preflightUiCompositionPlan(...)` against a `ComponentMetadataRegistry` built from the
-  frozen profile.
+- Corte A.5 release commit and the SHA-256 of every referenced evidence file;
+- the real `preflightUiCompositionPlan(...)` against a `ComponentMetadataRegistry` bootstrapped by
+  `providePraxisTableMetadata()`, `providePraxisListMetadata()` and
+  `providePraxisRelatedResourceOutletMetadata()` in an `EnvironmentInjector`;
+- actions from `providePraxisGlobalActionCatalog()`, not from a hand-maintained fixture.
 
 Target failure does not rewrite compiler parity. Cases intentionally prove that an identical,
 valid projection can still be blocked because the target train lacks a component, port,
@@ -99,10 +109,14 @@ mvn -q \
 This writes the reviewable Java report to
 `target/ui-composition-golden/java-report.json`.
 
-After building `@praxisui/core` and `@praxisui/page-builder`, from the sibling
+After building the official provider owners and Page Builder, from the sibling
 `praxis-ui-angular` checkout:
 
 ```bash
+npx ng build praxis-table-rule-builder --configuration production
+npx ng build praxis-table --configuration production
+npx ng build praxis-list --configuration production
+npx ng build praxis-page-builder --configuration production
 npm run build:tools
 npx -y ts-node --project tools/tsconfig.tools.json \
   tools/ai-registry/ui-composition-golden-corpus-runner.spec.ts

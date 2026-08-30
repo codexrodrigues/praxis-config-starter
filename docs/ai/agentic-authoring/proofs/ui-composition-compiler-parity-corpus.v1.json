@@ -1,6 +1,6 @@
 {
   "schemaVersion": "praxis.ui-composition-compiler-parity-corpus/v1",
-  "corpusVersion": "1.0.0",
+  "corpusVersion": "1.1.0",
   "kind": "praxis.ui-composition-compiler-parity-corpus",
   "description": "Neutral deterministic corpus for Java/TypeScript UiCompositionPlan compiler parity and separately phased Angular target readiness.",
   "canonicalization": {
@@ -8,47 +8,48 @@
     "templateConfig": "canonical-json-hash-service-v1-sort-keys-omit-null-preserve-arrays-utf8-sha256",
     "diagnostics": "stable-code-path-severity-provenance"
   },
+  "compilerContracts": {
+    "java": {
+      "id": "config-ui-composition-plan-compiler",
+      "builderVersion": "config-ui-composition-plan-compiler@1.2.0"
+    },
+    "typescript": {
+      "id": "praxis-page-builder-ui-composition-plan-compiler",
+      "exportName": "compileUiCompositionPlan"
+    }
+  },
   "targetProfiles": {
     "praxis-ui-angular-corte-a5": {
       "id": "praxis-ui-angular-corte-a5",
       "releaseTrain": {
         "repository": "codexrodrigues/praxis-ui-angular",
-        "commit": "a4281fae9f64eb336101803399dda85d536fcb2c",
-        "certification": "wave-a.5"
+        "commit": "4d70639f195d3478d8542f6b50a6cc3531f8801a",
+        "certification": "wave-a.5",
+        "primaryEvidenceRef": "projects/praxis-page-builder/docs/corte-a-widget-certification-matrix.md"
       },
-      "registryFingerprint": "c343862e90de9cb620b93c50a7375323169d1af5c88536e727a9ca7898820739",
-      "components": [
-        {
-          "id": "praxis-table",
-          "ports": [
-            { "id": "queryContext", "direction": "input", "semanticKind": "query-context" },
-            { "id": "selectionChange", "direction": "output", "semanticKind": "event" }
-          ]
-        },
-        {
-          "id": "praxis-list",
-          "ports": [
-            { "id": "selectionChange", "direction": "output", "semanticKind": "event" }
-          ]
-        },
-        {
-          "id": "praxis-related-resource-outlet",
-          "ports": [
-            { "id": "parentResourceId", "direction": "input", "semanticKind": "scalar" }
-          ]
-        }
-      ],
+      "registryFingerprint": "1af513f5e0b936e58c004b0a4948935f61c6b95b6af43e9bf57e13b44f5a28b1",
       "capabilities": [
         "composition.preflight",
         "dynamic-page.materialization",
         "provider.bootstrap.official"
       ],
-      "actions": ["trackEvent"],
       "providerEvidenceRefs": [
-        "projects/praxis-page-builder/docs/corte-a-widget-certification-matrix.md",
-        "src/app/features/dynamic-page-lab/dynamic-page-list-certification-wave-a.spec.ts",
-        "src/app/features/dynamic-page-lab/dynamic-page-related-resource-certification-wave-a4.spec.ts",
-        "src/app/features/dynamic-page-lab/dynamic-page-table-shell-actions-certification-wave-a5.spec.ts"
+        {
+          "path": "projects/praxis-page-builder/docs/corte-a-widget-certification-matrix.md",
+          "sha256": "0e073b8d953c2f0c8c268e08744ad55da4dc89ed07392d35af7b561eda077041"
+        },
+        {
+          "path": "src/app/features/dynamic-page-lab/dynamic-page-list-certification-wave-a.spec.ts",
+          "sha256": "d7c6022e5f4c4246833b6da8ce355b18e7f69d9eaf9d61f6f2b18b523fae8a1d"
+        },
+        {
+          "path": "src/app/features/dynamic-page-lab/dynamic-page-related-resource-certification-wave-a4.spec.ts",
+          "sha256": "c6acf181dfb2038170f047dca738ae937ef871e91194abfcc9bc692740f942e0"
+        },
+        {
+          "path": "src/app/features/dynamic-page-lab/dynamic-page-table-shell-actions-certification-wave-a5.spec.ts",
+          "sha256": "7b079786ed5ce47b5305ad2bc8a5b3fb2f17ddb749f82256f1c6095f255fe965"
+        }
       ],
       "templateRevisions": [
         {
@@ -682,6 +683,421 @@
               "provenance": "target-registry"
             }
           ]
+        }
+      }
+    },
+    {
+      "id": "master-detail-unknown-preset-family",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Block a master-detail plan whose requested preset family is not in the canonical catalog."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "layoutPreset": "employee-workspace",
+          "layoutPresetOptions": { "presetFamily": "unknown-master-detail-family" },
+          "widgets": [
+            { "key": "master", "componentId": "custom-master", "role": "master" },
+            { "key": "detail", "componentId": "custom-detail", "role": "detail" }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "block",
+          "diagnostics": [
+            {
+              "canonicalId": "master-detail-preset-family-unknown",
+              "severity": "error",
+              "provenance": "compiler",
+              "engineCodes": {
+                "java": "master-detail-preset-family-unknown",
+                "typescript": "master-detail-preset-family-unknown"
+              },
+              "pathByEngine": {
+                "java": "layoutPresetOptions.presetFamily",
+                "typescript": "layoutPresetOptions.presetFamily"
+              }
+            }
+          ]
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "skipped",
+          "requirements": { "components": [], "ports": [], "capabilities": [], "actions": [] },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "master-detail-unknown-slot",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Block a slot assignment outside the resolved master-detail preset."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "layoutPreset": "master-detail-dashboard",
+          "slotAssignments": { "master": "invented-slot" },
+          "widgets": [
+            { "key": "master", "componentId": "custom-master", "role": "master" },
+            { "key": "detail", "componentId": "custom-detail", "role": "detail" }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "block",
+          "diagnostics": [
+            {
+              "canonicalId": "master-detail-slot-unknown",
+              "severity": "error",
+              "provenance": "compiler",
+              "engineCodes": {
+                "java": "master-detail-slot-unknown",
+                "typescript": "master-detail-slot-unknown"
+              },
+              "pathByEngine": {
+                "java": "slotAssignments.master",
+                "typescript": "slotAssignments.master"
+              }
+            }
+          ]
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "skipped",
+          "requirements": { "components": [], "ports": [], "capabilities": [], "actions": [] },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "master-detail-role-slot-conflict",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Block contradictory master role and detail slot semantics."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "layoutPreset": "master-detail-dashboard",
+          "slotAssignments": { "conflict": "detail-table" },
+          "widgets": [
+            { "key": "conflict", "componentId": "custom-conflict", "role": "master" },
+            { "key": "master", "componentId": "custom-master", "role": "master" }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "block",
+          "diagnostics": [
+            {
+              "canonicalId": "master-detail-role-slot-conflict",
+              "severity": "error",
+              "provenance": "compiler",
+              "engineCodes": {
+                "java": "master-detail-role-slot-conflict",
+                "typescript": "master-detail-role-slot-conflict"
+              },
+              "pathByEngine": {
+                "java": "slotAssignments.conflict",
+                "typescript": "slotAssignments.conflict"
+              }
+            }
+          ]
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "skipped",
+          "requirements": { "components": [], "ports": [], "capabilities": [], "actions": [] },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "master-detail-ambiguous-master-and-missing-detail",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Block an ambiguous master set without any detail semantic region."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "layoutPreset": "master-detail-dashboard",
+          "widgets": [
+            { "key": "master-a", "componentId": "custom-a", "role": "master" },
+            { "key": "master-b", "componentId": "custom-b", "role": "master" }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "block",
+          "diagnostics": [
+            {
+              "canonicalId": "master-detail-master-ambiguous",
+              "severity": "error",
+              "provenance": "compiler",
+              "engineCodes": {
+                "java": "master-detail-master-ambiguous",
+                "typescript": "master-detail-master-ambiguous"
+              },
+              "pathByEngine": { "java": "widgets", "typescript": "widgets" }
+            },
+            {
+              "canonicalId": "master-detail-detail-required",
+              "severity": "error",
+              "provenance": "compiler",
+              "engineCodes": {
+                "java": "master-detail-detail-required",
+                "typescript": "master-detail-detail-required"
+              },
+              "pathByEngine": { "java": "widgets", "typescript": "widgets" }
+            }
+          ]
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "skipped",
+          "requirements": { "components": [], "ports": [], "capabilities": [], "actions": [] },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "master-detail-missing-master",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Block a master-detail preset without a master widget."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "layoutPreset": "master-detail-dashboard",
+          "widgets": [{ "key": "detail", "componentId": "custom-detail", "role": "detail" }]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "block",
+          "diagnostics": [
+            {
+              "canonicalId": "master-detail-master-required",
+              "severity": "error",
+              "provenance": "compiler",
+              "engineCodes": {
+                "java": "master-detail-master-required",
+                "typescript": "master-detail-master-required"
+              },
+              "pathByEngine": { "java": "widgets", "typescript": "widgets" }
+            }
+          ]
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "skipped",
+          "requirements": { "components": [], "ports": [], "capabilities": [], "actions": [] },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "master-detail-preset-conflict",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Block master-detail roles paired with a non-master-detail catalog preset."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "layoutPreset": "analytics-overview",
+          "widgets": [
+            { "key": "master", "componentId": "custom-master", "role": "master" },
+            { "key": "detail", "componentId": "custom-detail", "role": "detail" }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "block",
+          "diagnostics": [
+            {
+              "canonicalId": "master-detail-preset-conflict",
+              "severity": "error",
+              "provenance": "compiler",
+              "engineCodes": {
+                "java": "master-detail-preset-conflict",
+                "typescript": "master-detail-preset-conflict"
+              },
+              "pathByEngine": { "java": "layoutPreset", "typescript": "layoutPreset" }
+            }
+          ]
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "skipped",
+          "requirements": { "components": [], "ports": [], "capabilities": [], "actions": [] },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "master-detail-slot-cardinality-exceeded",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Block two detail widgets explicitly occupying a single-cardinality slot."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "layoutPreset": "master-detail-dashboard",
+          "slotAssignments": { "detail-a": "detail-table", "detail-b": "detail-table" },
+          "widgets": [
+            { "key": "master", "componentId": "custom-master", "role": "master" },
+            { "key": "detail-a", "componentId": "custom-a", "role": "detail" },
+            { "key": "detail-b", "componentId": "custom-b", "role": "detail" }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "block",
+          "diagnostics": [
+            {
+              "canonicalId": "master-detail-slot-cardinality-exceeded",
+              "severity": "error",
+              "provenance": "compiler",
+              "engineCodes": {
+                "java": "master-detail-slot-cardinality-exceeded",
+                "typescript": "master-detail-slot-cardinality-exceeded"
+              },
+              "pathByEngine": { "java": "slotAssignments", "typescript": "slotAssignments" }
+            }
+          ]
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "skipped",
+          "requirements": { "components": [], "ports": [], "capabilities": [], "actions": [] },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "master-detail-widget-role-fallback-warning",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Preserve the owner warning when an extension widget falls back to supporting content."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "layoutPreset": "master-detail-dashboard",
+          "widgets": [
+            { "key": "master", "componentId": "custom-master", "role": "master" },
+            { "key": "detail", "componentId": "custom-detail", "role": "detail" },
+            { "key": "extension", "componentId": "custom-extension" }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "warning",
+        "projectionSha256": "2534083dc60afca9d61e1d15612f82ccf2dee8e89f3fc64bb38ad45ee83d6b2f",
+          "diagnostics": [
+            {
+              "canonicalId": "master-detail-widget-role-fallback",
+              "severity": "warning",
+              "provenance": "compiler",
+              "engineCodes": {
+                "java": "master-detail-widget-role-fallback",
+                "typescript": "master-detail-widget-role-fallback"
+              },
+              "pathByEngine": { "java": "widgets.2.role", "typescript": "widgets.2.role" }
+            }
+          ]
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "skipped",
+          "requirements": { "components": [], "ports": [], "capabilities": [], "actions": [] },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "master-detail-detail-slot-fallback-warning",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Preserve the owner warning when detail widgets exceed the governed detail slots."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "layoutPreset": "master-detail-dashboard",
+          "widgets": [
+            { "key": "master", "componentId": "custom-master", "role": "master" },
+            { "key": "detail-a", "componentId": "custom-a", "role": "detail" },
+            { "key": "detail-b", "componentId": "custom-b", "role": "detail" },
+            { "key": "detail-c", "componentId": "custom-c", "role": "detail" },
+            { "key": "detail-d", "componentId": "custom-d", "role": "detail" },
+            { "key": "detail-e", "componentId": "custom-e", "role": "detail" }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "warning",
+        "projectionSha256": "56437442a00dda329066e5e6a556c03cb7653184d4f39e3c8be2b867cfcee86a",
+          "diagnostics": [
+            {
+              "canonicalId": "master-detail-detail-slot-fallback",
+              "severity": "warning",
+              "provenance": "compiler",
+              "engineCodes": {
+                "java": "master-detail-detail-slot-fallback",
+                "typescript": "master-detail-detail-slot-fallback"
+              },
+              "pathByEngine": { "java": "widgets.5.role", "typescript": "widgets.5.role" }
+            }
+          ]
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "skipped",
+          "requirements": { "components": [], "ports": [], "capabilities": [], "actions": [] },
+          "diagnostics": []
         }
       }
     }

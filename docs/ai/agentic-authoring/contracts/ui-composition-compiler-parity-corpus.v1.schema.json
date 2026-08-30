@@ -9,6 +9,7 @@
     "corpusVersion",
     "kind",
     "canonicalization",
+    "compilerContracts",
     "targetProfiles",
     "cases"
   ],
@@ -18,6 +19,31 @@
     "kind": { "const": "praxis.ui-composition-compiler-parity-corpus" },
     "description": { "type": "string", "minLength": 1 },
     "canonicalization": { "$ref": "#/$defs/canonicalization" },
+    "compilerContracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["java", "typescript"],
+      "properties": {
+        "java": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "builderVersion"],
+          "properties": {
+            "id": { "const": "config-ui-composition-plan-compiler" },
+            "builderVersion": { "type": "string", "pattern": "^config-ui-composition-plan-compiler@[0-9]+\\.[0-9]+\\.[0-9]+$" }
+          }
+        },
+        "typescript": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "exportName"],
+          "properties": {
+            "id": { "const": "praxis-page-builder-ui-composition-plan-compiler" },
+            "exportName": { "const": "compileUiCompositionPlan" }
+          }
+        }
+      }
+    },
     "targetProfiles": {
       "type": "object",
       "minProperties": 1,
@@ -52,9 +78,7 @@
         "id",
         "releaseTrain",
         "registryFingerprint",
-        "components",
         "capabilities",
-        "actions",
         "providerEvidenceRefs",
         "templateRevisions"
       ],
@@ -63,46 +87,34 @@
         "releaseTrain": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["repository", "commit", "certification"],
+          "required": ["repository", "commit", "certification", "primaryEvidenceRef"],
           "properties": {
             "repository": { "type": "string", "minLength": 1 },
             "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-            "certification": { "type": "string", "minLength": 1 }
+            "certification": { "type": "string", "minLength": 1 },
+            "primaryEvidenceRef": { "type": "string", "minLength": 1 }
           }
         },
         "registryFingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "components": {
+        "capabilities": { "$ref": "#/$defs/stringArray" },
+        "providerEvidenceRefs": {
           "type": "array",
           "minItems": 1,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["id", "ports"],
-            "properties": {
-              "id": { "type": "string", "minLength": 1 },
-              "ports": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["id", "direction", "semanticKind"],
-                  "properties": {
-                    "id": { "type": "string", "minLength": 1 },
-                    "direction": { "enum": ["input", "output"] },
-                    "semanticKind": { "type": "string", "minLength": 1 }
-                  }
-                }
-              }
-            }
-          }
+          "items": { "$ref": "#/$defs/evidenceRef" }
         },
-        "capabilities": { "$ref": "#/$defs/stringArray" },
-        "actions": { "$ref": "#/$defs/stringArray" },
-        "providerEvidenceRefs": { "$ref": "#/$defs/stringArray" },
         "templateRevisions": {
           "type": "array",
           "items": { "$ref": "#/$defs/templateRevisionIdentity" }
         }
+      }
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       }
     },
     "templateRevisionIdentity": {
@@ -174,7 +186,12 @@
                 "properties": { "outcome": { "enum": ["pass", "warning"] } },
                 "required": ["outcome"]
               },
-              "then": { "required": ["projectionSha256"] }
+              "then": {
+                "properties": {
+                  "projectionSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                },
+                "required": ["projectionSha256"]
+              }
             }
           ],
           "properties": {

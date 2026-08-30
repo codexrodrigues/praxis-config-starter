@@ -69,6 +69,7 @@ final class UiCompositionGoldenCorpusRunner {
                 .forEach(message -> globalFailures.add("schema:" + message));
         verifyTargetFingerprints(corpus, globalFailures);
         verifyTargetProfileReferences(corpus, globalFailures);
+        verifyCompilerContract(corpus, globalFailures);
 
         ArrayNode caseReports = objectMapper.createArrayNode();
         for (JsonNode testCase : corpus.path("cases")) {
@@ -82,7 +83,13 @@ final class UiCompositionGoldenCorpusRunner {
         ObjectNode report = objectMapper.createObjectNode();
         report.put("schemaVersion", "praxis.ui-composition-golden-report/v1");
         report.put("corpusVersion", corpus.path("corpusVersion").asText());
+        report.put("corpusSha256", canonicalHashService.sha256(corpus));
+        report.put("schemaSha256", canonicalHashService.sha256(schema));
         report.put("engine", "java");
+        ObjectNode compilerIdentity = report.putObject("compilerIdentity");
+        compilerIdentity.put("id", corpus.at("/compilerContracts/java/id").asText());
+        compilerIdentity.put("builderVersion", AgenticAuthoringUiCompositionPlanCompiler.BUILDER_VERSION);
+        compilerIdentity.put("implementationSha256", compilerImplementationSha256());
         ObjectNode targetProfileFingerprints = objectMapper.createObjectNode();
         corpus.path("targetProfiles").fields().forEachRemaining(entry ->
                 targetProfileFingerprints.put(
@@ -121,6 +128,11 @@ final class UiCompositionGoldenCorpusRunner {
                 new AgenticAuthoringUiCompositionPlanCompiler(objectMapper);
         AgenticAuthoringUiCompositionPlanCompiler.CompileResult result =
                 compiler.compile(plan, objectMapper.createObjectNode());
+        result.diagnostics().forEach(diagnostic -> diagnostics.add(new DiagnosticIdentity(
+                diagnostic.code(),
+                diagnostic.path(),
+                diagnostic.severity(),
+                "compiler")));
         if (result.valid()) {
             outcome = diagnostics.stream().anyMatch(diagnostic -> "warning".equals(diagnostic.severity()))
                     ? "warning"
@@ -129,8 +141,13 @@ final class UiCompositionGoldenCorpusRunner {
             projectionSha256 = projectionSha256(projection);
         } else {
             outcome = "block";
-            result.failureCodes().forEach(code -> diagnostics.add(
-                    new DiagnosticIdentity(code, null, "error", "compiler")));
+            Set<String> structuredCodes = result.diagnostics().stream()
+                    .map(AgenticAuthoringUiCompositionPlanCompiler.CompilerDiagnostic::code)
+                    .collect(java.util.stream.Collectors.toSet());
+            result.failureCodes().stream()
+                    .filter(code -> !structuredCodes.contains(code))
+                    .forEach(code -> diagnostics.add(
+                            new DiagnosticIdentity(code, null, "error", "compiler")));
         }
         return caseReport(caseId, phase, outcome, projectionSha256, projection, diagnostics, expected);
     }
@@ -255,10 +272,40 @@ final class UiCompositionGoldenCorpusRunner {
         }
     }
 
+    private void verifyCompilerContract(JsonNode corpus, List<String> failures) {
+        JsonNode contract = corpus.at("/compilerContracts/java");
+        if (!"config-ui-composition-plan-compiler".equals(contract.path("id").asText())) {
+            failures.add("java-compiler-id-mismatch");
+        }
+        if (!AgenticAuthoringUiCompositionPlanCompiler.BUILDER_VERSION.equals(
+                contract.path("builderVersion").asText())) {
+            failures.add("java-compiler-builder-version-mismatch");
+        }
+    }
+
+    private String compilerImplementationSha256() throws Exception {
+        String resource = "/"
+                + AgenticAuthoringUiCompositionPlanCompiler.class.getName().replace('.', '/')
+                + ".class";
+        try (java.io.InputStream input = AgenticAuthoringUiCompositionPlanCompiler.class
+                .getResourceAsStream(resource)) {
+            if (input == null) {
+                throw new IllegalStateException("Compiler bytecode resource not found: " + resource);
+            }
+            return sha256(input.readAllBytes());
+        }
+    }
+
+    private String canonicalDocumentSha256(JsonNode document) throws Exception {
+        return sha256(objectMapper.writeValueAsBytes(canonicalProjection(document)));
+    }
+
     private String projectionSha256(JsonNode page) throws Exception {
-        JsonNode canonical = canonicalProjection(page);
-        byte[] digest = MessageDigest.getInstance("SHA-256")
-                .digest(objectMapper.writeValueAsBytes(canonical));
+        return canonicalDocumentSha256(page);
+    }
+
+    private String sha256(byte[] value) throws Exception {
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(value);
         return HexFormat.of().formatHex(digest);
     }
 
