@@ -17,9 +17,9 @@
         "project-knowledge-revert-and-apply",
         "live-llm-flow-1"
       ],
-      "expectedDiscovered": 13,
+      "expectedDiscovered": 14,
       "minimumExecuted": 8,
-      "expectedSkipped": 5,
+      "expectedSkipped": 6,
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
         "Auditoria live: capabilities reais possuem proveniência governada e não degradada"
@@ -33,14 +33,16 @@
         "project-knowledge-revert-and-apply",
         "human-refinement-pr7",
         "live-llm-flow-1",
-        "live-llm-flow-2"
+        "live-llm-flow-2",
+        "live-resource-workspace-command"
       ],
-      "expectedDiscovered": 13,
-      "minimumExecuted": 10,
+      "expectedDiscovered": 14,
+      "minimumExecuted": 11,
       "expectedSkipped": 3,
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
-        "Auditoria live: capabilities reais possuem proveniência governada e não degradada"
+        "Auditoria live: capabilities reais possuem proveniência governada e não degradada",
+        "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload"
       ]
     }
   }

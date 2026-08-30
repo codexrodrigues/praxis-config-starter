@@ -51,7 +51,9 @@ public class AgenticAuthoringApplyService {
         String componentId = requireText(request.componentId(), "componentId is required");
         UserConfigService.Scope scope = resolveScope(request.scope(), principalContext.userId());
         JsonNode payload = extractPagePayload(request.compiledFormPatch());
-        validateSemanticMaterialization(request.semanticDecision(), request.compiledFormPatch());
+        if (request.semanticDecision() == null) {
+            validateSemanticMaterialization(null, request.compiledFormPatch(), request.compiledFormPatch());
+        }
         AiTurnEventService.StreamOwnership ownership = turnEventService.requireOwnership(
                 requireUuid(request.streamId(), "streamId is required"),
                 principalContext);
@@ -64,6 +66,10 @@ public class AgenticAuthoringApplyService {
                 componentId,
                 scope,
                 ifMatch);
+        validateSemanticMaterialization(
+                request.semanticDecision(),
+                request.compiledFormPatch(),
+                terminalSemanticEvidence(terminalResult, request.compiledFormPatch()));
         JsonNode tags = buildTags(request, terminalResult);
 
         UiUserConfig saved = "create".equals(applyTarget.mode())
@@ -189,13 +195,26 @@ public class AgenticAuthoringApplyService {
 
     private void validateSemanticMaterialization(
             AgenticAuthoringSemanticDecision semanticDecision,
-            JsonNode compiledFormPatch) {
+            JsonNode compiledFormPatch,
+            JsonNode semanticEvidence) {
         AgenticAuthoringSemanticMaterializationPolicy.ValidationResult result =
-                AgenticAuthoringSemanticMaterializationPolicy.validate(semanticDecision, compiledFormPatch);
+                AgenticAuthoringSemanticMaterializationPolicy.validate(
+                        semanticDecision,
+                        compiledFormPatch,
+                        semanticEvidence);
         if (!result.valid()) {
             throw new IllegalArgumentException("semantic-materialization-mismatch: "
                     + String.join(",", result.failureCodes()));
         }
+    }
+
+    private JsonNode terminalSemanticEvidence(
+            AiTurnEventEnvelope terminalResult,
+            JsonNode compiledFormPatch) {
+        JsonNode uiCompositionPlan = terminalResult.getPayload()
+                .path("preview")
+                .path("uiCompositionPlan");
+        return uiCompositionPlan.isObject() ? uiCompositionPlan : compiledFormPatch;
     }
 
     private JsonNode buildTags(

@@ -2006,10 +2006,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Decide from the user's meaning, not from backend keywords.
                 Set semanticIntentClass to the primary AI-authored semantic decision: platform_guidance, api_catalog_guidance, domain_decision_guidance, component_authoring, shared_rule_authoring, out_of_scope, or unknown.
                 Treat semanticRetrievalIntent as prior AI-authored semantic evidence; reconcile it rather than silently replacing a concrete artifact with an unrelated container.
-                When conversationContext.contextHints.preIntentSemanticOrientation contains primaryComponent, preserve
-                that prior AI-authored host decision unless later governed component or resource evidence proves it
-                incompatible. In particular, do not replace praxis-crud with a generic form or master-detail page merely
-                because both can display fields.
+                When conversationContext.contextHints.preIntentSemanticOrientation contains primaryComponent or
+                layoutKind, preserve both independent prior AI-authored decisions unless later governed component or
+                resource evidence proves either incompatible. primaryComponent does not override layoutKind: a
+                resource-master-detail composition may use praxis-table as its master and a dynamic form as its detail,
+                while resource-crud means one CRUD host is itself the requested composition.
                 Treat activeSemanticDecision and recentConversation as prior governed lineage for the current refinement, not as permission to ignore the new user request.
                 When the user's primary meaning is to reverse only the most recently materialized local change,
                 select semanticIntentClass "component_authoring", operationKind "undo", keep artifactKind aligned
@@ -2036,12 +2037,18 @@ public class AgenticAuthoringLlmIntentResolverService {
                 If authoringScopePolicy is present and the semantic user intent is a loose instruction, assistant meta request, greeting, or unrelated ask that does not request an authorable UI/business decision, answer as an informational chat reply using the policy outOfScopeResponseType; do not create a component preview, edit plan, or governed authoring route.
                 For a requested page organized as accordion/acordeon/expansion panels, use artifactKind "page", operationKind "create", layoutKind "accordion_layout" or "single_column_expansion_page", primaryComponent "praxis-expansion", and no chart axes unless the user asks for a chart.
                 For a requested page organized as tabs/abas, use artifactKind "page", operationKind "create", layoutKind "tabs_layout", primaryComponent "praxis-tabs", and no chart axes unless the user asks for a chart.
+                For a requested operational resource workspace that coordinates a collection, single-row selection and
+                a detail/editor region, use artifactKind "page", operationKind "create",
+                layoutKind "resource-master-detail" and primaryComponent "praxis-table". Item actions remain discovered
+                from governed metadata/capabilities; their presence does not downgrade the composition to resource-crud.
                 For an existing governed resource action or writable record operation, such as approving, rejecting,
                 deactivating, reactivating, paying, scheduling or editing a concrete record, use component_authoring,
                 operationKind "create", artifactKind "page", changeKind "create_artifact" and primaryComponent
-                "praxis-crud" when that component is authorable. The CRUD runtime discovers the canonical action,
-                availability, schema and form. Do not reinterpret an existing operation as shared-rule authoring or
-                a bare create form, and do not invent an action when governed evidence does not expose one.
+                "praxis-crud" with layoutKind "resource-crud" when one CRUD host is the requested composition. When
+                the user explicitly requests a coordinated collection, selection and detail/editor workspace, preserve
+                primaryComponent "praxis-table" with layoutKind "resource-master-detail"; the table runtime discovers
+                governed item actions. Do not reinterpret an existing operation as shared-rule authoring or a bare
+                create form, and do not invent an action when governed evidence does not expose one.
                 A record name or identifier in the prompt is only requested selection intent, and a proposed new value
                 is only write intent. Do not treat either as proof that the record was located, the field is writable or
                 the value was prefilled. Preserve the selection predicate for governed lookup/materialization and require

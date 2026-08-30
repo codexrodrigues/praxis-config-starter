@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.praxisplatform.config.service.AiJsonSchema;
@@ -49,6 +50,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             "praxis-expansion",
             "praxis-rich-content",
             "praxis-files-upload");
+    private static final List<String> COMPACT_RESOURCE_COMPOSITION_LAYOUTS = List.of(
+            "resource-master-detail",
+            "resource-crud");
 
     private final AiProviderManagementService providerManagementService;
     private final ObjectMapper objectMapper;
@@ -286,10 +290,33 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 || !result.path("shouldRetrieveGovernedResources").isBoolean()) {
             return false;
         }
+        if (!"praxis-agentic-authoring-pre-intent-tool-plan.v3".equals(text(result, "schemaVersion"))) {
+            return false;
+        }
+        String authoredLayoutKind = text(result, "layoutKind");
+        String layoutKind = layoutKind(result);
+        if (!authoredLayoutKind.isBlank() && layoutKind.isBlank()) {
+            return false;
+        }
+        String primaryComponent = primaryComponent(result);
+        if ("resource-master-detail".equals(layoutKind)
+                && !"praxis-table".equals(primaryComponent)) {
+            return false;
+        }
+        if ("resource-crud".equals(layoutKind)
+                && !"praxis-crud".equals(primaryComponent)) {
+            return false;
+        }
+        String groundingProfile = text(result, "groundingProfile");
+        boolean resourceScopedGrounding = Set.of(
+                        "api_resource",
+                        "domain_binding",
+                        "operation_verification")
+                .contains(groundingProfile);
         if (!result.path("shouldRetrieveGovernedResources").asBoolean(false)
-                || !"praxis-agentic-authoring-pre-intent-tool-plan.v2".equals(text(result, "schemaVersion"))
                 || !"authoring_or_other".equals(text(result, "semanticIntentClass"))
-                || !result.path("requiresFullIntentResolution").asBoolean(false)) {
+                || (!resourceScopedGrounding
+                        && !result.path("requiresFullIntentResolution").asBoolean(false))) {
             return true;
         }
         return StringUtils.hasText(text(
@@ -376,7 +403,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         if ("authoring_or_other".equals(semanticIntentClass)
                 && hasSelectedDomainDecision(request)) {
             return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
-                    textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v2"),
+                    textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v3"),
                     "selected-domain-decision-deferred-to-full-semantic-resolution",
                     List.of(),
                     semanticIntentClass,
@@ -384,6 +411,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     true,
                     result.path("queryConstraints").deepCopy(),
                     "unknown",
+                    "",
                     ""));
         }
         String assistantMessage = "platform_guidance".equals(semanticIntentClass)
@@ -395,7 +423,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                         "llm-platform-guidance-answer-empty");
             }
             return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
-                    textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v2"),
+                    textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v3"),
                     text(result, "reason"),
                     List.of(),
                     semanticIntentClass,
@@ -403,11 +431,12 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     false,
                     result.path("queryConstraints").deepCopy(),
                     text(result, "artifactKind"),
-                    primaryComponent(result)));
+                    primaryComponent(result),
+                    layoutKind(result)));
         }
         if (!result.path("shouldRetrieveGovernedResources").asBoolean(false)) {
             return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
-                    textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v2"),
+                    textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v3"),
                     text(result, "reason"),
                     List.of(),
                     semanticIntentClass,
@@ -415,7 +444,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     result.path("requiresFullIntentResolution").asBoolean(false),
                     result.path("queryConstraints").deepCopy(),
                     text(result, "artifactKind"),
-                    primaryComponent(result)));
+                    primaryComponent(result),
+                    layoutKind(result)));
         }
         String groundingProfile = text(result, "groundingProfile");
         if (!List.of("domain_context", "domain_capability", "domain_concept", "domain_binding", "operation_verification", "api_resource", "domain_decision")
@@ -459,7 +489,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         AgenticAuthoringToolCall toolCall = progressiveToolCall(
                 request, groundingProfile, retrievalQuery, artifactKind, resourceSearchFocus);
         return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
-                textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v2"),
+                textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v3"),
                 text(result, "reason"),
                 List.of(toolCall),
                 semanticIntentClass,
@@ -467,7 +497,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 requiresFullIntentResolution,
                 result.path("queryConstraints").deepCopy(),
                 artifactKind,
-                primaryComponent(result)));
+                primaryComponent(result),
+                layoutKind(result)));
     }
 
     private AgenticAuthoringToolCall progressiveToolCall(
@@ -641,9 +672,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Preserve a semantic category, such as an organizational area, as text or a text list on this first pass.
                 After resource and field grounding, live option resolution replaces it with current canonical IDs.
                 Never invent an option value or use textual contains.
-                Set requiresFullIntentResolution=true for an explicit predicate, value, grouping, order, aggregation,
-                layout or measured subject that needs later semantic preservation. Resource discovery, artifact kind,
-                defaults and a generic dashboard are not constraints.
+                Set requiresFullIntentResolution=true for semantics not completely preserved by this structure. A layout
+                fully represented by layoutKind needs no second pass. Resource discovery and defaults are not constraints.
                 Use groundingProfile=domain_decision for LLM semantic discovery; searchDomainRules returns identities,
                 never conditions or authority.
                 Select other groundingProfile values progressively: domain_context for macro business orientation,
@@ -682,9 +712,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Use artifactKind dashboard when the requested outcome depends on multiple coordinated analytical
                 regions such as filters, KPIs, multiple charts and a detail/list/table surface. Use artifactKind page
                 for general layout or content composition where analytics are not the dominant requested outcome.
-                Set primaryComponent semantically: praxis-crud for governed record, bulk or workflow actions (runtime
-                discovers them; invent none), praxis-table for read-only rows, praxis-dynamic-form for one form,
-                praxis-chart for analytics, otherwise null. Never keyword-route this choice.
+                Author layoutKind independently: resource-master-detail + praxis-table coordinates collection, selection
+                and detail, including discovered item actions; resource-crud + praxis-crud is one CRUD host. For another
+                layout use null and the full pass. Never keyword-route or substitute primaryComponent for layoutKind.
                 Canonical response locale: %s
                 Context JSON: %s
                 """.formatted(selectedDomainDecisionInstruction, responseLocale, context.toString());
@@ -1074,7 +1104,10 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         ObjectNode root = objectMapper.createObjectNode();
         root.put("type", "object");
         ObjectNode properties = root.putObject("properties");
-        properties.putObject("schemaVersion").put("type", "string");
+        ObjectNode schemaVersion = properties.putObject("schemaVersion");
+        schemaVersion.put("type", "string");
+        schemaVersion.putArray("enum")
+                .add("praxis-agentic-authoring-pre-intent-tool-plan.v3");
         ObjectNode semanticIntentClass = properties.putObject("semanticIntentClass");
         semanticIntentClass.put("type", "string");
         semanticIntentClass.putArray("enum")
@@ -1088,7 +1121,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         properties.putObject("shouldRetrieveGovernedResources").put("type", "boolean");
         properties.putObject("requiresFullIntentResolution")
                 .put("type", "boolean")
-                .put("description", "True only for a user-explicit predicate, subset, field value, grouping, ordering, aggregation or layout constraint. Artifact kind and governed defaults are not constraints.");
+                .put("description", "True when user-requested semantics are not completely preserved by this structured plan. A layout fully represented by layoutKind, artifact kind, resource discovery and governed defaults do not require a second pass by themselves.");
         ObjectNode queryConstraints = properties.putObject("queryConstraints");
         queryConstraints.put("type", "object");
         ObjectNode queryConstraintProperties = queryConstraints.putObject("properties");
@@ -1150,7 +1183,15 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         primaryComponentEnum.addNull();
         primaryComponent.put(
                 "description",
-                "Semantic runtime host selected after intent classification. Use praxis-crud when governed record or workflow actions must remain available; use praxis-table for read-only tabular exploration; null when a later full intent pass must decide.");
+                "Semantic primary runtime component selected after intent classification. For a resource-master-detail composition use praxis-table as the master collection; use praxis-crud only when one CRUD host is the requested composition. Governed actions remain metadata/capability-discovered and do not decide layoutKind.");
+        ObjectNode layoutKind = properties.putObject("layoutKind");
+        layoutKind.putArray("type").add("string").add("null");
+        ArrayNode layoutKindEnum = layoutKind.putArray("enum");
+        COMPACT_RESOURCE_COMPOSITION_LAYOUTS.forEach(layoutKindEnum::add);
+        layoutKindEnum.addNull();
+        layoutKind.put(
+                "description",
+                "AI-authored semantic composition archetype, independent from primaryComponent. Use resource-master-detail for coordinated collection selection and detail/editor regions, and resource-crud only for a single CRUD host.");
         nullableString(properties, "retrievalQuery");
         nullableString(properties, "reason");
         ObjectNode focus = properties.putObject("resourceSearchFocus");
@@ -1186,6 +1227,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 .add("groundingProfile")
                 .add("artifactKind")
                 .add("primaryComponent")
+                .add("layoutKind")
                 .add("retrievalQuery")
                 .add("resourceSearchFocus")
                 .add("reason");
@@ -1208,6 +1250,11 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private String primaryComponent(JsonNode node) {
         String componentId = text(node, "primaryComponent");
         return AUTHORABLE_PRIMARY_COMPONENTS.contains(componentId) ? componentId : "";
+    }
+
+    private String layoutKind(JsonNode node) {
+        String value = text(node, "layoutKind");
+        return COMPACT_RESOURCE_COMPOSITION_LAYOUTS.contains(value) ? value : "";
     }
 
     private String textOrDefault(JsonNode node, String field, String fallback) {

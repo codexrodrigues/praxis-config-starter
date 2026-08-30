@@ -73,6 +73,172 @@ class AgenticAuthoringTurnEngineTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void verifiesSelectedMasterDetailResourceBeforePlanningWorkspaceComposition() {
+        AgenticAuthoringToolRegistry registry = Mockito.mock(AgenticAuthoringToolRegistry.class);
+        AgenticAuthoringOperationalBindingVerificationService.OperationProjection operation =
+                new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
+                        "human-resources.funcionarios.start",
+                        "start",
+                        "workflow_action",
+                        "human-resources.funcionarios",
+                        "/api/human-resources/funcionarios",
+                        "/api/human-resources/funcionarios/{id}/actions/start",
+                        "post",
+                        "request",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios/{id}/actions/start&operation=post&schemaType=request",
+                        "/schemas/actions?resource=human-resources.funcionarios",
+                        "startEmployee",
+                        "start",
+                        "ITEM",
+                        "runtime_action_discovery",
+                        new AgenticAuthoringOperationalBindingVerificationService.AvailabilityProjection(
+                                false,
+                                "resource-context-required",
+                                "item_capabilities_at_selection"),
+                        "v1",
+                        List.of("domain-binding", "schema-grounding-verified"));
+        when(registry.execute(any(), any(), eq("retrieveEvidence"), eq("http://localhost:8088")))
+                .thenReturn(AgenticAuthoringToolResult.success(
+                        AgenticAuthoringToolRegistry.VERIFY_DOMAIN_OPERATION,
+                        List.of(operation),
+                        Map.of("operationCount", 1)));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry);
+        AgenticAuthoringIntentResolutionResult intent = funcionarioIntent(
+                "page",
+                "create_artifact",
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "employee-resource-workspace",
+                        "resource-master-detail",
+                        "praxis-table",
+                        List.of(),
+                        false,
+                        true,
+                        List.of(),
+                        false,
+                        false,
+                        "llm"));
+
+        AgenticAuthoringTurnStreamRequest groundedRequest = ReflectionTestUtils.invokeMethod(
+                engine,
+                "withResourceWorkspaceOperationalGrounding",
+                request("Crie um workspace master-detail de funcionarios."),
+                new AiPrincipalContext("tenant", "user", "local", true),
+                new CapturingSink(),
+                intent,
+                null,
+                "http://localhost:8088");
+
+        JsonNode grounding = groundedRequest.contextHints().path("verifiedDomainOperations");
+        assertThat(grounding.path("schemaVersion").asText())
+                .isEqualTo("praxis-agentic-authoring-verified-domain-operations.v2");
+        assertThat(grounding.path("source").asText())
+                .isEqualTo("schemas.filtered+resource.capabilities+schemas.actions");
+        assertThat(grounding.path("operationCount").asInt()).isEqualTo(1);
+        assertThat(grounding.path("entries").path(0).path("actionId").asText())
+                .isEqualTo("start");
+        ArgumentCaptor<AgenticAuthoringToolCall> call = ArgumentCaptor.forClass(AgenticAuthoringToolCall.class);
+        verify(registry).execute(
+                call.capture(),
+                any(AiPrincipalContext.class),
+                eq("retrieveEvidence"),
+                eq("http://localhost:8088"));
+        assertThat(call.getValue().name()).isEqualTo(AgenticAuthoringToolRegistry.VERIFY_DOMAIN_OPERATION);
+        assertThat(((DomainOperationVerificationToolRequest) call.getValue().payload()).resourceKey())
+                .isEqualTo("human-resources.funcionarios");
+    }
+
+    @Test
+    void regroundsTheFinalResourceWhenPreIntentOperationsBelongToAnotherResource() {
+        AgenticAuthoringToolRegistry registry = Mockito.mock(AgenticAuthoringToolRegistry.class);
+        AgenticAuthoringOperationalBindingVerificationService.OperationProjection employeeOperation =
+                new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
+                        "human-resources.funcionarios",
+                        "resource:human-resources.funcionarios",
+                        "resource_operation",
+                        "human-resources.funcionarios",
+                        "/api/human-resources/funcionarios",
+                        "/api/human-resources/funcionarios/filter",
+                        "post",
+                        "request",
+                        "schema-url",
+                        "capabilities-url",
+                        "filter",
+                        "",
+                        "",
+                        "principal_capability",
+                        new AgenticAuthoringOperationalBindingVerificationService.AvailabilityProjection(
+                                true, "", "resource_capabilities"),
+                        "v1",
+                        List.of("schema-grounding-verified"));
+        when(registry.execute(any(), any(), eq("retrieveEvidence"), eq("http://localhost:8088")))
+                .thenReturn(AgenticAuthoringToolResult.success(
+                        AgenticAuthoringToolRegistry.VERIFY_DOMAIN_OPERATION,
+                        List.of(employeeOperation),
+                        Map.of("operationCount", 1)));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry);
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode staleEnvelope = contextHints.putObject("verifiedDomainOperations");
+        staleEnvelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v2");
+        staleEnvelope.put("source", "schemas.filtered+resource.capabilities+schemas.actions");
+        staleEnvelope.put("operationCount", 1);
+        staleEnvelope.putArray("entries")
+                .addObject()
+                .put("resourceKey", "finance.payments")
+                .put("resourcePath", "/api/finance/payments");
+        AgenticAuthoringIntentResolutionResult finalIntent = funcionarioIntent(
+                "page",
+                "create_artifact",
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "employee-resource-workspace",
+                        "resource-master-detail",
+                        "praxis-table",
+                        List.of(),
+                        false,
+                        true,
+                        List.of(),
+                        false,
+                        false,
+                        "llm"));
+
+        AgenticAuthoringTurnStreamRequest groundedRequest = ReflectionTestUtils.invokeMethod(
+                engine,
+                "withResourceWorkspaceOperationalGrounding",
+                requestWithContextHints("Crie o workspace final de funcionarios.", contextHints),
+                new AiPrincipalContext("tenant", "user", "local", true),
+                new CapturingSink(),
+                finalIntent,
+                null,
+                "http://localhost:8088");
+
+        JsonNode entries = groundedRequest.contextHints()
+                .path("verifiedDomainOperations")
+                .path("entries");
+        assertThat(entries).hasSize(1);
+        assertThat(entries.path(0).path("resourceKey").asText())
+                .isEqualTo("human-resources.funcionarios");
+        ArgumentCaptor<AgenticAuthoringToolCall> call = ArgumentCaptor.forClass(AgenticAuthoringToolCall.class);
+        verify(registry).execute(
+                call.capture(),
+                any(AiPrincipalContext.class),
+                eq("retrieveEvidence"),
+                eq("http://localhost:8088"));
+        assertThat(((DomainOperationVerificationToolRequest) call.getValue().payload()).resourceKey())
+                .isEqualTo("human-resources.funcionarios");
+    }
+
+    @Test
     void terminalPublicationGuaranteesActionsForStructuredClarification() {
         AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
                 intentResolverService,
@@ -1443,7 +1609,7 @@ class AgenticAuthoringTurnEngineTest {
                 List.of(),
                 objectMapper.createObjectNode());
         AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
-                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                 "A pergunta solicita orientação geral sobre as capacidades do Praxis.",
                 List.of(),
                 "platform_guidance",
@@ -11482,7 +11648,9 @@ class AgenticAuthoringTurnEngineTest {
                     "",
                     false,
                     queryConstraints,
-                    "page"));
+                    "page",
+                    "praxis-table",
+                    "resource-master-detail"));
         });
         AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService =
                 Mockito.mock(AgenticAuthoringComponentCapabilitiesService.class);
@@ -11606,6 +11774,12 @@ class AgenticAuthoringTurnEngineTest {
                         .path("artifactKind").asText())
                 .isEqualTo("page");
         org.assertj.core.api.Assertions.assertThat(forwardedHints.path("preIntentSemanticOrientation")
+                        .path("primaryComponent").asText())
+                .isEqualTo("praxis-table");
+        org.assertj.core.api.Assertions.assertThat(forwardedHints.path("preIntentSemanticOrientation")
+                        .path("layoutKind").asText())
+                .isEqualTo("resource-master-detail");
+        org.assertj.core.api.Assertions.assertThat(forwardedHints.path("preIntentSemanticOrientation")
                         .path("requiresFullIntentResolution").asBoolean())
                 .isFalse();
         org.assertj.core.api.Assertions.assertThat(forwardedHints.path("preIntentSemanticOrientation")
@@ -11652,7 +11826,7 @@ class AgenticAuthoringTurnEngineTest {
             payload.put("page", 0);
             payload.put("limit", 6);
             return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
-                    "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                    "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                     "A LLM resolveu semanticamente que o pedido precisa descobrir decisões governadas.",
                     List.of(new AgenticAuthoringToolCall(
                             AgenticAuthoringToolRegistry.SEARCH_DOMAIN_RULES,

@@ -134,6 +134,60 @@ class AgenticAuthoringApplyServiceTest {
     }
 
     @Test
+    void applyUsesGovernedTerminalPlanEvidenceWithoutPersistingDiagnosticsInTheCompiledPage() throws Exception {
+        ObjectNode compiledPatch = (ObjectNode) compiledPatch();
+        ObjectNode page = (ObjectNode) compiledPatch.path("patch").path("page");
+        page.put("layoutPreset", "master-detail-dashboard");
+        JsonNode savedPayload = compiledPatch.path("patch").path("page");
+        UiUserConfig saved = UiUserConfig.builder()
+                .componentType("praxis-dynamic-page")
+                .componentId("page")
+                .environment("local")
+                .payload(objectMapper.writeValueAsString(savedPayload))
+                .tags("{\"source\":\"agentic-authoring\"}")
+                .version(1L)
+                .etag(UUID.fromString("00000000-0000-0000-0000-000000000457"))
+                .build();
+        when(userConfigService.create(
+                eq(UserConfigService.Scope.TENANT),
+                eq("tenant"),
+                eq("user"),
+                eq("praxis-dynamic-page"),
+                eq("page"),
+                eq("local"),
+                org.mockito.ArgumentMatchers.any(JsonNode.class),
+                org.mockito.ArgumentMatchers.any(JsonNode.class),
+                eq("author"))).thenReturn(saved);
+        when(apiKeyProtectionService.sanitizeForResponse(savedPayload)).thenReturn(savedPayload);
+
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch,
+                "praxis-dynamic-page",
+                "page",
+                "tenant",
+                masterDetailSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+        AiTurnEventEnvelope terminal = terminalResult(request, true);
+        ObjectNode terminalPlan = objectMapper.createObjectNode();
+        terminalPlan.put("layoutPreset", "master-detail-dashboard");
+        terminalPlan.withObject("/diagnostics/resourceWorkspaceGrounding")
+                .put("status", "verified");
+        ((ObjectNode) terminal.getPayload().path("preview"))
+                .set("uiCompositionPlan", terminalPlan);
+        when(turnEventService.findLastEvent(STREAM_ID)).thenReturn(Optional.of(terminal));
+
+        AgenticAuthoringApplyResult result = service().apply(
+                request,
+                principalContext,
+                "author",
+                null);
+
+        assertThat(result.applied()).isTrue();
+        assertThat(savedPayload.toString()).doesNotContain("resourceWorkspaceGrounding");
+    }
+
+    @Test
     void applyRejectsMissingTerminalResultReference() throws Exception {
         AgenticAuthoringApplyRequest request = new AgenticAuthoringApplyRequest(
                 compiledPatch(),
@@ -342,15 +396,18 @@ class AgenticAuthoringApplyServiceTest {
 
     @Test
     void applyRejectsMaterializationThatDoesNotSatisfySemanticDecision() throws Exception {
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "tenant",
+                chartSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+
         assertThatThrownBy(() -> service().apply(
-                new AgenticAuthoringApplyRequest(
-                        compiledPatch(),
-                        "praxis-dynamic-page",
-                        "page",
-                        "tenant",
-                        null,
-                        chartSemanticDecision()),
-                principal("user"),
+                request,
+                principalContext,
                 "author",
                 null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -360,15 +417,18 @@ class AgenticAuthoringApplyServiceTest {
 
     @Test
     void applyRejectsMaterializationBoundToDifferentResourceThanSemanticDecision() throws Exception {
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "tenant",
+                semanticDecisionForResource("/api/helpdesk/clients"));
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+
         assertThatThrownBy(() -> service().apply(
-                new AgenticAuthoringApplyRequest(
-                        compiledPatch(),
-                        "praxis-dynamic-page",
-                        "page",
-                        "tenant",
-                        null,
-                        semanticDecisionForResource("/api/helpdesk/clients")),
-                principal("user"),
+                request,
+                principalContext,
                 "author",
                 null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -378,15 +438,18 @@ class AgenticAuthoringApplyServiceTest {
 
     @Test
     void applyRejectsSemanticDecisionThatRequiresReview() throws Exception {
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "tenant",
+                reviewRequiredSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+
         assertThatThrownBy(() -> service().apply(
-                new AgenticAuthoringApplyRequest(
-                        compiledPatch(),
-                        "praxis-dynamic-page",
-                        "page",
-                        "tenant",
-                        null,
-                        reviewRequiredSemanticDecision()),
-                principal("user"),
+                request,
+                principalContext,
                 "author",
                 null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -440,15 +503,18 @@ class AgenticAuthoringApplyServiceTest {
 
     @Test
     void applyRejectsWeakLexicalReviewWhenMaterializationIsNotSchemaGrounded() throws Exception {
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "tenant",
+                weakLexicalReviewSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+
         assertThatThrownBy(() -> service().apply(
-                new AgenticAuthoringApplyRequest(
-                        compiledPatch(),
-                        "praxis-dynamic-page",
-                        "page",
-                        "tenant",
-                        null,
-                        weakLexicalReviewSemanticDecision()),
-                principal("user"),
+                request,
+                principalContext,
                 "author",
                 null))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -645,6 +711,30 @@ class AgenticAuthoringApplyServiceTest {
                         "praxis-page-builder",
                         List.of(),
                         true,
+                        true,
+                        "test"),
+                null,
+                false,
+                "",
+                "",
+                "");
+    }
+
+    private AgenticAuthoringSemanticDecision masterDetailSemanticDecision() {
+        return new AgenticAuthoringSemanticDecision(
+                "praxis-agentic-authoring-semantic-decision.v1",
+                "decision-master-detail",
+                "create",
+                "page",
+                "create_artifact",
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "resource-workspace",
+                        "resource-master-detail",
+                        "praxis-dynamic-form",
+                        List.of(),
+                        false,
                         true,
                         "test"),
                 null,

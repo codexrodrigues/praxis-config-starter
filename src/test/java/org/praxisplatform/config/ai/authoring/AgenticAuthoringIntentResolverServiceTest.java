@@ -27,6 +27,54 @@ class AgenticAuthoringIntentResolverServiceTest {
             new AgenticAuthoringIntentResolverService(objectMapper, quickstartCandidateCatalog());
 
     @Test
+    void keepsFallbackProvenanceFromContaminatingAStrongerDuplicateCandidate() {
+        AgenticAuthoringCandidate governed = new AgenticAuthoringCandidate(
+                "/api/operations/missoes",
+                "post",
+                "/schemas/filtered?path=/api/operations/missoes&operation=post&schemaType=request",
+                "/api/operations/missoes",
+                "post",
+                1d,
+                "Governed resource binding.",
+                List.of("domain-binding", "schema-grounding-verified", "resource-capabilities-verified"),
+                AgenticAuthoringEvidenceBundle.of("domain_binding", List.of()));
+        AgenticAuthoringCandidate lexical = new AgenticAuthoringCandidate(
+                "/api/operations/missoes",
+                "post",
+                "/schemas/filtered?path=/api/operations/missoes&operation=post&schemaType=request",
+                "/api/operations/missoes",
+                "post",
+                0.6d,
+                "Weak lexical fallback.",
+                List.of(
+                        "api-metadata",
+                        "lexical-fallback",
+                        "weak-evidence",
+                        "schema-probe-pending",
+                        "actions-probe-pending",
+                        "capabilities-probe-pending"),
+                AgenticAuthoringEvidenceBundle.of("lexical_fallback", List.of()));
+
+        AgenticAuthoringCandidate selected = ReflectionTestUtils.invokeMethod(
+                service,
+                "preferredCandidateForSameResource",
+                governed,
+                lexical);
+
+        assertThat(selected).isNotNull();
+        assertThat(selected.reason()).isEqualTo("Governed resource binding.");
+        assertThat(selected.evidence())
+                .contains("domain-binding", "schema-grounding-verified", "resource-capabilities-verified")
+                .doesNotContain(
+                        "lexical-fallback",
+                        "weak-evidence",
+                        "schema-probe-pending",
+                        "actions-probe-pending",
+                        "capabilities-probe-pending");
+        assertThat(selected.evidenceBundle().retrievalSource()).isEqualTo("domain_binding");
+    }
+
+    @Test
     void compactSemanticComponentDecisionAvoidsRedundantFullPassForConstrainedPage() {
         ObjectNode constraints = objectMapper.createObjectNode();
         constraints.put("appliesToDataSelection", true);
@@ -36,7 +84,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .put("operator", "eq")
                 .put("value", "pendentes");
         AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
-                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                 "The user requested an operational workflow and a governed subset.",
                 List.of(),
                 "authoring_or_other",
@@ -62,6 +110,34 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void compactSemanticCompositionPreservesIndependentCompatibleMasterDetailDecisions() {
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "The user requested a coordinated operational resource workspace.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                false,
+                objectMapper.createObjectNode()
+                        .put("appliesToDataSelection", false)
+                        .set("filters", objectMapper.createArrayNode()),
+                "page",
+                "praxis-table",
+                "resource-master-detail");
+
+        AgenticAuthoringVisualizationDecision visualizationDecision = ReflectionTestUtils.invokeMethod(
+                service,
+                "preIntentVisualizationDecision",
+                orientation);
+
+        assertThat(visualizationDecision).isNotNull();
+        assertThat(visualizationDecision.primaryComponent()).isEqualTo("praxis-table");
+        assertThat(visualizationDecision.layoutKind()).isEqualTo("resource-master-detail");
+        assertThat(visualizationDecision.includeDetailTable()).isTrue();
+        assertThat(visualizationDecision.provenance()).isEqualTo("llm-pre-intent-semantic-orientation");
+    }
+
+    @Test
     void constrainedRecordEditPreservesTheAiAuthoredCrudHostAcrossTheFullIntentPass() {
         ObjectNode constraints = objectMapper.createObjectNode();
         constraints.put("appliesToDataSelection", true);
@@ -71,7 +147,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .put("operator", "eq")
                 .put("value", "Rodrigo");
         AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
-                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                 "The user requested a governed record edit that must remain reviewable.",
                 List.of(),
                 "authoring_or_other",
@@ -3063,7 +3139,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 llmIntentResolver,
                 new AgenticAuthoringComponentCapabilitiesService());
         AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
-                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                 "The user is asking whether a governed payroll dashboard can be created.",
                 List.of(),
                 "platform_guidance",
@@ -11124,7 +11200,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         ObjectNode constraints = objectMapper.createObjectNode();
         constraints.putArray("filters");
         AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
-                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                 "Create a governed employee dashboard.",
                 List.of(),
                 "authoring_or_other",
@@ -14478,7 +14554,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .put("appliesToDataSelection", false)
                 .putArray("filters");
         AgenticAuthoringPreIntentToolPlan semanticOrientation = new AgenticAuthoringPreIntentToolPlan(
-                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                 "Create the requested governed form from the canonical incident resource.",
                 List.of(),
                 "authoring_or_other",
@@ -14569,7 +14645,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .putArray("filters");
 
         AgenticAuthoringPreIntentToolPlan semanticOrientation = new AgenticAuthoringPreIntentToolPlan(
-                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                 "The requested workflow needs a canonical time-entry resource and its actions.",
                 List.of(),
                 "authoring_or_other",
@@ -14662,7 +14738,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "",
                         "o candidato operacional não corresponde à identidade canônica authorada"));
         AgenticAuthoringPreIntentToolPlan semanticOrientation = new AgenticAuthoringPreIntentToolPlan(
-                "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                 "Search first; the resource still needs semantic confirmation.",
                 List.of(),
                 "authoring_or_other",

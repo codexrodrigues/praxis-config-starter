@@ -85,7 +85,10 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 && (isPrimaryComponent(visualizationDecision, "praxis-expansion")
                 || hasLayoutKind(visualizationDecision, "accordion", "expansion", "expansion-panels", "collapsible-panels")
                 || hasVisualIntent(visualizationDecision, "accordion", "expansion", "expansivel", "paineis"));
-        boolean crudRequested = !excludesComponent(visualizationDecision, "praxis-crud")
+        boolean masterDetailRequested = "page".equals(artifactKind)
+                && hasLayoutKind(visualizationDecision, "resource-master-detail");
+        boolean crudRequested = !masterDetailRequested
+                && !excludesComponent(visualizationDecision, "praxis-crud")
                 && isPrimaryComponent(visualizationDecision, "praxis-crud");
         if (!List.of("table", "dashboard", "page", "chart").contains(artifactKind)
                 && !(tabsRequested && "component".equals(artifactKind))
@@ -102,7 +105,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         }
         boolean chartOnly = isChartOnlyRequest(request, visualizationDecision);
         boolean dashboardMaterialization = shouldMaterializeDashboard(request, artifactKind, visualizationDecision);
-        ObjectNode plan = crudRequested ? crudPlan(request, candidate) : expansionRequested ? expansionPlan(candidate) : tabsRequested ? tabsPlan(request, candidate, visualizationDecision) : chartOnly ? singleChartPlan(request, candidate, visualizationDecision) : switch (artifactKind) {
+        ObjectNode plan = masterDetailRequested ? pagePlan(request, candidate, visualizationDecision) : crudRequested ? crudPlan(request, candidate) : expansionRequested ? expansionPlan(candidate) : tabsRequested ? tabsPlan(request, candidate, visualizationDecision) : chartOnly ? singleChartPlan(request, candidate, visualizationDecision) : switch (artifactKind) {
             case "dashboard" -> dashboardPlan(request, candidate, visualizationDecision);
             case "table" -> dashboardMaterialization
                     ? dashboardPlan(request, candidate, visualizationDecision)
@@ -113,7 +116,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                     : tablePlan(request, candidate);
         };
         preserveComponentSelectionAudit(request, plan);
-        String providerArtifactKind = crudRequested ? "crud" : chartOnly ? "chart" : dashboardMaterialization ? "dashboard" : artifactKind;
+        String providerArtifactKind = masterDetailRequested ? "page" : crudRequested ? "crud" : chartOnly ? "chart" : dashboardMaterialization ? "dashboard" : artifactKind;
         return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
                 true,
                 List.of(),
@@ -719,7 +722,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         if (isPrimaryComponent(visualizationDecision, "praxis-list")) {
             return listPagePlan(candidate);
         }
-        ObjectNode plan = basePlan("resource-master-detail");
+        ObjectNode plan = basePlan("master-detail-dashboard");
         ResourceWorkspaceGrounding grounding = resourceWorkspaceGrounding(request, candidate);
         ArrayNode widgets = plan.putArray("widgets");
         String filterKey = widgetKey(candidate, "filter");
@@ -846,7 +849,6 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         }
 
         ObjectNode options = plan.putObject("layoutPresetOptions");
-        options.put("presetFamily", "resource-master-detail");
         options.put("sourceResource", businessResourcePath(candidate.resourcePath()));
         options.put("density", "comfortable");
         options.put("responsiveStrategy", "canvas-device-layouts");
@@ -4192,8 +4194,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         }
         String schemaVersion = safe(envelope.path("schemaVersion").asText());
         String source = safe(envelope.path("source").asText());
-        if (!"praxis-agentic-authoring-verified-domain-operations.v1".equals(schemaVersion)
-                || !"schemas.filtered+resource.capabilities".equals(source)
+        if (!"praxis-agentic-authoring-verified-domain-operations.v2".equals(schemaVersion)
+                || !"schemas.filtered+resource.capabilities+schemas.actions".equals(source)
                 || !envelope.path("entries").isArray()) {
             return ResourceWorkspaceGrounding.rejected(
                     schemaVersion,
@@ -4248,21 +4250,48 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     }
 
     private boolean isCompleteVerifiedOperation(JsonNode operation) {
-        return operation != null
-                && operation.isObject()
-                && !safe(operation.path("resourceKey").asText()).isBlank()
-                && !safe(operation.path("resourcePath").asText()).isBlank()
-                && !safe(operation.path("apiPath").asText()).isBlank()
-                && !safe(operation.path("apiMethod").asText()).isBlank()
-                && !safe(operation.path("schemaUrl").asText()).isBlank()
-                && !safe(operation.path("capabilitiesUrl").asText()).isBlank()
-                && !safe(operation.path("capabilityOperationId").asText()).isBlank();
+        if (operation == null
+                || !operation.isObject()
+                || safe(operation.path("resourceKey").asText()).isBlank()
+                || safe(operation.path("resourcePath").asText()).isBlank()
+                || safe(operation.path("apiPath").asText()).isBlank()
+                || safe(operation.path("apiMethod").asText()).isBlank()
+                || safe(operation.path("schemaUrl").asText()).isBlank()
+                || safe(operation.path("metadataUrl").asText()).isBlank()
+                || safe(operation.path("operationId").asText()).isBlank()
+                || !operation.path("availability").path("allowed").isBoolean()) {
+            return false;
+        }
+        String kind = safe(operation.path("kind").asText());
+        String verificationMode = safe(operation.path("verificationMode").asText());
+        String availabilityResolution = safe(operation.path("availability").path("resolution").asText());
+        if ("resource_operation".equals(kind)) {
+            return "principal_capability".equals(verificationMode)
+                    && operation.path("availability").path("allowed").asBoolean(false)
+                    && "resource_capabilities".equals(availabilityResolution);
+        }
+        if (!"workflow_action".equals(kind)
+                || !"runtime_action_discovery".equals(verificationMode)
+                || safe(operation.path("actionId").asText()).isBlank()) {
+            return false;
+        }
+        String scope = safe(operation.path("scope").asText()).toUpperCase(Locale.ROOT);
+        if ("ITEM".equals(scope)) {
+            return !operation.path("availability").path("allowed").asBoolean(true)
+                    && "resource-context-required".equals(
+                            safe(operation.path("availability").path("reason").asText()))
+                    && "item_capabilities_at_selection".equals(availabilityResolution);
+        }
+        return "COLLECTION".equals(scope)
+                && operation.path("availability").path("allowed").asBoolean(false)
+                && "catalog_principal".equals(availabilityResolution);
     }
 
     private boolean isCommandOperation(JsonNode operation, String resourcePath) {
         String method = safe(operation.path("apiMethod").asText()).toLowerCase(Locale.ROOT);
         String apiPath = safe(operation.path("apiPath").asText());
-        return !"get".equals(method)
+        return "workflow_action".equals(safe(operation.path("kind").asText()))
+                && !"get".equals(method)
                 && apiPath.startsWith(resourcePath + "/")
                 && apiPath.contains("/actions/");
     }
@@ -4292,8 +4321,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         workspace.put("commandOperationCount", grounding.commandOperationCount());
         ObjectNode commandDiscovery = workspace.putObject("commandDiscovery");
         commandDiscovery.put("status", grounding.commandOperationCount() > 0 ? "enabled" : "blocked");
-        commandDiscovery.put("source", "praxis-table-runtime-hateoas-capabilities");
-        commandDiscovery.put("scopeResolution", "operation-scope-or-canonical-path");
+        commandDiscovery.put("source", "schemas-actions+runtime-hateoas-capabilities");
+        commandDiscovery.put("scopeResolution", "schemas-actions-scope");
+        commandDiscovery.put("availabilityResolution", "item-capabilities-at-selection");
         commandDiscovery.put("item", grounding.hasItemCommands());
         commandDiscovery.put("collection", grounding.hasCollectionCommands());
         commandDiscovery.put("endpointMaterializedByAuthoring", false);
@@ -4307,16 +4337,23 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             ObjectNode summary = operations.addObject();
             copyText(operation, summary, "conceptKey");
             copyText(operation, summary, "bindingKey");
+            copyText(operation, summary, "kind");
             copyText(operation, summary, "apiPath");
             copyText(operation, summary, "apiMethod");
             copyText(operation, summary, "schemaUrl");
-            copyText(operation, summary, "capabilitiesUrl");
-            copyText(operation, summary, "capabilityOperationId");
+            copyText(operation, summary, "metadataUrl");
+            copyText(operation, summary, "operationId");
+            copyText(operation, summary, "actionId");
+            copyText(operation, summary, "scope");
+            copyText(operation, summary, "verificationMode");
+            if (operation.path("availability").isObject()) {
+                summary.set("availability", operation.path("availability").deepCopy());
+            }
             copyText(operation, summary, "sourceRelease");
             summary.put("command", isCommandOperation(operation, businessResourcePath(operation.path("resourcePath").asText())));
             addSourceRef(sourceRefs, safe(operation.path("schemaUrl").asText()));
-            addSourceRef(sourceRefs, safe(operation.path("capabilitiesUrl").asText()));
-            addSourceRef(sourceRefs, "capability-operation:" + safe(operation.path("capabilityOperationId").asText()));
+            addSourceRef(sourceRefs, safe(operation.path("metadataUrl").asText()));
+            addSourceRef(sourceRefs, "metadata-operation:" + safe(operation.path("operationId").asText()));
         }
     }
 

@@ -679,6 +679,13 @@ public class AgenticAuthoringTurnEngine {
                     eventSink,
                     intentResolution,
                     route);
+            request = withResourceWorkspaceOperationalGrounding(
+                    request,
+                    principalContext,
+                    eventSink,
+                    intentResolution,
+                    route,
+                    schemaBaseUrl);
             request = withComponentSelectionContext(request, intentResolution, route, eventSink);
             AgenticAuthoringPreviewResult preview = null;
             AgenticAuthoringToolLoopResult toolLoopResult = null;
@@ -3297,10 +3304,11 @@ public class AgenticAuthoringTurnEngine {
                 ? request.contextHints().deepCopy()
                 : objectMapper.createObjectNode();
         ObjectNode context = contextHints.putObject("preIntentSemanticOrientation");
-        context.put("schemaVersion", "praxis-agentic-authoring-pre-intent-orientation-context.v1");
+        context.put("schemaVersion", "praxis-agentic-authoring-pre-intent-orientation-context.v2");
         context.put("semanticIntentClass", safeText(orientation.semanticIntentClass()));
         context.put("artifactKind", safeText(orientation.artifactKind()));
         context.put("primaryComponent", safeText(orientation.primaryComponent()));
+        context.put("layoutKind", safeText(orientation.layoutKind()));
         context.put("requiresFullIntentResolution", orientation.requiresFullIntentResolution());
         context.put("source", "llm_pre_intent_tool_plan");
         if (orientation.queryConstraints() != null && !orientation.queryConstraints().isNull()) {
@@ -3371,11 +3379,97 @@ public class AgenticAuthoringTurnEngine {
                 ? request.contextHints().deepCopy()
                 : objectMapper.createObjectNode();
         ObjectNode envelope = contextHints.putObject("verifiedDomainOperations");
-        envelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v1");
-        envelope.put("source", "schemas.filtered+resource.capabilities");
+        envelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v2");
+        envelope.put("source", "schemas.filtered+resource.capabilities+schemas.actions");
         envelope.put("operationCount", operations.size());
         envelope.set("entries", objectMapper.valueToTree(operations));
         return copyWithContextHints(request, contextHints);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withResourceWorkspaceOperationalGrounding(
+            AgenticAuthoringTurnStreamRequest request,
+            AiPrincipalContext principalContext,
+            AgenticAuthoringTurnEventSink eventSink,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringTurnRoute route,
+            String schemaBaseUrl) {
+        if (!requiresResourceWorkspaceOperationalGrounding(intentResolution) || request == null) {
+            return request;
+        }
+        AgenticAuthoringCandidate candidate = intentResolution.selectedCandidate();
+        String resourcePath = businessResourcePath(candidate == null ? "" : candidate.resourcePath());
+        String resourceKey = resourceKeyFromPath(resourcePath);
+        if (!StringUtils.hasText(resourceKey)) {
+            return request;
+        }
+        if (hasVerifiedOperationContextForResource(request, resourceKey, resourcePath)) {
+            return request;
+        }
+        AgenticAuthoringToolCall toolCall = new AgenticAuthoringToolCall(
+                AgenticAuthoringToolRegistry.VERIFY_DOMAIN_OPERATION,
+                route == null ? "component_authoring" : safeText(route.routeClass()),
+                new DomainOperationVerificationToolRequest(resourceKey, schemaBaseUrl));
+        eventSink.append("thought.step", safeToolProjection(
+                "tool.start",
+                "Estou verificando schemas, capabilities e actions do recurso selecionado para compor o workspace.",
+                Map.of(
+                        "tool", AgenticAuthoringToolRegistry.VERIFY_DOMAIN_OPERATION,
+                        "resourceKey", resourceKey,
+                        "layoutKind", "resource-master-detail")));
+        AgenticAuthoringToolResult result = toolRegistry.execute(
+                toolCall, principalContext, "retrieveEvidence", schemaBaseUrl);
+        eventSink.append("thought.step", safeToolProjection(
+                result.valid() ? "tool.result" : "tool.error",
+                result.valid()
+                        ? "Schemas, capabilities e actions do workspace foram verificados no backend."
+                        : "Nao foi possivel verificar schemas, capabilities e actions do workspace.",
+                safeToolDiagnostics(result)));
+        if (!result.valid() || !(result.payload() instanceof List<?> items)) {
+            return request;
+        }
+        List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection> operations = items.stream()
+                .filter(AgenticAuthoringOperationalBindingVerificationService.OperationProjection.class::isInstance)
+                .map(AgenticAuthoringOperationalBindingVerificationService.OperationProjection.class::cast)
+                .toList();
+        return operations.isEmpty() ? request : withVerifiedOperationContext(request, operations);
+    }
+
+    private boolean hasVerifiedOperationContextForResource(
+            AgenticAuthoringTurnStreamRequest request,
+            String resourceKey,
+            String resourcePath) {
+        JsonNode envelope = request == null || request.contextHints() == null
+                ? null
+                : request.contextHints().path("verifiedDomainOperations");
+        JsonNode entries = envelope == null ? null : envelope.path("entries");
+        if (envelope == null || !envelope.isObject() || entries == null || !entries.isArray() || entries.isEmpty()) {
+            return false;
+        }
+        String expectedPath = businessResourcePath(resourcePath);
+        for (JsonNode entry : entries) {
+            String entryResourceKey = safeText(entry.path("resourceKey").asText());
+            String entryResourcePath = businessResourcePath(entry.path("resourcePath").asText());
+            if (!resourceKey.equals(entryResourceKey)
+                    || !StringUtils.hasText(expectedPath)
+                    || !expectedPath.equals(entryResourcePath)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean requiresResourceWorkspaceOperationalGrounding(
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null || intentResolution.selectedCandidate() == null) {
+            return false;
+        }
+        AgenticAuthoringSemanticDecision semanticDecision = intentResolution.semanticDecision();
+        AgenticAuthoringVisualizationDecision visualizationDecision = semanticDecision != null
+                && semanticDecision.visualizationDecision() != null
+                        ? semanticDecision.visualizationDecision()
+                        : intentResolution.visualizationDecision();
+        return visualizationDecision != null
+                && "resource-master-detail".equals(safeText(visualizationDecision.layoutKind()));
     }
 
     private ArtifactReconciliationOutcome reconcilePlannedArtifact(

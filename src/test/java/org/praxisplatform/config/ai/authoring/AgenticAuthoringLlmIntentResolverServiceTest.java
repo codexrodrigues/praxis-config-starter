@@ -392,7 +392,8 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("Which governed supplier data can I use in a dashboard?")
                 .contains("Never reinterpret a requested business rule as a dashboard or page")
                 .contains("For an existing governed resource action or writable record operation")
-                .contains("The CRUD runtime discovers the canonical action")
+                .contains("primaryComponent \"praxis-table\" with layoutKind \"resource-master-detail\"")
+                .contains("the table runtime discovers")
                 .contains("\"authoringScopePolicy\"")
                 .contains("\"outOfScopeResponseType\" : \"info\"")
                 .contains("\"semanticRetrievalIntent\"")
@@ -522,7 +523,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .add("tool-search-api-resources")
                 .add("semantic-retrieval");
         ObjectNode orientation = contextHints.putObject("preIntentSemanticOrientation");
-        orientation.put("schemaVersion", "praxis-agentic-authoring-pre-intent-orientation-context.v1");
+        orientation.put("schemaVersion", "praxis-agentic-authoring-pre-intent-orientation-context.v2");
         orientation.put("semanticIntentClass", "authoring_or_other");
         orientation.put("artifactKind", "table");
         orientation.put("requiresFullIntentResolution", true);

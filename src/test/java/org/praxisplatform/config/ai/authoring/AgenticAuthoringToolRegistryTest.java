@@ -351,6 +351,7 @@ class AgenticAuthoringToolRegistryTest {
                                 new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
                                         "hr:employee-management",
                                         "resource:human-resources.funcionarios",
+                                        "resource_operation",
                                         "human-resources.funcionarios",
                                         "/api/human-resources/funcionarios",
                                         "/api/human-resources/funcionarios/filter/cursor",
@@ -359,11 +360,17 @@ class AgenticAuthoringToolRegistryTest {
                                         "http://localhost/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Ffuncionarios%2Ffilter%2Fcursor&operation=post&schemaType=request",
                                         "http://localhost/api/human-resources/funcionarios/capabilities",
                                         "cursor",
+                                        "",
+                                        "",
+                                        "principal_capability",
+                                        new AgenticAuthoringOperationalBindingVerificationService.AvailabilityProjection(
+                                                true, "", "resource_capabilities"),
                                         "hr-v1",
                                         binding.evidence()),
                                 new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
                                         "hr:employee-management",
                                         "update:human-resources.funcionarios",
+                                        "resource_operation",
                                         "human-resources.funcionarios",
                                         "/api/human-resources/funcionarios",
                                         "/api/human-resources/funcionarios/{id}",
@@ -372,8 +379,34 @@ class AgenticAuthoringToolRegistryTest {
                                         "http://localhost/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Ffuncionarios%2F%7Bid%7D&operation=put&schemaType=request",
                                         "http://localhost/api/human-resources/funcionarios/capabilities",
                                         "update",
+                                        "",
+                                        "",
+                                        "principal_capability",
+                                        new AgenticAuthoringOperationalBindingVerificationService.AvailabilityProjection(
+                                                true, "", "resource_capabilities"),
                                         "hr-v1",
-                                        binding.evidence())),
+                                        binding.evidence()),
+                                new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
+                                        "",
+                                        "",
+                                        "workflow_action",
+                                        "human-resources.funcionarios",
+                                        "/api/human-resources/funcionarios",
+                                        "/api/human-resources/funcionarios/{id}/actions/deactivate",
+                                        "post",
+                                        "request",
+                                        "http://localhost/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Ffuncionarios%2F%7Bid%7D%2Factions%2Fdeactivate&operation=post&schemaType=request",
+                                        "http://localhost/schemas/actions?resource=human-resources.funcionarios",
+                                        "deactivateEmployee",
+                                        "deactivate",
+                                        "ITEM",
+                                        "runtime_action_discovery",
+                                        new AgenticAuthoringOperationalBindingVerificationService.AvailabilityProjection(
+                                                false,
+                                                "resource-context-required",
+                                                "item_capabilities_at_selection"),
+                                        "",
+                                        List.of("metadata-action-catalog:deactivate"))),
                         List.of()));
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
                 resourceDiscoveryService,
@@ -405,7 +438,7 @@ class AgenticAuthoringToolRegistryTest {
                 .extractingByKey("resourceDiscoveryDiagnostics")
                 .isInstanceOfSatisfying(Map.class, diagnostics -> assertThat(diagnostics)
                         .containsEntry("vectorRetrievalSkipped", true)
-                        .containsEntry("bindingVerification", "schemas.filtered+resource.capabilities"));
+                        .containsEntry("bindingVerification", "schemas.filtered+resource.capabilities+schemas.actions"));
         AgenticAuthoringResourceCandidatesResult payload =
                 (AgenticAuthoringResourceCandidatesResult) result.payload();
         assertThat(payload.candidates())

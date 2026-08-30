@@ -12,12 +12,13 @@ public record AgenticAuthoringPreIntentToolPlan(
         boolean requiresFullIntentResolution,
         JsonNode queryConstraints,
         String artifactKind,
-        String primaryComponent
+        String primaryComponent,
+        String layoutKind
 ) {
 
     public AgenticAuthoringPreIntentToolPlan {
         schemaVersion = schemaVersion == null || schemaVersion.isBlank()
-                ? "praxis-agentic-authoring-pre-intent-tool-plan.v1"
+                ? "praxis-agentic-authoring-pre-intent-tool-plan.v3"
                 : schemaVersion.trim();
         reason = reason == null ? "" : reason.trim();
         toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
@@ -27,6 +28,30 @@ public record AgenticAuthoringPreIntentToolPlan(
         assistantMessage = assistantMessage == null ? "" : assistantMessage.trim();
         artifactKind = artifactKind == null || artifactKind.isBlank() ? "unknown" : artifactKind.trim();
         primaryComponent = primaryComponent == null ? "" : primaryComponent.trim();
+        layoutKind = layoutKind == null ? "" : layoutKind.trim();
+    }
+
+    public AgenticAuthoringPreIntentToolPlan(
+            String schemaVersion,
+            String reason,
+            List<AgenticAuthoringToolCall> toolCalls,
+            String semanticIntentClass,
+            String assistantMessage,
+            boolean requiresFullIntentResolution,
+            JsonNode queryConstraints,
+            String artifactKind,
+            String primaryComponent) {
+        this(
+                schemaVersion,
+                reason,
+                toolCalls,
+                semanticIntentClass,
+                assistantMessage,
+                requiresFullIntentResolution,
+                queryConstraints,
+                artifactKind,
+                primaryComponent,
+                "");
     }
 
     public AgenticAuthoringPreIntentToolPlan(
@@ -47,6 +72,7 @@ public record AgenticAuthoringPreIntentToolPlan(
                 requiresFullIntentResolution,
                 queryConstraints,
                 artifactKind,
+                "",
                 "");
     }
 
@@ -56,14 +82,14 @@ public record AgenticAuthoringPreIntentToolPlan(
             List<AgenticAuthoringToolCall> toolCalls,
             String semanticIntentClass,
             String assistantMessage) {
-        this(schemaVersion, reason, toolCalls, semanticIntentClass, assistantMessage, false, null, "unknown", "");
+        this(schemaVersion, reason, toolCalls, semanticIntentClass, assistantMessage, false, null, "unknown", "", "");
     }
 
     public AgenticAuthoringPreIntentToolPlan(
             String schemaVersion,
             String reason,
             List<AgenticAuthoringToolCall> toolCalls) {
-        this(schemaVersion, reason, toolCalls, "authoring_or_other", "", false, null, "unknown", "");
+        this(schemaVersion, reason, toolCalls, "authoring_or_other", "", false, null, "unknown", "", "");
     }
 
     public boolean resolvesPlatformGuidance() {

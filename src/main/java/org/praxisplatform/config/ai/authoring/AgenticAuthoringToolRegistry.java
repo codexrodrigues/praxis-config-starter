@@ -547,7 +547,7 @@ public class AgenticAuthoringToolRegistry {
                 VERIFY_DOMAIN_OPERATION,
                 Set.of("component_authoring", "shared_rule_authoring", "mixed", "needs_clarification", "advisory_authoring"),
                 Set.of("retrieveEvidence"),
-                "praxis-metadata-starter:schemas-filtered+capabilities",
+                "praxis-metadata-starter:schemas-filtered+capabilities+actions",
                 "read_only",
                 "governed_operational_verification",
                 "safe_event_projection_only");
@@ -581,13 +581,13 @@ public class AgenticAuthoringToolRegistry {
                             Map.of(
                                     "resourceKey", safeText(result.resourceKey()),
                                     "operationCount", result.operations().size(),
-                                    "verification", "schemas_filtered+capabilities"))
+                                    "verification", "schemas_filtered+capabilities+actions"))
                     : AgenticAuthoringToolResult.failure(
                             call.name(),
                             result.failureCodes().isEmpty()
                                     ? "operational-grounding-unverified"
                                     : result.failureCodes().get(0),
-                            "The governed binding did not pass exact schema and capability verification.");
+                            "The governed resource did not pass exact schema and metadata verification.");
         }
     }
 
@@ -1037,8 +1037,12 @@ public class AgenticAuthoringToolRegistry {
                 return null;
             }
             List<AgenticAuthoringCandidate> candidates = verification.operations().stream()
+                    .filter(AgenticAuthoringOperationalBindingVerificationService.OperationProjection::executableCandidate)
                     .map(operation -> verifiedBindingCandidate(operation, principalContext))
                     .toList();
+            if (candidates.isEmpty()) {
+                return null;
+            }
             return new AgenticAuthoringResourceCandidatesResult(
                     true,
                     SEARCH_API_RESOURCES,
@@ -1053,7 +1057,7 @@ public class AgenticAuthoringToolRegistry {
                     null,
                     Map.of(
                             "bindingResourceKey", verification.resourceKey(),
-                            "bindingVerification", "schemas.filtered+resource.capabilities",
+                            "bindingVerification", "schemas.filtered+resource.capabilities+schemas.actions",
                             "vectorRetrievalSkipped", true));
         }
 
@@ -1088,9 +1092,9 @@ public class AgenticAuthoringToolRegistry {
                                     principalContext == null ? "" : principalContext.environment(),
                                     operation.sourceRelease()),
                             new AgenticAuthoringEvidenceBundle.Evidence(
-                                    "capabilities", "operation_grounding", operation.capabilitiesUrl(),
+                                    "capabilities", "operation_grounding", operation.metadataUrl(),
                                     "Principal-scoped capability verified for the bound operation.", 1d,
-                                    List.of(operation.capabilityOperationId()),
+                                    List.of(operation.operationId()),
                                     principalContext == null ? "" : principalContext.tenantId(),
                                     principalContext == null ? "" : principalContext.environment(),
                                     operation.sourceRelease())));
