@@ -10,6 +10,7 @@
     "kind",
     "canonicalization",
     "compilerContracts",
+    "compilerReceipts",
     "targetProfiles",
     "cases"
   ],
@@ -42,6 +43,14 @@
             "exportName": { "const": "compileUiCompositionPlan" }
           }
         }
+      }
+    },
+    "compilerReceipts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["java"],
+      "properties": {
+        "java": { "$ref": "#/$defs/javaCompilerReceipt" }
       }
     },
     "targetProfiles": {
@@ -110,11 +119,12 @@
             "modules": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["core", "table", "list", "page-builder"],
+              "required": ["core", "table", "list", "tabs", "page-builder"],
               "properties": {
                 "core": { "$ref": "#/$defs/runtimeModuleReceipt" },
                 "table": { "$ref": "#/$defs/runtimeModuleReceipt" },
                 "list": { "$ref": "#/$defs/runtimeModuleReceipt" },
+                "tabs": { "$ref": "#/$defs/runtimeModuleReceipt" },
                 "page-builder": { "$ref": "#/$defs/runtimeModuleReceipt" }
               }
             }
@@ -129,6 +139,18 @@
       "properties": {
         "sourcePath": { "type": "string", "minLength": 1 },
         "sourceGitTree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "artifactSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "javaCompilerReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "sourcePath", "sourceGitBlob", "artifactPath", "artifactSha256"],
+      "properties": {
+        "scope": { "const": "source-git-blob-and-compiled-class-bytes" },
+        "sourcePath": { "const": "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.java" },
+        "sourceGitBlob": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "artifactPath": { "const": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.class" },
         "artifactSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       }
     },
@@ -158,7 +180,7 @@
       "required": ["kind", "module", "exportName"],
       "properties": {
         "kind": { "enum": ["module-export", "injector-token"] },
-        "module": { "enum": ["page-builder", "core", "table", "list"] },
+        "module": { "enum": ["page-builder", "core", "table", "list", "tabs"] },
         "exportName": { "type": "string", "minLength": 1 }
       }
     },
@@ -264,7 +286,23 @@
             "properties": {
               "targetAttestation": {
                 "type": "object",
-                "properties": { "outcome": { "const": "skipped" } }
+                "properties": {
+                  "outcome": { "const": "skipped" },
+                  "diagnostics": { "type": "array", "maxItems": 0 },
+                  "requirements": {
+                    "type": "object",
+                    "properties": {
+                      "components": { "type": "array", "maxItems": 0 },
+                      "ports": { "type": "array", "maxItems": 0 },
+                      "capabilities": { "type": "array", "maxItems": 0 },
+                      "actions": { "type": "array", "maxItems": 0 }
+                    },
+                    "not": {
+                      "properties": { "templateRevision": {} },
+                      "required": ["templateRevision"]
+                    }
+                  }
+                }
               }
             }
           }

@@ -50,14 +50,18 @@ Both engines validate or resolve the same plan, compile it, and compare:
 - canonical projection SHA-256;
 - stable diagnostic identity (`code`, `path`, `severity`, `provenance`).
 
-Corpus v1.3 carries 18 cases. Its adversarial master-detail coverage mirrors the TypeScript owner:
+Corpus v1.4 carries 18 cases. Its adversarial master-detail coverage mirrors the TypeScript owner:
 unknown preset/slot, role-slot conflict, missing or ambiguous master, missing detail, preset
 conflict, slot cardinality, widget-role fallback and detail-slot fallback. The Java builder identity
 is pinned as `config-ui-composition-plan-compiler@1.2.0`.
 
 Known Java/TypeScript spelling or path differences are explicit per expected diagnostic. The
 runners may not normalize an unexpected divergence into success. Reports publish byte-exact
-`corpusSha256`, `schemaSha256` and compiler identity (including implementation hash). Hashing source
+`corpusSha256`, `schemaSha256` and compiler identity (including implementation hash). The corpus-owned
+Java compiler receipt fixes the implementation source Git blob, class path and exact class bytes;
+both runners compare that external receipt with the current source/artifact, and the peer handshake
+reconstructs Java diagnostics directly from `engineCodes.java`, `pathByEngine.java`, severity and
+provenance instead of trusting the peer's `canonicalDiagnostics` field. Hashing source
 bytes preserves semantic `null` values instead of silently erasing them in a parser projection. The TypeScript
 peer handshake validates the Java class artifact against its reported hash before comparing every
 case's phase, outcome, projection hash, canonical diagnostics, pass bit and failure list.
@@ -80,14 +84,15 @@ requirements, and the identities used for the decision. It checks:
 - capability coordinates as real module exports or injectable tokens, including provider
   resolvability; a name in the corpus is never proof by itself;
 - global actions only when `GlobalActionService.getReadiness(...)` proves both the handler and its
-  Core-owned provider/runtime requirements without executing the side effect; `has()` alone is not
-  readiness;
+  Core-owned operational provider/runtime evidence without executing the side effect; `has()` or a
+  present injector token alone is not readiness. The positive `trackEvent` case separately executes
+  the real official analytics adapter and records its observation from `TelemetryService.events$`;
 - exact template revision (`registryKey`, `version`, `ETag`, `configSha256`) copied from the
   materialization resolved by the template resolver, never from the target profile;
 - Corte A.5 baseline `a4ccfef5720c7dc616a90c2e1b10d5b79055b1be` and the SHA-256 of every
   exact `commit:path` Git blob, rather than the current worktree file;
 - the real `preflightUiCompositionPlan(...)` against a `ComponentMetadataRegistry` bootstrapped by
-  `providePraxisTableMetadata()`, `providePraxisListMetadata()` and
+  `providePraxisTableMetadata()`, `providePraxisListMetadata()`, `providePraxisTabsMetadata()` and
   `providePraxisRelatedResourceOutletMetadata()` in an `EnvironmentInjector`;
 - action metadata from `providePraxisGlobalActionCatalog()` and executable handlers from the
   injector. Catalog metadata alone is intentionally insufficient.
@@ -96,18 +101,24 @@ requirements, and the identities used for the decision. It checks:
 ids, governed port contracts and sorted action-readiness projections returned by that injector. It is not
 a digest of the target-profile JSON. The report distinguishes the ancestral certification baseline
 from the executed `runtimeRevision`. A target-owned `runtimeExecutionReceipt` independently pins
-the source Git tree and built-module SHA-256 for Core, Table, List and Page Builder. The gate compares
+the source Git tree and built-module SHA-256 for Core, Table, List, Tabs and Page Builder. The gate compares
 the clean source trees and exact loaded bytes against that receipt; merely recalculating a hash in
 the report is not acceptance. `producerRevision` is provenance for the receipt, while content-tree
 equality keeps the proof valid when an equivalent tree receives a different merge commit.
 
-Target failure does not rewrite compiler parity. Cases intentionally prove that an identical,
+Nested targets are resolved from the materialized owner definition and `NestedPortCatalogService`;
+the terminal `componentType` is checked as part of the structured path but is never accepted as the
+source of the child component identity.
+
+Only a real compiler `block` may produce target `skipped`, and then target diagnostics plus all four
+requirement collections must be empty with no template revision. Compiler warnings are fully
+attested. Target failure does not rewrite compiler parity. Cases intentionally prove that an identical,
 valid projection can still be blocked because the target train lacks a component, port,
 capability/action or pinned template revision.
 
 The owner regressions additionally prove former bypasses stay closed: removing a declared action,
 emptying essential capabilities, freely marking a valid case `skipped`, accepting `surface.open`
-without `GLOBAL_SURFACE_SERVICE`, flattening `nestedPath`, declaring a fictitious capability,
+without an operational `GLOBAL_SURFACE_SERVICE`, trusting a false nested `componentType`, declaring a fictitious capability,
 declaring template version `999`, altering a loaded bundle after receipt publication, or drifting
 peer diagnostics/results/compiler bytes. Invalid or malformed corpus/schema input produces a
 persisted, readable fail-closed report instead of leaking a `TypeError` in both languages.
@@ -142,7 +153,7 @@ After building the official provider owners and Page Builder, from the sibling
 
 ```bash
 node scripts/build-libs.js --prod \
-  --only praxis-page-builder,praxis-table,praxis-list
+  --only praxis-core,praxis-page-builder,praxis-table,praxis-list,praxis-tabs
 npm run build:tools
 npx -y ts-node --project tools/tsconfig.tools.json \
   tools/ai-registry/ui-composition-golden-corpus-runner.spec.ts

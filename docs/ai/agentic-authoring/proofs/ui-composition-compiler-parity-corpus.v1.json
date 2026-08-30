@@ -1,6 +1,6 @@
 {
   "schemaVersion": "praxis.ui-composition-compiler-parity-corpus/v1",
-  "corpusVersion": "1.3.0",
+  "corpusVersion": "1.4.0",
   "kind": "praxis.ui-composition-compiler-parity-corpus",
   "description": "Neutral deterministic corpus for Java/TypeScript UiCompositionPlan compiler parity and separately phased Angular target readiness.",
   "canonicalization": {
@@ -18,6 +18,15 @@
       "exportName": "compileUiCompositionPlan"
     }
   },
+  "compilerReceipts": {
+    "java": {
+      "scope": "source-git-blob-and-compiled-class-bytes",
+      "sourcePath": "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.java",
+      "sourceGitBlob": "c8986fc3944d016fa037c2994b0bcc8124d298db",
+      "artifactPath": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.class",
+      "artifactSha256": "5291a1e215621718ce0a32d8a724a730b9bbfb5dc4417092fb74e218a0992e9b"
+    }
+  },
   "targetProfiles": {
     "praxis-ui-angular-corte-a5": {
       "id": "praxis-ui-angular-corte-a5",
@@ -27,15 +36,15 @@
         "certification": "wave-a.5",
         "primaryEvidenceRef": "projects/praxis-page-builder/docs/corte-a-widget-certification-matrix.md"
       },
-      "registryFingerprint": "23f6a4dbce8c9fe15e316f50b44dc1be501e9fcb7de1b00decb6ef4c2b3ef49b",
+      "registryFingerprint": "fc2000aa21f1f0536b81acc0034b7b4901a580f2048676a0c74dbcf7223489ad",
       "runtimeExecutionReceipt": {
         "scope": "source-trees-and-built-module-bytes",
-        "producerRevision": "2b480616c24e9ce22263aa993bf0234d3d2626e1",
+        "producerRevision": "1f88c7a502728cf0195f835448f9d52221e2b211",
         "modules": {
           "core": {
             "sourcePath": "projects/praxis-core/src",
-            "sourceGitTree": "c4d392924ec784fd8eaa0fd9e871afbe73902cad",
-            "artifactSha256": "538b9ab6d1354c7f3f10a55c2f840aff87d7b10c1b9394d2c0c07fb8bbdf64b9"
+            "sourceGitTree": "a66d528248c7f1cad8c6da37ff53a92d3851e515",
+            "artifactSha256": "034f539249aabb77f3969821c2ee3b19f3607fc605127e56bc81257f6a884c57"
           },
           "table": {
             "sourcePath": "projects/praxis-table/src",
@@ -46,6 +55,11 @@
             "sourcePath": "projects/praxis-list/src",
             "sourceGitTree": "592ddfb99b6e20092d48e3fe08bd18ce88f09896",
             "artifactSha256": "9de4b39d966601e9da78b4ce9cbdcaf25f01176738a93d3fdff0385eb98615b5"
+          },
+          "tabs": {
+            "sourcePath": "projects/praxis-tabs/src",
+            "sourceGitTree": "1efed31b18d211f9a7008648612ea6393cf51120",
+            "artifactSha256": "c641bb71b0fcaf32899ac3d57f3f401f6ebfd606eeda87f5af9605c2a4798713"
           },
           "page-builder": {
             "sourcePath": "projects/praxis-page-builder/src",
@@ -271,7 +285,7 @@
       "caseVersion": "1.0.0",
       "semanticIntent": {
         "decisionKind": "ui-composition-materialization",
-        "purpose": "Project a list selection into query context and canonical page state."
+        "purpose": "Project a list selection into a real table nested in official Praxis Tabs, canonical page state, and an operational analytics action."
       },
       "input": {
         "plan": {
@@ -280,7 +294,25 @@
           "state": { "values": { "selectedEmployeeId": null } },
           "widgets": [
             { "key": "employee-list", "componentId": "praxis-list" },
-            { "key": "employee-table", "componentId": "praxis-table" }
+            {
+              "key": "employee-tabs",
+              "componentId": "praxis-tabs",
+              "inputs": {
+                "config": {
+                  "tabs": [
+                    {
+                      "id": "details",
+                      "widgets": [
+                        {
+                          "id": "praxis-table",
+                          "childWidgetKey": "employee-table"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
           ],
           "bindings": [
             {
@@ -293,9 +325,13 @@
               },
               "to": {
                 "kind": "component-port",
-                "widget": "employee-table",
+                "widget": "employee-tabs",
                 "port": "queryContext",
-                "direction": "input"
+                "direction": "input",
+                "nestedPath": [
+                  { "kind": "tab", "id": "details", "index": 0 },
+                  { "kind": "widget", "key": "employee-table", "componentType": "praxis-table" }
+                ]
               },
               "intent": "data-projection",
               "transform": {
@@ -321,6 +357,17 @@
                 "path": "item.id",
                 "inputSource": "payload"
               }
+            },
+            {
+              "id": "list.selection->analytics",
+              "from": {
+                "kind": "component-port",
+                "widget": "employee-list",
+                "port": "selectionChange",
+                "direction": "output"
+              },
+              "to": { "kind": "global-action", "actionId": "trackEvent" },
+              "intent": "command-dispatch"
             }
           ]
         }
@@ -329,14 +376,14 @@
         "compilerParity": {
           "phase": "compiler-parity",
           "outcome": "pass",
-          "projectionSha256": "afa8c879a7d00c5c17d3e206a063b1415a21abc0315c98d6a08216b418c57161",
+          "projectionSha256": "a8f974cc8648a67d13e5b0572b9165003fae40a3c3b47d96dd50a922f73870db",
           "diagnostics": []
         },
         "targetAttestation": {
           "profileId": "praxis-ui-angular-corte-a5",
           "outcome": "pass",
           "requirements": {
-            "components": ["praxis-list", "praxis-table"],
+            "components": ["praxis-list", "praxis-table", "praxis-tabs"],
             "ports": [
               {
                 "ownerWidgetKey": "employee-list",
@@ -346,19 +393,24 @@
                 "direction": "output"
               },
               {
-                "ownerWidgetKey": "employee-table",
-                "ownerComponentId": "praxis-table",
+                "ownerWidgetKey": "employee-tabs",
+                "ownerComponentId": "praxis-tabs",
                 "componentId": "praxis-table",
                 "portId": "queryContext",
-                "direction": "input"
+                "direction": "input",
+                "nestedPath": [
+                  { "kind": "tab", "id": "details", "index": 0 },
+                  { "kind": "widget", "key": "employee-table", "componentType": "praxis-table" }
+                ]
               }
             ],
             "capabilities": [
               { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
               { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
-              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" }
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
+              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" }
             ],
-            "actions": []
+            "actions": ["trackEvent"]
           },
           "diagnostics": []
         }

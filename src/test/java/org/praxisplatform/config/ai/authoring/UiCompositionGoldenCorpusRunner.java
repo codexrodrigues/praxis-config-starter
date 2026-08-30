@@ -97,6 +97,7 @@ final class UiCompositionGoldenCorpusRunner {
                 .forEach(message -> globalFailures.add("schema:" + message));
         verifyTargetProfileReferences(corpus, globalFailures);
         verifyCompilerContract(corpus, globalFailures);
+        verifyJavaCompilerReceipt(corpus, globalFailures);
 
         ArrayNode caseReports = objectMapper.createArrayNode();
         for (JsonNode testCase : corpus.path("cases")) {
@@ -320,6 +321,56 @@ final class UiCompositionGoldenCorpusRunner {
         }
     }
 
+    private void verifyJavaCompilerReceipt(JsonNode corpus, List<String> failures) {
+        JsonNode receipt = corpus.at("/compilerReceipts/java");
+        String expectedSourcePath =
+                "src/main/java/org/praxisplatform/config/ai/authoring/"
+                        + "AgenticAuthoringUiCompositionPlanCompiler.java";
+        String expectedArtifactPath =
+                "target/classes/org/praxisplatform/config/ai/authoring/"
+                        + "AgenticAuthoringUiCompositionPlanCompiler.class";
+        if (!"source-git-blob-and-compiled-class-bytes".equals(receipt.path("scope").asText())) {
+            failures.add("java-compiler-receipt-scope-mismatch");
+        }
+        if (!expectedSourcePath.equals(receipt.path("sourcePath").asText())) {
+            failures.add("java-compiler-receipt-source-path-mismatch");
+        }
+        if (!expectedArtifactPath.equals(receipt.path("artifactPath").asText())) {
+            failures.add("java-compiler-receipt-artifact-path-mismatch");
+        }
+        try {
+            Path sourcePath = Path.of(expectedSourcePath);
+            if (!Files.isRegularFile(sourcePath)) {
+                failures.add("java-compiler-receipt-source-missing");
+            } else {
+                String actualBlob = gitHashObject(sourcePath);
+                if (!actualBlob.equals(receipt.path("sourceGitBlob").asText())) {
+                    failures.add("java-compiler-receipt-source-blob-mismatch");
+                }
+            }
+            Path artifactPath = Path.of(expectedArtifactPath);
+            if (!Files.isRegularFile(artifactPath)) {
+                failures.add("java-compiler-receipt-artifact-missing");
+            } else if (!sha256(Files.readAllBytes(artifactPath))
+                    .equals(receipt.path("artifactSha256").asText())) {
+                failures.add("java-compiler-receipt-artifact-sha-mismatch");
+            }
+        } catch (Exception error) {
+            failures.add("java-compiler-receipt-verification:" + readableFailure(error));
+        }
+    }
+
+    private String gitHashObject(Path sourcePath) throws Exception {
+        Process process = new ProcessBuilder("git", "hash-object", sourcePath.toString())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+        if (process.waitFor() != 0 || !output.matches("[0-9a-f]{40}")) {
+            throw new IllegalStateException("git hash-object failed: " + output);
+        }
+        return output;
+    }
+
     private String compilerImplementationSha256() throws Exception {
         String resource = "/"
                 + AgenticAuthoringUiCompositionPlanCompiler.class.getName().replace('.', '/')
@@ -363,6 +414,11 @@ final class UiCompositionGoldenCorpusRunner {
                 "target/classes/org/praxisplatform/config/ai/authoring/"
                         + "AgenticAuthoringUiCompositionPlanCompiler.class");
         implementationArtifact.put("sha256", implementationSha256);
+        if (corpus != null && corpus.at("/compilerReceipts/java").isObject()) {
+            compilerIdentity.set(
+                    "sourceReceipt",
+                    corpus.at("/compilerReceipts/java").deepCopy());
+        }
         return report;
     }
 

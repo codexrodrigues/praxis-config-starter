@@ -51,6 +51,10 @@ class UiCompositionGoldenCorpusRunnerTest {
         assertThat(implementationArtifact).exists();
         assertThat(report.at("/compilerIdentity/implementationArtifact/sha256").asText())
                 .isEqualTo(fileSha256(implementationArtifact));
+        assertThat(report.at("/compilerIdentity/sourceReceipt/sourceGitBlob").asText())
+                .matches("[a-f0-9]{40}");
+        assertThat(report.at("/compilerIdentity/sourceReceipt/artifactSha256").asText())
+                .isEqualTo(report.at("/compilerIdentity/implementationSha256").asText());
         assertThat(report.path("cases").get(0).path("canonicalDiagnostics").isArray()).isTrue();
         assertThat(report.path("passed").asBoolean())
                 .withFailMessage("Java golden report: %s", report)
@@ -123,5 +127,54 @@ class UiCompositionGoldenCorpusRunnerTest {
                 "compiler-parity", "template-attestation");
         assertThat(compilerOutcomes).containsExactlyInAnyOrder("pass", "warning", "block");
         assertThat(targetOutcomes).containsExactlyInAnyOrder("pass", "block", "skipped");
+    }
+
+    @Test
+    void skippedTargetRequiresCompilerBlockAndEmptyAttestationEvidence() throws Exception {
+        JsonNode corpus = objectMapper.readTree(
+                UiCompositionGoldenCorpusRunner.DEFAULT_CORPUS.toFile());
+        JsonNode schema = objectMapper.readTree(
+                UiCompositionGoldenCorpusRunner.DEFAULT_SCHEMA.toFile());
+        ObjectNode blockedCase = null;
+        for (JsonNode testCase : corpus.path("cases")) {
+            if ("block".equals(testCase.at("/expected/compilerParity/outcome").asText())) {
+                blockedCase = (ObjectNode) testCase;
+                break;
+            }
+        }
+        assertThat(blockedCase).isNotNull();
+        ((ObjectNode) blockedCase.at("/expected/targetAttestation/requirements"))
+                .withArray("actions")
+                .add("trackEvent");
+
+        ObjectNode report = new UiCompositionGoldenCorpusRunner().run(
+                corpus,
+                schema,
+                tempDir.resolve("invalid-skipped-report.json"));
+
+        assertThat(report.path("passed").asBoolean()).isFalse();
+        assertThat(report.path("globalFailures"))
+                .extracting(JsonNode::asText)
+                .anyMatch(message -> message.startsWith("schema:"));
+    }
+
+    @Test
+    void mismatchedExternalCompilerReceiptFailsClosed() throws Exception {
+        JsonNode corpus = objectMapper.readTree(
+                UiCompositionGoldenCorpusRunner.DEFAULT_CORPUS.toFile());
+        JsonNode schema = objectMapper.readTree(
+                UiCompositionGoldenCorpusRunner.DEFAULT_SCHEMA.toFile());
+        ((ObjectNode) corpus.at("/compilerReceipts/java"))
+                .put("artifactSha256", "0".repeat(64));
+
+        ObjectNode report = new UiCompositionGoldenCorpusRunner().run(
+                corpus,
+                schema,
+                tempDir.resolve("invalid-receipt-report.json"));
+
+        assertThat(report.path("passed").asBoolean()).isFalse();
+        assertThat(report.path("globalFailures"))
+                .extracting(JsonNode::asText)
+                .contains("java-compiler-receipt-artifact-sha-mismatch");
     }
 }
