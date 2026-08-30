@@ -2918,7 +2918,18 @@ public class AgenticAuthoringIntentResolverService {
 
     private boolean requiresAdditionalIntentResolution(
             AgenticAuthoringPreIntentToolPlan semanticOrientation) {
-        return semanticOrientation != null && semanticOrientation.requiresFullIntentResolution();
+        if (semanticOrientation == null || !semanticOrientation.requiresFullIntentResolution()) {
+            return false;
+        }
+        JsonNode constraints = semanticOrientation.queryConstraints();
+        // A governed page/table selection with explicit semantic filters is already a complete
+        // authoring decision. Other cases (notably forms and workflow actions) still need the
+        // full semantic pass even when pre-intent also recommends a component.
+        return !"authoring_or_other".equals(semanticOrientation.semanticIntentClass())
+                || constraints == null
+                || !constraints.path("filters").isArray()
+                || constraints.path("filters").isEmpty()
+                || !List.of("page", "table").contains(semanticOrientation.artifactKind());
     }
 
     private AgenticAuthoringLlmIntentResolution preIntentSemanticOrientationResolution(

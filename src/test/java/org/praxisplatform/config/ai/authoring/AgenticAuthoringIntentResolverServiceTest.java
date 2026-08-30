@@ -75,7 +75,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void explicitFullResolutionFlagIsNeverBypassedByConstrainedCompactDecision() {
+    void constrainedCompactPageDecisionPreservesTheExistingNoSecondPassPolicy() {
         ObjectNode constraints = objectMapper.createObjectNode();
         constraints.put("appliesToDataSelection", true);
         constraints.putArray("filters").addObject()
@@ -99,7 +99,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 "requiresAdditionalIntentResolution",
                 orientation);
 
-        assertThat(requiresAdditionalResolution).isTrue();
+        assertThat(requiresAdditionalResolution).isFalse();
         AgenticAuthoringVisualizationDecision visualizationDecision = ReflectionTestUtils.invokeMethod(
                 service,
                 "preIntentVisualizationDecision",
