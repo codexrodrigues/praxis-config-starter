@@ -16,7 +16,7 @@ param(
     [int] $UiStartupTimeoutSec = 600,
     [int] $StreamProcessingTimeoutSeconds = 0,
     [int] $ApiCatalogIndexingTimeoutSec = 900,
-    [ValidateSet("smoke", "single-table", "full")]
+    [ValidateSet("smoke", "single-table", "capability-continuation", "full")]
     [string] $ValidationMode = "smoke",
     [int] $PlaywrightTestTimeoutMs = 0,
     [int] $Retries = -1,
