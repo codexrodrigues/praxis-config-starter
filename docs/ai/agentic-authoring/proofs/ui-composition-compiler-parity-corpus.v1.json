@@ -1,6 +1,6 @@
 {
   "schemaVersion": "praxis.ui-composition-compiler-parity-corpus/v1",
-  "corpusVersion": "1.2.0",
+  "corpusVersion": "1.3.0",
   "kind": "praxis.ui-composition-compiler-parity-corpus",
   "description": "Neutral deterministic corpus for Java/TypeScript UiCompositionPlan compiler parity and separately phased Angular target readiness.",
   "canonicalization": {
@@ -27,7 +27,33 @@
         "certification": "wave-a.5",
         "primaryEvidenceRef": "projects/praxis-page-builder/docs/corte-a-widget-certification-matrix.md"
       },
-      "registryFingerprint": "5eec0aa4673471294ed5c218bda75560ea72aedfbfc0354cf325b3f4f47ae5d4",
+      "registryFingerprint": "23f6a4dbce8c9fe15e316f50b44dc1be501e9fcb7de1b00decb6ef4c2b3ef49b",
+      "runtimeExecutionReceipt": {
+        "scope": "source-trees-and-built-module-bytes",
+        "producerRevision": "2b480616c24e9ce22263aa993bf0234d3d2626e1",
+        "modules": {
+          "core": {
+            "sourcePath": "projects/praxis-core/src",
+            "sourceGitTree": "c4d392924ec784fd8eaa0fd9e871afbe73902cad",
+            "artifactSha256": "538b9ab6d1354c7f3f10a55c2f840aff87d7b10c1b9394d2c0c07fb8bbdf64b9"
+          },
+          "table": {
+            "sourcePath": "projects/praxis-table/src",
+            "sourceGitTree": "ea6247152fed03bb7fae1cdf9294f19d532efce5",
+            "artifactSha256": "abd9ebb4da337ec5d69ba2eaf2f3c38b64a19f444160a31fd4d18d6d5a820517"
+          },
+          "list": {
+            "sourcePath": "projects/praxis-list/src",
+            "sourceGitTree": "592ddfb99b6e20092d48e3fe08bd18ce88f09896",
+            "artifactSha256": "9de4b39d966601e9da78b4ce9cbdcaf25f01176738a93d3fdff0385eb98615b5"
+          },
+          "page-builder": {
+            "sourcePath": "projects/praxis-page-builder/src",
+            "sourceGitTree": "3ba4d280f5d809c2c2bc18ac5672cb03906807e1",
+            "artifactSha256": "0d7d6d1d08ab5496a833079a03a866672b3692ac11c7797f88b0885563acdc77"
+          }
+        }
+      },
       "providerEvidenceRefs": [
         {
           "path": "projects/praxis-page-builder/docs/corte-a-widget-certification-matrix.md",
@@ -127,8 +153,8 @@
             "capabilities": [
               { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
               { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
-              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
-              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" }
+              { "kind": "module-export", "module": "page-builder", "exportName": "resolveUiCompositionPlanTemplate" },
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" }
             ],
             "actions": [],
             "templateRevision": {
@@ -213,12 +239,26 @@
           "outcome": "pass",
           "requirements": {
             "components": ["praxis-table", "praxis-related-resource-outlet"],
-            "ports": ["praxis-table:selectionChange", "praxis-related-resource-outlet:parentResourceId"],
+            "ports": [
+              {
+                "ownerWidgetKey": "employees",
+                "ownerComponentId": "praxis-table",
+                "componentId": "praxis-table",
+                "portId": "selectionChange",
+                "direction": "output"
+              },
+              {
+                "ownerWidgetKey": "employee-related",
+                "ownerComponentId": "praxis-related-resource-outlet",
+                "componentId": "praxis-related-resource-outlet",
+                "portId": "parentResourceId",
+                "direction": "input"
+              }
+            ],
             "capabilities": [
               { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
               { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
-              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
-              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" }
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" }
             ],
             "actions": []
           },
@@ -297,12 +337,26 @@
           "outcome": "pass",
           "requirements": {
             "components": ["praxis-list", "praxis-table"],
-            "ports": ["praxis-list:selectionChange", "praxis-table:queryContext"],
+            "ports": [
+              {
+                "ownerWidgetKey": "employee-list",
+                "ownerComponentId": "praxis-list",
+                "componentId": "praxis-list",
+                "portId": "selectionChange",
+                "direction": "output"
+              },
+              {
+                "ownerWidgetKey": "employee-table",
+                "ownerComponentId": "praxis-table",
+                "componentId": "praxis-table",
+                "portId": "queryContext",
+                "direction": "input"
+              }
+            ],
             "capabilities": [
               { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
               { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
-              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
-              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" }
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" }
             ],
             "actions": []
           },
@@ -370,8 +424,7 @@
             "capabilities": [
               { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
               { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
-              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
-              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" }
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" }
             ],
             "actions": []
           },
@@ -426,12 +479,26 @@
           "outcome": "block",
           "requirements": {
             "components": ["praxis-list", "praxis-unknown"],
-            "ports": ["praxis-list:missingPort", "praxis-unknown:queryContext"],
+            "ports": [
+              {
+                "ownerWidgetKey": "source",
+                "ownerComponentId": "praxis-list",
+                "componentId": "praxis-list",
+                "portId": "missingPort",
+                "direction": "output"
+              },
+              {
+                "ownerWidgetKey": "missing",
+                "ownerComponentId": "praxis-unknown",
+                "componentId": "praxis-unknown",
+                "portId": "queryContext",
+                "direction": "input"
+              }
+            ],
             "capabilities": [
               { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
               { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
-              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
-              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" }
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" }
             ],
             "actions": []
           },
@@ -666,8 +733,8 @@
             "capabilities": [
               { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
               { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
-              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
-              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" }
+              { "kind": "module-export", "module": "page-builder", "exportName": "resolveUiCompositionPlanTemplate" },
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" }
             ],
             "actions": [],
             "templateRevision": {
@@ -733,7 +800,15 @@
           "outcome": "block",
           "requirements": {
             "components": ["praxis-table"],
-            "ports": ["praxis-table:selectionChange"],
+            "ports": [
+              {
+                "ownerWidgetKey": "employees",
+                "ownerComponentId": "praxis-table",
+                "componentId": "praxis-table",
+                "portId": "selectionChange",
+                "direction": "output"
+              }
+            ],
             "capabilities": [
               { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
               { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
@@ -745,8 +820,8 @@
           },
           "diagnostics": [
             {
-              "code": "TARGET_CAPABILITY_UNAVAILABLE",
-              "path": "capabilities.module-export:page-builder:collectionExportRemote",
+              "code": "TARGET_DECLARED_CAPABILITIES_MISMATCH",
+              "path": "requirements.capabilities",
               "severity": "error",
               "provenance": "target-registry"
             },
@@ -1121,9 +1196,26 @@
         },
         "targetAttestation": {
           "profileId": "praxis-ui-angular-corte-a5",
-          "outcome": "skipped",
-          "requirements": { "components": [], "ports": [], "capabilities": [], "actions": [] },
-          "diagnostics": []
+          "outcome": "block",
+          "requirements": {
+            "components": ["custom-detail", "custom-extension", "custom-master"],
+            "ports": [],
+            "capabilities": [
+              { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
+              { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" }
+            ],
+            "actions": []
+          },
+          "diagnostics": [
+            { "code": "TARGET_COMPONENT_UNAVAILABLE", "path": "components.custom-detail", "severity": "error", "provenance": "target-registry" },
+            { "code": "TARGET_COMPONENT_UNAVAILABLE", "path": "components.custom-extension", "severity": "error", "provenance": "target-registry" },
+            { "code": "TARGET_COMPONENT_UNAVAILABLE", "path": "components.custom-master", "severity": "error", "provenance": "target-registry" },
+            { "code": "master-detail-widget-role-fallback", "path": "widgets.2.role", "severity": "warning", "provenance": "ui-composition-plan-preflight" },
+            { "code": "SEMANTIC_COMPONENT_NOT_REGISTERED", "path": "widgets.master.definition.id", "severity": "error", "provenance": "semantic-validator" },
+            { "code": "SEMANTIC_COMPONENT_NOT_REGISTERED", "path": "widgets.detail.definition.id", "severity": "error", "provenance": "semantic-validator" },
+            { "code": "SEMANTIC_COMPONENT_NOT_REGISTERED", "path": "widgets.extension.definition.id", "severity": "error", "provenance": "semantic-validator" }
+          ]
         }
       }
     },
@@ -1169,9 +1261,32 @@
         },
         "targetAttestation": {
           "profileId": "praxis-ui-angular-corte-a5",
-          "outcome": "skipped",
-          "requirements": { "components": [], "ports": [], "capabilities": [], "actions": [] },
-          "diagnostics": []
+          "outcome": "block",
+          "requirements": {
+            "components": ["custom-a", "custom-b", "custom-c", "custom-d", "custom-e", "custom-master"],
+            "ports": [],
+            "capabilities": [
+              { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
+              { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" }
+            ],
+            "actions": []
+          },
+          "diagnostics": [
+            { "code": "TARGET_COMPONENT_UNAVAILABLE", "path": "components.custom-a", "severity": "error", "provenance": "target-registry" },
+            { "code": "TARGET_COMPONENT_UNAVAILABLE", "path": "components.custom-b", "severity": "error", "provenance": "target-registry" },
+            { "code": "TARGET_COMPONENT_UNAVAILABLE", "path": "components.custom-c", "severity": "error", "provenance": "target-registry" },
+            { "code": "TARGET_COMPONENT_UNAVAILABLE", "path": "components.custom-d", "severity": "error", "provenance": "target-registry" },
+            { "code": "TARGET_COMPONENT_UNAVAILABLE", "path": "components.custom-e", "severity": "error", "provenance": "target-registry" },
+            { "code": "TARGET_COMPONENT_UNAVAILABLE", "path": "components.custom-master", "severity": "error", "provenance": "target-registry" },
+            { "code": "master-detail-detail-slot-fallback", "path": "widgets.5.role", "severity": "warning", "provenance": "ui-composition-plan-preflight" },
+            { "code": "SEMANTIC_COMPONENT_NOT_REGISTERED", "path": "widgets.master.definition.id", "severity": "error", "provenance": "semantic-validator" },
+            { "code": "SEMANTIC_COMPONENT_NOT_REGISTERED", "path": "widgets.detail-a.definition.id", "severity": "error", "provenance": "semantic-validator" },
+            { "code": "SEMANTIC_COMPONENT_NOT_REGISTERED", "path": "widgets.detail-b.definition.id", "severity": "error", "provenance": "semantic-validator" },
+            { "code": "SEMANTIC_COMPONENT_NOT_REGISTERED", "path": "widgets.detail-c.definition.id", "severity": "error", "provenance": "semantic-validator" },
+            { "code": "SEMANTIC_COMPONENT_NOT_REGISTERED", "path": "widgets.detail-d.definition.id", "severity": "error", "provenance": "semantic-validator" },
+            { "code": "SEMANTIC_COMPONENT_NOT_REGISTERED", "path": "widgets.detail-e.definition.id", "severity": "error", "provenance": "semantic-validator" }
+          ]
         }
       }
     }

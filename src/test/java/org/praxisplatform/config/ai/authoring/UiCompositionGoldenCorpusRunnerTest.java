@@ -13,9 +13,13 @@ import java.util.HashSet;
 import java.util.Set;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 @Tag("unit")
 class UiCompositionGoldenCorpusRunnerTest {
+
+    @TempDir
+    Path tempDir;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -40,9 +44,35 @@ class UiCompositionGoldenCorpusRunnerTest {
                 .isEqualTo("config-ui-composition-plan-compiler@1.2.0");
         assertThat(report.at("/compilerIdentity/implementationSha256").asText())
                 .matches("[a-f0-9]{64}");
+        assertThat(report.at("/compilerIdentity/implementationArtifact/kind").asText())
+                .isEqualTo("jvm-class");
+        Path implementationArtifact = Path.of(
+                report.at("/compilerIdentity/implementationArtifact/path").asText());
+        assertThat(implementationArtifact).exists();
+        assertThat(report.at("/compilerIdentity/implementationArtifact/sha256").asText())
+                .isEqualTo(fileSha256(implementationArtifact));
+        assertThat(report.path("cases").get(0).path("canonicalDiagnostics").isArray()).isTrue();
         assertThat(report.path("passed").asBoolean())
                 .withFailMessage("Java golden report: %s", report)
                 .isTrue();
+    }
+
+    @Test
+    void malformedCorpusPersistsReadableFailClosedReport() throws Exception {
+        Path malformedCorpus = tempDir.resolve("malformed-corpus.json");
+        Path reportPath = tempDir.resolve("malformed-report.json");
+        Files.writeString(malformedCorpus, "{ not-json");
+
+        ObjectNode report = new UiCompositionGoldenCorpusRunner().run(
+                malformedCorpus,
+                UiCompositionGoldenCorpusRunner.DEFAULT_SCHEMA,
+                reportPath);
+
+        assertThat(report.path("passed").asBoolean()).isFalse();
+        assertThat(report.path("globalFailures").get(0).asText()).startsWith("json-parse:");
+        assertThat(report.path("cases")).isEmpty();
+        assertThat(report.path("corpusSha256").asText()).isEqualTo(fileSha256(malformedCorpus));
+        assertThat(objectMapper.readTree(reportPath.toFile())).isEqualTo(report);
     }
 
     private String fileSha256(Path path) throws Exception {

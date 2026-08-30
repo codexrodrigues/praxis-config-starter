@@ -52,14 +52,23 @@ final class UiCompositionGoldenCorpusRunner {
     }
 
     ObjectNode run(Path corpusPath, Path schemaPath, Path reportPath) throws Exception {
-        JsonNode corpus = objectMapper.readTree(corpusPath.toFile());
-        JsonNode schema = objectMapper.readTree(schemaPath.toFile());
-        return run(
-                corpus,
-                schema,
-                reportPath,
-                sha256(Files.readAllBytes(corpusPath)),
-                sha256(Files.readAllBytes(schemaPath)));
+        byte[] corpusBytes = Files.readAllBytes(corpusPath);
+        byte[] schemaBytes = Files.readAllBytes(schemaPath);
+        String corpusSha256 = sha256(corpusBytes);
+        String schemaSha256 = sha256(schemaBytes);
+        try {
+            JsonNode corpus = objectMapper.readTree(corpusBytes);
+            JsonNode schema = objectMapper.readTree(schemaBytes);
+            return run(corpus, schema, reportPath, corpusSha256, schemaSha256);
+        } catch (Exception error) {
+            ObjectNode report = baseReport(null, corpusSha256, schemaSha256);
+            report.put("passed", false);
+            report.set("globalFailures", objectMapper.valueToTree(
+                    List.of("json-parse:" + readableFailure(error))));
+            report.set("cases", objectMapper.createArrayNode());
+            writeReport(reportPath, report);
+            return report;
+        }
     }
 
     ObjectNode run(JsonNode corpus, JsonNode schema, Path reportPath) throws Exception {
@@ -98,16 +107,7 @@ final class UiCompositionGoldenCorpusRunner {
         for (JsonNode caseReport : caseReports) {
             casesPassed &= caseReport.path("passed").asBoolean();
         }
-        ObjectNode report = objectMapper.createObjectNode();
-        report.put("schemaVersion", "praxis.ui-composition-golden-report/v1");
-        report.put("corpusVersion", corpus.path("corpusVersion").asText());
-        report.put("corpusSha256", corpusSha256);
-        report.put("schemaSha256", schemaSha256);
-        report.put("engine", "java");
-        ObjectNode compilerIdentity = report.putObject("compilerIdentity");
-        compilerIdentity.put("id", corpus.at("/compilerContracts/java/id").asText());
-        compilerIdentity.put("builderVersion", AgenticAuthoringUiCompositionPlanCompiler.BUILDER_VERSION);
-        compilerIdentity.put("implementationSha256", compilerImplementationSha256());
+        ObjectNode report = baseReport(corpus, corpusSha256, schemaSha256);
         ObjectNode targetProfileFingerprints = objectMapper.createObjectNode();
         corpus.path("targetProfiles").fields().forEachRemaining(entry ->
                 targetProfileFingerprints.put(
@@ -247,6 +247,8 @@ final class UiCompositionGoldenCorpusRunner {
             report.set("projection", projection);
         }
         report.set("diagnostics", objectMapper.valueToTree(diagnostics));
+        report.set("canonicalDiagnostics", objectMapper.valueToTree(
+                canonicalDiagnostics(diagnostics, expected)));
         report.put("passed", failures.isEmpty());
         report.set("failures", objectMapper.valueToTree(failures));
         return report;
@@ -262,6 +264,34 @@ final class UiCompositionGoldenCorpusRunner {
                             : diagnostic.at("/pathByEngine/java").asText(),
                     diagnostic.path("severity").asText(),
                     diagnostic.path("provenance").asText()));
+        }
+        return identities;
+    }
+
+    private List<CanonicalDiagnosticIdentity> canonicalDiagnostics(
+            List<DiagnosticIdentity> diagnostics,
+            JsonNode expected) {
+        List<CanonicalDiagnosticIdentity> identities = new ArrayList<>();
+        for (DiagnosticIdentity actual : diagnostics) {
+            String canonicalId = null;
+            for (JsonNode candidate : expected.path("diagnostics")) {
+                DiagnosticIdentity expectedIdentity = new DiagnosticIdentity(
+                        candidate.at("/engineCodes/java").asText(),
+                        candidate.at("/pathByEngine/java").isNull()
+                                ? null
+                                : candidate.at("/pathByEngine/java").asText(),
+                        candidate.path("severity").asText(),
+                        candidate.path("provenance").asText());
+                if (expectedIdentity.equals(actual)) {
+                    canonicalId = candidate.path("canonicalId").asText();
+                    break;
+                }
+            }
+            if (canonicalId == null) {
+                canonicalId = "unmapped:" + actual.code() + ":" + String.valueOf(actual.path());
+            }
+            identities.add(new CanonicalDiagnosticIdentity(
+                    canonicalId, actual.severity(), actual.provenance()));
         }
         return identities;
     }
@@ -301,6 +331,48 @@ final class UiCompositionGoldenCorpusRunner {
             }
             return sha256(input.readAllBytes());
         }
+    }
+
+    private ObjectNode baseReport(
+            JsonNode corpus,
+            String corpusSha256,
+            String schemaSha256) throws Exception {
+        ObjectNode report = objectMapper.createObjectNode();
+        report.put("schemaVersion", "praxis.ui-composition-golden-report/v1");
+        if (corpus == null || corpus.path("corpusVersion").isMissingNode()) {
+            report.putNull("corpusVersion");
+        } else {
+            report.put("corpusVersion", corpus.path("corpusVersion").asText());
+        }
+        report.put("corpusSha256", corpusSha256);
+        report.put("schemaSha256", schemaSha256);
+        report.put("engine", "java");
+        ObjectNode compilerIdentity = report.putObject("compilerIdentity");
+        compilerIdentity.put(
+                "id",
+                corpus == null
+                        ? "config-ui-composition-plan-compiler"
+                        : corpus.at("/compilerContracts/java/id").asText());
+        compilerIdentity.put("builderVersion", AgenticAuthoringUiCompositionPlanCompiler.BUILDER_VERSION);
+        String implementationSha256 = compilerImplementationSha256();
+        compilerIdentity.put("implementationSha256", implementationSha256);
+        ObjectNode implementationArtifact = compilerIdentity.putObject("implementationArtifact");
+        implementationArtifact.put("kind", "jvm-class");
+        implementationArtifact.put(
+                "path",
+                "target/classes/org/praxisplatform/config/ai/authoring/"
+                        + "AgenticAuthoringUiCompositionPlanCompiler.class");
+        implementationArtifact.put("sha256", implementationSha256);
+        return report;
+    }
+
+    private String readableFailure(Exception error) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            message = error.getClass().getSimpleName();
+        }
+        String normalized = message.replaceAll("[\\r\\n]+", " ");
+        return normalized.length() > 240 ? normalized.substring(0, 240) : normalized;
     }
 
     private String canonicalDocumentSha256(JsonNode document) throws Exception {
@@ -351,6 +423,8 @@ final class UiCompositionGoldenCorpusRunner {
     }
 
     record DiagnosticIdentity(String code, String path, String severity, String provenance) {}
+
+    record CanonicalDiagnosticIdentity(String canonicalId, String severity, String provenance) {}
 
     record TemplateResolution(boolean valid, JsonNode plan, List<DiagnosticIdentity> diagnostics) {
         static TemplateResolution invalid(String code) {

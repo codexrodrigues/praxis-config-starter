@@ -50,7 +50,7 @@ Both engines validate or resolve the same plan, compile it, and compare:
 - canonical projection SHA-256;
 - stable diagnostic identity (`code`, `path`, `severity`, `provenance`).
 
-Corpus v1.2 carries 18 cases. Its adversarial master-detail coverage mirrors the TypeScript owner:
+Corpus v1.3 carries 18 cases. Its adversarial master-detail coverage mirrors the TypeScript owner:
 unknown preset/slot, role-slot conflict, missing or ambiguous master, missing detail, preset
 conflict, slot cardinality, widget-role fallback and detail-slot fallback. The Java builder identity
 is pinned as `config-ui-composition-plan-compiler@1.2.0`.
@@ -59,8 +59,8 @@ Known Java/TypeScript spelling or path differences are explicit per expected dia
 runners may not normalize an unexpected divergence into success. Reports publish byte-exact
 `corpusSha256`, `schemaSha256` and compiler identity (including implementation hash). Hashing source
 bytes preserves semantic `null` values instead of silently erasing them in a parser projection. The TypeScript
-peer handshake validates those identities before comparing every case's phase, outcome and
-projection hash.
+peer handshake validates the Java class artifact against its reported hash before comparing every
+case's phase, outcome, projection hash, canonical diagnostics, pass bit and failure list.
 
 Projection canonicalization sorts object keys recursively, preserves array order and semantic
 `null`, serializes UTF-8 JSON and hashes with SHA-256. Template configuration continues to use the
@@ -73,12 +73,15 @@ Only after compiler parity passes does the Angular runner attest the materializa
 selected frozen target profile. Each case publishes `profileId`, declared and compiled-derived
 requirements, and the identities used for the decision. It checks:
 
-- exact equality between declared and compiled-derived components, ports and global actions, so an
+- exact equality between declared and compiled-derived components, structured nested ports,
+  capabilities and global actions, so an
   omitted or extra requirement blocks before target lookup;
 - target component and semantic port availability from the injected registry;
 - capability coordinates as real module exports or injectable tokens, including provider
   resolvability; a name in the corpus is never proof by itself;
-- global actions only when a handler is actually provided and resolvable by `GlobalActionService`;
+- global actions only when `GlobalActionService.getReadiness(...)` proves both the handler and its
+  Core-owned provider/runtime requirements without executing the side effect; `has()` alone is not
+  readiness;
 - exact template revision (`registryKey`, `version`, `ETag`, `configSha256`) copied from the
   materialization resolved by the template resolver, never from the target profile;
 - Corte A.5 baseline `a4ccfef5720c7dc616a90c2e1b10d5b79055b1be` and the SHA-256 of every
@@ -90,19 +93,24 @@ requirements, and the identities used for the decision. It checks:
   injector. Catalog metadata alone is intentionally insufficient.
 
 `registryFingerprint` is the canonical SHA-256 of the runtime provider projection: sorted component
-ids, governed port contracts and sorted executable action ids returned by that injector. It is not
+ids, governed port contracts and sorted action-readiness projections returned by that injector. It is not
 a digest of the target-profile JSON. The report distinguishes the ancestral certification baseline
-from the executed `runtimeRevision` and publishes hashes for the exact Core, Table, List and Page
-Builder modules loaded, plus each evidence blob identity.
+from the executed `runtimeRevision`. A target-owned `runtimeExecutionReceipt` independently pins
+the source Git tree and built-module SHA-256 for Core, Table, List and Page Builder. The gate compares
+the clean source trees and exact loaded bytes against that receipt; merely recalculating a hash in
+the report is not acceptance. `producerRevision` is provenance for the receipt, while content-tree
+equality keeps the proof valid when an equivalent tree receives a different merge commit.
 
 Target failure does not rewrite compiler parity. Cases intentionally prove that an identical,
 valid projection can still be blocked because the target train lacks a component, port,
 capability/action or pinned template revision.
 
-The owner regressions additionally prove three former bypasses stay closed: removing a declared
-action while the compiled link remains, declaring a fictitious capability, and declaring template
-version `999` against a materialization actually resolved at version `7`. Invalid corpus/schema
-input produces a persisted, readable fail-closed report instead of leaking a `TypeError`.
+The owner regressions additionally prove former bypasses stay closed: removing a declared action,
+emptying essential capabilities, freely marking a valid case `skipped`, accepting `surface.open`
+without `GLOBAL_SURFACE_SERVICE`, flattening `nestedPath`, declaring a fictitious capability,
+declaring template version `999`, altering a loaded bundle after receipt publication, or drifting
+peer diagnostics/results/compiler bytes. Invalid or malformed corpus/schema input produces a
+persisted, readable fail-closed report instead of leaking a `TypeError` in both languages.
 
 ## Deliberate divergence proof
 
@@ -153,7 +161,8 @@ When behavior changes intentionally:
 4. inspect both projection bodies, diagnostics and hashes;
 5. update an expected hash only after human review explains the semantic change;
 6. update `registryFingerprint` only after reviewing an intentional change in the official provider
-   projection; update the certification baseline and evidence hashes independently.
+   projection; publish a new external `runtimeExecutionReceipt` only from reviewed, clean source
+   trees and their exact built bytes; update the certification baseline independently.
 
 There is no automatic “accept golden” command. Generated reports live under ignored build output
 and are evidence, not committed sources of truth.
