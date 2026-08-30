@@ -69,6 +69,9 @@ identifiers, compares apply/persisted/reload payload hashes and reports determin
 Config Starter locates the receipt by the matrix-owned test title and attachment name,
 rejects unknown properties, validates the persisted/runtime proof and combines authoring turns with
 Playwright retries to classify the result as `first-pass` or `eventual-pass`.
+Functional behavior is represented by strict canonical assertion ids whose required set belongs to
+the gate matrix for each scenario. The common receipt therefore does not encode master-detail,
+Table or command fields as if they were universal platform semantics.
 
 This is `ja-suportado-mal-nomeado-ou-mal-materializado`: the browser journey already captured the
 raw turns and all functional assertions, but the published evidence exposed only aggregate test
@@ -150,6 +153,11 @@ The compact path may skip the full intent pass only after one non-lexical operat
 canonical collection binding, filtered schema and current resource capabilities are verified. Any
 ambiguity or partial grounding remains fail-closed. Schema-visible fields are projected in canonical
 order without the former silent 16-column cap; `hidden` and `tableHidden` remain authoritative.
+
+Inventory update: the current `table-human-authoring` production-like scenario proves canonical
+single-table creation, real resource-backed DOM and multi-turn semantic edits, but it does not yet
+execute `page-apply`, persisted readback and reload. It is therefore `suportado-parcialmente` and
+cannot be counted as the first-pass control until that lifecycle is added to the same real lane.
 
 ### P0 — Shared golden corpus and attestation
 

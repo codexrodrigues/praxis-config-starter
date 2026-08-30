@@ -324,6 +324,10 @@ function Assert-PlaywrightScenarioReceiptParserFixture {
         archetype = 'master-detail-command'
         testTitle = 'mission workspace'
         attachmentName = 'mission-workspace-first-pass-receipt.json'
+        requiredFunctionalAssertions = @(
+            'composition.master-visible',
+            'composition.detail-visible'
+        )
     }
     $receipt = [ordered]@{
         schemaVersion = 'praxis.page-builder-agentic-scenario-receipt/v1'
@@ -360,17 +364,7 @@ function Assert-PlaywrightScenarioReceiptParserFixture {
             reloadMatchesPersisted = $true
             reloadEtagMatches = $true
         }
-        runtime = [ordered]@{
-            masterRendered = $true
-            detailRendered = $true
-            selectionPropagated = $true
-            actionDiscoveryStatus = 200
-            capabilitiesDiscoveryStatus = 200
-            commandStatus = 200
-            duplicateCommandStatus = 409
-            refreshObserved = $true
-            reloadRendered = $true
-        }
+        functionalAssertions = @('composition.master-visible', 'composition.detail-visible')
         timingMs = [ordered]@{
             firstUsefulStatus = 10
             firstApplicableTerminal = 20
@@ -1156,6 +1150,15 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             streamProcessingTimeoutSeconds = $StreamProcessingTimeoutSeconds
             playwrightTestTimeoutMs = $PlaywrightTestTimeoutMs
             retries = $Retries
+            receiptRequirements = @($gateMatrix.evidence.scenarioReceipts |
+                Where-Object { $_.scenarioId -in $selectedScenarioIds } |
+                ForEach-Object {
+                    [ordered]@{
+                        scenarioId = [string] $_.scenarioId
+                        archetype = [string] $_.archetype
+                        requiredFunctionalAssertions = @($_.requiredFunctionalAssertions)
+                    }
+                })
         }
         playwright = $playwrightSummary
         scenarioEvidence = @($scenarioEvidence)

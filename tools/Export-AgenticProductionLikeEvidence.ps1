@@ -76,9 +76,23 @@ Assert-True ([int] $result.playwright.executed -ge [int] $result.matrix.minimumE
 Assert-True ([int] $result.playwright.skipped -eq [int] $result.matrix.expectedSkipped) "Playwright skipped count diverges from the matrix."
 Assert-True ([int] $result.playwright.failed -eq 0 -and [int] $result.playwright.passed -eq [int] $result.playwright.executed) "Not every executed Playwright test passed."
 $scenarioEvidence = @($result.scenarioEvidence)
+$receiptRequirements = @($result.matrix.receiptRequirements)
 $requiresMissionReceipt = @($result.matrix.scenarios) -contains 'live-resource-workspace-command'
 Assert-True (-not $requiresMissionReceipt -or $scenarioEvidence.Count -eq 1) "The live mission scenario requires exactly one sanitized scenario receipt."
-foreach ($evidence in $scenarioEvidence) { Assert-PraxisPageBuilderScenarioEvidence $evidence }
+Assert-True ($scenarioEvidence.Count -eq $receiptRequirements.Count) "Scenario evidence count diverges from the matrix receipt requirements."
+foreach ($evidence in $scenarioEvidence) {
+    Assert-PraxisPageBuilderScenarioEvidence $evidence
+    $requirements = @($receiptRequirements | Where-Object {
+        $_.scenarioId -eq $evidence.scenarioId -and $_.archetype -eq $evidence.archetype
+    })
+    Assert-True ($requirements.Count -eq 1) "Scenario evidence identity must resolve exactly one matrix requirement."
+    Assert-PraxisScenarioEvidenceProperties $requirements[0] @(
+        'scenarioId', 'archetype', 'requiredFunctionalAssertions'
+    ) 'Scenario receipt requirement'
+    $actualAssertions = @($evidence.functionalAssertions | Sort-Object)
+    $requiredAssertions = @($requirements[0].requiredFunctionalAssertions | Sort-Object)
+    Assert-True (($actualAssertions -join ',') -eq ($requiredAssertions -join ',')) "Scenario functional assertions diverge from the published matrix requirement."
+}
 Assert-True (@($result.git).Count -eq 4) "The four immutable repository identities are required."
 foreach ($identity in @($result.git)) {
     Assert-True (([string] $identity.sha) -match '^[0-9a-f]{40}$') "Invalid immutable SHA for $($identity.name)."
