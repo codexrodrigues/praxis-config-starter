@@ -79,19 +79,18 @@ function Assert-PraxisScenarioEvidenceCore([object] $Evidence) {
         $persistence.reloadMatchesPersisted -eq $true -and $persistence.reloadEtagMatches -eq $true
     ) 'Scenario persistence evidence is incomplete or inconsistent.'
 
-    Assert-PraxisScenarioEvidenceProperties $Evidence.runtime @(
-        'masterRendered', 'detailRendered', 'selectionPropagated', 'actionDiscoveryStatus',
-        'capabilitiesDiscoveryStatus', 'commandStatus', 'duplicateCommandStatus',
-        'refreshObserved', 'reloadRendered'
-    ) 'Scenario runtime evidence'
-    $runtime = $Evidence.runtime
+    $functionalAssertions = @($Evidence.functionalAssertions)
     Assert-PraxisScenarioEvidenceCondition (
-        $runtime.masterRendered -eq $true -and $runtime.detailRendered -eq $true -and
-        $runtime.selectionPropagated -eq $true -and [int] $runtime.actionDiscoveryStatus -eq 200 -and
-        [int] $runtime.capabilitiesDiscoveryStatus -eq 200 -and [int] $runtime.commandStatus -eq 200 -and
-        [int] $runtime.duplicateCommandStatus -eq 409 -and $runtime.refreshObserved -eq $true -and
-        $runtime.reloadRendered -eq $true
-    ) 'Scenario runtime evidence is incomplete.'
+        $functionalAssertions.Count -gt 0
+    ) 'Scenario functional assertions are missing.'
+    foreach ($assertionId in $functionalAssertions) {
+        Assert-PraxisScenarioEvidenceCondition (
+            [string] $assertionId -match '^[a-z0-9][a-z0-9.-]{0,119}$'
+        ) 'Scenario evidence contains a non-canonical functional assertion id.'
+    }
+    Assert-PraxisScenarioEvidenceCondition (
+        @($functionalAssertions | Sort-Object -Unique).Count -eq $functionalAssertions.Count
+    ) 'Scenario evidence contains duplicate functional assertion ids.'
 
     Assert-PraxisScenarioEvidenceProperties $Evidence.timingMs @(
         'firstUsefulStatus', 'firstApplicableTerminal', 'applyCompleted',
@@ -127,7 +126,7 @@ function ConvertTo-PraxisPageBuilderScenarioEvidence(
 ) {
     Assert-PraxisScenarioEvidenceProperties $Receipt @(
         'schemaVersion', 'scenarioId', 'archetype', 'authoringFirstPass', 'interaction',
-        'terminal', 'apply', 'persistence', 'runtime', 'timingMs'
+        'terminal', 'apply', 'persistence', 'functionalAssertions', 'timingMs'
     ) 'Scenario receipt'
     Assert-PraxisScenarioEvidenceCondition (
         $Receipt.schemaVersion -eq 'praxis.page-builder-agentic-scenario-receipt/v1'
@@ -138,6 +137,11 @@ function ConvertTo-PraxisPageBuilderScenarioEvidence(
     Assert-PraxisScenarioEvidenceCondition ($RetryAttempts -ge 0) 'Scenario receipt retry count is invalid.'
 
     $computedAuthoringFirstPass = Assert-PraxisScenarioEvidenceCore $Receipt
+    $actualAssertions = @($Receipt.functionalAssertions | Sort-Object)
+    $requiredAssertions = @($Definition.requiredFunctionalAssertions | Sort-Object)
+    Assert-PraxisScenarioEvidenceCondition (
+        ($actualAssertions -join ',') -eq ($requiredAssertions -join ',')
+    ) 'Scenario receipt functional assertions diverge from the gate matrix.'
     Assert-PraxisScenarioEvidenceCondition (
         [bool] $Receipt.authoringFirstPass -eq $computedAuthoringFirstPass
     ) 'Scenario receipt authoringFirstPass diverges from its interaction evidence.'
@@ -155,7 +159,7 @@ function ConvertTo-PraxisPageBuilderScenarioEvidence(
         terminal = $Receipt.terminal
         apply = $Receipt.apply
         persistence = $Receipt.persistence
-        runtime = $Receipt.runtime
+        functionalAssertions = @($Receipt.functionalAssertions)
         timingMs = $Receipt.timingMs
     }
 }
@@ -164,7 +168,7 @@ function Assert-PraxisPageBuilderScenarioEvidence([object] $Evidence) {
     Assert-PraxisScenarioEvidenceProperties $Evidence @(
         'schemaVersion', 'scenarioId', 'archetype', 'outcome', 'firstPassFunctional',
         'authoringFirstPass', 'playwrightRetryAttempts', 'interaction', 'terminal',
-        'apply', 'persistence', 'runtime', 'timingMs'
+        'apply', 'persistence', 'functionalAssertions', 'timingMs'
     ) 'Scenario evidence'
     Assert-PraxisScenarioEvidenceCondition (
         $Evidence.schemaVersion -eq 'praxis.page-builder-agentic-scenario-receipt/v1'

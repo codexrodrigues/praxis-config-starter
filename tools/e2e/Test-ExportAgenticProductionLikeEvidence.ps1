@@ -55,17 +55,7 @@ try {
             reloadMatchesPersisted = $true
             reloadEtagMatches = $true
         }
-        runtime = [ordered]@{
-            masterRendered = $true
-            detailRendered = $true
-            selectionPropagated = $true
-            actionDiscoveryStatus = 200
-            capabilitiesDiscoveryStatus = 200
-            commandStatus = 200
-            duplicateCommandStatus = 409
-            refreshObserved = $true
-            reloadRendered = $true
-        }
+        functionalAssertions = @('composition.master-visible', 'composition.detail-visible')
         timingMs = [ordered]@{
             firstUsefulStatus = 10
             firstApplicableTerminal = 20
@@ -112,6 +102,11 @@ try {
         git = $identities
         matrix = [ordered]@{
             scenarios = @("critical-interception-guard", "live-resource-workspace-command")
+            receiptRequirements = @([ordered]@{
+                scenarioId = "live-resource-workspace-command"
+                archetype = "master-detail-command"
+                requiredFunctionalAssertions = @('composition.master-visible', 'composition.detail-visible')
+            })
             expectedDiscovered = 2
             minimumExecuted = 2
             expectedSkipped = 0
@@ -156,6 +151,23 @@ try {
     if (-not $failedClosed) { throw "Exporter did not reject a forged apply/persistence hash relation." }
     $forgedResult.scenarioEvidence[0].apply.payloadSha256 = ("f" * 64)
     $forgedResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
+
+    $missingAssertionOutput = Join-Path $root "missing-assertion-published"
+    $missingAssertionResult = Get-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Raw | ConvertFrom-Json
+    $missingAssertionResult.scenarioEvidence[0].functionalAssertions = @('composition.master-visible')
+    $missingAssertionResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -HttpArtifactRoot $httpArtifactRoot -OutputRoot $missingAssertionOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "Scenario functional assertions diverge from the published matrix requirement"
+    }
+    if (-not $failedClosed) { throw "Exporter did not reject a missing matrix-owned functional assertion." }
+    $missingAssertionResult.scenarioEvidence[0].functionalAssertions = @(
+        'composition.master-visible',
+        'composition.detail-visible'
+    )
+    $missingAssertionResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
 
     $invalidOutput = Join-Path $root "invalid-published"
     $invalidResult = Get-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Raw | ConvertFrom-Json

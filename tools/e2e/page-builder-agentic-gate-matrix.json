@@ -12,7 +12,18 @@
         "scenarioId": "live-resource-workspace-command",
         "archetype": "master-detail-command",
         "testTitle": "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
-        "attachmentName": "mission-workspace-first-pass-receipt.json"
+        "attachmentName": "mission-workspace-first-pass-receipt.json",
+        "requiredFunctionalAssertions": [
+          "composition.master-visible",
+          "composition.detail-visible",
+          "composition.selection-propagated",
+          "discovery.actions.http-200",
+          "discovery.capabilities.http-200",
+          "command.execute.http-200",
+          "command.duplicate.http-409",
+          "resource.refresh-observed",
+          "persistence.reload-rendered"
+        ]
       }
     ]
   },
