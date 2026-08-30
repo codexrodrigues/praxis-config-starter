@@ -2851,6 +2851,12 @@ public class AgenticAuthoringIntentResolverService {
             trace.add("skipped:ai-authored-resource-focus-unconfirmed");
             return null;
         }
+        if ("table".equals(artifactKind)
+                && (singleGovernedArtifactCandidate == null
+                        || !hasVerifiedOperationalBindingEvidence(singleGovernedArtifactCandidate))) {
+            trace.add("skipped:single-table-operational-grounding-incomplete");
+            return null;
+        }
         trace.add("accepted:pre-intent-governed-evidence");
         return new AgenticAuthoringLlmIntentResolution(
                 true,
@@ -3319,7 +3325,8 @@ public class AgenticAuthoringIntentResolverService {
     }
 
     private boolean hasVerifiedOperationalBindingEvidence(AgenticAuthoringCandidate candidate) {
-        return hasEvidence(candidate, "schema-grounding-verified")
+        return hasEvidence(candidate, "domain-binding")
+                && hasEvidence(candidate, "schema-grounding-verified")
                 && hasEvidence(candidate, "resource-capabilities-verified");
     }
 

@@ -1712,6 +1712,38 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void canonicalSingleTableDecisionCannotBeReinterpretedAsDashboardFromPromptText() {
+        AgenticAuthoringVisualizationDecision decision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "governed collection table",
+                "single-table",
+                "praxis-table",
+                List.of(),
+                false,
+                true,
+                List.of(),
+                false,
+                false,
+                "llm-pre-intent-semantic-orientation");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Use os dados do dashboard anterior, mas materialize a decisão de tabela única.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "table", "create_artifact",
+                        "/api/human-resources/funcionarios",
+                        decision))).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("single-table-page");
+        assertThat(plan.path("widgets")).hasSize(1);
+        assertThat(plan.path("widgets").path(0).path("componentId").asText())
+                .isEqualTo("praxis-table");
+        assertThat(plan.toString()).doesNotContain("praxis-chart");
+    }
+
+    @Test
     void normalizesTimeseriesCandidateToBusinessResourceButPreservesTimeseriesStatsOperation() {
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Crie grafico temporal de incidentes por ocorrido em",

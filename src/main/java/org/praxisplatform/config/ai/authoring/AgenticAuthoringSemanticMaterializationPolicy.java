@@ -144,8 +144,9 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
                 ? ""
                 : safe(semanticDecision.visualizationDecision().layoutKind());
         return "resource-master-detail".equals(semanticLayout)
+                || "single-table".equals(semanticLayout)
                 || materialization != null
-                        && "master-detail-dashboard".equals(
+                        && List.of("master-detail-dashboard", "single-table-page").contains(
                                 safe(materialization.path("layoutPreset").asText()));
     }
 
@@ -184,6 +185,7 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         }
         String semanticLayout = safe(semanticDecision.visualizationDecision().layoutKind());
         String expectedLayoutPreset = switch (semanticLayout) {
+            case "single-table" -> "single-table-page";
             case "resource-master-detail" -> "master-detail-dashboard";
             case "resource-crud" -> "resource-crud";
             default -> "";
@@ -194,7 +196,35 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         String materializedLayout = materialization == null
                 ? ""
                 : safe(materialization.path("layoutPreset").asText(""));
-        return !expectedLayoutPreset.equals(materializedLayout);
+        return !expectedLayoutPreset.equals(materializedLayout)
+                || "single-table".equals(semanticLayout)
+                        && countComponents(materialization, "praxis-table") != 1;
+    }
+
+    private static int countComponents(JsonNode node, String componentId) {
+        if (node == null || node.isMissingNode() || node.isNull() || componentId == null || componentId.isBlank()) {
+            return 0;
+        }
+        if (node.isObject()) {
+            int count = componentId.equals(node.path("componentId").asText(""))
+                    || componentId.equals(node.path("definition").path("id").asText("")) ? 1 : 0;
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                var field = fields.next();
+                if (!"diagnostics".equals(field.getKey())) {
+                    count += countComponents(field.getValue(), componentId);
+                }
+            }
+            return count;
+        }
+        if (node.isArray()) {
+            int count = 0;
+            for (JsonNode child : node) {
+                count += countComponents(child, componentId);
+            }
+            return count;
+        }
+        return 0;
     }
 
     private static void collectResourceBindings(JsonNode node, List<String> bindings) {

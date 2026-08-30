@@ -319,6 +319,180 @@ class AgenticAuthoringToolRegistryTest {
     }
 
     @Test
+    void promotesUniqueDomainCatalogSemanticDiscoveryToExactOperationalVerification() {
+        AgenticAuthoringResourceDiscoveryService resourceDiscoveryService =
+                Mockito.mock(AgenticAuthoringResourceDiscoveryService.class);
+        AgenticAuthoringOperationalBindingVerificationService verificationService =
+                Mockito.mock(AgenticAuthoringOperationalBindingVerificationService.class);
+        AgenticAuthoringResourceSearchFocus semanticFocus = new AgenticAuthoringResourceSearchFocus(
+                "pessoas da empresa", List.of(), "table", "", "LLM-authored business subject");
+        AgenticAuthoringCandidate discoveredCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=request",
+                "/api/human-resources/funcionarios/filter/cursor",
+                "POST",
+                0.94d,
+                "Semantically grounded by the governed Domain Catalog.",
+                List.of("api-metadata", "domain-catalog-grounding", "semantic-retrieval"));
+        when(resourceDiscoveryService.search(
+                        Mockito.any(),
+                        Mockito.any(AiPrincipalContext.class),
+                        eq("http://localhost:8088")))
+                .thenReturn(new AgenticAuthoringResourceCandidatesResult(
+                        true,
+                        "searchApiResources",
+                        "pessoas da empresa",
+                        "table",
+                        "",
+                        null,
+                        List.of(discoveredCandidate),
+                        List.of(),
+                        List.of(),
+                        semanticFocus,
+                        null,
+                        Map.of()));
+        when(verificationService.verify(
+                        eq("human-resources.funcionarios"),
+                        eq("http://localhost:8088"),
+                        Mockito.any(AiPrincipalContext.class)))
+                .thenReturn(verifiedEmployeeResource());
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                resourceDiscoveryService,
+                null,
+                null,
+                null,
+                objectMapper,
+                null,
+                null,
+                null,
+                verificationService);
+        AgenticAuthoringResourceCandidatesRequest request =
+                new AgenticAuthoringResourceCandidatesRequest(
+                        "pessoas da empresa",
+                        "monte uma tabela com as pessoas da empresa",
+                        "table",
+                        6,
+                        semanticFocus);
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                        "pre_intent_resource_discovery",
+                        request),
+                new AiPrincipalContext("tenant", "user", "local", true),
+                "retrieveEvidence",
+                "http://localhost:8088");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.safeDiagnostics())
+                .containsEntry("candidateCount", 1)
+                .containsEntry("retrievalSource", "domain_binding")
+                .extractingByKey("resourceDiscoveryDiagnostics")
+                .isInstanceOfSatisfying(Map.class, diagnostics -> assertThat(diagnostics)
+                        .containsEntry("vectorRetrievalSkipped", false)
+                        .containsEntry("operationalGroundingSource", "unique-domain-catalog-resource"));
+        AgenticAuthoringResourceCandidatesResult payload =
+                (AgenticAuthoringResourceCandidatesResult) result.payload();
+        assertThat(payload.candidates()).singleElement().satisfies(candidate -> assertThat(candidate.evidence())
+                .contains("domain-binding", "schema-grounding-verified", "resource-capabilities-verified"));
+        Mockito.verify(verificationService).verify(
+                eq("human-resources.funcionarios"),
+                eq("http://localhost:8088"),
+                Mockito.any(AiPrincipalContext.class));
+    }
+
+    @Test
+    void doesNotOperationallyVerifyAmbiguousDomainCatalogSemanticDiscovery() {
+        AgenticAuthoringResourceDiscoveryService resourceDiscoveryService =
+                Mockito.mock(AgenticAuthoringResourceDiscoveryService.class);
+        AgenticAuthoringOperationalBindingVerificationService verificationService =
+                Mockito.mock(AgenticAuthoringOperationalBindingVerificationService.class);
+        AgenticAuthoringCandidate employees = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios", "post", "schema-a", "submit-a", "POST", 0.91d, "",
+                List.of("domain-catalog-grounding", "semantic-retrieval"));
+        AgenticAuthoringCandidate suppliers = new AgenticAuthoringCandidate(
+                "/api/suppliers/funcionarios", "post", "schema-b", "submit-b", "POST", 0.90d, "",
+                List.of("domain-catalog-grounding", "semantic-retrieval"));
+        when(resourceDiscoveryService.search(
+                        Mockito.any(),
+                        Mockito.any(AiPrincipalContext.class),
+                        eq("http://localhost:8088")))
+                .thenReturn(new AgenticAuthoringResourceCandidatesResult(
+                        true, "searchApiResources", "funcionarios", "table", "",
+                        List.of(employees, suppliers), List.of(), List.of()));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                resourceDiscoveryService,
+                null,
+                null,
+                null,
+                objectMapper,
+                null,
+                null,
+                null,
+                verificationService);
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                        "pre_intent_resource_discovery",
+                        new AgenticAuthoringResourceCandidatesRequest(
+                                "funcionarios", "monte uma tabela", "table", 6)),
+                new AiPrincipalContext("tenant", "user", "local", true),
+                "retrieveEvidence",
+                "http://localhost:8088");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(((AgenticAuthoringResourceCandidatesResult) result.payload()).candidates()).hasSize(2);
+        Mockito.verifyNoInteractions(verificationService);
+    }
+
+    @Test
+    void doesNotOperationallyVerifyWhenAnyDomainCatalogCandidateLacksCanonicalResourcePath() {
+        AgenticAuthoringResourceDiscoveryService resourceDiscoveryService =
+                Mockito.mock(AgenticAuthoringResourceDiscoveryService.class);
+        AgenticAuthoringOperationalBindingVerificationService verificationService =
+                Mockito.mock(AgenticAuthoringOperationalBindingVerificationService.class);
+        AgenticAuthoringCandidate employees = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios", "post", "schema-a", "submit-a", "POST", 0.91d, "",
+                List.of("domain-catalog-grounding", "semantic-retrieval"));
+        AgenticAuthoringCandidate invalid = new AgenticAuthoringCandidate(
+                "funcionarios", "post", "schema-b", "submit-b", "POST", 0.90d, "",
+                List.of("domain-catalog-grounding", "semantic-retrieval"));
+        when(resourceDiscoveryService.search(
+                        Mockito.any(),
+                        Mockito.any(AiPrincipalContext.class),
+                        eq("http://localhost:8088")))
+                .thenReturn(new AgenticAuthoringResourceCandidatesResult(
+                        true, "searchApiResources", "funcionarios", "table", "",
+                        List.of(employees, invalid), List.of(), List.of()));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                resourceDiscoveryService,
+                null,
+                null,
+                null,
+                objectMapper,
+                null,
+                null,
+                null,
+                verificationService);
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                        "pre_intent_resource_discovery",
+                        new AgenticAuthoringResourceCandidatesRequest(
+                                "funcionarios", "monte uma tabela", "table", 6)),
+                new AiPrincipalContext("tenant", "user", "local", true),
+                "retrieveEvidence",
+                "http://localhost:8088");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(((AgenticAuthoringResourceCandidatesResult) result.payload()).candidates()).hasSize(2);
+        Mockito.verifyNoInteractions(verificationService);
+    }
+
+    @Test
     void usesUniqueOperationallyVerifiedDomainBindingBeforeVectorResourceSearch() {
         AgenticAuthoringResourceDiscoveryService resourceDiscoveryService =
                 Mockito.mock(AgenticAuthoringResourceDiscoveryService.class);
@@ -462,6 +636,32 @@ class AgenticAuthoringToolRegistryTest {
                     .contains("schema_grounding", "operation_grounding");
         });
         Mockito.verifyNoInteractions(resourceDiscoveryService);
+    }
+
+    private AgenticAuthoringOperationalBindingVerificationService.VerificationResult verifiedEmployeeResource() {
+        return new AgenticAuthoringOperationalBindingVerificationService.VerificationResult(
+                true,
+                "human-resources.funcionarios",
+                List.of(new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
+                        "hr:employee-management",
+                        "resource:human-resources.funcionarios",
+                        "resource_operation",
+                        "human-resources.funcionarios",
+                        "/api/human-resources/funcionarios",
+                        "/api/human-resources/funcionarios/filter/cursor",
+                        "post",
+                        "request",
+                        "http://localhost/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Ffuncionarios%2Ffilter%2Fcursor&operation=post&schemaType=request",
+                        "http://localhost/api/human-resources/funcionarios/capabilities",
+                        "cursor",
+                        "",
+                        "",
+                        "principal_capability",
+                        new AgenticAuthoringOperationalBindingVerificationService.AvailabilityProjection(
+                                true, "", "resource_capabilities"),
+                        "hr-v1",
+                        List.of("domain-knowledge:evidence-status:active"))),
+                List.of());
     }
 
     @Test

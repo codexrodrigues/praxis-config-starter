@@ -189,6 +189,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("queryConstraints.appliesToDataSelection=true")
                 .contains("headers, labels, renderers, formatting, composed cells")
                 .contains("Author layoutKind independently")
+                .contains("single-table + artifactKind=table + praxis-table")
                 .contains("resource-master-detail")
                 .contains("resource-crud + praxis-crud")
                 .contains("Feasibility questions stay platform_guidance")
@@ -217,6 +218,8 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         assertThat(structuredOutputSchema.path("properties").path("schemaVersion").path("enum"))
                 .containsExactly(objectMapper.getNodeFactory()
                         .textNode("praxis-agentic-authoring-pre-intent-tool-plan.v3"));
+        assertThat(structuredOutputSchema.path("properties").path("layoutKind").path("enum"))
+                .contains(objectMapper.getNodeFactory().textNode("single-table"));
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(7);
         assertThat(configCaptor.getValue().getModel()).isEqualTo("gpt-5.6-luna");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(640);
@@ -379,6 +382,47 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
     }
 
     @Test
+    void preservesCanonicalSingleTableWithoutRequiringASecondIntentPass() throws Exception {
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                          "semanticIntentClass": "authoring_or_other",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "requiresFullIntentResolution": false,
+                          "queryConstraints": {"appliesToDataSelection": false, "filters": []},
+                          "groundingProfile": "api_resource",
+                          "artifactKind": "table",
+                          "primaryComponent": "praxis-table",
+                          "layoutKind": "single-table",
+                          "retrievalQuery": "funcionários",
+                          "resourceSearchFocus": {
+                            "primaryBusinessEntity": "human-resources.funcionarios",
+                            "supportingConcepts": [],
+                            "desiredSurface": "tabela única com todos os campos visíveis",
+                            "uncertainty": null,
+                            "rationale": "Uma coleção governada é a composição completa solicitada."
+                          },
+                          "reason": "The semantic table composition is complete."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("crie uma tabela de funcionários com todos os campos disponíveis"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().artifactKind()).isEqualTo("table");
+        assertThat(result.plan().primaryComponent()).isEqualTo("praxis-table");
+        assertThat(result.plan().layoutKind()).isEqualTo("single-table");
+        assertThat(result.plan().requiresFullIntentResolution()).isFalse();
+    }
+
+    @Test
     void rejectsIncompatibleCompactLayoutAndPrimaryComponentPair() throws Exception {
         ObjectNode result = (ObjectNode) objectMapper.readTree("""
                 {
@@ -402,6 +446,16 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         result.put("schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v2");
         Boolean staleVersion = ReflectionTestUtils.invokeMethod(service, "isValidStructuredPlan", result);
         assertThat(staleVersion).isFalse();
+
+        result.put("schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v3");
+        result.put("layoutKind", "single-table");
+        Boolean wrongArtifact = ReflectionTestUtils.invokeMethod(service, "isValidStructuredPlan", result);
+        assertThat(wrongArtifact).isFalse();
+
+        result.put("artifactKind", "table");
+        result.put("primaryComponent", "praxis-crud");
+        Boolean wrongSingleTableComponent = ReflectionTestUtils.invokeMethod(service, "isValidStructuredPlan", result);
+        assertThat(wrongSingleTableComponent).isFalse();
     }
 
     @Test

@@ -30,6 +30,21 @@
         "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload"
       ]
     },
+    "single-table": {
+      "description": "Focal live LLM proof for the canonical table/praxis-table/single-table creation path plus the invariant critical-endpoint interception guard, without retries.",
+      "retries": 0,
+      "scenarios": [
+        "critical-interception-guard",
+        "table-human-authoring"
+      ],
+      "expectedDiscovered": 2,
+      "minimumExecuted": 2,
+      "expectedSkipped": 0,
+      "requiredPassedTests": [
+        "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "compara pedido, decisão, proposedConfig e DOM em todos os turnos"
+      ]
+    },
     "full": {
       "description": "Deliberate live LLM matrix with all non-mocked browser scenarios.",
       "scenarios": [

@@ -989,7 +989,11 @@ public class AgenticAuthoringToolRegistry {
                                     "API discovery requires exact schema and capability verification.");
                         }
                         AgenticAuthoringResourceCandidatesResult verifiedResult = verifiedBindingResult(
-                                request, principalContext, verification);
+                                request,
+                                principalContext,
+                                verification,
+                                true,
+                                "canonical-resource-focus");
                         if (verifiedResult != null) {
                             return success(call, verifiedResult);
                         }
@@ -1001,7 +1005,75 @@ public class AgenticAuthoringToolRegistry {
             }
             AgenticAuthoringResourceCandidatesResult result =
                     resourceDiscoveryService.search(request, principalContext, requestBaseUrl);
+            String discoveredResourceKey = uniqueDomainCatalogGroundedResourceKey(result);
+            if (!discoveredResourceKey.isBlank() && operationalVerificationService != null) {
+                // The LLM has already authored the business subject and semantic retrieval has
+                // resolved it to one governed Domain Catalog resource. This is post-intent target
+                // grounding, not textual intent routing: promote that unique canonical identity to
+                // the same exact schema/capability proof required for an explicitly named key.
+                AgenticAuthoringOperationalBindingVerificationService.VerificationResult verification =
+                        operationalVerificationService.verify(
+                                discoveredResourceKey, requestBaseUrl, principalContext);
+                if (!verification.verified()) {
+                    return AgenticAuthoringToolResult.failure(
+                            call.name(),
+                            verification.failureCodes().isEmpty()
+                                    ? "operational-grounding-unverified"
+                                    : verification.failureCodes().get(0),
+                            "The uniquely grounded Domain Catalog resource did not pass exact schema and capability verification.");
+                }
+                AgenticAuthoringResourceCandidatesResult verifiedResult = verifiedBindingResult(
+                        request,
+                        principalContext,
+                        verification,
+                        false,
+                        "unique-domain-catalog-resource");
+                if (verifiedResult != null) {
+                    return success(call, verifiedResult);
+                }
+            }
             return success(call, result);
+        }
+
+        private String uniqueDomainCatalogGroundedResourceKey(
+                AgenticAuthoringResourceCandidatesResult result) {
+            if (result == null || result.candidates() == null || result.candidates().isEmpty()) {
+                return "";
+            }
+            boolean hasDomainCatalogGrounding = result.candidates().stream()
+                    .filter(Objects::nonNull)
+                    .anyMatch(candidate -> candidate.evidence() != null
+                            && candidate.evidence().contains(
+                                    AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING));
+            if (!hasDomainCatalogGrounding) {
+                return "";
+            }
+            List<AgenticAuthoringCandidate> candidates = result.candidates().stream()
+                    .filter(Objects::nonNull)
+                    .toList();
+            List<String> resourceKeys = candidates.stream()
+                    .map(AgenticAuthoringCandidate::resourcePath)
+                    .map(SearchApiResourcesToolExecutor::canonicalResourceKey)
+                    .toList();
+            if (candidates.size() != result.candidates().size()
+                    || resourceKeys.stream().anyMatch(String::isBlank)) {
+                return "";
+            }
+            List<String> distinctResourceKeys = resourceKeys.stream().distinct().toList();
+            return distinctResourceKeys.size() == 1 ? distinctResourceKeys.get(0) : "";
+        }
+
+        private static String canonicalResourceKey(String resourcePath) {
+            String normalized = safeText(resourcePath).trim();
+            if (!normalized.startsWith("/api/") || normalized.contains("{") || normalized.contains("}")) {
+                return "";
+            }
+            normalized = normalized.substring(5)
+                    .replaceAll("/+$", "")
+                    .replace('/', '.');
+            return normalized.matches("^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)+$")
+                    ? normalized
+                    : "";
         }
 
         private AgenticAuthoringToolResult success(
@@ -1024,7 +1096,9 @@ public class AgenticAuthoringToolRegistry {
         private AgenticAuthoringResourceCandidatesResult verifiedBindingResult(
                 AgenticAuthoringResourceCandidatesRequest request,
                 AiPrincipalContext principalContext,
-                AgenticAuthoringOperationalBindingVerificationService.VerificationResult verification) {
+                AgenticAuthoringOperationalBindingVerificationService.VerificationResult verification,
+                boolean vectorRetrievalSkipped,
+                String operationalGroundingSource) {
             if (verification.operations() == null || verification.operations().isEmpty()) {
                 return null;
             }
@@ -1058,7 +1132,8 @@ public class AgenticAuthoringToolRegistry {
                     Map.of(
                             "bindingResourceKey", verification.resourceKey(),
                             "bindingVerification", "schemas.filtered+resource.capabilities+schemas.actions",
-                            "vectorRetrievalSkipped", true));
+                            "vectorRetrievalSkipped", vectorRetrievalSkipped,
+                            "operationalGroundingSource", operationalGroundingSource));
         }
 
         private AgenticAuthoringCandidate verifiedBindingCandidate(

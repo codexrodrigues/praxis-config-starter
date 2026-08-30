@@ -15,6 +15,13 @@ final class AgenticAuthoringSemanticDecisionPolicy {
         String changeKind = valueOrDefault(input.changeKind(), "unknown");
         AgenticAuthoringCandidate selectedCandidate = input.selectedCandidate();
         List<AgenticAuthoringCandidate> candidates = input.candidates() == null ? List.of() : input.candidates();
+        if (isCanonicalSingleTableDecision(input.llmIntent())) {
+            return new AgenticAuthoringSemanticDecision(
+                    operationKind,
+                    artifactKind,
+                    changeKind,
+                    selectedCandidate);
+        }
         String prompt = normalize(input.prompt());
         String currentPrompt = normalize(input.currentPrompt());
         String rawPrompt = normalize(input.rawPrompt());
@@ -113,6 +120,16 @@ final class AgenticAuthoringSemanticDecisionPolicy {
             }
         }
         return new AgenticAuthoringSemanticDecision(operationKind, artifactKind, changeKind, selectedCandidate);
+    }
+
+    private boolean isCanonicalSingleTableDecision(AgenticAuthoringLlmIntentResolution llmIntent) {
+        if (llmIntent == null || !llmIntent.resolved() || llmIntent.visualizationDecision() == null) {
+            return false;
+        }
+        AgenticAuthoringVisualizationDecision decision = llmIntent.visualizationDecision();
+        return "table".equals(llmIntent.artifactKind())
+                && "single-table".equals(decision.layoutKind())
+                && "praxis-table".equals(decision.primaryComponent());
     }
 
     private boolean isDirectMaterializationRequest(String prompt) {

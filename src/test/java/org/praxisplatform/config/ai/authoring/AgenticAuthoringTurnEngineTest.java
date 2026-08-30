@@ -12061,8 +12061,27 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(result.path("intentResolution").path("failureCodes").toString())
                 .contains("semantic-artifact-conflict", "semantic-intent-confirmation-required");
         org.assertj.core.api.Assertions.assertThat(result.path("intentResolution")
-                        .path("clarificationQuestions").toString())
-                .contains("painel analítico coordenado", "página de conteúdo");
+                        .path("clarificationQuestions").path(0).asText())
+                .isEqualTo("Você confirma qual artefato deve governar a materialização: dashboard, definido pelo planejamento semântico, ou página, definido pela resolução semântica?");
+    }
+
+    @Test
+    void derivesPersistentArtifactConflictClarificationFromCanonicalArtifactKinds() {
+        AgenticAuthoringTurnEngine engine = engine();
+
+        AgenticAuthoringIntentResolutionResult blocked = ReflectionTestUtils.invokeMethod(
+                engine,
+                "blockPersistentArtifactConflict",
+                "table",
+                funcionarioPageAccordionIntent());
+
+        assertThat(blocked).isNotNull();
+        assertThat(blocked.valid()).isFalse();
+        assertThat(blocked.gate().status()).isEqualTo("clarification_required");
+        assertThat(blocked.failureCodes())
+                .contains("semantic-artifact-conflict", "semantic-intent-confirmation-required");
+        assertThat(blocked.clarificationQuestions())
+                .containsExactly("Você confirma qual artefato deve governar a materialização: tabela, definido pelo planejamento semântico, ou página, definido pela resolução semântica?");
     }
 
     @Test
