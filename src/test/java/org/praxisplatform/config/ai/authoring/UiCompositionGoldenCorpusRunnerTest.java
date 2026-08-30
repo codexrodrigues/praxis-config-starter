@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.networknt.schema.JsonSchemaFactory;
+import com.networknt.schema.SpecVersion;
 import java.nio.file.Path;
 import java.nio.file.Files;
 import java.security.MessageDigest;
@@ -38,6 +40,8 @@ class UiCompositionGoldenCorpusRunnerTest {
                 .isEqualTo(fileSha256(UiCompositionGoldenCorpusRunner.DEFAULT_CORPUS));
         assertThat(report.path("schemaSha256").asText())
                 .isEqualTo(fileSha256(UiCompositionGoldenCorpusRunner.DEFAULT_SCHEMA));
+        assertThat(report.path("reportSchemaSha256").asText())
+                .isEqualTo(fileSha256(UiCompositionGoldenCorpusRunner.DEFAULT_REPORT_SCHEMA));
         assertThat(report.at("/compilerIdentity/id").asText())
                 .isEqualTo("config-ui-composition-plan-compiler");
         assertThat(report.at("/compilerIdentity/builderVersion").asText())
@@ -51,10 +55,22 @@ class UiCompositionGoldenCorpusRunnerTest {
         assertThat(implementationArtifact).exists();
         assertThat(report.at("/compilerIdentity/implementationArtifact/sha256").asText())
                 .isEqualTo(fileSha256(implementationArtifact));
-        assertThat(report.at("/compilerIdentity/sourceReceipt/sourceGitBlob").asText())
-                .matches("[a-f0-9]{40}");
-        assertThat(report.at("/compilerIdentity/sourceReceipt/artifactSha256").asText())
-                .isEqualTo(report.at("/compilerIdentity/implementationSha256").asText());
+        assertThat(report.at("/compilerIdentity/sourceReceipt/scope").asText())
+                .isEqualTo("ordered-praxis-source-and-class-byte-closure");
+        assertThat(report.at("/compilerIdentity/sourceReceipt/sources")).hasSize(11);
+        assertThat(report.at("/compilerIdentity/sourceReceipt/sources/3/id").asText())
+                .isEqualTo("compiled-page-patch-validator");
+        assertThat(report.at("/compilerIdentity/sourceReceipt/dependencyGraph")).isNotEmpty();
+        assertThat(report.at("/compilerIdentity/sourceReceipt/closureSha256").asText())
+                .matches("[a-f0-9]{64}");
+        Set<String> coveredClasses = new HashSet<>();
+        report.at("/compilerIdentity/sourceReceipt/sources").forEach(source ->
+                source.path("artifacts").forEach(artifact -> coveredClasses.add(
+                        binaryClassName(artifact.path("path").asText()))));
+        report.at("/compilerIdentity/sourceReceipt/dependencyGraph").forEach(edge -> {
+            String value = edge.asText();
+            assertThat(coveredClasses).contains(value.substring(value.indexOf(" -> ") + 4));
+        });
         assertThat(report.path("cases").get(0).path("canonicalDiagnostics").isArray()).isTrue();
         assertThat(report.path("passed").asBoolean())
                 .withFailMessage("Java golden report: %s", report)
@@ -164,8 +180,8 @@ class UiCompositionGoldenCorpusRunnerTest {
                 UiCompositionGoldenCorpusRunner.DEFAULT_CORPUS.toFile());
         JsonNode schema = objectMapper.readTree(
                 UiCompositionGoldenCorpusRunner.DEFAULT_SCHEMA.toFile());
-        ((ObjectNode) corpus.at("/compilerReceipts/java"))
-                .put("artifactSha256", "0".repeat(64));
+        ((ObjectNode) corpus.at("/compilerReceipts/java/sources/3/artifacts/0"))
+                .put("sha256", "0".repeat(64));
 
         ObjectNode report = new UiCompositionGoldenCorpusRunner().run(
                 corpus,
@@ -175,6 +191,81 @@ class UiCompositionGoldenCorpusRunnerTest {
         assertThat(report.path("passed").asBoolean()).isFalse();
         assertThat(report.path("globalFailures"))
                 .extracting(JsonNode::asText)
-                .contains("java-compiler-receipt-artifact-sha-mismatch");
+                .contains("java-compiler-receipt-artifact-sha-mismatch:"
+                        + "target/classes/org/praxisplatform/config/ai/authoring/"
+                        + "AgenticAuthoringCompiledPagePatchValidator.class");
+    }
+
+    @Test
+    void missingPraxisDependencyEdgeFailsClosed() throws Exception {
+        JsonNode corpus = objectMapper.readTree(
+                UiCompositionGoldenCorpusRunner.DEFAULT_CORPUS.toFile());
+        JsonNode schema = objectMapper.readTree(
+                UiCompositionGoldenCorpusRunner.DEFAULT_SCHEMA.toFile());
+        ((com.fasterxml.jackson.databind.node.ArrayNode) corpus.at("/compilerReceipts/java/dependencyGraph"))
+                .remove(0);
+
+        ObjectNode report = new UiCompositionGoldenCorpusRunner().run(
+                corpus,
+                schema,
+                tempDir.resolve("missing-java-dependency-edge-report.json"));
+
+        assertThat(report.path("passed").asBoolean()).isFalse();
+        assertThat(report.path("globalFailures"))
+                .extracting(JsonNode::asText)
+                .contains("java-compiler-receipt-dependency-graph-mismatch");
+    }
+
+    @Test
+    void publishedReportSchemaRejectsMalformedPeerShape() throws Exception {
+        ObjectNode report = new UiCompositionGoldenCorpusRunner().run(
+                UiCompositionGoldenCorpusRunner.DEFAULT_CORPUS,
+                UiCompositionGoldenCorpusRunner.DEFAULT_SCHEMA,
+                tempDir.resolve("valid-report.json"));
+        JsonNode reportSchema = objectMapper.readTree(
+                UiCompositionGoldenCorpusRunner.DEFAULT_REPORT_SCHEMA.toFile());
+        ObjectNode malformedPeer = report.deepCopy();
+        ((ObjectNode) malformedPeer.path("compilerIdentity")).remove("sourceReceipt");
+
+        assertThat(JsonSchemaFactory
+                        .getInstance(SpecVersion.VersionFlag.V202012)
+                        .getSchema(reportSchema)
+                        .validate(malformedPeer))
+                .isNotEmpty();
+    }
+
+    @Test
+    void targetProbeRequiresOnlyTheAuthoredDispatchPayload() throws Exception {
+        JsonNode corpus = objectMapper.readTree(
+                UiCompositionGoldenCorpusRunner.DEFAULT_CORPUS.toFile());
+        JsonNode schema = objectMapper.readTree(
+                UiCompositionGoldenCorpusRunner.DEFAULT_SCHEMA.toFile());
+        ObjectNode probe = (ObjectNode) corpus.path("cases").get(2).path("input").path("targetProbe");
+        JsonNode dispatchPayload = probe.remove("dispatchPayload");
+
+        ObjectNode missingPayloadReport = new UiCompositionGoldenCorpusRunner().run(
+                corpus,
+                schema,
+                tempDir.resolve("target-probe-missing-payload-report.json"));
+        assertThat(missingPayloadReport.path("globalFailures"))
+                .extracting(JsonNode::asText)
+                .anyMatch(message -> message.startsWith("schema:"));
+
+        probe.set("dispatchPayload", dispatchPayload);
+        probe.put("actionId", "trackEvent");
+        ObjectNode extraAuthorityReport = new UiCompositionGoldenCorpusRunner().run(
+                corpus,
+                schema,
+                tempDir.resolve("target-probe-extra-authority-report.json"));
+        assertThat(extraAuthorityReport.path("globalFailures"))
+                .extracting(JsonNode::asText)
+                .anyMatch(message -> message.startsWith("schema:"));
+    }
+
+    private String binaryClassName(String artifactPath) {
+        int classesMarker = artifactPath.indexOf("classes/");
+        return artifactPath
+                .substring(classesMarker + "classes/".length(), artifactPath.length() - ".class".length())
+                .replace('/', '.');
     }
 }

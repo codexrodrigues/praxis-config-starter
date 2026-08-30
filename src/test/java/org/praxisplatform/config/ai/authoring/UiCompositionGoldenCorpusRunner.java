@@ -10,6 +10,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SpecVersion;
 import com.networknt.schema.ValidationMessage;
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,6 +22,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.dto.AiRegistryTemplateRecord;
@@ -34,6 +37,8 @@ final class UiCompositionGoldenCorpusRunner {
             "ui-composition-compiler-parity-corpus.v1.json");
     static final Path DEFAULT_SCHEMA = AgenticAuthoringTestPaths.contract(
             "ui-composition-compiler-parity-corpus.v1.schema.json");
+    static final Path DEFAULT_REPORT_SCHEMA = AgenticAuthoringTestPaths.contract(
+            "ui-composition-golden-report.v1.schema.json");
     static final Path DEFAULT_REPORT = Path.of(
             "target", "ui-composition-golden", "java-report.json");
 
@@ -117,6 +122,7 @@ final class UiCompositionGoldenCorpusRunner {
         report.put("passed", globalFailures.isEmpty() && casesPassed);
         report.set("globalFailures", objectMapper.valueToTree(globalFailures));
         report.set("cases", caseReports);
+        validateReportShape(report);
         writeReport(reportPath, report);
         return report;
     }
@@ -323,41 +329,306 @@ final class UiCompositionGoldenCorpusRunner {
 
     private void verifyJavaCompilerReceipt(JsonNode corpus, List<String> failures) {
         JsonNode receipt = corpus.at("/compilerReceipts/java");
-        String expectedSourcePath =
-                "src/main/java/org/praxisplatform/config/ai/authoring/"
-                        + "AgenticAuthoringUiCompositionPlanCompiler.java";
-        String expectedArtifactPath =
-                "target/classes/org/praxisplatform/config/ai/authoring/"
-                        + "AgenticAuthoringUiCompositionPlanCompiler.class";
-        if (!"source-git-blob-and-compiled-class-bytes".equals(receipt.path("scope").asText())) {
+        if (!"ordered-praxis-source-and-class-byte-closure".equals(receipt.path("scope").asText())) {
             failures.add("java-compiler-receipt-scope-mismatch");
         }
-        if (!expectedSourcePath.equals(receipt.path("sourcePath").asText())) {
-            failures.add("java-compiler-receipt-source-path-mismatch");
-        }
-        if (!expectedArtifactPath.equals(receipt.path("artifactPath").asText())) {
-            failures.add("java-compiler-receipt-artifact-path-mismatch");
-        }
         try {
-            Path sourcePath = Path.of(expectedSourcePath);
-            if (!Files.isRegularFile(sourcePath)) {
-                failures.add("java-compiler-receipt-source-missing");
+            ObjectNode actual = javaExecutionClosureReceipt();
+            JsonNode declaredSources = receipt.path("sources");
+            JsonNode actualSources = actual.path("sources");
+            if (!declaredSources.isArray() || declaredSources.size() != actualSources.size()) {
+                failures.add("java-compiler-receipt-source-closure-mismatch");
             } else {
-                String actualBlob = gitHashObject(sourcePath);
-                if (!actualBlob.equals(receipt.path("sourceGitBlob").asText())) {
-                    failures.add("java-compiler-receipt-source-blob-mismatch");
+                for (int sourceIndex = 0; sourceIndex < actualSources.size(); sourceIndex++) {
+                    JsonNode declaredSource = declaredSources.get(sourceIndex);
+                    JsonNode actualSource = actualSources.get(sourceIndex);
+                    String sourceId = actualSource.path("id").asText();
+                    if (!sourceId.equals(declaredSource.path("id").asText())) {
+                        failures.add("java-compiler-receipt-source-id-mismatch:" + sourceId);
+                    }
+                    if (!actualSource.path("sourcePath").asText()
+                            .equals(declaredSource.path("sourcePath").asText())) {
+                        failures.add("java-compiler-receipt-source-path-mismatch:" + sourceId);
+                    }
+                    if (!actualSource.path("sourceGitBlob").asText()
+                            .equals(declaredSource.path("sourceGitBlob").asText())) {
+                        failures.add("java-compiler-receipt-source-blob-mismatch:" + sourceId);
+                    }
+                    JsonNode declaredArtifacts = declaredSource.path("artifacts");
+                    JsonNode actualArtifacts = actualSource.path("artifacts");
+                    if (!declaredArtifacts.isArray()
+                            || declaredArtifacts.size() != actualArtifacts.size()) {
+                        failures.add("java-compiler-receipt-artifact-closure-mismatch:" + sourceId);
+                        continue;
+                    }
+                    for (int artifactIndex = 0; artifactIndex < actualArtifacts.size(); artifactIndex++) {
+                        JsonNode declaredArtifact = declaredArtifacts.get(artifactIndex);
+                        JsonNode actualArtifact = actualArtifacts.get(artifactIndex);
+                        String artifactPath = actualArtifact.path("path").asText();
+                        if (!artifactPath.equals(declaredArtifact.path("path").asText())) {
+                            failures.add("java-compiler-receipt-artifact-path-mismatch:"
+                                    + sourceId + ":" + artifactIndex);
+                        }
+                        if (!actualArtifact.path("sha256").asText()
+                                .equals(declaredArtifact.path("sha256").asText())) {
+                            failures.add("java-compiler-receipt-artifact-sha-mismatch:" + artifactPath);
+                        }
+                    }
                 }
             }
-            Path artifactPath = Path.of(expectedArtifactPath);
-            if (!Files.isRegularFile(artifactPath)) {
-                failures.add("java-compiler-receipt-artifact-missing");
-            } else if (!sha256(Files.readAllBytes(artifactPath))
-                    .equals(receipt.path("artifactSha256").asText())) {
-                failures.add("java-compiler-receipt-artifact-sha-mismatch");
+            if (!actual.path("closureSha256").asText()
+                    .equals(receipt.path("closureSha256").asText())) {
+                failures.add("java-compiler-receipt-closure-sha-mismatch");
             }
+            if (!actual.path("dependencyGraph").equals(receipt.path("dependencyGraph"))) {
+                failures.add("java-compiler-receipt-dependency-graph-mismatch");
+            }
+            Set<String> coveredClasses = new TreeSet<>();
+            actual.path("sources").forEach(source -> source.path("artifacts").forEach(artifact ->
+                    coveredClasses.add(binaryClassName(artifact.path("path").asText()))));
+            actual.path("dependencyGraph").forEach(edge -> {
+                String value = edge.asText();
+                int separator = value.indexOf(" -> ");
+                String target = separator < 0 ? "" : value.substring(separator + 4);
+                if (!coveredClasses.contains(target)) {
+                    failures.add("java-compiler-receipt-uncovered-praxis-dependency:" + target);
+                }
+            });
         } catch (Exception error) {
             failures.add("java-compiler-receipt-verification:" + readableFailure(error));
         }
+    }
+
+    private ObjectNode javaExecutionClosureReceipt() throws Exception {
+        ObjectNode receipt = objectMapper.createObjectNode();
+        receipt.put("scope", "ordered-praxis-source-and-class-byte-closure");
+        ArrayNode sources = receipt.putArray("sources");
+        addJavaExecutionSource(
+                sources,
+                "golden-corpus-runner",
+                "src/test/java/org/praxisplatform/config/ai/authoring/UiCompositionGoldenCorpusRunner.java",
+                List.of(
+                        "target/test-classes/org/praxisplatform/config/ai/authoring/UiCompositionGoldenCorpusRunner.class",
+                        "target/test-classes/org/praxisplatform/config/ai/authoring/UiCompositionGoldenCorpusRunner$CanonicalDiagnosticIdentity.class",
+                        "target/test-classes/org/praxisplatform/config/ai/authoring/UiCompositionGoldenCorpusRunner$DiagnosticIdentity.class",
+                        "target/test-classes/org/praxisplatform/config/ai/authoring/UiCompositionGoldenCorpusRunner$TemplateResolution.class"));
+        addJavaExecutionSource(
+                sources,
+                "agentic-authoring-test-paths",
+                "src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTestPaths.java",
+                List.of("target/test-classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringTestPaths.class"));
+        addJavaExecutionSource(
+                sources,
+                "ui-composition-plan-compiler",
+                "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.java",
+                List.of(
+                        "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.class",
+                        "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$CompileResult.class",
+                        "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$CompilerDiagnostic.class",
+                        "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$MasterDetailAnalysis.class",
+                        "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$MasterDetailWidget.class",
+                        "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$NestedWidgetArrayLocation.class",
+                        "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$SlotDefinition.class",
+                        "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$UiCompositionLayoutMaterialization.class"));
+        addJavaExecutionSource(
+                sources,
+                "compiled-page-patch-validator",
+                "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringCompiledPagePatchValidator.java",
+                List.of("target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringCompiledPagePatchValidator.class"));
+        addJavaExecutionSource(
+                sources,
+                "ui-composition-template-resolver",
+                "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionTemplateResolver.java",
+                List.of(
+                        "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionTemplateResolver.class",
+                        "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionTemplateResolver$Resolution.class"));
+        addJavaExecutionSource(
+                sources,
+                "canonical-json-hash-service",
+                "src/main/java/org/praxisplatform/config/service/CanonicalJsonHashService.java",
+                List.of("target/classes/org/praxisplatform/config/service/CanonicalJsonHashService.class"));
+        addJavaExecutionSource(
+                sources,
+                "ai-registry",
+                "src/main/java/org/praxisplatform/config/domain/AiRegistry.java",
+                List.of(
+                        "target/classes/org/praxisplatform/config/domain/AiRegistry.class",
+                        "target/classes/org/praxisplatform/config/domain/AiRegistry$AiRegistryBuilder.class"));
+        addJavaExecutionSource(
+                sources,
+                "ai-registry-template-record",
+                "src/main/java/org/praxisplatform/config/dto/AiRegistryTemplateRecord.java",
+                List.of(
+                        "target/classes/org/praxisplatform/config/dto/AiRegistryTemplateRecord.class",
+                        "target/classes/org/praxisplatform/config/dto/AiRegistryTemplateRecord$AiRegistryTemplateRecordBuilder.class"));
+        addJavaExecutionSource(
+                sources,
+                "ai-registry-template-revision",
+                "src/main/java/org/praxisplatform/config/dto/AiRegistryTemplateRevision.java",
+                List.of(
+                        "target/classes/org/praxisplatform/config/dto/AiRegistryTemplateRevision.class",
+                        "target/classes/org/praxisplatform/config/dto/AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder.class"));
+        addJavaExecutionSource(
+                sources,
+                "ai-registry-template-service-mock-boundary",
+                "src/main/java/org/praxisplatform/config/service/AiRegistryTemplateService.java",
+                List.of("target/classes/org/praxisplatform/config/service/AiRegistryTemplateService.class"));
+        addJavaExecutionSource(
+                sources,
+                "ai-registry-scope",
+                "src/main/java/org/praxisplatform/config/domain/Scope.java",
+                List.of("target/classes/org/praxisplatform/config/domain/Scope.class"));
+        ArrayNode dependencyGraph = javaPraxisDependencyGraph(sources);
+        receipt.set("dependencyGraph", dependencyGraph);
+        ObjectNode closureMaterial = objectMapper.createObjectNode();
+        closureMaterial.set("sources", sources.deepCopy());
+        closureMaterial.set("dependencyGraph", dependencyGraph.deepCopy());
+        receipt.put("closureSha256", canonicalDocumentSha256(closureMaterial));
+        return receipt;
+    }
+
+    private void addJavaExecutionSource(
+            ArrayNode sources,
+            String id,
+            String sourcePathValue,
+            List<String> artifactPaths) throws Exception {
+        Path sourcePath = Path.of(sourcePathValue);
+        if (!Files.isRegularFile(sourcePath)) {
+            throw new IllegalStateException("Java execution source missing: " + sourcePathValue);
+        }
+        ObjectNode source = sources.addObject();
+        source.put("id", id);
+        source.put("sourcePath", sourcePathValue);
+        source.put("sourceGitBlob", gitHashObject(sourcePath));
+        ArrayNode artifacts = source.putArray("artifacts");
+        for (String artifactPathValue : artifactPaths) {
+            Path artifactPath = Path.of(artifactPathValue);
+            if (!Files.isRegularFile(artifactPath)) {
+                throw new IllegalStateException("Java execution artifact missing: " + artifactPathValue);
+            }
+            ObjectNode artifact = artifacts.addObject();
+            artifact.put("path", artifactPathValue);
+            artifact.put("sha256", sha256(Files.readAllBytes(artifactPath)));
+        }
+    }
+
+    private ArrayNode javaPraxisDependencyGraph(ArrayNode sources) throws Exception {
+        String mockBoundary =
+                "target/classes/org/praxisplatform/config/service/AiRegistryTemplateService.class";
+        Set<String> edges = new TreeSet<>();
+        for (JsonNode source : sources) {
+            for (JsonNode artifact : source.path("artifacts")) {
+                String artifactPath = artifact.path("path").asText();
+                if (mockBoundary.equals(artifactPath)) {
+                    continue;
+                }
+                String from = binaryClassName(artifactPath);
+                for (String target : praxisClassReferences(Files.readAllBytes(Path.of(artifactPath)))) {
+                    if (!from.equals(target)) {
+                        edges.add(from + "\u0000" + target);
+                    }
+                }
+            }
+        }
+        ArrayNode graph = objectMapper.createArrayNode();
+        for (String edge : edges) {
+            int separator = edge.indexOf('\u0000');
+            graph.add(edge.substring(0, separator) + " -> " + edge.substring(separator + 1));
+        }
+        return graph;
+    }
+
+    private Set<String> praxisClassReferences(byte[] bytecode) throws Exception {
+        try (DataInputStream input = new DataInputStream(new ByteArrayInputStream(bytecode))) {
+            if (input.readInt() != 0xCAFEBABE) {
+                throw new IllegalArgumentException("Invalid JVM class artifact");
+            }
+            input.readUnsignedShort();
+            input.readUnsignedShort();
+            int constantPoolCount = input.readUnsignedShort();
+            String[] utf8 = new String[constantPoolCount];
+            int[] classNameIndexes = new int[constantPoolCount];
+            for (int index = 1; index < constantPoolCount; index++) {
+                int tag = input.readUnsignedByte();
+                switch (tag) {
+                    case 1 -> utf8[index] = input.readUTF();
+                    case 3, 4 -> input.skipNBytes(4);
+                    case 5, 6 -> {
+                        input.skipNBytes(8);
+                        index++;
+                    }
+                    case 7 -> classNameIndexes[index] = input.readUnsignedShort();
+                    case 8, 16, 19, 20 -> input.skipNBytes(2);
+                    case 9, 10, 11, 12, 17, 18 -> input.skipNBytes(4);
+                    case 15 -> input.skipNBytes(3);
+                    default -> throw new IllegalArgumentException("Unsupported JVM constant tag: " + tag);
+                }
+            }
+            Set<String> references = new TreeSet<>();
+            for (int classNameIndex : classNameIndexes) {
+                if (classNameIndex <= 0 || classNameIndex >= utf8.length) {
+                    continue;
+                }
+                String internalName = utf8[classNameIndex];
+                if (internalName == null) {
+                    continue;
+                }
+                if (internalName.startsWith("[L") && internalName.endsWith(";")) {
+                    internalName = internalName.substring(2, internalName.length() - 1);
+                }
+                if (internalName.startsWith("org/praxisplatform/config/")) {
+                    references.add(internalName.replace('/', '.'));
+                }
+            }
+            input.skipNBytes(6);
+            int interfaceCount = input.readUnsignedShort();
+            input.skipNBytes((long) interfaceCount * 2);
+            readMemberDescriptorReferences(input, utf8, references);
+            readMemberDescriptorReferences(input, utf8, references);
+            return references;
+        }
+    }
+
+    private void readMemberDescriptorReferences(
+            DataInputStream input,
+            String[] utf8,
+            Set<String> references) throws Exception {
+        int memberCount = input.readUnsignedShort();
+        for (int memberIndex = 0; memberIndex < memberCount; memberIndex++) {
+            input.readUnsignedShort();
+            input.readUnsignedShort();
+            int descriptorIndex = input.readUnsignedShort();
+            addDescriptorReferences(utf8[descriptorIndex], references);
+            int attributeCount = input.readUnsignedShort();
+            for (int attributeIndex = 0; attributeIndex < attributeCount; attributeIndex++) {
+                input.readUnsignedShort();
+                long length = Integer.toUnsignedLong(input.readInt());
+                input.skipNBytes(length);
+            }
+        }
+    }
+
+    private void addDescriptorReferences(String descriptor, Set<String> references) {
+        int cursor = 0;
+        String marker = "Lorg/praxisplatform/config/";
+        while (descriptor != null && (cursor = descriptor.indexOf(marker, cursor)) >= 0) {
+            int end = descriptor.indexOf(';', cursor);
+            if (end < 0) {
+                return;
+            }
+            references.add(descriptor.substring(cursor + 1, end).replace('/', '.'));
+            cursor = end + 1;
+        }
+    }
+
+    private String binaryClassName(String artifactPath) {
+        int classesMarker = artifactPath.indexOf("classes/");
+        if (classesMarker < 0 || !artifactPath.endsWith(".class")) {
+            throw new IllegalArgumentException("Unexpected Java artifact path: " + artifactPath);
+        }
+        return artifactPath
+                .substring(classesMarker + "classes/".length(), artifactPath.length() - ".class".length())
+                .replace('/', '.');
     }
 
     private String gitHashObject(Path sourcePath) throws Exception {
@@ -397,6 +668,7 @@ final class UiCompositionGoldenCorpusRunner {
         }
         report.put("corpusSha256", corpusSha256);
         report.put("schemaSha256", schemaSha256);
+        report.put("reportSchemaSha256", sha256(Files.readAllBytes(DEFAULT_REPORT_SCHEMA)));
         report.put("engine", "java");
         ObjectNode compilerIdentity = report.putObject("compilerIdentity");
         compilerIdentity.put(
@@ -414,12 +686,26 @@ final class UiCompositionGoldenCorpusRunner {
                 "target/classes/org/praxisplatform/config/ai/authoring/"
                         + "AgenticAuthoringUiCompositionPlanCompiler.class");
         implementationArtifact.put("sha256", implementationSha256);
-        if (corpus != null && corpus.at("/compilerReceipts/java").isObject()) {
-            compilerIdentity.set(
-                    "sourceReceipt",
-                    corpus.at("/compilerReceipts/java").deepCopy());
-        }
+        compilerIdentity.set("sourceReceipt", javaExecutionClosureReceipt());
         return report;
+    }
+
+    private void validateReportShape(ObjectNode report) throws Exception {
+        JsonNode reportSchema = objectMapper.readTree(DEFAULT_REPORT_SCHEMA.toFile());
+        List<String> shapeFailures = JsonSchemaFactory
+                .getInstance(SpecVersion.VersionFlag.V202012)
+                .getSchema(reportSchema)
+                .validate(report)
+                .stream()
+                .map(ValidationMessage::getMessage)
+                .sorted()
+                .map(message -> "report-schema:" + message)
+                .toList();
+        if (!shapeFailures.isEmpty()) {
+            ArrayNode failures = (ArrayNode) report.withArray("globalFailures");
+            shapeFailures.forEach(failures::add);
+            report.put("passed", false);
+        }
     }
 
     private String readableFailure(Exception error) {

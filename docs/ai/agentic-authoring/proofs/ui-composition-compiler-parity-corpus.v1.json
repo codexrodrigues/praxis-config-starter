@@ -1,6 +1,6 @@
 {
   "schemaVersion": "praxis.ui-composition-compiler-parity-corpus/v1",
-  "corpusVersion": "1.4.0",
+  "corpusVersion": "1.5.0",
   "kind": "praxis.ui-composition-compiler-parity-corpus",
   "description": "Neutral deterministic corpus for Java/TypeScript UiCompositionPlan compiler parity and separately phased Angular target readiness.",
   "canonicalization": {
@@ -20,11 +20,169 @@
   },
   "compilerReceipts": {
     "java": {
-      "scope": "source-git-blob-and-compiled-class-bytes",
-      "sourcePath": "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.java",
-      "sourceGitBlob": "c8986fc3944d016fa037c2994b0bcc8124d298db",
-      "artifactPath": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.class",
-      "artifactSha256": "5291a1e215621718ce0a32d8a724a730b9bbfb5dc4417092fb74e218a0992e9b"
+      "scope": "ordered-praxis-source-and-class-byte-closure",
+      "sources": [
+        {
+          "id": "golden-corpus-runner",
+          "sourcePath": "src/test/java/org/praxisplatform/config/ai/authoring/UiCompositionGoldenCorpusRunner.java",
+          "sourceGitBlob": "b1cb06502ac731285bec3e5f1c89222fa1b05f28",
+          "artifacts": [
+            { "path": "target/test-classes/org/praxisplatform/config/ai/authoring/UiCompositionGoldenCorpusRunner.class", "sha256": "c8cd51dd7a7ecb4b017a0b0327b54e8d82fc61d866f37fce0440a6df92978361" },
+            { "path": "target/test-classes/org/praxisplatform/config/ai/authoring/UiCompositionGoldenCorpusRunner$CanonicalDiagnosticIdentity.class", "sha256": "dc0de17b1f5ddae4d3f970db436d1c922fa082a333ca359bbfa8000d667fb4f1" },
+            { "path": "target/test-classes/org/praxisplatform/config/ai/authoring/UiCompositionGoldenCorpusRunner$DiagnosticIdentity.class", "sha256": "526e999b4ded966a41327c2449e281d001ed522f981a05a1d4426f531cb09bdb" },
+            { "path": "target/test-classes/org/praxisplatform/config/ai/authoring/UiCompositionGoldenCorpusRunner$TemplateResolution.class", "sha256": "cdd61a884eaa4304e3ce62024fbe46803f50db66a04bf3252d76b5ad9b661ba4" }
+          ]
+        },
+        {
+          "id": "agentic-authoring-test-paths",
+          "sourcePath": "src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTestPaths.java",
+          "sourceGitBlob": "38dd4810891e348aadc0077f41d83595a8fd0d55",
+          "artifacts": [
+            { "path": "target/test-classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringTestPaths.class", "sha256": "4c4afed9c9f305e3885c13adc852026af3f38b6c9f9d76385107bd5d36ebd865" }
+          ]
+        },
+        {
+          "id": "ui-composition-plan-compiler",
+          "sourcePath": "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.java",
+          "sourceGitBlob": "c8986fc3944d016fa037c2994b0bcc8124d298db",
+          "artifacts": [
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.class", "sha256": "5291a1e215621718ce0a32d8a724a730b9bbfb5dc4417092fb74e218a0992e9b" },
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$CompileResult.class", "sha256": "0b613972aa728185933c9e969628f3d251c972b54671707dac663af92f709e42" },
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$CompilerDiagnostic.class", "sha256": "a115e1748116502539beecbcb79a457d83ec4e55af0b05613d560a1ef9311224" },
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$MasterDetailAnalysis.class", "sha256": "d8d55b0b3c44c4dd465ee211884d94fe6dc066816d13357e39fc782c8f262772" },
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$MasterDetailWidget.class", "sha256": "282538198fd546708ae9039a807e6c0f6761de6611a29880a365df5d383e0eb3" },
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$NestedWidgetArrayLocation.class", "sha256": "a75cd92b7283417cf93bc5580b54daa88e89aa791eddc536b88f599dec587667" },
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$SlotDefinition.class", "sha256": "4938e21330d95309f0d10b1f8ed4abe93696e1496dbb7988e63fed93f0d14c1a" },
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$UiCompositionLayoutMaterialization.class", "sha256": "efcbf380f815cf8abda48172b9ba3792f420ee7f394928913ccaeb9818e3c9a1" }
+          ]
+        },
+        {
+          "id": "compiled-page-patch-validator",
+          "sourcePath": "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringCompiledPagePatchValidator.java",
+          "sourceGitBlob": "762f62c9702ba72e4eccaf04b5af1858496bc082",
+          "artifacts": [
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringCompiledPagePatchValidator.class", "sha256": "18e74ae7aa9e36377c888a6508fdff47193766193dcb307b4a8185a64102e495" }
+          ]
+        },
+        {
+          "id": "ui-composition-template-resolver",
+          "sourcePath": "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionTemplateResolver.java",
+          "sourceGitBlob": "0a982ed8f2f9c11f952fb9f10a22ae576de14342",
+          "artifacts": [
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionTemplateResolver.class", "sha256": "4694a22c63ea7fdc1f886600c0ff30da313c456ae7cacd3929c32b2900719f9a" },
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionTemplateResolver$Resolution.class", "sha256": "f33d3b23f7ad591afeb3633c1bcbe6cd17c14ab81677e852e257d928727f448b" }
+          ]
+        },
+        {
+          "id": "canonical-json-hash-service",
+          "sourcePath": "src/main/java/org/praxisplatform/config/service/CanonicalJsonHashService.java",
+          "sourceGitBlob": "112389a9ff70fb61d0ee80efdd1639863155c476",
+          "artifacts": [
+            { "path": "target/classes/org/praxisplatform/config/service/CanonicalJsonHashService.class", "sha256": "5edfb2013007c75a7ef416db56adb4e0480b057bf0cc78cdaed644d8a6290040" }
+          ]
+        },
+        {
+          "id": "ai-registry",
+          "sourcePath": "src/main/java/org/praxisplatform/config/domain/AiRegistry.java",
+          "sourceGitBlob": "16693e628fb4c18b5d440add03cecc16db7b6912",
+          "artifacts": [
+            { "path": "target/classes/org/praxisplatform/config/domain/AiRegistry.class", "sha256": "5c0749edb37bcd3241a5a9995e7f3bf9d2d4d65670945a3a7beac89d544751ad" },
+            { "path": "target/classes/org/praxisplatform/config/domain/AiRegistry$AiRegistryBuilder.class", "sha256": "5e1bcd34f81f886bf3daf9dd4c64bfd8320f6ee7d6e5115cd1ea44f109d4b366" }
+          ]
+        },
+        {
+          "id": "ai-registry-template-record",
+          "sourcePath": "src/main/java/org/praxisplatform/config/dto/AiRegistryTemplateRecord.java",
+          "sourceGitBlob": "37d3c0ab2d790940d0d8d825ae093dbbc753c11e",
+          "artifacts": [
+            { "path": "target/classes/org/praxisplatform/config/dto/AiRegistryTemplateRecord.class", "sha256": "b65d9e988ce18eea9a660f7f0dd027bdf0e94d455c5ad9a8c2a940f2f1cfd85c" },
+            { "path": "target/classes/org/praxisplatform/config/dto/AiRegistryTemplateRecord$AiRegistryTemplateRecordBuilder.class", "sha256": "e249bcb0996a52597f8f3d980732f68eb578c3257108e854d9c18b91b24008ee" }
+          ]
+        },
+        {
+          "id": "ai-registry-template-revision",
+          "sourcePath": "src/main/java/org/praxisplatform/config/dto/AiRegistryTemplateRevision.java",
+          "sourceGitBlob": "2117d6e0ea8b077609a8a46f4c5b27a9848403aa",
+          "artifacts": [
+            { "path": "target/classes/org/praxisplatform/config/dto/AiRegistryTemplateRevision.class", "sha256": "c14068776cb84f552346a8566206bfbc29ead4c81f8c20eb8d8d582c018d2356" },
+            { "path": "target/classes/org/praxisplatform/config/dto/AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder.class", "sha256": "59040759e6ab737ab7601c4ad5af8adbc6dc9e2d7fee680e5abcb50f92a02f81" }
+          ]
+        },
+        {
+          "id": "ai-registry-template-service-mock-boundary",
+          "sourcePath": "src/main/java/org/praxisplatform/config/service/AiRegistryTemplateService.java",
+          "sourceGitBlob": "ea91c03eff1835aa064bdb29f5b12a0abe55e353",
+          "artifacts": [
+            { "path": "target/classes/org/praxisplatform/config/service/AiRegistryTemplateService.class", "sha256": "0d50771e5f5a71cf098140a22963dd8cf1b96a6708b6f709d03eaee3bebb7e41" }
+          ]
+        },
+        {
+          "id": "ai-registry-scope",
+          "sourcePath": "src/main/java/org/praxisplatform/config/domain/Scope.java",
+          "sourceGitBlob": "44d07ea5a67a9ff765f011cb62f97c810c6fd29c",
+          "artifacts": [
+            { "path": "target/classes/org/praxisplatform/config/domain/Scope.class", "sha256": "b41ade90524053da95c9a07e3b6a969aaef114c34e6afb91c6717650e818e102" }
+          ]
+        }
+      ],
+      "dependencyGraph": [
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler -> org.praxisplatform.config.ai.authoring.AgenticAuthoringCompiledPagePatchValidator",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$CompileResult",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$CompilerDiagnostic",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$MasterDetailAnalysis",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$MasterDetailWidget",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$NestedWidgetArrayLocation",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$SlotDefinition",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$UiCompositionLayoutMaterialization",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$CompileResult -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$CompileResult -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$CompilerDiagnostic",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$CompilerDiagnostic -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$MasterDetailAnalysis -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$MasterDetailAnalysis -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$CompilerDiagnostic",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$MasterDetailAnalysis -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$MasterDetailWidget",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$MasterDetailWidget -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$NestedWidgetArrayLocation -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$SlotDefinition -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$UiCompositionLayoutMaterialization -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver$Resolution",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver -> org.praxisplatform.config.domain.AiRegistry",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver -> org.praxisplatform.config.dto.AiRegistryTemplateRecord",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver -> org.praxisplatform.config.dto.AiRegistryTemplateRevision",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver -> org.praxisplatform.config.service.AiRegistryTemplateService",
+        "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver$Resolution -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.ai.authoring.AgenticAuthoringTestPaths",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$CompileResult",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompiler$CompilerDiagnostic",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver$Resolution",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner$CanonicalDiagnosticIdentity",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner$DiagnosticIdentity",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner$TemplateResolution",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.domain.AiRegistry",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.domain.AiRegistry$AiRegistryBuilder",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.dto.AiRegistryTemplateRecord",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.dto.AiRegistryTemplateRecord$AiRegistryTemplateRecordBuilder",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.dto.AiRegistryTemplateRevision",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.dto.AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.service.AiRegistryTemplateService",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner -> org.praxisplatform.config.service.CanonicalJsonHashService",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner$CanonicalDiagnosticIdentity -> org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner$DiagnosticIdentity -> org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner$TemplateResolution -> org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner",
+        "org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner$TemplateResolution -> org.praxisplatform.config.ai.authoring.UiCompositionGoldenCorpusRunner$DiagnosticIdentity",
+        "org.praxisplatform.config.domain.AiRegistry -> org.praxisplatform.config.domain.AiRegistry$AiRegistryBuilder",
+        "org.praxisplatform.config.domain.AiRegistry -> org.praxisplatform.config.domain.Scope",
+        "org.praxisplatform.config.domain.AiRegistry$AiRegistryBuilder -> org.praxisplatform.config.domain.AiRegistry",
+        "org.praxisplatform.config.domain.AiRegistry$AiRegistryBuilder -> org.praxisplatform.config.domain.Scope",
+        "org.praxisplatform.config.dto.AiRegistryTemplateRecord -> org.praxisplatform.config.dto.AiRegistryTemplateRecord$AiRegistryTemplateRecordBuilder",
+        "org.praxisplatform.config.dto.AiRegistryTemplateRecord -> org.praxisplatform.config.dto.AiRegistryTemplateRevision",
+        "org.praxisplatform.config.dto.AiRegistryTemplateRecord$AiRegistryTemplateRecordBuilder -> org.praxisplatform.config.dto.AiRegistryTemplateRecord",
+        "org.praxisplatform.config.dto.AiRegistryTemplateRecord$AiRegistryTemplateRecordBuilder -> org.praxisplatform.config.dto.AiRegistryTemplateRevision",
+        "org.praxisplatform.config.dto.AiRegistryTemplateRevision -> org.praxisplatform.config.dto.AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder",
+        "org.praxisplatform.config.dto.AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder -> org.praxisplatform.config.dto.AiRegistryTemplateRevision"
+      ],
+      "closureSha256": "e890690f1d9faa67760f960f675db115ca4dc10f0f53c17f663ffd4da0495303"
     }
   },
   "targetProfiles": {
@@ -38,35 +196,514 @@
       },
       "registryFingerprint": "fc2000aa21f1f0536b81acc0034b7b4901a580f2048676a0c74dbcf7223489ad",
       "runtimeExecutionReceipt": {
-        "scope": "source-trees-and-built-module-bytes",
-        "producerRevision": "1f88c7a502728cf0195f835448f9d52221e2b211",
-        "modules": {
-          "core": {
-            "sourcePath": "projects/praxis-core/src",
-            "sourceGitTree": "a66d528248c7f1cad8c6da37ff53a92d3851e515",
-            "artifactSha256": "034f539249aabb77f3969821c2ee3b19f3607fc605127e56bc81257f6a884c57"
+        "schemaVersion": "praxis.ui-composition-package-closure/v2",
+        "scope": "transitive-package-source-trees-and-directory-bytes",
+        "producerRevision": "ecc988f18cbd437499e696ca507d3ac87d92fa66",
+        "buildCommand": "node scripts/build-libs.js --prod --only praxis-core,praxis-table,praxis-list,praxis-tabs,praxis-page-builder",
+        "seeds": [
+          "@praxisui/core",
+          "@praxisui/list",
+          "@praxisui/page-builder",
+          "@praxisui/table",
+          "@praxisui/tabs"
+        ],
+        "buildInputs": [
+          {
+            "path": "package.json",
+            "gitBlob": "1c40dabf0f718fd56027521d5fbc26dbf6861df3",
+            "sha256": "12b5a9b82cd4950f4ed5a6ca5d99cdbdf498d984a1ef3f4ec5a7cd2125107f64"
           },
-          "table": {
-            "sourcePath": "projects/praxis-table/src",
-            "sourceGitTree": "ea6247152fed03bb7fae1cdf9294f19d532efce5",
-            "artifactSha256": "abd9ebb4da337ec5d69ba2eaf2f3c38b64a19f444160a31fd4d18d6d5a820517"
+          {
+            "path": "package-lock.json",
+            "gitBlob": "d8a8a505245828d6bf39ad1665b0b96af5bee82a",
+            "sha256": "da17e8ed29fd9962f9a58cfd9909c35f72dfb2997626647126aa1ffcbfec042a"
           },
-          "list": {
-            "sourcePath": "projects/praxis-list/src",
-            "sourceGitTree": "592ddfb99b6e20092d48e3fe08bd18ce88f09896",
-            "artifactSha256": "9de4b39d966601e9da78b4ce9cbdcaf25f01176738a93d3fdff0385eb98615b5"
+          {
+            "path": "angular.json",
+            "gitBlob": "27b113772996b7eac0be651c692aaf663a8171b1",
+            "sha256": "9ffc041e570bf2fcee9c1b2b0bc8a46062fbe8091022433a18532e7af404f683"
           },
-          "tabs": {
-            "sourcePath": "projects/praxis-tabs/src",
-            "sourceGitTree": "1efed31b18d211f9a7008648612ea6393cf51120",
-            "artifactSha256": "c641bb71b0fcaf32899ac3d57f3f401f6ebfd606eeda87f5af9605c2a4798713"
+          {
+            "path": "tsconfig.json",
+            "gitBlob": "c678a4a9b8a28b0c92cdc133b88cc47b9b89e5e1",
+            "sha256": "71acec3b487daf98817a3c1b1614df3a83be1221030a647af3a9d63085a0d221"
           },
-          "page-builder": {
-            "sourcePath": "projects/praxis-page-builder/src",
-            "sourceGitTree": "3ba4d280f5d809c2c2bc18ac5672cb03906807e1",
-            "artifactSha256": "0d7d6d1d08ab5496a833079a03a866672b3692ac11c7797f88b0885563acdc77"
+          {
+            "path": "scripts/build-libs.js",
+            "gitBlob": "55c40622bdc796991d382b2b655eb43153da5f40",
+            "sha256": "f6464cc5d7041a6937f0cc0dacf1074b526203065fd68516c247194403b3f7e3"
+          },
+          {
+            "path": "scripts/lib-graph.js",
+            "gitBlob": "3c65cfb79a3cf18cc0b7fa75dfdb28c5035137ff",
+            "sha256": "5a18bf2a256fcec8bd8871305d0f0d5196f6586e81ab26f39d4e7d3c096f138e"
+          },
+          {
+            "path": "tools/ai-registry/build-ui-composition-package-closure.mjs",
+            "gitBlob": "e00d5db1775413532d4262e48e863fce5bfd1c7a",
+            "sha256": "0a42860f01141ed61a9b3dc92553c9fa9be5e134484bb11798d3511440b43b2f"
           }
-        }
+        ],
+        "packages": [
+          {
+            "name": "@praxisui/ai",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-ai",
+            "sourceGitTree": "54210dca152e7c20319a2ca5b8ee4ce1d3d6e997",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/ai",
+            "artifactSha256": "4a8c8c2f11cc64acc50fc433af5950b5540e89c16221212eb58540e3d0f85f3c",
+            "manifestSha256": "53528af1d5233ffee77a3a629206c910f8955f028a84be495e3679ae8be1b876",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-ai.mjs",
+                "sha256": "a258ae147cd67c99dc903af91334068b07db3fdad60efdbbb14bb134d473f906"
+              }
+            ],
+            "praxisDependencies": [
+              "core"
+            ],
+            "manifestPraxisDependencies": [
+              "core"
+            ],
+            "emittedPraxisImports": [
+              "core"
+            ]
+          },
+          {
+            "name": "@praxisui/core",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-core",
+            "sourceGitTree": "2671c27da4eb86cd8831f4596ad5523e7bce88e0",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/core",
+            "artifactSha256": "1eb293369a8da8b602276e0385ec1592c6ba5c8c4d2a93a3a174607d0079bd23",
+            "manifestSha256": "5bed2be4bcb5d4f4092562bb69d1c5840b67eed1aebf6386ad8945b3bf5561a7",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-core.mjs",
+                "sha256": "caba421b6499be5543cb7b68ae82d92e42c5cd6ea5240e6eae4675cc399e38c8"
+              }
+            ],
+            "praxisDependencies": [],
+            "manifestPraxisDependencies": [],
+            "emittedPraxisImports": []
+          },
+          {
+            "name": "@praxisui/cron-builder",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-cron-builder",
+            "sourceGitTree": "0779880f5c157b7c3ff21bd4d7192b9e4b580a56",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/cron-builder",
+            "artifactSha256": "3640bbbf6db66d27522f9a2a9f0213fee3fadd0ec8ed5d67bd21030f06cb33cd",
+            "manifestSha256": "7ec5867781ec31931d5a58f5e178cfd2876db37d6f0b7bb5badcaae03cefe7d2",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-cron-builder.mjs",
+                "sha256": "737befbac37bc3a86c855160de7b9a687e6cfdd8bbabc61aebae8b35c5be46d3"
+              }
+            ],
+            "praxisDependencies": [
+              "ai",
+              "core"
+            ],
+            "manifestPraxisDependencies": [
+              "ai",
+              "core"
+            ],
+            "emittedPraxisImports": [
+              "core"
+            ]
+          },
+          {
+            "name": "@praxisui/dialog",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-dialog",
+            "sourceGitTree": "64d84cd14f2935d9948ce841c1e91fbb7df61636",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/dialog",
+            "artifactSha256": "608a52ebe1bfef4ad7eef10d58480bbf53d6b0f263e502e66112ef99f093bc1c",
+            "manifestSha256": "b6b3bd0d3bfa22be7aea6a5e16856ca4dab1905efb9abd2a05596e6ef8a9c572",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-dialog.mjs",
+                "sha256": "0d3a91dffb94872b08840e07a94d86ce71e717b13121d8245a82e831f08e6d31"
+              }
+            ],
+            "praxisDependencies": [
+              "core"
+            ],
+            "manifestPraxisDependencies": [
+              "core"
+            ],
+            "emittedPraxisImports": [
+              "core"
+            ]
+          },
+          {
+            "name": "@praxisui/dynamic-fields",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-dynamic-fields",
+            "sourceGitTree": "72defa64d4e28e04f8adc994a8f97bf3e7444b3a",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/dynamic-fields",
+            "artifactSha256": "cf9e9a87a0501cddcc1b674be89c15230524b4ba7459bfa5516acfca727fef3a",
+            "manifestSha256": "9d7f4910a5885a2615c0d772e0ae414b686f928753a4135ca8cb9fb82e7ac19d",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-dynamic-fields.mjs",
+                "sha256": "a86ebe6720579636346fb680cc544198749f9ce73a7ddce1b5191f6afb157746"
+              }
+            ],
+            "praxisDependencies": [
+              "core",
+              "cron-builder"
+            ],
+            "manifestPraxisDependencies": [
+              "core",
+              "cron-builder"
+            ],
+            "emittedPraxisImports": [
+              "core",
+              "cron-builder"
+            ]
+          },
+          {
+            "name": "@praxisui/dynamic-form",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-dynamic-form",
+            "sourceGitTree": "6977b160cbe4c89a3a4deff8b1fc3591fecaa3a9",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/dynamic-form",
+            "artifactSha256": "1283095867c2612de497c2149c0acc0bc41ea422002e4eaafc368733e6c63916",
+            "manifestSha256": "cf889ad6f6f8c9348e1b5883ec369ffc69917b4055bc1e1456a978f65d89c4e8",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-dynamic-form.mjs",
+                "sha256": "3bfb1ba357bb9a555ccbd7b7b98b2c787201afdf1c0b25426aa10ef17f3b94c4"
+              }
+            ],
+            "praxisDependencies": [
+              "ai",
+              "core",
+              "dynamic-fields",
+              "metadata-editor",
+              "rich-content",
+              "settings-panel",
+              "visual-builder"
+            ],
+            "manifestPraxisDependencies": [
+              "ai",
+              "core",
+              "dynamic-fields",
+              "metadata-editor",
+              "rich-content",
+              "settings-panel",
+              "visual-builder"
+            ],
+            "emittedPraxisImports": [
+              "ai",
+              "core",
+              "dynamic-fields",
+              "metadata-editor",
+              "rich-content",
+              "settings-panel",
+              "visual-builder"
+            ]
+          },
+          {
+            "name": "@praxisui/list",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-list",
+            "sourceGitTree": "1b810d7d3f00410dd861d6dbf69c7d7ca666c745",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/list",
+            "artifactSha256": "3fb893c3215a628629e7715ba0f6e396388a48685ebf8e3b479ac1e54a501aff",
+            "manifestSha256": "d56dcf5e295af8f4ee6fbc208527d40f65df9144f490940e7fed0336ad6d4a33",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-list.mjs",
+                "sha256": "9de4b39d966601e9da78b4ce9cbdcaf25f01176738a93d3fdff0385eb98615b5"
+              }
+            ],
+            "praxisDependencies": [
+              "ai",
+              "core",
+              "dynamic-fields",
+              "rich-content",
+              "settings-panel"
+            ],
+            "manifestPraxisDependencies": [
+              "ai",
+              "core",
+              "dynamic-fields",
+              "rich-content",
+              "settings-panel"
+            ],
+            "emittedPraxisImports": [
+              "ai",
+              "core",
+              "dynamic-fields",
+              "rich-content",
+              "settings-panel"
+            ]
+          },
+          {
+            "name": "@praxisui/metadata-editor",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-metadata-editor",
+            "sourceGitTree": "7f34555c1b7e4b97b3958be100f1cd4b152b577d",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/metadata-editor",
+            "artifactSha256": "4048b4eb4cbd2d1e5757769ac3fd36e4cd98ad2018db643701f66acddef6bf2e",
+            "manifestSha256": "b406c7c269ceadf2db52119a862ae6fe1e616df9532095ac504b415561b9f98d",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-metadata-editor.mjs",
+                "sha256": "1bac038b6f5b1054ab1aeae60fd33ab41981e5a63fffe6e64a9aabb2454e3599"
+              }
+            ],
+            "praxisDependencies": [
+              "ai",
+              "core",
+              "dynamic-fields",
+              "settings-panel"
+            ],
+            "manifestPraxisDependencies": [
+              "ai",
+              "core",
+              "dynamic-fields",
+              "settings-panel"
+            ],
+            "emittedPraxisImports": [
+              "core",
+              "dynamic-fields",
+              "settings-panel"
+            ]
+          },
+          {
+            "name": "@praxisui/page-builder",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-page-builder",
+            "sourceGitTree": "cb0bab02eb6366f688975b4825113539223b483b",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/page-builder",
+            "artifactSha256": "3bcec074644385863f8d02220f26cbde93c255378f5c2a2a1536510bc5a97386",
+            "manifestSha256": "4af6470a31038d43e532837f55196ef4e3311f9c2a7a737ea013008f0f42b63c",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-page-builder.mjs",
+                "sha256": "0d7d6d1d08ab5496a833079a03a866672b3692ac11c7797f88b0885563acdc77"
+              }
+            ],
+            "praxisDependencies": [
+              "ai",
+              "core",
+              "settings-panel"
+            ],
+            "manifestPraxisDependencies": [
+              "ai",
+              "core",
+              "settings-panel"
+            ],
+            "emittedPraxisImports": [
+              "ai",
+              "core",
+              "settings-panel"
+            ]
+          },
+          {
+            "name": "@praxisui/rich-content",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-rich-content",
+            "sourceGitTree": "0ffed1b4f79edb080e8aacfd6f9f9854276a55a1",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/rich-content",
+            "artifactSha256": "0c7317e85175f836c11192f14e4f43c68b978ddaf4b1678c0d5d9bc320c86e04",
+            "manifestSha256": "7eb969a741037251f7e1edefe5ecb5e33b603366bacfbc2b9da9f92862dabf79",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-rich-content.mjs",
+                "sha256": "9a7db4d1d9f38c836bf1491fbe470e49515fa61711157f1852addb5510fc4cdf"
+              }
+            ],
+            "praxisDependencies": [
+              "core"
+            ],
+            "manifestPraxisDependencies": [
+              "core"
+            ],
+            "emittedPraxisImports": [
+              "core"
+            ]
+          },
+          {
+            "name": "@praxisui/settings-panel",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-settings-panel",
+            "sourceGitTree": "db77a89c167db4253021bd3fcc489e9dabf40598",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/settings-panel",
+            "artifactSha256": "b60604e23c16e9162e1f5e851165216f75cb9a949b335d113561e601e08080df",
+            "manifestSha256": "42f323e833b67084ef7aa573790d50465a2ef7debf877d023ed9dacd3b8c8b9f",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-settings-panel.mjs",
+                "sha256": "f2700a2a9e6975773c69dd918eb22133f577b7210c64b105a2f4d959d9847205"
+              }
+            ],
+            "praxisDependencies": [
+              "ai",
+              "core",
+              "dynamic-fields"
+            ],
+            "manifestPraxisDependencies": [
+              "ai",
+              "core",
+              "dynamic-fields"
+            ],
+            "emittedPraxisImports": [
+              "ai",
+              "core",
+              "dynamic-fields"
+            ]
+          },
+          {
+            "name": "@praxisui/table",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-table",
+            "sourceGitTree": "03fc56de19dad616899bd6742d33a0cf7cf2c848",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/table",
+            "artifactSha256": "884418b71e33f5731a35b85b8b3064c284bece5ab3595570fffb7e57a27877cb",
+            "manifestSha256": "50b8113ed6ac5ca5aa3d10e8273124fed90307f806181885b053da3c1baa7080",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-table-filter-drawer-adapter.mjs",
+                "sha256": "7d79ff401adb0d204140bd0009867585a0fe4dbc67e23f2ad09196920655b102"
+              },
+              {
+                "path": "fesm2022/praxisui-table.mjs",
+                "sha256": "abd9ebb4da337ec5d69ba2eaf2f3c38b64a19f444160a31fd4d18d6d5a820517"
+              }
+            ],
+            "praxisDependencies": [
+              "ai",
+              "core",
+              "dialog",
+              "dynamic-fields",
+              "dynamic-form",
+              "metadata-editor",
+              "rich-content",
+              "settings-panel",
+              "table-rule-builder"
+            ],
+            "manifestPraxisDependencies": [
+              "ai",
+              "core",
+              "dialog",
+              "dynamic-fields",
+              "dynamic-form",
+              "metadata-editor",
+              "rich-content",
+              "settings-panel",
+              "table-rule-builder"
+            ],
+            "emittedPraxisImports": [
+              "ai",
+              "core",
+              "dialog",
+              "dynamic-fields",
+              "dynamic-form",
+              "metadata-editor",
+              "rich-content",
+              "settings-panel",
+              "table-rule-builder"
+            ]
+          },
+          {
+            "name": "@praxisui/table-rule-builder",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-table-rule-builder",
+            "sourceGitTree": "e5eee94b02b0886bdfd22fb3fac7bf4a699344cd",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/table-rule-builder",
+            "artifactSha256": "39fc6cbd8616d8ce1d707d70a8290f650e321ac23cd6f2038f90a3fe27f09595",
+            "manifestSha256": "4f1a54c48583270ce40c6ef3db9424d6c888c616adcd84ba4648d5781fecd186",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-table-rule-builder.mjs",
+                "sha256": "7c4d298c9f351f07a8caf5b4fc7066d3908ddcdc16d40f6d406776b449c4dc73"
+              }
+            ],
+            "praxisDependencies": [
+              "ai",
+              "core",
+              "dynamic-fields"
+            ],
+            "manifestPraxisDependencies": [
+              "ai",
+              "core",
+              "dynamic-fields"
+            ],
+            "emittedPraxisImports": [
+              "core",
+              "dynamic-fields"
+            ]
+          },
+          {
+            "name": "@praxisui/tabs",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-tabs",
+            "sourceGitTree": "4e44effdf9bf98728dcad46daea291bb4db6d186",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/tabs",
+            "artifactSha256": "d7f0000a17196ad0747f73b1a73bb9ab626fe1d72781ebe92214aeec7bf30553",
+            "manifestSha256": "3c086d05dfbcc5fe3871eb89baa51c7dd9b96d4318459db8928e994c817c6b3f",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-tabs.mjs",
+                "sha256": "c641bb71b0fcaf32899ac3d57f3f401f6ebfd606eeda87f5af9605c2a4798713"
+              }
+            ],
+            "praxisDependencies": [
+              "ai",
+              "core",
+              "dynamic-fields",
+              "settings-panel"
+            ],
+            "manifestPraxisDependencies": [
+              "ai",
+              "core",
+              "dynamic-fields",
+              "settings-panel"
+            ],
+            "emittedPraxisImports": [
+              "ai",
+              "core",
+              "dynamic-fields",
+              "settings-panel"
+            ]
+          },
+          {
+            "name": "@praxisui/visual-builder",
+            "version": "9.0.37",
+            "sourcePath": "projects/praxis-visual-builder",
+            "sourceGitTree": "ebf499b8471288727f5f30319e2f926ab71b9257",
+            "artifactPath": "dist/ui-composition-package-closure/node_modules/@praxisui/visual-builder",
+            "artifactSha256": "a8530dbfad69d341e0d9e64493c2f5c8325f6c264e0cd9eb20e28a28e54ac12c",
+            "manifestSha256": "20721cd977eb506ac519af41bc82cb7cbf24c47d1612d46ffc3edc9d313a2972",
+            "exportEntries": [
+              {
+                "path": "fesm2022/praxisui-visual-builder.mjs",
+                "sha256": "9d38b84fbaffd8294bb01d3d0208539610c7df1c0fcfedd12db419db6e464737"
+              }
+            ],
+            "praxisDependencies": [
+              "ai",
+              "core",
+              "metadata-editor",
+              "settings-panel"
+            ],
+            "manifestPraxisDependencies": [
+              "ai",
+              "core",
+              "metadata-editor",
+              "settings-panel"
+            ],
+            "emittedPraxisImports": [
+              "ai",
+              "core"
+            ]
+          }
+        ]
       },
       "providerEvidenceRefs": [
         {
@@ -367,16 +1004,28 @@
                 "direction": "output"
               },
               "to": { "kind": "global-action", "actionId": "trackEvent" },
-              "intent": "command-dispatch"
+              "intent": "command-dispatch",
+              "transform": {
+                "kind": "template",
+                "id": "employee-selection-analytics-envelope",
+                "inputSource": "event",
+                "template": {
+                  "eventName": "employee.selection.changed",
+                  "payload": { "employeeId": "${payload.item.id}" }
+                }
+              }
             }
           ]
+        },
+        "targetProbe": {
+          "dispatchPayload": { "item": { "id": "employee-42" } }
         }
       },
       "expected": {
         "compilerParity": {
           "phase": "compiler-parity",
           "outcome": "pass",
-          "projectionSha256": "a8f974cc8648a67d13e5b0572b9165003fae40a3c3b47d96dd50a922f73870db",
+          "projectionSha256": "037202d351a279959d5c7353c6fff2af09f20fe61e3495152481159c98379851",
           "diagnostics": []
         },
         "targetAttestation": {

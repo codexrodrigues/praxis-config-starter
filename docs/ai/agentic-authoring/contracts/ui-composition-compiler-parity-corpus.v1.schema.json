@@ -112,46 +112,159 @@
         "runtimeExecutionReceipt": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["scope", "producerRevision", "modules"],
+          "required": [
+            "schemaVersion",
+            "scope",
+            "producerRevision",
+            "buildCommand",
+            "seeds",
+            "buildInputs",
+            "packages"
+          ],
           "properties": {
-            "scope": { "const": "source-trees-and-built-module-bytes" },
+            "schemaVersion": { "const": "praxis.ui-composition-package-closure/v2" },
+            "scope": { "const": "transitive-package-source-trees-and-directory-bytes" },
             "producerRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-            "modules": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["core", "table", "list", "tabs", "page-builder"],
-              "properties": {
-                "core": { "$ref": "#/$defs/runtimeModuleReceipt" },
-                "table": { "$ref": "#/$defs/runtimeModuleReceipt" },
-                "list": { "$ref": "#/$defs/runtimeModuleReceipt" },
-                "tabs": { "$ref": "#/$defs/runtimeModuleReceipt" },
-                "page-builder": { "$ref": "#/$defs/runtimeModuleReceipt" }
-              }
+            "buildCommand": { "type": "string", "minLength": 1 },
+            "seeds": {
+              "type": "array",
+              "minItems": 5,
+              "maxItems": 5,
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^@praxisui/[a-z0-9-]+$" }
+            },
+            "buildInputs": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/runtimeBuildInputReceipt" }
+            },
+            "packages": {
+              "type": "array",
+              "minItems": 15,
+              "maxItems": 15,
+              "items": { "$ref": "#/$defs/runtimePackageReceipt" }
             }
           }
         }
       }
     },
-    "runtimeModuleReceipt": {
+    "runtimeBuildInputReceipt": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sourcePath", "sourceGitTree", "artifactSha256"],
+      "required": ["path", "gitBlob", "sha256"],
       "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "gitBlob": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "runtimePackageReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "sourcePath",
+        "sourceGitTree",
+        "artifactPath",
+        "artifactSha256",
+        "manifestSha256",
+        "exportEntries",
+        "praxisDependencies",
+        "manifestPraxisDependencies",
+        "emittedPraxisImports"
+      ],
+      "properties": {
+        "name": { "type": "string", "pattern": "^@praxisui/[a-z0-9-]+$" },
+        "version": { "type": "string", "minLength": 1 },
         "sourcePath": { "type": "string", "minLength": 1 },
         "sourceGitTree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "artifactSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "artifactPath": { "type": "string", "minLength": 1 },
+        "artifactSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "manifestSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "exportEntries": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/runtimeArtifactEntryReceipt" }
+        },
+        "praxisDependencies": { "$ref": "#/$defs/runtimePackageNameArray" },
+        "manifestPraxisDependencies": { "$ref": "#/$defs/runtimePackageNameArray" },
+        "emittedPraxisImports": { "$ref": "#/$defs/runtimePackageNameArray" }
       }
+    },
+    "runtimeArtifactEntryReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "runtimePackageNameArray": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }
     },
     "javaCompilerReceipt": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scope", "sourcePath", "sourceGitBlob", "artifactPath", "artifactSha256"],
+      "required": ["scope", "sources", "dependencyGraph", "closureSha256"],
       "properties": {
-        "scope": { "const": "source-git-blob-and-compiled-class-bytes" },
-        "sourcePath": { "const": "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.java" },
+        "scope": { "const": "ordered-praxis-source-and-class-byte-closure" },
+        "sources": {
+          "type": "array",
+          "minItems": 11,
+          "maxItems": 11,
+          "items": { "$ref": "#/$defs/javaExecutionSource" }
+        },
+        "dependencyGraph": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^org\\.praxisplatform\\.config\\..+ -> org\\.praxisplatform\\.config\\..+$"
+          }
+        },
+        "closureSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "javaExecutionSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sourcePath", "sourceGitBlob", "artifacts"],
+      "properties": {
+        "id": {
+          "enum": [
+            "golden-corpus-runner",
+            "agentic-authoring-test-paths",
+            "ui-composition-plan-compiler",
+            "compiled-page-patch-validator",
+            "ui-composition-template-resolver",
+            "canonical-json-hash-service",
+            "ai-registry",
+            "ai-registry-template-record",
+            "ai-registry-template-revision",
+            "ai-registry-template-service-mock-boundary",
+            "ai-registry-scope"
+          ]
+        },
+        "sourcePath": { "type": "string", "minLength": 1 },
         "sourceGitBlob": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "artifactPath": { "const": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.class" },
-        "artifactSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/javaExecutionArtifact" }
+        }
+      }
+    },
+    "javaExecutionArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       }
     },
     "evidenceRef": {
@@ -236,6 +349,14 @@
       "properties": {
         "plan": { "type": "object" },
         "templateReference": { "type": "object" },
+        "targetProbe": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dispatchPayload"],
+          "properties": {
+            "dispatchPayload": {}
+          }
+        },
         "templateMaterialization": {
           "type": "object",
           "additionalProperties": false,

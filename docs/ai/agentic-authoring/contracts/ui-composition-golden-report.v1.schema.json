@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://praxisplatform.org/schemas/ai/ui-composition-golden-report.v1.schema.json",
+  "title": "Praxis UiCompositionPlan compiler golden report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "corpusVersion",
+    "corpusSha256",
+    "schemaSha256",
+    "reportSchemaSha256",
+    "engine",
+    "compilerIdentity",
+    "passed",
+    "globalFailures",
+    "cases"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "praxis.ui-composition-golden-report/v1" },
+    "corpusVersion": {
+      "oneOf": [
+        { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        { "type": "null" }
+      ]
+    },
+    "corpusSha256": { "$ref": "#/$defs/sha256" },
+    "schemaSha256": { "$ref": "#/$defs/sha256" },
+    "reportSchemaSha256": { "$ref": "#/$defs/sha256" },
+    "engine": { "const": "java" },
+    "compilerIdentity": { "$ref": "#/$defs/compilerIdentity" },
+    "targetProfileFingerprints": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/sha256" }
+    },
+    "passed": { "type": "boolean" },
+    "globalFailures": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "cases": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/caseReport" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "gitBlob": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "compilerIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "builderVersion",
+        "implementationSha256",
+        "implementationArtifact",
+        "sourceReceipt"
+      ],
+      "properties": {
+        "id": { "const": "config-ui-composition-plan-compiler" },
+        "builderVersion": {
+          "type": "string",
+          "pattern": "^config-ui-composition-plan-compiler@[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "implementationSha256": { "$ref": "#/$defs/sha256" },
+        "implementationArtifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path", "sha256"],
+          "properties": {
+            "kind": { "const": "jvm-class" },
+            "path": {
+              "const": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.class"
+            },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "sourceReceipt": { "$ref": "#/$defs/javaExecutionClosureReceipt" }
+      }
+    },
+    "javaExecutionClosureReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "sources", "dependencyGraph", "closureSha256"],
+      "properties": {
+        "scope": { "const": "ordered-praxis-source-and-class-byte-closure" },
+        "sources": {
+          "type": "array",
+          "minItems": 11,
+          "maxItems": 11,
+          "items": { "$ref": "#/$defs/javaExecutionSource" }
+        },
+        "dependencyGraph": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^org\\.praxisplatform\\.config\\..+ -> org\\.praxisplatform\\.config\\..+$"
+          }
+        },
+        "closureSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "javaExecutionSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sourcePath", "sourceGitBlob", "artifacts"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sourcePath": { "type": "string", "minLength": 1 },
+        "sourceGitBlob": { "$ref": "#/$defs/gitBlob" },
+        "artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/javaExecutionArtifact" }
+        }
+      }
+    },
+    "javaExecutionArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "caseReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "phase",
+        "outcome",
+        "diagnostics",
+        "canonicalDiagnostics",
+        "passed",
+        "failures"
+      ],
+      "properties": {
+        "caseId": { "type": "string", "minLength": 1 },
+        "phase": { "enum": ["compiler-parity", "template-attestation"] },
+        "outcome": { "enum": ["pass", "warning", "block"] },
+        "projectionSha256": { "$ref": "#/$defs/sha256" },
+        "projection": { "type": "object" },
+        "diagnostics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/diagnostic" }
+        },
+        "canonicalDiagnostics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/canonicalDiagnostic" }
+        },
+        "passed": { "type": "boolean" },
+        "failures": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "path", "severity", "provenance"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "path": { "type": ["string", "null"] },
+        "severity": { "enum": ["warning", "error"] },
+        "provenance": { "enum": ["compiler", "template-attestation"] }
+      }
+    },
+    "canonicalDiagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonicalId", "severity", "provenance"],
+      "properties": {
+        "canonicalId": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["warning", "error"] },
+        "provenance": { "enum": ["compiler", "template-attestation"] }
+      }
+    }
+  }
+}
