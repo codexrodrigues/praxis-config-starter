@@ -258,6 +258,7 @@ public class AgenticAuthoringTurnEngine {
                 AgenticAuthoringApplyTarget.resolve(request, principalContext);
         request = withoutAgenticApplyTargetContext(request);
         request = withoutClientAuthoringEvidenceContext(request);
+        request = withoutClientVerifiedDomainOperations(request);
         request = withGroundedRuntimeComponentContext(request);
         AgenticAuthoringTurnState state = initialState(request);
         List<AiProviderInvocationTelemetry> turnProviderInvocations = new ArrayList<>();
@@ -6220,6 +6221,16 @@ public class AgenticAuthoringTurnEngine {
         }
         ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
         sanitized.remove("authoringEvidence");
+        return copyWithContextHints(request, sanitized.isEmpty() ? null : sanitized);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withoutClientVerifiedDomainOperations(
+            AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
+            return request;
+        }
+        ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
+        sanitized.remove("verifiedDomainOperations");
         return copyWithContextHints(request, sanitized.isEmpty() ? null : sanitized);
     }
 

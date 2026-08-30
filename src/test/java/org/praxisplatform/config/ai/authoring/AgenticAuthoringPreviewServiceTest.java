@@ -4699,8 +4699,12 @@ class AgenticAuthoringPreviewServiceTest {
                 .isEqualTo("selectionChange");
         assertThat(compiledPage.at("/composition/links/2/to/ref/port").asText())
                 .isEqualTo("initialValue");
-        assertThat(compiledPage.at("/widgets/1/definition/inputs/config/toolbar/actions/0/discovery/rel").asText())
-                .isEqualTo("actions");
+        assertThat(compiledPage.at("/widgets/1/definition/inputs/config/actions/row/discovery/enabled").asBoolean())
+                .isTrue();
+        assertThat(compiledPage.at("/widgets/1/definition/inputs/config/actions/collection/discovery/enabled").asBoolean())
+                .isTrue();
+        assertThat(compiledPage.at("/widgets/1/definition/inputs/config/toolbar/actions").isMissingNode())
+                .isTrue();
         assertThat(result.compiledFormPatch().toString()).doesNotContain("resourceWorkspaceGrounding");
     }
 

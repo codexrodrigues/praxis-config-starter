@@ -1072,25 +1072,14 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 .putObject("selection")
                 .put("enabled", true)
                 .put("type", "single");
-        if (grounding.commandOperationCount() > 0) {
-            ObjectNode toolbar = config.putObject("toolbar");
-            toolbar.put("visible", true);
-            toolbar.put("title", resourceTitle(candidate));
-            ObjectNode action = toolbar.putArray("actions").addObject();
-            action.put("id", "inspect-governed-actions");
-            action.put("action", "inspect-actions");
-            action.put("label", "Ações disponíveis");
-            action.put("icon", "bolt");
-            action.put("type", "button");
-            action.put("appearance", "outlined");
-            action.put("position", "end");
-            action.put("order", 100);
-            action.putObject("discovery")
-                    .put("rel", "actions")
-                    .put("scope", "resource")
-                    .put("resourcePath", resourcePath)
-                    .put("resourceKey", grounding.resourceKey());
-        }
+        ObjectNode actions = config.putObject("actions");
+        actions.putObject("collection")
+                .putObject("discovery")
+                .put("enabled", grounding.hasCommands());
+        ObjectNode row = actions.putObject("row");
+        row.put("enabled", grounding.hasCommands());
+        row.putObject("discovery")
+                .put("enabled", grounding.hasCommands());
     }
 
     private void addWorkspaceFilter(
@@ -4301,6 +4290,13 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         workspace.put("operationCount", grounding.operations().size());
         workspace.put("filterOperationCount", grounding.filterOperationCount());
         workspace.put("commandOperationCount", grounding.commandOperationCount());
+        ObjectNode commandDiscovery = workspace.putObject("commandDiscovery");
+        commandDiscovery.put("status", grounding.commandOperationCount() > 0 ? "enabled" : "blocked");
+        commandDiscovery.put("source", "praxis-table-runtime-hateoas-capabilities");
+        commandDiscovery.put("scopeResolution", "runtime-action-catalog");
+        commandDiscovery.put("item", grounding.hasCommands());
+        commandDiscovery.put("collection", grounding.hasCommands());
+        commandDiscovery.put("endpointMaterializedByAuthoring", false);
         if (!grounding.failureCode().isBlank()) {
             workspace.put("failureCode", grounding.failureCode());
         }
@@ -4499,6 +4495,10 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
 
         private int commandOperationCount() {
             return commandOperations.size();
+        }
+
+        private boolean hasCommands() {
+            return !commandOperations.isEmpty();
         }
     }
 }

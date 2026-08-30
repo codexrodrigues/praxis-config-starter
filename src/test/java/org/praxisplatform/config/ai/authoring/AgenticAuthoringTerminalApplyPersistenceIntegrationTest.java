@@ -174,8 +174,10 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 .isEqualTo("selectionChange");
         assertThat(persistedPage.at("/composition/links/1/to/ref/port").asText())
                 .isEqualTo("initialValue");
-        assertThat(persistedPage.at("/widgets/0/definition/inputs/config/toolbar/actions/0/discovery/rel").asText())
-                .isEqualTo("actions");
+        assertThat(persistedPage.at("/widgets/0/definition/inputs/config/actions/row/discovery/enabled").asBoolean())
+                .isTrue();
+        assertThat(persistedPage.at("/widgets/0/definition/inputs/config/actions/collection/discovery/enabled").asBoolean())
+                .isTrue();
         JsonNode persistedTags = objectMapper.readTree(persisted.config().getTags());
         assertThat(persistedTags.path("authoringResultEventId").asText())
                 .isEqualTo(terminal.getEventId().toString());
@@ -324,19 +326,9 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                         "resourcePath": "/api/operations/missoes",
                         "tableId": "missions-master",
                         "config": {
-                          "toolbar": {
-                            "visible": true,
-                            "actions": [{
-                              "id": "inspect-governed-actions",
-                              "action": "inspect-actions",
-                              "label": "Actions",
-                              "discovery": {
-                                "rel": "actions",
-                                "scope": "resource",
-                                "resourcePath": "/api/operations/missoes",
-                                "resourceKey": "operations.missoes"
-                              }
-                            }]
+                          "actions": {
+                            "collection": { "discovery": { "enabled": true } },
+                            "row": { "enabled": true, "discovery": { "enabled": true } }
                           },
                           "behavior": { "selection": { "enabled": true, "type": "single" } }
                         }

@@ -52,7 +52,7 @@ Classification: `ja-suportado-mal-nomeado-ou-mal-materializado` for state or evi
 
 ### Partially supported
 
-- the first resource-backed master/detail/filter/action-discovery materializer now exists, while the full five-archetype certification still remains incomplete;
+- a partial resource-backed master/detail/filter materializer now exists and can enable the official Table action discovery path from backend-owned verification; cross-language certification and the real HTTP/browser command smoke remain incomplete;
 - semantic grounding exists, but transaction lifecycle and UI composition are not closed in one real HTTP proof;
 - validation exists on both sides, but releases do not share one golden cross-language gate.
 
@@ -81,10 +81,13 @@ Implementation status for the first slice: the generic provider now consumes the
 existing verified-operation envelope, emits a resource Filter, Table master and
 Dynamic Form detail, binds `requestSearch -> queryContext` and
 `selectionChange -> state -> initialValue`, publishes responsive device layouts,
-and exposes action discovery only when a verified `/actions/` operation exists.
-The server preview/compiler path and transactional apply/ETag path have focused
-tests. See [the delta audit](RESOURCE-BACKED-WORKSPACE-DELTA-AUDIT.md) for the
-reuse classification and remaining gaps.
+and enables the official Table item/collection discovery policy only when a
+backend-owned verified `/actions/` operation exists. Client-provided operation
+envelopes are removed at HTTP ingress. The server preview/compiler path and
+transactional apply/ETag path have focused tests, but this is a partial slice:
+the shared #357 corpus/attestation and a real HTTP/browser command smoke are not
+integrated. See [the delta audit](RESOURCE-BACKED-WORKSPACE-DELTA-AUDIT.md) for
+the reuse classification and remaining gaps.
 
 The decision must describe semantic intent, archetype, resources, surfaces, actions, capabilities, components, slots, bindings and transactional lifecycle. It should materialize both compact authoring input and portable runtime output without leaking Angular implementation detail into Java.
 

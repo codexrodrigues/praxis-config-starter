@@ -3,6 +3,7 @@ package org.praxisplatform.config.controller;
 import jakarta.servlet.http.HttpServletRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import com.fasterxml.jackson.databind.node.MissingNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
@@ -227,6 +228,7 @@ public class AgenticAuthoringController {
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         requireTurnStreamSupport();
+        request = withoutClientVerifiedDomainOperations(request);
         requireSelectedDomainDecisionReadAccess(request, servletRequest);
         AiPrincipalContext principalContext = principalContextResolver.resolve(
                 servletRequest,
@@ -318,6 +320,7 @@ public class AgenticAuthoringController {
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         try {
+            request = withoutClientVerifiedDomainOperations(request);
             AgenticAuthoringPlanResult result = previewService.generateMinimalFormPlan(
                     request,
                     tenantId,
@@ -369,6 +372,7 @@ public class AgenticAuthoringController {
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         try {
+            request = withoutClientVerifiedDomainOperations(request);
             AgenticAuthoringPlanRequest effectiveRequest = withResolvedIntent(request, tenantId, userId, environment);
             String baseUrl = currentContextBaseUrl();
             Optional<AgenticAuthoringPreviewResult> consultativePreview =
@@ -386,6 +390,58 @@ public class AgenticAuthoringController {
         } catch (IllegalArgumentException | IllegalStateException | IOException ex) {
             return ResponseEntity.badRequest().body(AgenticAuthoringDryRunErrorResponse.configurationInvalid(ex.getMessage()));
         }
+    }
+
+    private AgenticAuthoringPlanRequest withoutClientVerifiedDomainOperations(
+            AgenticAuthoringPlanRequest request) {
+        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
+            return request;
+        }
+        ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
+        sanitized.remove("verifiedDomainOperations");
+        return new AgenticAuthoringPlanRequest(
+                request.userPrompt(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.currentPage(),
+                request.intentResolution(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                sanitized.isEmpty() ? null : sanitized);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withoutClientVerifiedDomainOperations(
+            AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
+            return request;
+        }
+        ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
+        sanitized.remove("verifiedDomainOperations");
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                sanitized.isEmpty() ? null : sanitized,
+                request.componentCapabilities(),
+                request.activeSemanticDecision(),
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
     }
 
     private Optional<AgenticAuthoringPreviewResult> previewConsultativeSemanticIntent(

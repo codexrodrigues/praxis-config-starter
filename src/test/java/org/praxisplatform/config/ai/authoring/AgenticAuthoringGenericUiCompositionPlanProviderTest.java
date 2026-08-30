@@ -906,7 +906,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
-    void materializesGovernedCommandDiscoveryFromVerifiedResourceOperations() {
+    void enablesOfficialRuntimeScopedCommandDiscoveryFromVerifiedResourceOperations() {
         ObjectNode contextHints = verifiedDomainOperations(
                 "schemas.filtered+resource.capabilities",
                 "/api/operations/missoes",
@@ -935,15 +935,21 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                         "/api/operations/missoes/capabilities",
                         "capability-operation:start");
 
-        JsonNode action = findWidgetInputs(plan, "praxis-table", "master")
-                .path("config").path("toolbar").path("actions").path(0);
-        assertThat(action.path("action").asText()).isEqualTo("inspect-actions");
-        assertThat(action.path("discovery").path("rel").asText()).isEqualTo("actions");
-        assertThat(action.path("discovery").path("resourcePath").asText())
-                .isEqualTo("/api/operations/missoes");
-        assertThat(action.path("discovery").path("resourceKey").asText())
-                .isEqualTo("operations.missoes");
-        assertThat(action.has("globalAction")).isFalse();
+        JsonNode config = findWidgetInputs(plan, "praxis-table", "master").path("config");
+        assertThat(config.path("actions").path("row").path("enabled").asBoolean()).isTrue();
+        assertThat(config.path("actions").path("row").path("discovery").path("enabled").asBoolean())
+                .isTrue();
+        assertThat(config.path("actions").path("collection").path("discovery").path("enabled").asBoolean())
+                .isTrue();
+        assertThat(config.has("toolbar")).isFalse();
+        assertThat(grounding.path("commandDiscovery").path("source").asText())
+                .isEqualTo("praxis-table-runtime-hateoas-capabilities");
+        assertThat(grounding.path("commandDiscovery").path("item").asBoolean()).isTrue();
+        assertThat(grounding.path("commandDiscovery").path("collection").asBoolean()).isTrue();
+        assertThat(grounding.path("commandDiscovery").path("scopeResolution").asText())
+                .isEqualTo("runtime-action-catalog");
+        assertThat(grounding.path("commandDiscovery").path("endpointMaterializedByAuthoring").asBoolean())
+                .isFalse();
         assertThat(findWidget(plan, "praxis-filter", "filter").path("outputs")
                 .path("requestSearch").asText()).isEqualTo("emit");
 
@@ -963,6 +969,40 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void enablesOfficialDiscoveryWithoutFabricatingTheCollectionCommandEndpoint() {
+        ObjectNode contextHints = verifiedDomainOperations(
+                "schemas.filtered+resource.capabilities",
+                "/api/operations/missoes",
+                "operations.missoes",
+                false);
+        ObjectNode envelope = (ObjectNode) contextHints.path("verifiedDomainOperations");
+        addVerifiedOperation(
+                (ArrayNode) envelope.path("entries"),
+                "/api/operations/missoes",
+                "operations.missoes",
+                "/api/operations/missoes/actions/recalculate",
+                "post",
+                "recalculate");
+        envelope.put("operationCount", envelope.path("entries").size());
+
+        JsonNode plan = provider.plan(pageRequest("/api/operations/missoes", contextHints))
+                .orElseThrow()
+                .uiCompositionPlan();
+
+        JsonNode config = findWidgetInputs(plan, "praxis-table", "master").path("config");
+        assertThat(config.path("actions").path("collection").path("discovery").path("enabled").asBoolean())
+                .isTrue();
+        assertThat(config.path("actions").path("row").path("enabled").asBoolean()).isTrue();
+        assertThat(config.has("toolbar")).isFalse();
+        JsonNode discovery = plan.path("diagnostics").path("resourceWorkspaceGrounding")
+                .path("commandDiscovery");
+        assertThat(discovery.path("collection").asBoolean()).isTrue();
+        assertThat(discovery.path("item").asBoolean()).isTrue();
+        assertThat(discovery.path("scopeResolution").asText()).isEqualTo("runtime-action-catalog");
+        assertThat(discovery.path("endpointMaterializedByAuthoring").asBoolean()).isFalse();
+    }
+
+    @Test
     void rejectsUntrustedVerifiedOperationsEnvelopeAndOmitsCommands() {
         ObjectNode contextHints = verifiedDomainOperations(
                 "prompt-derived-operation-list",
@@ -979,6 +1019,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(grounding.path("failureCode").asText())
                 .isEqualTo("verified-domain-operations-envelope-untrusted");
         assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config").has("toolbar"))
+                .isFalse();
+        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config")
+                .path("actions").path("row").path("discovery").path("enabled").asBoolean())
                 .isFalse();
         assertThat(plan.path("sourceRefs")).extracting(JsonNode::asText)
                 .containsExactly("intent-resolution");
@@ -1003,6 +1046,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
                 .containsExactly("praxis-table", "praxis-dynamic-form");
         assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config").has("toolbar"))
+                .isFalse();
+        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config")
+                .path("actions").path("collection").path("discovery").path("enabled").asBoolean())
                 .isFalse();
     }
 
