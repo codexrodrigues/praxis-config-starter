@@ -10,19 +10,24 @@
   },
   "modes": {
     "smoke": {
-      "description": "Release gate with one live LLM authoring journey plus real dependency and transport proofs.",
+      "description": "Release gate with two focal live LLM authoring journeys plus real dependency and transport proofs.",
       "scenarios": [
         "critical-interception-guard",
         "governed-capabilities-provenance",
         "project-knowledge-revert-and-apply",
-        "live-llm-flow-1"
+        "live-llm-flow-1",
+        "live-resource-workspace-command"
       ],
-      "expectedDiscovered": 14,
-      "minimumExecuted": 8,
-      "expectedSkipped": 6,
+      "expectedDiscovered": 6,
+      "minimumExecuted": 6,
+      "expectedSkipped": 0,
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
-        "Auditoria live: capabilities reais possuem proveniência governada e não degradada"
+        "Auditoria live: capabilities reais possuem proveniência governada e não degradada",
+        "Project Knowledge — evidencia revertida deixa de aparecer no authoring browser",
+        "Project Knowledge — cockpit aplica change-set governado via backend real",
+        "Fluxo 1 — Dashboard de pagamentos com linguagem imperfeita: contrato backend-driven validado",
+        "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload"
       ]
     },
     "full": {
@@ -30,19 +35,30 @@
       "scenarios": [
         "critical-interception-guard",
         "governed-capabilities-provenance",
+        "governed-domain-rule-timeline",
         "project-knowledge-revert-and-apply",
         "human-refinement-pr7",
+        "consultative-capability-continuation",
         "live-llm-flow-1",
         "live-llm-flow-2",
-        "live-resource-workspace-command"
+        "live-resource-workspace-command",
+        "table-human-authoring"
       ],
-      "expectedDiscovered": 14,
+      "expectedDiscovered": 11,
       "minimumExecuted": 11,
-      "expectedSkipped": 3,
+      "expectedSkipped": 0,
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
         "Auditoria live: capabilities reais possuem proveniência governada e não degradada",
-        "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload"
+        "Shared-rule handoff — timeline governada renderizada no cockpit",
+        "Project Knowledge — evidencia revertida deixa de aparecer no authoring browser",
+        "Project Knowledge — cockpit aplica change-set governado via backend real",
+        "PR7 — jornada humana cria tabela e refina para gráficos preservando governança do backend",
+        "Fluxo 0 — Assistente explica capacidades do Page Builder de forma amigável e acionável",
+        "Fluxo 1 — Dashboard de pagamentos com linguagem imperfeita: contrato backend-driven validado",
+        "Fluxo 2 — Formulário de funcionários com linguagem imperfeita: contrato backend-driven validado",
+        "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
+        "compara pedido, decisão, proposedConfig e DOM em todos os turnos"
       ]
     }
   }
