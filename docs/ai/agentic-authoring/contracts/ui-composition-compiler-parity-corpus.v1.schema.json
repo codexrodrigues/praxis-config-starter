@@ -78,9 +78,7 @@
         "id",
         "releaseTrain",
         "registryFingerprint",
-        "capabilities",
-        "providerEvidenceRefs",
-        "templateRevisions"
+        "providerEvidenceRefs"
       ],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
@@ -96,15 +94,10 @@
           }
         },
         "registryFingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "capabilities": { "$ref": "#/$defs/stringArray" },
         "providerEvidenceRefs": {
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/$defs/evidenceRef" }
-        },
-        "templateRevisions": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/templateRevisionIdentity" }
         }
       }
     },
@@ -126,6 +119,16 @@
         "version": { "type": "integer", "minimum": 1 },
         "etag": { "type": "string", "minLength": 1 },
         "configSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "runtimeCapabilityRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "module", "exportName"],
+      "properties": {
+        "kind": { "enum": ["module-export", "injector-token"] },
+        "module": { "enum": ["page-builder", "core", "table", "list"] },
+        "exportName": { "type": "string", "minLength": 1 }
       }
     },
     "case": {
@@ -255,7 +258,11 @@
       "properties": {
         "components": { "$ref": "#/$defs/stringArray" },
         "ports": { "$ref": "#/$defs/stringArray" },
-        "capabilities": { "$ref": "#/$defs/stringArray" },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/runtimeCapabilityRef" },
+          "uniqueItems": true
+        },
         "actions": { "$ref": "#/$defs/stringArray" },
         "templateRevision": { "$ref": "#/$defs/templateRevisionIdentity" }
       }

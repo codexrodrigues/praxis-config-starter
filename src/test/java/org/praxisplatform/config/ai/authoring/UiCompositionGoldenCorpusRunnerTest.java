@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.HashSet;
 import java.util.Set;
 import org.junit.jupiter.api.Tag;
@@ -27,6 +30,10 @@ class UiCompositionGoldenCorpusRunnerTest {
         assertThat(report.path("cases")).hasSize(18);
         assertThat(report.path("corpusSha256").asText()).matches("[a-f0-9]{64}");
         assertThat(report.path("schemaSha256").asText()).matches("[a-f0-9]{64}");
+        assertThat(report.path("corpusSha256").asText())
+                .isEqualTo(fileSha256(UiCompositionGoldenCorpusRunner.DEFAULT_CORPUS));
+        assertThat(report.path("schemaSha256").asText())
+                .isEqualTo(fileSha256(UiCompositionGoldenCorpusRunner.DEFAULT_SCHEMA));
         assertThat(report.at("/compilerIdentity/id").asText())
                 .isEqualTo("config-ui-composition-plan-compiler");
         assertThat(report.at("/compilerIdentity/builderVersion").asText())
@@ -36,6 +43,11 @@ class UiCompositionGoldenCorpusRunnerTest {
         assertThat(report.path("passed").asBoolean())
                 .withFailMessage("Java golden report: %s", report)
                 .isTrue();
+    }
+
+    private String fileSha256(Path path) throws Exception {
+        return HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path)));
     }
 
     @Test

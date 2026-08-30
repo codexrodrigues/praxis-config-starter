@@ -54,10 +54,29 @@ final class UiCompositionGoldenCorpusRunner {
     ObjectNode run(Path corpusPath, Path schemaPath, Path reportPath) throws Exception {
         JsonNode corpus = objectMapper.readTree(corpusPath.toFile());
         JsonNode schema = objectMapper.readTree(schemaPath.toFile());
-        return run(corpus, schema, reportPath);
+        return run(
+                corpus,
+                schema,
+                reportPath,
+                sha256(Files.readAllBytes(corpusPath)),
+                sha256(Files.readAllBytes(schemaPath)));
     }
 
     ObjectNode run(JsonNode corpus, JsonNode schema, Path reportPath) throws Exception {
+        return run(
+                corpus,
+                schema,
+                reportPath,
+                canonicalDocumentSha256(corpus),
+                canonicalDocumentSha256(schema));
+    }
+
+    private ObjectNode run(
+            JsonNode corpus,
+            JsonNode schema,
+            Path reportPath,
+            String corpusSha256,
+            String schemaSha256) throws Exception {
         List<String> globalFailures = new ArrayList<>();
         Set<ValidationMessage> schemaErrors = JsonSchemaFactory
                 .getInstance(SpecVersion.VersionFlag.V202012)
@@ -82,8 +101,8 @@ final class UiCompositionGoldenCorpusRunner {
         ObjectNode report = objectMapper.createObjectNode();
         report.put("schemaVersion", "praxis.ui-composition-golden-report/v1");
         report.put("corpusVersion", corpus.path("corpusVersion").asText());
-        report.put("corpusSha256", canonicalHashService.sha256(corpus));
-        report.put("schemaSha256", canonicalHashService.sha256(schema));
+        report.put("corpusSha256", corpusSha256);
+        report.put("schemaSha256", schemaSha256);
         report.put("engine", "java");
         ObjectNode compilerIdentity = report.putObject("compilerIdentity");
         compilerIdentity.put("id", corpus.at("/compilerContracts/java/id").asText());

@@ -1,6 +1,6 @@
 {
   "schemaVersion": "praxis.ui-composition-compiler-parity-corpus/v1",
-  "corpusVersion": "1.1.0",
+  "corpusVersion": "1.2.0",
   "kind": "praxis.ui-composition-compiler-parity-corpus",
   "description": "Neutral deterministic corpus for Java/TypeScript UiCompositionPlan compiler parity and separately phased Angular target readiness.",
   "canonicalization": {
@@ -23,20 +23,15 @@
       "id": "praxis-ui-angular-corte-a5",
       "releaseTrain": {
         "repository": "codexrodrigues/praxis-ui-angular",
-        "commit": "4d70639f195d3478d8542f6b50a6cc3531f8801a",
+        "commit": "a4ccfef5720c7dc616a90c2e1b10d5b79055b1be",
         "certification": "wave-a.5",
         "primaryEvidenceRef": "projects/praxis-page-builder/docs/corte-a-widget-certification-matrix.md"
       },
       "registryFingerprint": "5eec0aa4673471294ed5c218bda75560ea72aedfbfc0354cf325b3f4f47ae5d4",
-      "capabilities": [
-        "composition.preflight",
-        "dynamic-page.materialization",
-        "provider.bootstrap.official"
-      ],
       "providerEvidenceRefs": [
         {
           "path": "projects/praxis-page-builder/docs/corte-a-widget-certification-matrix.md",
-          "sha256": "0e073b8d953c2f0c8c268e08744ad55da4dc89ed07392d35af7b561eda077041"
+          "sha256": "58f55a85b001e2b5179af5dc5ff6ff50b5b776d1d7c1d04f81ab6579881233ff"
         },
         {
           "path": "src/app/features/dynamic-page-lab/dynamic-page-list-certification-wave-a.spec.ts",
@@ -49,14 +44,6 @@
         {
           "path": "src/app/features/dynamic-page-lab/dynamic-page-table-shell-actions-certification-wave-a5.spec.ts",
           "sha256": "7b079786ed5ce47b5305ad2bc8a5b3fb2f17ddb749f82256f1c6095f255fe965"
-        }
-      ],
-      "templateRevisions": [
-        {
-          "registryKey": "praxis-dynamic-page:employee-operations-casework",
-          "version": 7,
-          "etag": "123e4567-e89b-12d3-a456-426614174000",
-          "configSha256": "79526136a54368ede7ee42d944e2e120156d22e27036723d2b82a1a2f05e100b"
         }
       ]
     }
@@ -137,7 +124,12 @@
           "requirements": {
             "components": ["praxis-table"],
             "ports": [],
-            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official"],
+            "capabilities": [
+              { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
+              { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
+              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" }
+            ],
             "actions": [],
             "templateRevision": {
               "registryKey": "praxis-dynamic-page:employee-operations-casework",
@@ -222,7 +214,12 @@
           "requirements": {
             "components": ["praxis-table", "praxis-related-resource-outlet"],
             "ports": ["praxis-table:selectionChange", "praxis-related-resource-outlet:parentResourceId"],
-            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official"],
+            "capabilities": [
+              { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
+              { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
+              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" }
+            ],
             "actions": []
           },
           "diagnostics": []
@@ -301,7 +298,12 @@
           "requirements": {
             "components": ["praxis-list", "praxis-table"],
             "ports": ["praxis-list:selectionChange", "praxis-table:queryContext"],
-            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official"],
+            "capabilities": [
+              { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
+              { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
+              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" }
+            ],
             "actions": []
           },
           "diagnostics": []
@@ -365,7 +367,12 @@
           "requirements": {
             "components": ["praxis-table", "praxis-list"],
             "ports": [],
-            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official"],
+            "capabilities": [
+              { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
+              { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
+              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" }
+            ],
             "actions": []
           },
           "diagnostics": []
@@ -419,8 +426,13 @@
           "outcome": "block",
           "requirements": {
             "components": ["praxis-list", "praxis-unknown"],
-            "ports": ["praxis-list:missingPort"],
-            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official"],
+            "ports": ["praxis-list:missingPort", "praxis-unknown:queryContext"],
+            "capabilities": [
+              { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
+              { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
+              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" }
+            ],
             "actions": []
           },
           "diagnostics": [
@@ -433,6 +445,12 @@
             {
               "code": "TARGET_PORT_UNAVAILABLE",
               "path": "components.praxis-list.ports.missingPort",
+              "severity": "error",
+              "provenance": "target-registry"
+            },
+            {
+              "code": "TARGET_PORT_UNAVAILABLE",
+              "path": "components.praxis-unknown.ports.queryContext",
               "severity": "error",
               "provenance": "target-registry"
             },
@@ -585,14 +603,59 @@
               "inputs": { "resourcePath": "human-resources/funcionarios" }
             }
           ]
+        },
+        "templateReference": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "templateRef": {
+            "registryKey": "praxis-dynamic-page:employee-operations-casework",
+            "configSha256": "79526136a54368ede7ee42d944e2e120156d22e27036723d2b82a1a2f05e100b"
+          },
+          "overrides": {}
+        },
+        "templateMaterialization": {
+          "registryKey": "praxis-dynamic-page:employee-operations-casework",
+          "revision": {
+            "registryKey": "praxis-dynamic-page:employee-operations-casework",
+            "version": 7,
+            "etag": "123e4567-e89b-12d3-a456-426614174000",
+            "configSha256": "79526136a54368ede7ee42d944e2e120156d22e27036723d2b82a1a2f05e100b"
+          },
+          "configJson": {
+            "authoringPlan": {
+              "version": "1.0",
+              "kind": "praxis.ui-composition-plan",
+              "widgets": [
+                {
+                  "key": "employee-table",
+                  "componentId": "praxis-table",
+                  "inputs": { "resourcePath": "human-resources/funcionarios" }
+                }
+              ]
+            }
+          }
         }
       },
       "expected": {
         "compilerParity": {
           "phase": "compiler-parity",
-          "outcome": "pass",
+          "outcome": "warning",
           "projectionSha256": "de5e31247473e3500ed04418019d3c5fcadd58c93de234570480a652fc09fe2b",
-          "diagnostics": []
+          "diagnostics": [
+            {
+              "canonicalId": "template-reference-resolved",
+              "severity": "warning",
+              "provenance": "template-attestation",
+              "engineCodes": {
+                "java": "ui-composition-template-reference-resolved",
+                "typescript": "ui-composition-template-reference-resolved"
+              },
+              "pathByEngine": {
+                "java": null,
+                "typescript": "templateRef"
+              }
+            }
+          ]
         },
         "targetAttestation": {
           "profileId": "praxis-ui-angular-corte-a5",
@@ -600,7 +663,12 @@
           "requirements": {
             "components": ["praxis-table"],
             "ports": [],
-            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official"],
+            "capabilities": [
+              { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
+              { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
+              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" }
+            ],
             "actions": [],
             "templateRevision": {
               "registryKey": "praxis-dynamic-page:employee-operations-casework",
@@ -666,13 +734,19 @@
           "requirements": {
             "components": ["praxis-table"],
             "ports": ["praxis-table:selectionChange"],
-            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official", "collection.export.remote"],
+            "capabilities": [
+              { "kind": "module-export", "module": "page-builder", "exportName": "preflightUiCompositionPlan" },
+              { "kind": "module-export", "module": "page-builder", "exportName": "compileUiCompositionPlan" },
+              { "kind": "injector-token", "module": "core", "exportName": "ComponentMetadataRegistry" },
+              { "kind": "injector-token", "module": "core", "exportName": "GlobalActionService" },
+              { "kind": "module-export", "module": "page-builder", "exportName": "collectionExportRemote" }
+            ],
             "actions": ["exportRecords"]
           },
           "diagnostics": [
             {
               "code": "TARGET_CAPABILITY_UNAVAILABLE",
-              "path": "capabilities.collection.export.remote",
+              "path": "capabilities.module-export:page-builder:collectionExportRemote",
               "severity": "error",
               "provenance": "target-registry"
             },
