@@ -9,7 +9,7 @@ param(
     [string] $UiRef = "2882822b4b6202aa94665d2ba5769ee369fe559b",
     [int] $QuickstartStartupTimeoutSeconds = 180,
     [switch] $RunPageBuilderFullE2E,
-    [ValidateSet("smoke", "full")]
+    [ValidateSet("smoke", "single-table", "full")]
     [string] $PageBuilderE2EMode = "smoke",
     [int] $PageBuilderE2ETimeoutMinutes = 30,
     [string] $Token = "",

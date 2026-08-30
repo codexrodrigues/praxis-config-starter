@@ -16,7 +16,7 @@ param(
     [int] $UiStartupTimeoutSec = 600,
     [int] $StreamProcessingTimeoutSeconds = 0,
     [int] $ApiCatalogIndexingTimeoutSec = 900,
-    [ValidateSet("smoke", "full")]
+    [ValidateSet("smoke", "single-table", "full")]
     [string] $ValidationMode = "smoke",
     [int] $PlaywrightTestTimeoutMs = 0,
     [int] $Retries = -1,
@@ -499,6 +499,7 @@ foreach ($requiredPath in @($QuickstartRoot, $MetadataRoot, $UiRoot, $EnvFile, $
 $gateMatrix = Get-Content -LiteralPath $matrixPath -Raw | ConvertFrom-Json
 $modeMatrix = $gateMatrix.modes.$ValidationMode
 if ($null -eq $modeMatrix) { throw "Validation mode is missing from the canonical gate matrix: $ValidationMode" }
+$isHumanResourcesFocusedMode = $ValidationMode -in @("smoke", "single-table")
 $selectedScenarioIds = @($modeMatrix.scenarios | ForEach-Object { [string] $_ })
 if ($selectedScenarioIds.Count -eq 0) {
     throw "Validation mode must declare at least one executable scenario: $ValidationMode"
@@ -517,7 +518,13 @@ if ($StreamProcessingTimeoutSeconds -le 0) {
 if ($PlaywrightTestTimeoutMs -le 0) {
     $PlaywrightTestTimeoutMs = [int] $gateMatrix.defaults.playwrightTestTimeoutMs
 }
-if ($Retries -lt 0) { $Retries = [int] $gateMatrix.defaults.retries }
+if ($Retries -lt 0) {
+    $Retries = if ($null -ne $modeMatrix.retries) {
+        [int] $modeMatrix.retries
+    } else {
+        [int] $gateMatrix.defaults.retries
+    }
+}
 
 $null = . $EnvFile
 $resolvedEmbeddingProvider = if ([string]::IsNullOrWhiteSpace($EmbeddingProvider)) { $Provider } else { $EmbeddingProvider }
@@ -752,7 +759,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $env:CONFIG_ORIGIN = $uiUrl
         $env:TENANT_ID = "desenv"
         $env:ENVIRONMENT = "local"
-        $apiCatalogReleaseId = if ($ValidationMode -eq "smoke") {
+        $apiCatalogReleaseId = if ($isHumanResourcesFocusedMode) {
             "e2e-page-builder-smoke-v1"
         } else {
             "v1"
@@ -761,7 +768,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $env:REQUEST_TIMEOUT_MS = "60000"
         $env:INDEXING_TIMEOUT_MS = "$($ApiCatalogIndexingTimeoutSec * 1000)"
         $env:STATUS_POLL_MS = "1000"
-        if ($ValidationMode -eq "smoke") {
+        if ($isHumanResourcesFocusedMode) {
             $smokeCatalogPathPrefixes = @(
                 "/api/human-resources/funcionarios",
                 "/api/human-resources/departamentos",
@@ -772,7 +779,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             )
             $env:API_CATALOG_PATH_PREFIXES = ($smokeCatalogPathPrefixes -join ",")
             $env:CHUNK_SIZE = "20"
-            Write-Phase "Smoke mode: API catalog upload scoped to $($smokeCatalogPathPrefixes.Count) human-resources path prefixes."
+            Write-Phase "Focused mode: API catalog upload scoped to $($smokeCatalogPathPrefixes.Count) human-resources path prefixes."
         } else {
             Remove-Item Env:\API_CATALOG_PATH_PREFIXES -ErrorAction SilentlyContinue
             $env:CHUNK_SIZE = "20"
@@ -785,7 +792,13 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $apiCatalogEvidence = [ordered]@{
             source = "/schemas/catalog"
             indexingState = "READY"
-            scope = if ($ValidationMode -eq "smoke") { "human-resources-smoke" } else { "full" }
+            scope = if ($ValidationMode -eq "smoke") {
+                "human-resources-smoke"
+            } elseif ($ValidationMode -eq "single-table") {
+                "human-resources-focused"
+            } else {
+                "full"
+            }
         }
     } finally {
         Pop-Location
