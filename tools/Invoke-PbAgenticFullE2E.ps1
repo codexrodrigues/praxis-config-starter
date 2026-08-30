@@ -499,6 +499,18 @@ foreach ($requiredPath in @($QuickstartRoot, $MetadataRoot, $UiRoot, $EnvFile, $
 $gateMatrix = Get-Content -LiteralPath $matrixPath -Raw | ConvertFrom-Json
 $modeMatrix = $gateMatrix.modes.$ValidationMode
 if ($null -eq $modeMatrix) { throw "Validation mode is missing from the canonical gate matrix: $ValidationMode" }
+$selectedScenarioIds = @($modeMatrix.scenarios | ForEach-Object { [string] $_ })
+if ($selectedScenarioIds.Count -eq 0) {
+    throw "Validation mode must declare at least one executable scenario: $ValidationMode"
+}
+foreach ($scenarioId in $selectedScenarioIds) {
+    if ($scenarioId -notmatch '^[a-z0-9-]+$') {
+        throw "Invalid executable scenario id in the canonical gate matrix: $scenarioId"
+    }
+}
+if (@($selectedScenarioIds | Sort-Object -Unique).Count -ne $selectedScenarioIds.Count) {
+    throw "Validation mode contains duplicate executable scenario ids: $ValidationMode"
+}
 if ($StreamProcessingTimeoutSeconds -le 0) {
     $StreamProcessingTimeoutSeconds = [int] $gateMatrix.defaults.streamProcessingTimeoutSeconds
 }
@@ -843,6 +855,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $env:PRAXIS_E2E_API_CATALOG_RELEASE_ID = $apiCatalogReleaseId
         $env:PRAXIS_E2E_AGENTIC_VALIDATION_MODE = $ValidationMode
         $env:PRAXIS_E2E_AGENTIC_EXECUTION_LANE = "live"
+        $env:PRAXIS_E2E_SCENARIO_IDS = $selectedScenarioIds -join ","
         $env:PRAXIS_E2E_JSON_REPORT_PATH = $playwrightReportPath
         if ($PlaywrightTestTimeoutMs -gt 0) {
             $env:PRAXIS_E2E_TEST_TIMEOUT_MS = "$PlaywrightTestTimeoutMs"
@@ -875,6 +888,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         }
         Write-Phase "Playwright Page Builder validation completed."
     } finally {
+        Remove-Item Env:\PRAXIS_E2E_SCENARIO_IDS -ErrorAction SilentlyContinue
         Pop-Location
     }
 
@@ -953,6 +967,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             expectedDiscovered = [int] $modeMatrix.expectedDiscovered
             minimumExecuted = [int] $modeMatrix.minimumExecuted
             expectedSkipped = [int] $modeMatrix.expectedSkipped
+            requiredPassedTests = @($modeMatrix.requiredPassedTests)
             streamProcessingTimeoutSeconds = $StreamProcessingTimeoutSeconds
             playwrightTestTimeoutMs = $PlaywrightTestTimeoutMs
             retries = $Retries

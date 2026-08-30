@@ -384,6 +384,8 @@ jobs:
           name: agentic-authoring-smoke-artifacts
           path: |
             artifacts/ai-sse-smoke/**/summary.json
+            praxis-config-starter/artifacts/page-builder-agentic-e2e/**/result.json
+            praxis-config-starter/artifacts/page-builder-agentic-e2e/**/source-audit.json
             praxis-config-starter/artifacts/agentic-authoring-publication/**
           if-no-files-found: ignore
           retention-days: 14
