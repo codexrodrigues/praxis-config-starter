@@ -24,6 +24,20 @@
           "resource.refresh-observed",
           "persistence.reload-rendered"
         ]
+      },
+      {
+        "scenarioId": "table-human-authoring",
+        "archetype": "single-table-control",
+        "testTitle": "compara pedido, decisão, proposedConfig e DOM em todos os turnos",
+        "attachmentName": "single-table-first-pass-receipt.json",
+        "requiredFunctionalAssertions": [
+          "composition.single-table-only",
+          "grounding.resource-schema-verified",
+          "resource.rows-rendered",
+          "persistence.page-apply-authorized",
+          "persistence.readback-equivalent",
+          "persistence.reload-equivalent"
+        ]
       }
     ]
   },
