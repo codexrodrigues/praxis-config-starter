@@ -31,15 +31,17 @@
       ]
     },
     "single-table": {
-      "description": "Focal live LLM proof for the canonical table/praxis-table/single-table creation path, without retries.",
+      "description": "Focal live LLM proof for the canonical table/praxis-table/single-table creation path plus the invariant critical-endpoint interception guard, without retries.",
       "retries": 0,
       "scenarios": [
+        "critical-interception-guard",
         "table-human-authoring"
       ],
-      "expectedDiscovered": 1,
-      "minimumExecuted": 1,
+      "expectedDiscovered": 2,
+      "minimumExecuted": 2,
       "expectedSkipped": 0,
       "requiredPassedTests": [
+        "Guard live rejeita interceptacao de endpoint critico antes do registro",
         "compara pedido, decisão, proposedConfig e DOM em todos os turnos"
       ]
     },
