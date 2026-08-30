@@ -195,7 +195,8 @@
         "primaryEvidenceRef": "projects/praxis-page-builder/docs/corte-a-widget-certification-matrix.md"
       },
       "registryFingerprint": "fc2000aa21f1f0536b81acc0034b7b4901a580f2048676a0c74dbcf7223489ad",
-      "runtimeExecutionReceipt": {        "schemaVersion": "praxis.ui-composition-package-closure/v2",
+      "runtimeExecutionReceipt": {
+        "schemaVersion": "praxis.ui-composition-package-closure/v2",
         "scope": "transitive-package-source-trees-and-directory-bytes",
         "producerRevision": "71e4be3acef941db74d6aaaf1e1b7680257037fb",
         "buildCommand": "node scripts/build-libs.js --prod --only praxis-core,praxis-table,praxis-list,praxis-tabs,praxis-page-builder",
