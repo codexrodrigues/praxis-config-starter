@@ -24,17 +24,17 @@ on:
       quickstart_ref:
         description: 'Immutable praxis-api-quickstart commit SHA to test against.'
         required: true
-        default: cdb9ef3ae29155ec676149fec21d1147979b8211
+        default: fbb59945675722d2f7bd431d2f4da0baebd95811
         type: string
       metadata_ref:
         description: 'Immutable praxis-metadata-starter commit SHA to install locally.'
         required: true
-        default: 83e32d40e8a6338953580616c762f4722fa3b4f6
+        default: 800ccb62a4a9881a359d8d7dfa5724adfcc28035
         type: string
       ui_ref:
         description: 'Immutable praxis-ui-angular commit SHA used by the page-builder E2E gate.'
         required: true
-        default: 2882822b4b6202aa94665d2ba5769ee369fe559b
+        default: 370cc129e8149f46f322069185703e34fee611bb
         type: string
       run_page_builder_full_e2e:
         description: 'Run the page-builder agentic Playwright gate after the HTTP/SSE smoke.'
