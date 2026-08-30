@@ -2879,21 +2879,26 @@ public class AgenticAuthoringIntentResolverService {
         String primaryComponent = semanticOrientation == null
                 ? ""
                 : valueOrDefault(semanticOrientation.primaryComponent(), "");
-        if (primaryComponent.isBlank()) {
+        String authoredLayoutKind = semanticOrientation == null
+                ? ""
+                : valueOrDefault(semanticOrientation.layoutKind(), "");
+        if (primaryComponent.isBlank() && authoredLayoutKind.isBlank()) {
             return null;
         }
-        String layoutKind = switch (primaryComponent) {
+        String layoutKind = !authoredLayoutKind.isBlank() ? authoredLayoutKind : switch (primaryComponent) {
             case "praxis-crud" -> "resource-crud";
             case "praxis-table" -> "single-table";
             case "praxis-dynamic-form" -> "single-form";
             case "praxis-chart" -> "single-chart";
             default -> "single-component";
         };
-        boolean detailTable = "praxis-crud".equals(primaryComponent)
+        boolean detailTable = "resource-master-detail".equals(layoutKind)
+                || "resource-crud".equals(layoutKind)
+                || "praxis-crud".equals(primaryComponent)
                 || "praxis-table".equals(primaryComponent);
         return new AgenticAuthoringVisualizationDecision(
                 "praxis-agentic-authoring-visualization-decision.v1",
-                "pre-intent-primary-component",
+                "pre-intent-semantic-composition",
                 layoutKind,
                 primaryComponent,
                 List.of(),
@@ -3031,17 +3036,29 @@ public class AgenticAuthoringIntentResolverService {
         if (resolution == null || semanticOrientation == null) {
             return resolution == null ? null : resolution.visualizationDecision();
         }
-        String orientedPrimaryComponent = valueOrDefault(semanticOrientation.primaryComponent(), "");
+        AgenticAuthoringVisualizationDecision oriented = preIntentVisualizationDecision(semanticOrientation);
+        String orientedPrimaryComponent = oriented == null
+                ? ""
+                : valueOrDefault(oriented.primaryComponent(), "");
+        String orientedLayoutKind = oriented == null
+                ? ""
+                : valueOrDefault(oriented.layoutKind(), "");
         String artifactKind = constrainedOrientationArtifactKind(semanticOrientation, resolution);
-        if (orientedPrimaryComponent.isBlank()
-                || !isCompatiblePrimaryComponent(artifactKind, orientedPrimaryComponent)) {
+        if (!orientedPrimaryComponent.isBlank()
+                && !isCompatiblePrimaryComponent(artifactKind, orientedPrimaryComponent)) {
             return resolution.visualizationDecision();
         }
         AgenticAuthoringVisualizationDecision current = resolution.visualizationDecision();
-        if (current != null && orientedPrimaryComponent.equals(current.primaryComponent())) {
+        if (orientedPrimaryComponent.isBlank() && orientedLayoutKind.isBlank()) {
             return current;
         }
-        AgenticAuthoringVisualizationDecision oriented = preIntentVisualizationDecision(semanticOrientation);
+        if (current != null
+                && (orientedPrimaryComponent.isBlank()
+                        || orientedPrimaryComponent.equals(current.primaryComponent()))
+                && (orientedLayoutKind.isBlank()
+                        || orientedLayoutKind.equals(current.layoutKind()))) {
+            return current;
+        }
         if (oriented == null) {
             return current;
         }
@@ -3050,8 +3067,12 @@ public class AgenticAuthoringIntentResolverService {
                 current == null || valueOrDefault(current.intent(), "").isBlank()
                         ? oriented.intent()
                         : current.intent(),
-                oriented.layoutKind(),
-                oriented.primaryComponent(),
+                orientedLayoutKind.isBlank()
+                        ? current == null ? oriented.layoutKind() : current.layoutKind()
+                        : orientedLayoutKind,
+                orientedPrimaryComponent.isBlank()
+                        ? current == null ? oriented.primaryComponent() : current.primaryComponent()
+                        : orientedPrimaryComponent,
                 List.of(),
                 oriented.includeSummary(),
                 oriented.includeDetailTable(),
@@ -6897,6 +6918,11 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringCandidate preferred,
             AgenticAuthoringCandidate secondary) {
         if (preferred == null || secondary == null || secondary.evidence() == null || secondary.evidence().isEmpty()) {
+            return preferred;
+        }
+        String preferredSource = AgenticAuthoringCandidateProvenancePolicy.retrievalSource(List.of(preferred));
+        String secondarySource = AgenticAuthoringCandidateProvenancePolicy.retrievalSource(List.of(secondary));
+        if (!preferredSource.equals(secondarySource)) {
             return preferred;
         }
         List<String> preferredEvidence = preferred.evidence() == null ? List.of() : preferred.evidence();

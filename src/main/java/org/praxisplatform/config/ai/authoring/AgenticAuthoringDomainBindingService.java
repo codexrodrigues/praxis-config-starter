@@ -1,5 +1,7 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Objects;
 import org.praxisplatform.config.domain.DomainKnowledgeBinding;
@@ -12,12 +14,21 @@ public class AgenticAuthoringDomainBindingService {
 
     private final DomainKnowledgeBindingRepository bindingRepository;
     private final DomainKnowledgeEvidenceRepository evidenceRepository;
+    private final ObjectMapper objectMapper;
 
     public AgenticAuthoringDomainBindingService(
             DomainKnowledgeBindingRepository bindingRepository,
             DomainKnowledgeEvidenceRepository evidenceRepository) {
+        this(bindingRepository, evidenceRepository, new ObjectMapper());
+    }
+
+    public AgenticAuthoringDomainBindingService(
+            DomainKnowledgeBindingRepository bindingRepository,
+            DomainKnowledgeEvidenceRepository evidenceRepository,
+            ObjectMapper objectMapper) {
         this.bindingRepository = bindingRepository;
         this.evidenceRepository = evidenceRepository;
+        this.objectMapper = objectMapper;
     }
 
     List<BindingProjection> resolve(String tenantId, String environment, String resourceKey, int limit) {
@@ -80,6 +91,7 @@ public class AgenticAuthoringDomainBindingService {
                 binding.getConcept().getConceptKey(),
                 binding.getBindingType(),
                 binding.getBindingKey(),
+                operationId(binding),
                 binding.getResourceKey(),
                 binding.getApiPath(),
                 binding.getApiMethod(),
@@ -92,10 +104,27 @@ public class AgenticAuthoringDomainBindingService {
                         "domain-knowledge:evidence-status:active"));
     }
 
+    private String operationId(DomainKnowledgeBinding binding) {
+        if (binding == null || !StringUtils.hasText(binding.getPayload())) {
+            return "";
+        }
+        try {
+            JsonNode target = objectMapper.readTree(binding.getPayload()).path("target");
+            String actionId = target.path("id").asText("").trim();
+            if ("workflow_action".equals(binding.getBindingType()) && StringUtils.hasText(actionId)) {
+                return actionId;
+            }
+            return target.path("operationId").asText("").trim();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
     record BindingProjection(
             String conceptKey,
             String bindingType,
             String bindingKey,
+            String operationId,
             String resourceKey,
             String apiPath,
             String apiMethod,
@@ -103,5 +132,30 @@ public class AgenticAuthoringDomainBindingService {
             Double confidence,
             String sourceRelease,
             List<String> evidence) {
+
+        BindingProjection(
+                String conceptKey,
+                String bindingType,
+                String bindingKey,
+                String resourceKey,
+                String apiPath,
+                String apiMethod,
+                String schemaPointer,
+                Double confidence,
+                String sourceRelease,
+                List<String> evidence) {
+            this(
+                    conceptKey,
+                    bindingType,
+                    bindingKey,
+                    "",
+                    resourceKey,
+                    apiPath,
+                    apiMethod,
+                    schemaPointer,
+                    confidence,
+                    sourceRelease,
+                    evidence);
+        }
     }
 }

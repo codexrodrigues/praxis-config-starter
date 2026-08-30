@@ -93,14 +93,48 @@ function Get-GitIdentity([string] $Root, [string] $Name, [string] $Materializati
     }
 }
 
-function New-EphemeralStreamSecret {
-    $bytes = New-Object byte[] 48
+function New-EphemeralRuntimeSecret {
+    param([int] $ByteCount = 48)
+    if ($ByteCount -lt 32) { throw "Ephemeral runtime secrets require at least 32 random bytes." }
+    $bytes = New-Object byte[] $ByteCount
     $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
     try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
     return [Convert]::ToBase64String($bytes)
 }
 
-function Get-QuickstartDependencyVersion([string] $Path, [string] $ArtifactId) {
+function New-EphemeralRuntimeSecrets {
+    $streamSecret = New-EphemeralRuntimeSecret
+    do {
+        $resourceVersionEtagSecret = New-EphemeralRuntimeSecret
+    } while ($resourceVersionEtagSecret -eq $streamSecret)
+    return [ordered]@{
+        streamAuthTokenSecret = $streamSecret
+        resourceVersionEtagSecret = $resourceVersionEtagSecret
+    }
+}
+
+function Assert-EphemeralRuntimeSecretFixture {
+    $secrets = New-EphemeralRuntimeSecrets
+    $streamBytes = [Convert]::FromBase64String([string] $secrets.streamAuthTokenSecret)
+    $resourceBytes = [Convert]::FromBase64String([string] $secrets.resourceVersionEtagSecret)
+    if ($streamBytes.Length -lt 32 -or $resourceBytes.Length -lt 32) {
+        throw "Ephemeral runtime secret fixture produced fewer than 32 random bytes."
+    }
+    if ($secrets.streamAuthTokenSecret -eq $secrets.resourceVersionEtagSecret) {
+        throw "Stream auth and resource version ETag secrets must be independently generated."
+    }
+    $safeEvidence = [ordered]@{
+        streamAuthTokenSecretPresent = -not [string]::IsNullOrWhiteSpace([string] $secrets.streamAuthTokenSecret)
+        resourceVersionEtagSecretPresent = -not [string]::IsNullOrWhiteSpace([string] $secrets.resourceVersionEtagSecret)
+        independent = $true
+    } | ConvertTo-Json -Compress
+    if ($safeEvidence.Contains([string] $secrets.streamAuthTokenSecret) -or
+        $safeEvidence.Contains([string] $secrets.resourceVersionEtagSecret)) {
+        throw "Sanitized runtime secret evidence leaked secret material."
+    }
+}
+
+function Get-QuickstartDependencyEvidence([string] $Path, [string] $ArtifactId) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $outer = [IO.Compression.ZipFile]::OpenRead($Path)
     try {
@@ -111,7 +145,21 @@ function Get-QuickstartDependencyVersion([string] $Path, [string] $ArtifactId) {
         if ($null -eq $starterEntry) { throw "Quickstart jar does not contain $ArtifactId under BOOT-INF/lib." }
         $versionMatch = [regex]::Match($starterEntry.Name, "^$escapedArtifactId-(?<version>.+)\.jar$")
         if (-not $versionMatch.Success) { throw "Cannot resolve $ArtifactId version from Quickstart jar." }
-        return $versionMatch.Groups['version'].Value.Trim()
+        $entryStream = $starterEntry.Open()
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha256.ComputeHash($entryStream)
+            $hash = ([BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
+        } finally {
+            $sha256.Dispose()
+            $entryStream.Dispose()
+        }
+        return [ordered]@{
+            artifactId = $ArtifactId
+            version = $versionMatch.Groups['version'].Value.Trim()
+            entry = $starterEntry.FullName
+            sha256 = $hash
+        }
     } finally { $outer.Dispose() }
 }
 
@@ -381,7 +429,8 @@ function Invoke-DomainCatalogIngest {
         [string] $BaseUrl,
         [string] $Origin,
         [string] $TenantId,
-        [string] $Environment
+        [string] $Environment,
+        [string[]] $Groups
     )
 
     $headers = @{
@@ -392,36 +441,44 @@ function Invoke-DomainCatalogIngest {
     $jsonHeaders = $headers.Clone()
     $jsonHeaders["Content-Type"] = "application/json"
 
-    Write-Phase "Loading governed domain catalog from $BaseUrl/schemas/domain?group=human-resources."
-    $catalog = Invoke-RestMethod `
-        -Method Get `
-        -Uri "$BaseUrl/schemas/domain?group=human-resources" `
-        -Headers @{ "Origin" = $Origin } `
-        -TimeoutSec 60
-
-    if ($catalog.schemaVersion -ne "praxis.domain-catalog/v0.2") {
-        throw "Expected praxis.domain-catalog/v0.2, got $($catalog.schemaVersion)."
+    if ($null -eq $Groups -or $Groups.Count -eq 0) {
+        throw "At least one governed domain catalog group is required."
     }
+    foreach ($group in $Groups) {
+        $encodedGroup = [Uri]::EscapeDataString($group)
+        Write-Phase "Loading governed domain catalog from $BaseUrl/schemas/domain?group=$encodedGroup."
+        $catalog = Invoke-RestMethod `
+            -Method Get `
+            -Uri "$BaseUrl/schemas/domain?group=$encodedGroup" `
+            -Headers @{ "Origin" = $Origin } `
+            -TimeoutSec 60
 
-    $body = $catalog | ConvertTo-Json -Depth 100
-    Write-Phase "Ingesting governed domain catalog v0.2 into praxis-config-starter."
-    Invoke-RestMethod `
-        -Method Post `
-        -Uri "$BaseUrl/api/praxis/config/domain-catalog/ingest" `
-        -Headers $jsonHeaders `
-        -Body $body `
-        -TimeoutSec 900 | Out-Null
-    Write-Phase "Governed domain catalog ingest completed."
+        if ($catalog.schemaVersion -ne "praxis.domain-catalog/v0.2") {
+            throw "Expected praxis.domain-catalog/v0.2 for group $group, got $($catalog.schemaVersion)."
+        }
+
+        $body = $catalog | ConvertTo-Json -Depth 100
+        Write-Phase "Ingesting governed domain catalog group $group into praxis-config-starter."
+        Invoke-RestMethod `
+            -Method Post `
+            -Uri "$BaseUrl/api/praxis/config/domain-catalog/ingest" `
+            -Headers $jsonHeaders `
+            -Body $body `
+            -TimeoutSec 900 | Out-Null
+        Write-Phase "Governed domain catalog ingest completed for group $group."
+    }
     return [ordered]@{
-        schemaVersion = [string] $catalog.schemaVersion
+        schemaVersion = "praxis.domain-catalog/v0.2"
         source = "/schemas/domain"
         ingested = $true
+        groups = @($Groups)
     }
 }
 
 if ($ValidateEvidenceParsersOnly.IsPresent) {
     Assert-PlaywrightSummaryParserFixture
-    Write-Output "Invoke-PbAgenticFullE2E: Playwright summary parser fixture passed."
+    Assert-EphemeralRuntimeSecretFixture
+    Write-Output "Invoke-PbAgenticFullE2E: Playwright summary parser and runtime secret fixtures passed."
     exit 0
 }
 
@@ -502,13 +559,28 @@ if ([string]::IsNullOrWhiteSpace($JarPath)) {
 
 [xml] $starterPom = Get-Content -LiteralPath (Join-Path $starterRoot "pom.xml") -Raw
 $expectedStarterVersion = [string] $starterPom.project.version
-$jarStarterVersion = Get-QuickstartDependencyVersion $JarPath "praxis-config-starter"
-$jarMetadataVersion = Get-QuickstartDependencyVersion $JarPath "praxis-metadata-starter"
+$jarStarterDependency = Get-QuickstartDependencyEvidence $JarPath "praxis-config-starter"
+$jarMetadataDependency = Get-QuickstartDependencyEvidence $JarPath "praxis-metadata-starter"
+$jarStarterVersion = [string] $jarStarterDependency.version
+$jarMetadataVersion = [string] $jarMetadataDependency.version
 if ($jarStarterVersion -ne $expectedStarterVersion) {
     throw "Quickstart jar uses praxis-config-starter $jarStarterVersion, expected $expectedStarterVersion. Repackage it against the current starter."
 }
 if (-not [string]::IsNullOrWhiteSpace($ExpectedMetadataVersion) -and $jarMetadataVersion -ne $ExpectedMetadataVersion) {
     throw "Quickstart jar uses praxis-metadata-starter $jarMetadataVersion, expected $ExpectedMetadataVersion. Repackage it against the declared Metadata version."
+}
+$localStarterJar = Join-Path $starterRoot "target\praxis-config-starter-$expectedStarterVersion.jar"
+if (-not (Test-Path -LiteralPath $localStarterJar -PathType Leaf)) {
+    throw "Local praxis-config-starter jar not found. Build the current checkout before packaging the Quickstart: target/praxis-config-starter-$expectedStarterVersion.jar"
+}
+$localStarterJarSha256 = (Get-FileHash -LiteralPath $localStarterJar -Algorithm SHA256).Hash.ToLowerInvariant()
+$configStarterArtifactEvidence = [ordered]@{
+    artifactId = "praxis-config-starter"
+    version = $expectedStarterVersion
+    localJarSha256 = $localStarterJarSha256
+    quickstartNestedJarSha256 = [string] $jarStarterDependency.sha256
+    quickstartEntry = [string] $jarStarterDependency.entry
+    byteIdentical = ($localStarterJarSha256 -eq [string] $jarStarterDependency.sha256)
 }
 
 [xml] $quickstartPom = Get-Content -LiteralPath (Join-Path $QuickstartRoot "pom.xml") -Raw
@@ -543,7 +615,9 @@ $backendProcess = $null
 $uiProcess = $null
 $playwrightSummary = $null
 $capabilitiesEvidence = $null
-$streamSecret = New-EphemeralStreamSecret
+$runtimeSecrets = New-EphemeralRuntimeSecrets
+$streamSecret = [string] $runtimeSecrets.streamAuthTokenSecret
+$resourceVersionEtagSecret = [string] $runtimeSecrets.resourceVersionEtagSecret
 $resultPath = Join-Path $artifactRoot "result.json"
 $sourceAuditPath = Join-Path $artifactRoot "source-audit.json"
 $playwrightReportPath = Join-Path $artifactRoot "playwright-results.json"
@@ -556,6 +630,10 @@ $apiCatalogEvidence = $null
 
 try {
     Write-Phase "Starting Page Builder agentic E2E gate. provider=$Provider validationMode=$ValidationMode backend=$backendUrl ui=$uiUrl artifactRoot=$artifactRoot."
+    if (-not $configStarterArtifactEvidence.byteIdentical) {
+        throw "Quickstart nested praxis-config-starter jar does not match the current local checkout artifact. localSha256=$($configStarterArtifactEvidence.localJarSha256) nestedSha256=$($configStarterArtifactEvidence.quickstartNestedJarSha256) Reinstall the starter and clean-package the Quickstart."
+    }
+    Write-Phase "Verified byte-identical praxis-config-starter artifact. sha256=$($configStarterArtifactEvidence.localJarSha256)"
     if ($null -ne (Get-ListenPid $BackendPort)) { throw "Port $BackendPort is already in use." }
     if ($null -ne (Get-ListenPid $UiPort)) { throw "Port $UiPort is already in use." }
 
@@ -612,6 +690,12 @@ Set-Location '$QuickstartRoot'
 `$env:PRAXIS_AI_SECURITY_LOCAL_DEFAULT_USER = 'codex-e2e'
 `$env:PRAXIS_AI_SECURITY_LOCAL_DEFAULT_ENVIRONMENT = 'local'
 `$env:PRAXIS_AI_STREAM_AUTH_MODE = 'signed-url-token'
+`$env:PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET = '$streamSecret'
+`$env:PRAXIS_RESOURCE_VERSION_ETAG_SECRET = '$resourceVersionEtagSecret'
+`$env:PRAXIS_AI_REGISTRY_BOOTSTRAP_ENABLED = 'true'
+`$env:SPRING_AI_ENABLED = 'true'
+`$env:PRAXIS_AI_RAG_VECTOR_STORE_ENABLED = 'true'
+`$env:PRAXIS_API_METADATA_RAG_PUBLICATION_ENABLED = 'true'
 `$env:EMBEDDING_PROVIDER = '$resolvedEmbeddingProvider'
 `$env:PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ENABLED = 'false'
 `$env:PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ASYNC_ENABLED = 'true'
@@ -623,6 +707,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($backendScript))
     Write-Phase "Starting Quickstart backend on $backendUrl."
     $env:PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET = $streamSecret
+    $env:PRAXIS_RESOURCE_VERSION_ETAG_SECRET = $resourceVersionEtagSecret
     $backendProcess = Start-Process powershell.exe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encoded) -RedirectStandardOutput (Join-Path $quickstartLogs "page-builder-agentic-e2e.out.log") -RedirectStandardError (Join-Path $quickstartLogs "page-builder-agentic-e2e.err.log") -PassThru -WindowStyle Hidden
     Wait-Url "$backendUrl/actuator/health" $StartupTimeoutSec "Quickstart backend"
     Assert-LoopbackListener $BackendPort "Quickstart backend"
@@ -633,7 +718,13 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
     Write-Phase "Verifying canonical AI Registry bootstrap and immutable snapshot hash."
     $aiRegistryEvidence = Wait-AiRegistryReady $backendUrl $uiUrl $expectedRegistrySnapshotHash $StartupTimeoutSec
 
-    $domainCatalogEvidence = Invoke-DomainCatalogIngest $backendUrl $uiUrl "desenv" "local"
+    $domainCatalogGroups = if ($ValidationMode -eq "full") {
+        @("human-resources", "operations")
+    } else {
+        @("human-resources")
+    }
+    $domainCatalogEvidence = Invoke-DomainCatalogIngest `
+        $backendUrl $uiUrl "desenv" "local" $domainCatalogGroups
 
     Push-Location $UiRoot
     try {
@@ -790,6 +881,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
     Stop-ProcAndPort $uiProcess $UiPort
     Stop-ProcAndPort $backendProcess $BackendPort
     Remove-Item Env:\PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET -ErrorAction SilentlyContinue
+    Remove-Item Env:\PRAXIS_RESOURCE_VERSION_ETAG_SECRET -ErrorAction SilentlyContinue
     try {
         if ($uiProcessWasStarted) { Assert-PortReleased $UiPort "Angular dev server" }
         if ($backendProcessWasStarted) { Assert-PortReleased $BackendPort "Quickstart backend" }
@@ -817,6 +909,9 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         model = $modelId
         embeddingProvider = $resolvedEmbeddingProvider
         datasourceKinds = [ordered]@{ application = "postgresql"; config = "postgresql" }
+        dependencyAttestation = [ordered]@{
+            configStarter = $configStarterArtifactEvidence
+        }
         pgvector = $pgvectorEvidence
         backendBaseUrl = $backendUrl
         uiBaseUrl = $uiUrl

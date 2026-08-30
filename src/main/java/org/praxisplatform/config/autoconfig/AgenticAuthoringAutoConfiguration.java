@@ -63,6 +63,7 @@ import org.praxisplatform.config.service.GovernedPlatformRequestAuthorizationPro
 import org.praxisplatform.config.service.LiveOptionValueRetrievalService;
 import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
 import org.praxisplatform.config.service.ResourceSurfaceCatalogRetrievalService;
+import org.praxisplatform.config.service.ResourceActionCatalogRetrievalService;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
@@ -346,6 +347,7 @@ public class AgenticAuthoringAutoConfiguration {
     @ConditionalOnMissingBean
     public org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainBindingService
             agenticAuthoringDomainBindingService(
+                    ObjectMapper objectMapper,
                     ObjectProvider<org.praxisplatform.config.repository.DomainKnowledgeBindingRepository>
                             bindingRepositoryProvider,
                     ObjectProvider<org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository>
@@ -356,7 +358,7 @@ public class AgenticAuthoringAutoConfiguration {
             return null;
         }
         return new org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainBindingService(
-                bindingRepository, evidenceRepository);
+                bindingRepository, evidenceRepository, objectMapper);
     }
 
     @Bean
@@ -496,20 +498,38 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public ResourceActionCatalogRetrievalService resourceActionCatalogRetrievalService(
+            ObjectMapper objectMapper,
+            ObjectProvider<GovernedPlatformRequestAuthorizationProvider> authorizationProviders,
+            @Value("${praxis.ai.capabilities.base-url:}") String metadataBaseUrl,
+            @Value("${praxis.ai.capabilities.timeout-ms:15000}") long metadataTimeoutMs) {
+        return new ResourceActionCatalogRetrievalService(
+                objectMapper,
+                metadataBaseUrl,
+                metadataTimeoutMs,
+                authorizationProviders.getIfAvailable(
+                        GovernedPlatformRequestAuthorizationProvider::none));
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     @ConditionalOnBean({
             org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainBindingService.class,
             SchemaRetrievalService.class,
-            ResourceCapabilitiesRetrievalService.class
+            ResourceCapabilitiesRetrievalService.class,
+            ResourceActionCatalogRetrievalService.class
     })
     public org.praxisplatform.config.ai.authoring.AgenticAuthoringOperationalBindingVerificationService
             agenticAuthoringOperationalBindingVerificationService(
                     org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainBindingService bindingService,
                     SchemaRetrievalService schemaRetrievalService,
-                    ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService) {
+                    ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService,
+                    ResourceActionCatalogRetrievalService resourceActionCatalogRetrievalService) {
         return new org.praxisplatform.config.ai.authoring.AgenticAuthoringOperationalBindingVerificationService(
                 bindingService,
                 schemaRetrievalService,
-                resourceCapabilitiesRetrievalService);
+                resourceCapabilitiesRetrievalService,
+                resourceActionCatalogRetrievalService);
     }
 
     @Bean

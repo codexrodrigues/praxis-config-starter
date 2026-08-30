@@ -4632,8 +4632,8 @@ class AgenticAuthoringPreviewServiceTest {
     void previewCompilesGovernedResourceWorkspaceThroughTheOfficialServerPath() throws Exception {
         ObjectNode contextHints = objectMapper.createObjectNode();
         ObjectNode envelope = contextHints.putObject("verifiedDomainOperations");
-        envelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v1");
-        envelope.put("source", "schemas.filtered+resource.capabilities");
+        envelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v2");
+        envelope.put("source", "schemas.filtered+resource.capabilities+schemas.actions");
         ArrayNode entries = envelope.putArray("entries");
         addVerifiedWorkspaceOperation(
                 entries,
@@ -4680,6 +4680,12 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.valid())
                 .withFailMessage("Preview failure codes: %s", result.failureCodes())
                 .isTrue();
+        assertThat(result.failureCodes()).doesNotContain(
+                AgenticAuthoringSemanticMaterializationPolicy.PRIMARY_COMPONENT_REQUIRED_FAILURE,
+                AgenticAuthoringSemanticMaterializationPolicy.LAYOUT_REQUIRED_FAILURE);
+        assertThat(result.uiCompositionPlan().path("layoutPreset").asText())
+                .isEqualTo("master-detail-dashboard");
+        assertThat(result.uiCompositionPlan().path("layoutPresetOptions").has("presetFamily")).isFalse();
         assertThat(result.warnings()).contains(
                 "ui-composition-plan-provider:generic-resource-page",
                 "ui-composition-plan-compiled-by-config");
@@ -4960,8 +4966,28 @@ class AgenticAuthoringPreviewServiceTest {
         operation.put("schemaUrl", "/schemas/filtered?path=" + apiPath
                 + "&operation=" + apiMethod + "&schemaType="
                 + ("get".equals(apiMethod) ? "response" : "request"));
-        operation.put("capabilitiesUrl", "/api/human-resources/funcionarios/capabilities");
-        operation.put("capabilityOperationId", operationId);
+        boolean action = apiPath.contains("/actions/");
+        operation.put("kind", action ? "workflow_action" : "resource_operation");
+        operation.put("metadataUrl", action
+                ? "/schemas/actions?resource=human-resources.funcionarios"
+                : "/api/human-resources/funcionarios/capabilities");
+        operation.put("operationId", operationId);
+        ObjectNode availability = operation.putObject("availability");
+        if (action) {
+            operation.put("actionId", operationId);
+            operation.put("scope", "ITEM");
+            operation.put("verificationMode", "runtime_action_discovery");
+            availability.put("allowed", false);
+            availability.put("reason", "resource-context-required");
+            availability.put("resolution", "item_capabilities_at_selection");
+        } else {
+            operation.put("actionId", "");
+            operation.put("scope", "");
+            operation.put("verificationMode", "principal_capability");
+            availability.put("allowed", true);
+            availability.put("reason", "");
+            availability.put("resolution", "resource_capabilities");
+        }
         operation.put("sourceRelease", "quickstart-funcionarios-v1");
         operation.putArray("evidence")
                 .add("schema-grounding-verified")

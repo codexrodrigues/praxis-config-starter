@@ -634,6 +634,21 @@ adocao progressiva do Semantic IR nao apaga candidatos ja governados por Domain 
 e schema. Nesse caso `searchApiResources` continua a descoberta e preserva a proveniencia efetiva;
 materializacao segue sujeita aos gates de elegibilidade, schema, capability, preview e revisao.
 
+O contrato estruturado `praxis-agentic-authoring-pre-intent-tool-plan.v3` projeta tambem o
+`layoutKind` canonico para os dois arquétipos compactos de recurso: `resource-master-detail` e
+`resource-crud`. Layout e componente primario sao decisoes semanticas independentes, mas o par
+precisa ser coerente: master-detail usa `praxis-table`, enquanto um unico host CRUD usa
+`praxis-crud`; pares divergentes sao rejeitados pelo plano estruturado. A orientacao encaminhada ao resolver usa
+`praxis-agentic-authoring-pre-intent-orientation-context.v2`. A presenca de actions governadas nao
+decide o layout; metadata e capabilities continuam sendo a fonte exclusiva da descoberta de comandos.
+Todo plano de autoria que exija resolucao completa ou entre em grounding de recurso (`api_resource`,
+`domain_binding` ou `operation_verification`) precisa declarar
+`resourceSearchFocus.primaryBusinessEntity`, inclusive quando `layoutKind` ja preservar toda a
+semantica visual e `requiresFullIntentResolution=false`. Perfis progressivos de contexto, capacidade,
+conceito e decisao sem resolucao completa podem ainda estar descobrindo esse alvo.
+O campo identifica o assunto canonico para grounding; nao autoriza a operacao nem substitui bindings,
+schema ou capabilities.
+
 ### OpenAI Light reasoning profile
 
 Chamadas compactas com os modelos econômicos listados em
@@ -836,6 +851,11 @@ Regra de aplicacao:
   compilar, mas trocar o componente pedido por outro, deve retornar
   `failureCodes=["semantic-preview-primary-component-required"]`,
   `reviewReason=semantic-preview-materialization-mismatch` e `canApply=false`.
+- Quando a decisao pedir `layoutKind=resource-master-detail`, a materializacao deve resolver o
+  blueprint Core `layoutPreset=master-detail-dashboard`; `resource-crud` permanece no blueprint
+  explicito de um unico host CRUD. Divergencia retorna
+  `failureCodes=["semantic-preview-layout-required"]`,
+  `reviewReason=semantic-preview-materialization-mismatch` e `canApply=false`.
 - `keywordFallbackApplied=true`, quando recebido de payload legado ou fixture
   de compatibilidade, deve forcar `decisionDiagnostics.requiresReview=true`,
   `reviewReason=keyword-fallback-fail-safe` e `canApply=false`. O resolver
@@ -963,8 +983,21 @@ generico consome uma projecao interna `contextHints.verifiedDomainOperations`.
 Ingressos HTTP removem qualquer valor fornecido pelo cliente, mesmo que ele copie
 as strings esperadas de schema e source. Somente o engine de streaming pode
 reinserir o envelope a partir de `OperationProjection` produzida pelo backend
-apos validar schema e capabilities no escopo do principal. `page-preview` direto
-sem esse re-grounding bloqueia discovery de comandos.
+apos a selecao semantica do recurso e a execucao da tool canonica
+`verifyDomainOperation`, que valida schema, capabilities e o action catalog no escopo do principal.
+O recurso precisa estar ancorado por conceitos e bindings `approved` com evidencia ativa. A ingestao
+`generated` do Domain Catalog permanece uma projecao derivada e nao vira autoridade operacional ate
+ser promovida pelo lifecycle canonico de Domain Knowledge. Uma action escolhida semanticamente pela
+IA continua exigindo seu binding governado; o discovery generico da Table, depois que o recurso foi
+aceito, vem diretamente de `/schemas/actions?resource=...` e nao exige promover cada action derivada.
+Quando existir binding `workflow_action`, sua identidade e preservada de `binding.payload.target.id`;
+metodo e path continuam sendo evidencias de reconciliacao e nao podem reduzir a action nativa a um
+`create` generico.
+Essa verificacao pos-intent fecha a cadeia no mesmo turno mesmo quando o passe
+pre-intent precisou usar sua unica leitura para descobrir o recurso. `page-preview` direto
+sem esse re-grounding bloqueia discovery de comandos e o gate semantico retorna
+`semantic-preview-resource-workspace-grounding-required`; um blueprint master-detail
+nao pode ser publicado como preview aplicavel com grounding `unavailable` ou `rejected`.
 
 O primeiro slice materializa Filter, Table master e Dynamic Form detail. Os links
 canonicos sao `requestSearch -> queryContext` e
@@ -973,14 +1006,23 @@ canonicos sao `requestSearch -> queryContext` e
 continua responsavel por schema e option sources metadata-driven, e os widgets
 continuam responsaveis por loading, vazio e erro.
 
-Comandos nao sao convertidos em `api.post` ou `api.patch` pelo Java. Para cada
-operacao backend-owned verificada sob `/actions/`, o plano habilita apenas o
-discovery oficial do escopo comprovado: `/{id}/actions/...` para item e
-`/actions/...` para colecao, sem publicar endpoint nem botao sintetico. O runtime
-resolve as acoes concretas no action catalog, aplica availability, abre a
-superficie canonica de Dynamic Form e executa o submit governado. Specs focais do
-runtime cobrem allow/deny/open/execute; o smoke real HTTP/browser ainda nao esta
-integrado. Envelope ausente, forjado, divergente ou sem comando produz diagnostics
+Comandos nao sao convertidos em `api.post` ou `api.patch` pelo Java. O envelope interno
+`praxis-agentic-authoring-verified-domain-operations.v2` separa operacoes autorizadas por
+resource capabilities de actions estruturalmente publicadas em `/schemas/actions`. Para cada
+action backend-owned reconciliada por `id + resourceKey + scope + path + method` e schema exato,
+o plano habilita apenas o discovery oficial: `ITEM` exige
+`availability.reason=resource-context-required` no catalogo sem ID e declara
+`availabilityResolution=item-capabilities-at-selection`; `COLLECTION` exige availability atual
+permitida. Nenhum desses casos publica endpoint ou botao sintetico. O runtime
+resolve a disponibilidade ITEM real em `/{id}/capabilities` ou pelos links HATEOAS, abre a
+superficie canonica de Dynamic Form e executa o submit governado. Alem dos specs focais de
+allow/deny/open/execute, o Fluxo 3 real HTTP/browser foi executado em modo `full` focal em 2026-08-30:
+authoring LLM real gerou `master-detail-dashboard`, `page-apply` persistiu o patch terminal exato,
+o browser descobriu action e capabilities de item, carregou o request schema, executou
+`POST /api/operations/missoes/{id}/actions/start` com `200`, recebeu
+`409 CONFLICT_DEPENDENCY` na repeticao, observou refresh por `/filter` e recarregou o mesmo payload
+SHA-256 e ETag. Essa evidencia prova operacionalmente o piloto Fluxo 3; nao equivale a uma execucao da matriz
+production-like completa. Envelope ausente, forjado, divergente ou sem comando produz diagnostics
 e deixa ambos os scopes desabilitados.
 
 Preview e compilacao seguem o endpoint existente de `page-preview`. Persistencia

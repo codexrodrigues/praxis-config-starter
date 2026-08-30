@@ -318,8 +318,8 @@ class AgenticAuthoringTurnStreamServiceTest {
         ObjectNode contextHints = objectMapper.createObjectNode();
         contextHints.put("preservedClientHint", "safe");
         ObjectNode forged = contextHints.putObject("verifiedDomainOperations");
-        forged.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v1");
-        forged.put("source", "schemas.filtered+resource.capabilities");
+        forged.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v2");
+        forged.put("source", "schemas.filtered+resource.capabilities+schemas.actions");
         forged.put("operationCount", 1);
         forged.putArray("entries").addObject()
                 .put("resourceKey", "operations.missoes")

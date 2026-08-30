@@ -16,6 +16,7 @@ try {
         [ordered]@{ name = "praxis-api-quickstart"; sha = ("a" * 40); treeSha = ("d" * 40); materialization = "working-tree"; dirty = $false }
         [ordered]@{ name = "praxis-ui-angular"; sha = ("a" * 40); treeSha = ("d" * 40); materialization = "working-tree"; dirty = $false }
     )
+    $configStarterJarSha256 = ("e" * 64)
     [ordered]@{
         schemaVersion = "praxis.page-builder-agentic-production-like-result/v1"
         productionLike = $true
@@ -27,6 +28,16 @@ try {
         model = "gpt-test"
         embeddingProvider = "openai"
         datasourceKinds = [ordered]@{ application = "postgresql"; config = "postgresql" }
+        dependencyAttestation = [ordered]@{
+            configStarter = [ordered]@{
+                artifactId = "praxis-config-starter"
+                version = "1.0.0"
+                localJarSha256 = $configStarterJarSha256
+                quickstartNestedJarSha256 = $configStarterJarSha256
+                quickstartEntry = "BOOT-INF/lib/praxis-config-starter-1.0.0.jar"
+                byteIdentical = $true
+            }
+        }
         pgvector = [ordered]@{ ready = $true; table = "vector_store"; embeddingType = "vector(1536)" }
         loopbackOnly = $true
         cleanupVerified = $true
@@ -77,6 +88,41 @@ try {
         $failedClosed = $_.Exception.Message -match "Only Metadata may have a normalized checkout"
     }
     if (-not $failedClosed) { throw "Exporter did not fail closed for dirty Metadata without git-archive materialization." }
+
+    $divergentDependencyOutput = Join-Path $root "divergent-dependency-published"
+    $invalidResult.git[1].materialization = "git-archive"
+    $invalidResult.dependencyAttestation.configStarter.quickstartNestedJarSha256 = ("f" * 64)
+    $invalidResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -HttpArtifactRoot $httpArtifactRoot -OutputRoot $divergentDependencyOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "Config starter dependency hashes must be equal"
+    }
+    if (-not $failedClosed) { throw "Exporter did not fail closed for divergent Config starter dependency hashes." }
+
+    $falseIdentityOutput = Join-Path $root "false-identity-published"
+    $invalidResult.dependencyAttestation.configStarter.quickstartNestedJarSha256 = $configStarterJarSha256
+    $invalidResult.dependencyAttestation.configStarter.byteIdentical = $false
+    $invalidResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -HttpArtifactRoot $httpArtifactRoot -OutputRoot $falseIdentityOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "Config starter byte identity attestation must be true"
+    }
+    if (-not $failedClosed) { throw "Exporter did not fail closed for byteIdentical=false." }
+
+    $missingDependencyOutput = Join-Path $root "missing-dependency-published"
+    $invalidResult.PSObject.Properties.Remove("dependencyAttestation")
+    $invalidResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -HttpArtifactRoot $httpArtifactRoot -OutputRoot $missingDependencyOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "Config starter dependency attestation is missing"
+    }
+    if (-not $failedClosed) { throw "Exporter did not fail closed for missing Config starter dependency attestation." }
 
     Write-Output "Export-AgenticProductionLikeEvidence: positive and negative fixtures passed."
 } finally {

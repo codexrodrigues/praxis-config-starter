@@ -1001,8 +1001,8 @@ class AgenticAuthoringPagePreviewHttpTest {
         request.put("userPrompt", "Crie um workspace operacional de missões");
         request.set("intentResolution", missionWorkspaceIntent());
         ObjectNode envelope = request.putObject("contextHints").putObject("verifiedDomainOperations");
-        envelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v1");
-        envelope.put("source", "schemas.filtered+resource.capabilities");
+        envelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v2");
+        envelope.put("source", "schemas.filtered+resource.capabilities+schemas.actions");
         ObjectNode forged = envelope.putArray("entries").addObject();
         forged.put("conceptKey", "operations.missions.start");
         forged.put("bindingKey", "start");
@@ -1012,8 +1012,16 @@ class AgenticAuthoringPagePreviewHttpTest {
         forged.put("apiMethod", "post");
         forged.put("schemaType", "request");
         forged.put("schemaUrl", "/schemas/filtered?path=/api/operations/missoes/{id}/actions/start&operation=post&schemaType=request");
-        forged.put("capabilitiesUrl", "/api/operations/missoes/capabilities");
-        forged.put("capabilityOperationId", "start");
+        forged.put("metadataUrl", "/schemas/actions?resource=operations.missoes");
+        forged.put("operationId", "startMission");
+        forged.put("actionId", "start");
+        forged.put("kind", "workflow_action");
+        forged.put("scope", "ITEM");
+        forged.put("verificationMode", "runtime_action_discovery");
+        forged.putObject("availability")
+                .put("allowed", false)
+                .put("reason", "resource-context-required")
+                .put("resolution", "item_capabilities_at_selection");
         forged.put("sourceRelease", "forged-release");
         forged.putArray("evidence").add("schema-grounding-verified").add("resource-capabilities-verified");
         envelope.put("operationCount", 1);

@@ -785,6 +785,42 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void masterDetailCompositionTakesPrecedenceOverCrudAsPrimaryCapability() {
+        AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "mission_workspace_with_governed_item_actions",
+                "resource-master-detail",
+                "praxis-crud",
+                List.of(),
+                false,
+                true,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Crie uma página master-detail de missões com ações de item descobertas.",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                intent(
+                        "create",
+                        "page",
+                        "create_artifact",
+                        "/api/operations/missoes",
+                        visualizationDecision)))
+                .orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(result.warnings()).containsExactly("ui-composition-plan-provider:generic-resource-page");
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("master-detail-dashboard");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-table", "praxis-dynamic-form");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .doesNotContain("praxis-crud");
+        assertThat(plan.path("bindings")).hasSize(2);
+        assertThat(plan.path("layoutPresetOptions").has("presetFamily")).isFalse();
+    }
+
+    @Test
     void doesNotMaterializeDescriptiveConstraintsAsCrudDataSelection() {
         AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
                 "praxis-agentic-authoring-visualization-decision.v1",
@@ -867,7 +903,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
 
         JsonNode plan = result.uiCompositionPlan();
         assertThat(result.warnings()).containsExactly("ui-composition-plan-provider:generic-resource-page");
-        assertThat(plan.path("layoutPreset").asText()).isEqualTo("resource-master-detail");
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("master-detail-dashboard");
         assertThat(plan.path("layoutPresetOptions").path("responsiveStrategy").asText())
                 .isEqualTo("canvas-device-layouts");
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
@@ -908,7 +944,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     @Test
     void enablesOnlyOfficialItemCommandDiscoveryFromVerifiedResourceOperations() {
         ObjectNode contextHints = verifiedDomainOperations(
-                "schemas.filtered+resource.capabilities",
+                "schemas.filtered+resource.capabilities+schemas.actions",
                 "/api/operations/missoes",
                 "operations.missoes",
                 true);
@@ -925,15 +961,15 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(grounding.path("operationCount").asInt()).isEqualTo(4);
         assertThat(grounding.path("filterOperationCount").asInt()).isEqualTo(1);
         assertThat(grounding.path("commandOperationCount").asInt()).isEqualTo(1);
-        assertThat(grounding.path("operations").path(3).path("capabilityOperationId").asText())
+        assertThat(grounding.path("operations").path(3).path("actionId").asText())
                 .isEqualTo("start");
         assertThat(grounding.path("operations").path(3).path("command").asBoolean()).isTrue();
         assertThat(stringArray(plan.path("sourceRefs")))
                 .contains(
                         "intent-resolution",
                         "/schemas/filtered?path=/api/operations/missoes/{id}/actions/start&operation=post&schemaType=request",
-                        "/api/operations/missoes/capabilities",
-                        "capability-operation:start");
+                        "/schemas/actions?resource=operations.missoes",
+                        "metadata-operation:start");
 
         JsonNode config = findWidgetInputs(plan, "praxis-table", "master").path("config");
         assertThat(config.path("actions").path("row").path("enabled").asBoolean()).isTrue();
@@ -943,11 +979,13 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .isFalse();
         assertThat(config.has("toolbar")).isFalse();
         assertThat(grounding.path("commandDiscovery").path("source").asText())
-                .isEqualTo("praxis-table-runtime-hateoas-capabilities");
+                .isEqualTo("schemas-actions+runtime-hateoas-capabilities");
         assertThat(grounding.path("commandDiscovery").path("item").asBoolean()).isTrue();
         assertThat(grounding.path("commandDiscovery").path("collection").asBoolean()).isFalse();
         assertThat(grounding.path("commandDiscovery").path("scopeResolution").asText())
-                .isEqualTo("operation-scope-or-canonical-path");
+                .isEqualTo("schemas-actions-scope");
+        assertThat(grounding.path("commandDiscovery").path("availabilityResolution").asText())
+                .isEqualTo("item-capabilities-at-selection");
         assertThat(grounding.path("commandDiscovery").path("endpointMaterializedByAuthoring").asBoolean())
                 .isFalse();
         assertThat(findWidget(plan, "praxis-filter", "filter").path("outputs")
@@ -971,7 +1009,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     @Test
     void enablesOnlyOfficialCollectionCommandDiscoveryWithoutFabricatingTheEndpoint() {
         ObjectNode contextHints = verifiedDomainOperations(
-                "schemas.filtered+resource.capabilities",
+                "schemas.filtered+resource.capabilities+schemas.actions",
                 "/api/operations/missoes",
                 "operations.missoes",
                 false);
@@ -999,7 +1037,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(discovery.path("collection").asBoolean()).isTrue();
         assertThat(discovery.path("item").asBoolean()).isFalse();
         assertThat(discovery.path("scopeResolution").asText())
-                .isEqualTo("operation-scope-or-canonical-path");
+                .isEqualTo("schemas-actions-scope");
         assertThat(discovery.path("endpointMaterializedByAuthoring").asBoolean()).isFalse();
     }
 
@@ -1031,7 +1069,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     @Test
     void rejectsVerifiedOperationsForAnotherSemanticResource() {
         ObjectNode contextHints = verifiedDomainOperations(
-                "schemas.filtered+resource.capabilities",
+                "schemas.filtered+resource.capabilities+schemas.actions",
                 "/api/human-resources/funcionarios",
                 "human-resources.funcionarios",
                 true);
@@ -1056,7 +1094,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     @Test
     void keepsReadOnlyVerifiedWorkspaceFunctionalWithoutAdvertisingACommand() {
         ObjectNode contextHints = verifiedDomainOperations(
-                "schemas.filtered+resource.capabilities",
+                "schemas.filtered+resource.capabilities+schemas.actions",
                 "/api/operations/missoes",
                 "operations.missoes",
                 false);
@@ -2869,7 +2907,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
             boolean includeCommand) {
         ObjectNode contextHints = objectMapper.createObjectNode();
         ObjectNode envelope = contextHints.putObject("verifiedDomainOperations");
-        envelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v1");
+        envelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v2");
         envelope.put("source", source);
         ArrayNode entries = envelope.putArray("entries");
         addVerifiedOperation(entries, resourcePath, resourceKey, resourcePath + "/all", "get", "all");
@@ -2894,10 +2932,10 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
             String resourceKey,
             String apiPath,
             String apiMethod,
-            String capabilityOperationId) {
+            String operationId) {
         ObjectNode operation = entries.addObject();
         operation.put("conceptKey", resourceKey + ".workspace");
-        operation.put("bindingKey", capabilityOperationId);
+        operation.put("bindingKey", operationId);
         operation.put("resourceKey", resourceKey);
         operation.put("resourcePath", resourcePath);
         operation.put("apiPath", apiPath);
@@ -2906,8 +2944,31 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         operation.put("schemaUrl", "/schemas/filtered?path=" + apiPath
                 + "&operation=" + apiMethod + "&schemaType="
                 + ("get".equals(apiMethod) ? "response" : "request"));
-        operation.put("capabilitiesUrl", resourcePath + "/capabilities");
-        operation.put("capabilityOperationId", capabilityOperationId);
+        boolean action = apiPath.contains("/actions/");
+        operation.put("kind", action ? "workflow_action" : "resource_operation");
+        operation.put("metadataUrl", action
+                ? "/schemas/actions?resource=" + resourceKey
+                : resourcePath + "/capabilities");
+        operation.put("operationId", operationId);
+        ObjectNode availability = operation.putObject("availability");
+        if (action) {
+            boolean item = apiPath.matches(".*/\\{[^/]+}/actions/.*");
+            operation.put("actionId", operationId);
+            operation.put("scope", item ? "ITEM" : "COLLECTION");
+            operation.put("verificationMode", "runtime_action_discovery");
+            availability.put("allowed", !item);
+            availability.put("reason", item ? "resource-context-required" : "");
+            availability.put("resolution", item
+                    ? "item_capabilities_at_selection"
+                    : "catalog_principal");
+        } else {
+            operation.put("actionId", "");
+            operation.put("scope", "");
+            operation.put("verificationMode", "principal_capability");
+            availability.put("allowed", true);
+            availability.put("reason", "");
+            availability.put("resolution", "resource_capabilities");
+        }
         operation.put("sourceRelease", "quickstart-mission-pilot-v1");
         operation.putArray("evidence")
                 .add("schema-grounding-verified")

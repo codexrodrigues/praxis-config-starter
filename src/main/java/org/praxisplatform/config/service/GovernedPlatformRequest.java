@@ -23,6 +23,7 @@ public record GovernedPlatformRequest(
         SCHEMA_FILTERED,
         RESOURCE_CAPABILITIES,
         RESOURCE_SURFACE_CATALOG,
+        RESOURCE_ACTION_CATALOG,
         OPTION_SOURCE_VALUES
     }
 

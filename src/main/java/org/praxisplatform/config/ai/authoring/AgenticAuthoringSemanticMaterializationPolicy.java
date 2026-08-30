@@ -9,6 +9,9 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
     static final String CHART_REQUIRED_FAILURE = "semantic-preview-chart-required";
     static final String DASHBOARD_REQUIRED_FAILURE = "semantic-preview-dashboard-required";
     static final String PRIMARY_COMPONENT_REQUIRED_FAILURE = "semantic-preview-primary-component-required";
+    static final String LAYOUT_REQUIRED_FAILURE = "semantic-preview-layout-required";
+    static final String RESOURCE_WORKSPACE_GROUNDING_REQUIRED_FAILURE =
+            "semantic-preview-resource-workspace-grounding-required";
     static final String RESOURCE_BINDING_MISMATCH_FAILURE = "semantic-preview-resource-binding-mismatch";
     static final String AXIS_SCHEMA_VERIFICATION_REQUIRED_FAILURE = "semantic-preview-axis-schema-verification-required";
     static final String AXIS_STATS_CAPABILITY_VERIFICATION_REQUIRED_FAILURE =
@@ -21,8 +24,16 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
     static ValidationResult validate(
             AgenticAuthoringSemanticDecision semanticDecision,
             JsonNode materialization) {
+        return validate(semanticDecision, materialization, materialization);
+    }
+
+    static ValidationResult validate(
+            AgenticAuthoringSemanticDecision semanticDecision,
+            JsonNode materialization,
+            JsonNode semanticEvidence) {
         List<String> failureCodes = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
+        JsonNode structuralMaterialization = structuralMaterialization(materialization);
         if (semanticDecision == null) {
             failureCodes.add("semantic-decision-required");
             warnings.add("semantic-decision-required");
@@ -30,32 +41,43 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         }
         if (semanticDecision != null
                 && semanticDecision.reviewRequired()
-                && !reviewRequirementRegroundedByMaterialization(semanticDecision, materialization)) {
+                && !reviewRequirementRegroundedByMaterialization(
+                        semanticDecision,
+                        structuralMaterialization,
+                        semanticEvidence)) {
             failureCodes.add(reviewRequiredFailure(semanticDecision));
             warnings.add("semantic-decision-review-required");
         }
         String primaryComponent = requestedPrimaryComponent(semanticDecision);
         if (!primaryComponent.isBlank()
-                && !containsComponent(materialization, primaryComponent)
-                && !primaryComponentSatisfiedByCompositeMaterialization(primaryComponent, materialization)) {
+                && !containsComponent(structuralMaterialization, primaryComponent)
+                && !primaryComponentSatisfiedByCompositeMaterialization(primaryComponent, structuralMaterialization)) {
             failureCodes.add(PRIMARY_COMPONENT_REQUIRED_FAILURE);
             warnings.add(MATERIALIZATION_MISMATCH_WARNING);
         }
+        if (hasLayoutMaterializationMismatch(semanticDecision, structuralMaterialization)) {
+            failureCodes.add(LAYOUT_REQUIRED_FAILURE);
+            warnings.add(MATERIALIZATION_MISMATCH_WARNING);
+        }
+        if (hasUnverifiedResourceWorkspace(structuralMaterialization, semanticEvidence)) {
+            failureCodes.add(RESOURCE_WORKSPACE_GROUNDING_REQUIRED_FAILURE);
+            warnings.add("semantic-resource-workspace-grounding-required");
+        }
         if (requiresChartMaterialization(semanticDecision)
-                && !containsComponent(materialization, "praxis-chart")) {
+                && !containsComponent(structuralMaterialization, "praxis-chart")) {
             failureCodes.add(CHART_REQUIRED_FAILURE);
             warnings.add(MATERIALIZATION_MISMATCH_WARNING);
         }
-        if (hasResourceBindingMismatch(semanticDecision, materialization)) {
+        if (hasResourceBindingMismatch(semanticDecision, structuralMaterialization)) {
             failureCodes.add(RESOURCE_BINDING_MISMATCH_FAILURE);
             warnings.add(MATERIALIZATION_MISMATCH_WARNING);
         }
-        if (hasUnverifiedSemanticAxes(materialization)) {
+        if (hasUnverifiedSemanticAxes(semanticEvidence)) {
             failureCodes.add(AXIS_SCHEMA_VERIFICATION_REQUIRED_FAILURE);
             warnings.add("semantic-axis-schema-verification-pending");
             warnings.add(MATERIALIZATION_MISMATCH_WARNING);
         }
-        if (hasUnverifiedStatsAxes(materialization)) {
+        if (hasUnverifiedStatsAxes(semanticEvidence)) {
             failureCodes.add(AXIS_STATS_CAPABILITY_VERIFICATION_REQUIRED_FAILURE);
             warnings.add("semantic-axis-stats-capability-verification-pending");
             warnings.add(MATERIALIZATION_MISMATCH_WARNING);
@@ -102,12 +124,77 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         }
         List<String> bindings = new ArrayList<>();
         collectResourceBindings(materialization, bindings);
-        return bindings.stream()
+        List<String> normalizedBindings = bindings.stream()
                 .map(AgenticAuthoringSemanticMaterializationPolicy::normalizePath)
                 .filter(value -> !value.isBlank())
+                .toList();
+        if (normalizedBindings.isEmpty()) {
+            return requiresCanonicalResourceBinding(semanticDecision, materialization);
+        }
+        return normalizedBindings.stream()
                 .anyMatch(value -> !value.equals(expectedResource)
                         && !value.startsWith(expectedResource + "/")
                         && !expectedResource.startsWith(value + "/"));
+    }
+
+    private static boolean requiresCanonicalResourceBinding(
+            AgenticAuthoringSemanticDecision semanticDecision,
+            JsonNode materialization) {
+        String semanticLayout = semanticDecision == null || semanticDecision.visualizationDecision() == null
+                ? ""
+                : safe(semanticDecision.visualizationDecision().layoutKind());
+        return "resource-master-detail".equals(semanticLayout)
+                || materialization != null
+                        && "master-detail-dashboard".equals(
+                                safe(materialization.path("layoutPreset").asText()));
+    }
+
+    private static boolean hasUnverifiedResourceWorkspace(
+            JsonNode structuralMaterialization,
+            JsonNode evidenceMaterialization) {
+        if (structuralMaterialization == null
+                || !"master-detail-dashboard".equals(
+                        safe(structuralMaterialization.path("layoutPreset").asText()))) {
+            return false;
+        }
+        JsonNode diagnostics = evidenceMaterialization == null
+                ? structuralMaterialization.path("diagnostics")
+                : evidenceMaterialization.path("diagnostics").isObject()
+                        ? evidenceMaterialization.path("diagnostics")
+                        : structuralMaterialization.path("diagnostics");
+        return !"verified".equals(safe(diagnostics
+                .path("resourceWorkspaceGrounding")
+                .path("status")
+                .asText()));
+    }
+
+    private static JsonNode structuralMaterialization(JsonNode materialization) {
+        if (materialization == null) {
+            return null;
+        }
+        JsonNode page = materialization.path("patch").path("page");
+        return page.isObject() ? page : materialization;
+    }
+
+    private static boolean hasLayoutMaterializationMismatch(
+            AgenticAuthoringSemanticDecision semanticDecision,
+            JsonNode materialization) {
+        if (semanticDecision == null || semanticDecision.visualizationDecision() == null) {
+            return false;
+        }
+        String semanticLayout = safe(semanticDecision.visualizationDecision().layoutKind());
+        String expectedLayoutPreset = switch (semanticLayout) {
+            case "resource-master-detail" -> "master-detail-dashboard";
+            case "resource-crud" -> "resource-crud";
+            default -> "";
+        };
+        if (expectedLayoutPreset.isBlank()) {
+            return false;
+        }
+        String materializedLayout = materialization == null
+                ? ""
+                : safe(materialization.path("layoutPreset").asText(""));
+        return !expectedLayoutPreset.equals(materializedLayout);
     }
 
     private static void collectResourceBindings(JsonNode node, List<String> bindings) {
@@ -169,14 +256,15 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
 
     private static boolean reviewRequirementRegroundedByMaterialization(
             AgenticAuthoringSemanticDecision semanticDecision,
-            JsonNode materialization) {
+            JsonNode structuralMaterialization,
+            JsonNode semanticEvidence) {
         if (semanticDecision == null
-                || materialization == null
-                || materialization.isMissingNode()
-                || materialization.isNull()) {
+                || semanticEvidence == null
+                || semanticEvidence.isMissingNode()
+                || semanticEvidence.isNull()) {
             return false;
         }
-        JsonNode grounding = materialization.path("diagnostics").path("resourceSchemaGrounding");
+        JsonNode grounding = semanticEvidence.path("diagnostics").path("resourceSchemaGrounding");
         boolean schemaGrounded = grounding.path("verified").asBoolean(false)
                 && "schemas.filtered".equals(safe(grounding.path("source").asText("")));
         if (!schemaGrounded) {
@@ -186,13 +274,13 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         if ("weak-lexical-evidence".equals(reason)) {
             return semanticDecision.selectedResource() != null
                     && !safe(semanticDecision.selectedResource().resourcePath()).isBlank()
-                    && !hasResourceBindingMismatch(semanticDecision, materialization);
+                    && !hasResourceBindingMismatch(semanticDecision, structuralMaterialization);
         }
         if ("prompt-alignment-selection".equals(reason)) {
             return hasGovernedResourceEvidence(semanticDecision)
                     && semanticDecision.selectedResource() != null
                     && !safe(semanticDecision.selectedResource().resourcePath()).isBlank()
-                    && !hasResourceBindingMismatch(semanticDecision, materialization);
+                    && !hasResourceBindingMismatch(semanticDecision, structuralMaterialization);
         }
         return "keyword-fallback-fail-safe".equals(reason)
                 && (semanticDecision.refinement() != null
@@ -200,7 +288,7 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
                 || hasGovernedResourceEvidence(semanticDecision)
                 && semanticDecision.selectedResource() != null
                 && !safe(semanticDecision.selectedResource().resourcePath()).isBlank()
-                && !hasResourceBindingMismatch(semanticDecision, materialization));
+                && !hasResourceBindingMismatch(semanticDecision, structuralMaterialization));
     }
 
     private static boolean hasGovernedResourceEvidence(AgenticAuthoringSemanticDecision semanticDecision) {
@@ -278,6 +366,9 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
             return true;
         }
         JsonNode page = materialization.path("patch").path("page");
+        if (!page.isObject()) {
+            page = materialization;
+        }
         // The compiled authoring envelope preserves governance diagnostics while its canonical
         // page projection intentionally no longer carries the authoring-plan discriminator.
         return page.path("widgets").isArray()

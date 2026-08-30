@@ -24,6 +24,7 @@ import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiProviderCallException;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 @Tag("unit")
@@ -48,7 +49,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                   "semanticIntentClass": "authoring_or_other",
                   "assistantMessage": "",
                   "shouldRetrieveGovernedResources": true,
@@ -111,12 +112,19 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                   "semanticIntentClass": "authoring_or_other",
                   "assistantMessage": "",
                   "shouldRetrieveGovernedResources": true,
                   "artifactKind": "page",
                   "retrievalQuery": "funcionarios colaboradores recursos humanos pessoas da empresa",
+                  "resourceSearchFocus": {
+                    "primaryBusinessEntity": "human-resources.funcionarios",
+                    "supportingConcepts": [],
+                    "desiredSurface": "table",
+                    "uncertainty": "",
+                    "rationale": "Canonical employee resource is the requested business subject."
+                  },
                   "reason": "O pedido precisa descobrir uma fonte governada de pessoas antes de criar a tela."
                 }
                 """));
@@ -151,7 +159,9 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         AgenticAuthoringResourceCandidatesRequest payload =
                 (AgenticAuthoringResourceCandidatesRequest) call.payload();
         assertThat(payload.retrievalQuery())
-                .isEqualTo("funcionarios colaboradores recursos humanos pessoas da empresa");
+                .isEqualTo("primary business entity: human-resources.funcionarios. "
+                        + "supporting concepts: none. desired surface: table. semantic query: "
+                        + "funcionarios colaboradores recursos humanos pessoas da empresa");
         assertThat(payload.userPrompt())
                 .isEqualTo("quero criar algo que mostre informacoes dos empregados");
         assertThat(payload.artifactKind()).isEqualTo("page");
@@ -175,13 +185,12 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("not yet commanding creation")
                 .contains("domainDiscovery")
                 .contains("human-resources.funcionarios")
-                .contains("Resource discovery, artifact kind")
-                .contains("defaults and a generic dashboard are not constraints")
+                .contains("Resource discovery and defaults are not constraints")
                 .contains("queryConstraints.appliesToDataSelection=true")
                 .contains("headers, labels, renderers, formatting, composed cells")
-                .contains("generic dashboard are not constraints")
-                .contains("Set primaryComponent semantically")
-                .contains("praxis-crud for governed record")
+                .contains("Author layoutKind independently")
+                .contains("resource-master-detail")
+                .contains("resource-crud + praxis-crud")
                 .contains("Feasibility questions stay platform_guidance")
                 .contains("they do not")
                 .contains("informações salariais")
@@ -199,9 +208,15 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("displayed-value edits")
                 .contains("primaryComponent")
                 .contains("praxis-crud")
+                .contains("layoutKind")
+                .contains("AI-authored semantic composition archetype")
                 .contains("Canonical business subject explicitly requested by the user")
                 .contains("Dimensions, fields, filters, groupings")
                 .contains("collection dashboard with filters, charts, and a detail table");
+        JsonNode structuredOutputSchema = objectMapper.readTree(schemaCaptor.getValue().jsonSchema());
+        assertThat(structuredOutputSchema.path("properties").path("schemaVersion").path("enum"))
+                .containsExactly(objectMapper.getNodeFactory()
+                        .textNode("praxis-agentic-authoring-pre-intent-tool-plan.v3"));
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(7);
         assertThat(configCaptor.getValue().getModel()).isEqualTo("gpt-5.6-luna");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(640);
@@ -219,7 +234,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                   "semanticIntentClass": "authoring_or_other",
                   "assistantMessage": "",
                   "shouldRetrieveGovernedResources": true,
@@ -276,7 +291,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(objectMapper.readTree("""
                         {
-                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                           "semanticIntentClass": "authoring_or_other",
                           "assistantMessage": "",
                           "shouldRetrieveGovernedResources": true,
@@ -293,6 +308,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                           "groundingProfile": "api_resource",
                           "artifactKind": "page",
                           "primaryComponent": "praxis-crud",
+                          "layoutKind": "resource-crud",
                           "retrievalQuery": "eventos da folha com ação de aprovação em lote",
                           "resourceSearchFocus": {
                             "primaryBusinessEntity": "human-resources.eventos-folha",
@@ -313,8 +329,106 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
 
         assertThat(result.planned()).isTrue();
         assertThat(result.plan().primaryComponent()).isEqualTo("praxis-crud");
+        assertThat(result.plan().layoutKind()).isEqualTo("resource-crud");
         assertThat(result.plan().requiresFullIntentResolution()).isTrue();
         assertThat(result.plan().queryConstraints().path("filters")).hasSize(1);
+    }
+
+    @Test
+    void preservesMasterDetailCompositionIndependentlyFromGovernedItemActions() throws Exception {
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                          "semanticIntentClass": "authoring_or_other",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "requiresFullIntentResolution": false,
+                          "queryConstraints": {
+                            "appliesToDataSelection": false,
+                            "filters": []
+                          },
+                          "groundingProfile": "api_resource",
+                          "artifactKind": "page",
+                          "primaryComponent": "praxis-table",
+                          "layoutKind": "resource-master-detail",
+                          "retrievalQuery": "missões operacionais",
+                          "resourceSearchFocus": {
+                            "primaryBusinessEntity": "operations.missoes",
+                            "supportingConcepts": ["seleção", "detalhe", "ações de item"],
+                            "desiredSurface": "workspace operacional master-detail",
+                            "uncertainty": null,
+                            "rationale": "A coleção seleciona uma missão para detalhe e ações governadas."
+                          },
+                          "reason": "Preserve the requested resource workspace composition."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("crie uma página master-detail de missões com ações de item descobertas"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().artifactKind()).isEqualTo("page");
+        assertThat(result.plan().primaryComponent()).isEqualTo("praxis-table");
+        assertThat(result.plan().layoutKind()).isEqualTo("resource-master-detail");
+        assertThat(result.plan().requiresFullIntentResolution()).isFalse();
+    }
+
+    @Test
+    void rejectsIncompatibleCompactLayoutAndPrimaryComponentPair() throws Exception {
+        ObjectNode result = (ObjectNode) objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                  "semanticIntentClass": "authoring_or_other",
+                  "shouldRetrieveGovernedResources": true,
+                  "requiresFullIntentResolution": false,
+                  "artifactKind": "page",
+                  "primaryComponent": "praxis-crud",
+                  "layoutKind": "resource-master-detail"
+                }
+                """);
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+
+        Boolean valid = ReflectionTestUtils.invokeMethod(service, "isValidStructuredPlan", result);
+
+        assertThat(valid).isFalse();
+
+        result.put("primaryComponent", "praxis-table");
+        result.put("schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v2");
+        Boolean staleVersion = ReflectionTestUtils.invokeMethod(service, "isValidStructuredPlan", result);
+        assertThat(staleVersion).isFalse();
+    }
+
+    @Test
+    void rejectsRetrievalAuthoringWithoutCanonicalBusinessEntityEvenWhenFullResolutionIsNotRequired()
+            throws Exception {
+        ObjectNode result = (ObjectNode) objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                  "semanticIntentClass": "authoring_or_other",
+                  "shouldRetrieveGovernedResources": true,
+                  "requiresFullIntentResolution": false,
+                  "artifactKind": "page",
+                  "primaryComponent": "praxis-table",
+                  "layoutKind": "resource-master-detail",
+                  "groundingProfile": "api_resource"
+                }
+                """);
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+
+        Boolean valid = ReflectionTestUtils.invokeMethod(service, "isValidStructuredPlan", result);
+
+        assertThat(valid).isFalse();
+        result.putObject("resourceSearchFocus")
+                .put("primaryBusinessEntity", "operations.missoes");
+        Boolean grounded = ReflectionTestUtils.invokeMethod(service, "isValidStructuredPlan", result);
+        assertThat(grounded).isTrue();
     }
 
     @Test
@@ -323,7 +437,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(objectMapper.readTree("""
                         {
-                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                           "semanticIntentClass": "authoring_or_other",
                           "assistantMessage": "",
                           "shouldRetrieveGovernedResources": true,
@@ -365,7 +479,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(objectMapper.readTree("""
                         {
-                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                           "semanticIntentClass": "authoring_or_other",
                           "assistantMessage": "",
                           "shouldRetrieveGovernedResources": true,
@@ -404,7 +518,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .thenReturn(
                         objectMapper.readTree("""
                         {
-                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                           "semanticIntentClass": "authoring_or_other",
                           "assistantMessage": "",
                           "shouldRetrieveGovernedResources": true,
@@ -424,7 +538,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                         """),
                         objectMapper.readTree("""
                         {
-                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                           "semanticIntentClass": "authoring_or_other",
                           "assistantMessage": "",
                           "shouldRetrieveGovernedResources": true,
@@ -472,7 +586,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(objectMapper.readTree("""
                         {
-                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                           "semanticIntentClass": "governed_domain_discovery",
                           "assistantMessage": "",
                           "shouldRetrieveGovernedResources": true,
@@ -510,7 +624,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                   "semanticIntentClass": "platform_guidance",
                   "assistantMessage": "Posso ajudar a criar formularios, tabelas, graficos e paineis.",
                   "shouldRetrieveGovernedResources": false,
@@ -562,7 +676,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(objectMapper.readTree("""
                         {
-                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                           "semanticIntentClass": "authoring_or_other",
                           "assistantMessage": "",
                           "shouldRetrieveGovernedResources": true,
@@ -614,7 +728,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("local")))
                 .thenReturn(objectMapper.readTree("""
                         {
-                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                           "shouldRetrieveGovernedResources": true,
                           "artifactKind": "dashboard",
                           "retrievalQuery": "afastamentos por departamento",
@@ -669,7 +783,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(objectMapper.readTree("""
                         {
-                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                           "semanticIntentClass": "authoring_or_other",
                           "assistantMessage": "",
                           "shouldRetrieveGovernedResources": true,
@@ -729,7 +843,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(objectMapper.readTree("""
                         {
-                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                           "semanticIntentClass": "authoring_or_other",
                           "assistantMessage": "",
                           "shouldRetrieveGovernedResources": true,
@@ -785,7 +899,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                         {
-                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                           "shouldRetrieveGovernedResources": false,
                           "artifactKind": "page",
                           "reason": "A mudança é apenas visual."
@@ -812,7 +926,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                   "shouldRetrieveGovernedResources": false,
                   "artifactKind": "unknown",
                   "retrievalQuery": null,
@@ -843,7 +957,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v2",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                   "semanticIntentClass": "platform_guidance",
                   "assistantMessage": "Aqui no Praxis posso ajudar a criar formulários, tabelas e gráficos usando os recursos governados do seu domínio.",
                   "shouldRetrieveGovernedResources": false,
@@ -927,7 +1041,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                   "shouldRetrieveGovernedResources": true,
                   "artifactKind": "page",
                   "retrievalQuery": "acompanhar pessoas da empresa com detalhes por area",
@@ -969,7 +1083,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                   "shouldRetrieveGovernedResources": true,
                   "artifactKind": "table",
                   "retrievalQuery": "consultar nome cargo e departamento",
@@ -1030,7 +1144,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                   "shouldRetrieveGovernedResources": true,
                   "artifactKind": "table",
                   "retrievalQuery": "consultar funcionarios",
@@ -1083,7 +1197,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                   "shouldRetrieveGovernedResources": true,
                   "artifactKind": "page",
                   "retrievalQuery": "contratos fornecedores compras vigencia status",
@@ -1168,7 +1282,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 eq("user"),
                 eq("local"))).thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                   "shouldRetrieveGovernedResources": true,
                   "artifactKind": "page",
                   "retrievalQuery": "funcionarios ficha resumo pessoas empresa",
@@ -1271,7 +1385,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .thenThrow(AiProviderCallException.fromHttpStatus("openai", 429, "rate limit exceeded"))
                 .thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                   "shouldRetrieveGovernedResources": true,
                   "artifactKind": "page",
                   "retrievalQuery": "funcionarios colaboradores recursos humanos pessoas da empresa",
@@ -1353,7 +1467,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .thenReturn(null)
                 .thenReturn(objectMapper.readTree("""
                 {
-                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                   "shouldRetrieveGovernedResources": true,
                   "artifactKind": "dashboard",
                   "retrievalQuery": "funcionarios por cargo e departamento",

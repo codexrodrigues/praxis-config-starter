@@ -44,6 +44,16 @@ Assert-True ($result.criticalInterceptionGuard.passed -eq $true) "The critical i
 Assert-True ($result.executionLane -eq "live" -and $result.e2ePassed -eq $true) "The live browser lane did not pass."
 Assert-True ($result.loopbackOnly -eq $true -and $result.cleanupVerified -eq $true) "Loopback or cleanup proof is missing."
 Assert-True ($result.datasourceKinds.application -eq "postgresql" -and $result.datasourceKinds.config -eq "postgresql") "Both datasources must be PostgreSQL."
+$configStarterAttestation = $result.dependencyAttestation.configStarter
+Assert-True ($null -ne $configStarterAttestation) "Config starter dependency attestation is missing."
+Assert-True ($configStarterAttestation.byteIdentical -eq $true) "Config starter byte identity attestation must be true."
+$localStarterJarSha256 = [string] $configStarterAttestation.localJarSha256
+$quickstartNestedJarSha256 = [string] $configStarterAttestation.quickstartNestedJarSha256
+Assert-True (
+    $localStarterJarSha256 -match '^[0-9a-fA-F]{64}$' -and
+    $quickstartNestedJarSha256 -match '^[0-9a-fA-F]{64}$'
+) "Config starter dependency hashes must be valid SHA-256 values."
+Assert-True ($localStarterJarSha256 -eq $quickstartNestedJarSha256) "Config starter dependency hashes must be equal."
 Assert-True ($result.pgvector.ready -eq $true -and $result.pgvector.table -eq "vector_store" -and ([string] $result.pgvector.embeddingType).StartsWith("vector")) "Pgvector readiness evidence is missing."
 Assert-True ($result.capabilities.source -eq "registry" -and $result.capabilities.degraded -eq $false) "Capabilities must be registry-backed and non-degraded."
 Assert-True ($result.aiRegistry.ready -eq $true -and (([string] $result.aiRegistry.snapshotHash) -match '^[0-9a-f]{64}$')) "AI Registry readiness or immutable snapshot evidence is missing."

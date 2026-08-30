@@ -530,17 +530,25 @@ owning concept remains governed and has active evidence. `inspectDomainBindings`
 projection as a read-only tool, and the planner may select `groundingProfile=domain_binding` after
 resolving a canonical `resourceKey`. Its result is carried in a bounded `domainBindings.v1`
 grounding envelope. A pre-intent `searchApiResources` call fails closed when the canonical resource
-or an eligible binding is absent.
+or an eligible binding is absent. Generated catalog ingestion is therefore not operational
+authority: a proof or production rollout promotes the required concepts and bindings through the
+canonical Domain Knowledge change-set validation, approval and apply lifecycle.
 
 The operational verification gate is now complete for this slice. `verifyDomainOperation` reloads
-the governed binding, resolves the exact `path + HTTP operation + request|response` variant through
-`/schemas/filtered`, and checks the corresponding canonical capability operation plus current
-principal availability. The safe `verifiedDomainOperations.v1` projection preserves only canonical
-operation identity, schema/capabilities URLs, release and evidence refs; it never injects the full
-schema into macro planning. Missing schema, unsupported operation, unverified availability or an
-explicit capability denial fail closed. Pre-intent API discovery uses the same verification when
+the governed resource binding, resolves the exact `path + HTTP operation + request|response` variant
+through `/schemas/filtered`, and checks ordinary operations against resource capabilities. Workflow
+actions are instead reconciled against `/schemas/actions` by exact id, resource, scope, path and
+method. The safe `verifiedDomainOperations.v2` projection distinguishes principal-authorized
+operations from `runtime_action_discovery`; it never injects the full schema or promotes a
+context-required action into an executable candidate. An ITEM action with
+`resource-context-required` is structurally verified but remains unresolved until the runtime reads
+`/{id}/capabilities` or HATEOAS after row selection. Missing schema, unsupported operation,
+unverified availability or an explicit capability denial fail closed. Pre-intent API discovery uses
+only the executable subset of the same verification when
 the verifier is available, so macro profiles without a resolved resource/binding/operation cannot
-fall through to broad endpoint or schema loading.
+fall through to broad endpoint or schema loading. Native `workflow_action` bindings preserve the
+catalog target action id as their canonical operation identity; HTTP method and path remain
+reconciliation evidence and cannot reinterpret the command as generic CRUD.
 
 ### Slice 4: Generative UI selection envelope
 

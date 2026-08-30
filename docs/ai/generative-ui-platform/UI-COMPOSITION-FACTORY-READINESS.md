@@ -1,6 +1,6 @@
 # Governed UI composition factory readiness
 
-Status: prioritized evolution baseline, 2026-08-29.
+Status: first operationally proved master-detail pilot, 2026-08-30.
 
 ## Decision
 
@@ -52,24 +52,29 @@ Classification: `ja-suportado-mal-nomeado-ou-mal-materializado` for state or evi
 
 ### Partially supported
 
-- a partial resource-backed master/detail/filter materializer now exists and can enable the official Table action discovery path from backend-owned verification; cross-language certification and the real HTTP/browser command smoke remain incomplete;
-- semantic grounding exists, but transaction lifecycle and UI composition are not closed in one real HTTP proof;
-- validation exists on both sides, but releases do not share one golden cross-language gate.
+- the first resource-backed master/detail/filter materializer resolves the official Core preset and enables Table action discovery from backend-owned verification;
+- the Fluxo 3 focal proof closes semantic grounding, transaction lifecycle and UI composition against real HTTP/browser infrastructure for the missions pilot;
+- Java and TypeScript share the #357 golden corpus and target attestation, while release-train adoption and coverage of other archetypes remain incomplete.
 
 Classification: `suportado-parcialmente`.
 
-### Real contract gap
+### Implemented attestation contract; rollout still partial
 
-The missing interoperable attestation must bind:
+The #357 interoperable attestation now binds the evidence it actually owns:
 
-- canonical decision id/version;
-- materialization id/version;
-- target application/surface;
-- metadata and registry/catalog identities/hashes;
-- conformance report and diagnostics;
-- lineage and publication ETag.
+- corpus, schema and compiler contract hashes/receipts;
+- canonical page projection hash and stable diagnostics;
+- target profile id/fingerprint and derived component/port/capability/action requirements;
+- registry-aware runtime receipt;
+- template `registryKey`, version, ETag and `configSha256` revision evidence.
 
-Classification: `lacuna-real-de-contrato`. Before defining it, implementation must inventory and reuse the existing decision snapshots, registry snapshots, target identities, template hashes, approvals and materialization heads.
+The focal Fluxo 3 proves terminal apply correlation (`streamId` + `resultEventId`), persisted page
+version/ETag/hash and reload. Decision/materialization ids and approval/publication lineage remain
+adjacent Config lifecycle evidence that still requires an explicit correlation proof; none of those
+lifecycle fields belongs to the #357 cross-language report. Classification: `suportado-parcialmente`.
+The compiler/target compatibility gap is closed; release-train adoption, explicit lifecycle-evidence
+correlation and broader archetype/target coverage remain without introducing a parallel attestation
+contract.
 
 ## Priority backlog
 
@@ -77,19 +82,23 @@ Classification: `lacuna-real-de-contrato`. Before defining it, implementation mu
 
 Issue: [#356](https://github.com/codexrodrigues/praxis-config-starter/issues/356).
 
-Implementation status for the first slice: the generic provider now consumes the
-existing verified-operation envelope, emits a resource Filter, Table master and
-Dynamic Form detail, binds `requestSearch -> queryContext` and
+Implementation status for the first operationally proved pilot: the generic provider consumes the
+backend-owned `verifiedDomainOperations` envelope with schema version
+`praxis-agentic-authoring-verified-domain-operations.v2`, emits an optional resource Filter when a
+verified filter operation exists, a resource Table master and Dynamic Form detail, binds
+`requestSearch -> queryContext` when the Filter is present and
 `selectionChange -> state -> initialValue`, publishes responsive device layouts,
-and enables the official Table item or collection discovery policy only for the
-scope proven by a backend-owned verified `/actions/` operation. An item-only
+and enables the official Table item or collection discovery policy only for the exact
+scope reconciled with `/schemas/actions`, schemas and capabilities. An item-only
 command does not enable collection discovery, and a collection-only command does
 not create row actions. Client-provided operation
 envelopes are removed at HTTP ingress. The server preview/compiler path and
-transactional apply/ETag path have focused tests, but this is a partial slice:
-the shared #357 corpus/attestation and a real HTTP/browser command smoke are not
-integrated. See [the delta audit](RESOURCE-BACKED-WORKSPACE-DELTA-AUDIT.md) for
-the reuse classification and remaining gaps.
+transactional apply/ETag path have focused tests. The #357 shared corpus/attestation is integrated,
+and the 2026-08-30 full-mode focal Fluxo 3 proved real LLM authoring, exact terminal-patch apply,
+item action/capability discovery, governed Dynamic Form submit, `200` execution, repeated-transition
+`409`, Table refresh and reload with identical payload SHA-256 and ETag. This proves the first
+pilot operationally; the complete production-like matrix and additional archetypes remain release work. See
+[the delta audit](RESOURCE-BACKED-WORKSPACE-DELTA-AUDIT.md) for the reuse classification and residuals.
 
 The decision must describe semantic intent, archetype, resources, surfaces, actions, capabilities, components, slots, bindings and transactional lifecycle. It should materialize both compact authoring input and portable runtime output without leaking Angular implementation detail into Java.
 

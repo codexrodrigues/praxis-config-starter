@@ -85,6 +85,36 @@ class AgenticAuthoringDomainBindingServiceTest {
         assertThat(service.resolve("tenant", "dev", "human-resources.funcionarios", 4)).isEmpty();
     }
 
+    @Test
+    void preservesNativeWorkflowActionIdFromTheCanonicalBindingTarget() {
+        DomainKnowledgeConcept concept = concept("tenant", "dev", null);
+        concept.setConceptKey("operations.missoes.action.start");
+        DomainKnowledgeBinding binding = DomainKnowledgeBinding.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant")
+                .environment("dev")
+                .concept(concept)
+                .bindingType("workflow_action")
+                .bindingKey("binding:operations.missoes.action.start:workflow-action")
+                .resourceKey("operations.missoes")
+                .apiPath("/api/operations/missoes/{id}/actions/start")
+                .apiMethod("POST")
+                .payload("""
+                        {"target":{"id":"start","operationId":"startMission"}}
+                        """)
+                .curationStatus("approved")
+                .build();
+        when(bindingRepository.findGovernedOperationalBindings(
+                "tenant", "dev", "operations.missoes")).thenReturn(List.of(binding));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectIdAndStatus(
+                "tenant", "dev", "concept", concept.getId(), "active"))
+                .thenReturn(List.of(DomainKnowledgeEvidence.builder().id(UUID.randomUUID()).build()));
+
+        assertThat(service.resolve("tenant", "dev", "operations.missoes", 4))
+                .singleElement()
+                .satisfies(projected -> assertThat(projected.operationId()).isEqualTo("start"));
+    }
+
     private DomainKnowledgeConcept concept(
             String tenantId,
             String environment,
