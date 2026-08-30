@@ -24,7 +24,7 @@ on:
       quickstart_ref:
         description: 'Immutable praxis-api-quickstart commit SHA to test against.'
         required: true
-        default: fbb59945675722d2f7bd431d2f4da0baebd95811
+        default: 39b75011f29b5eeb942b923b5af14df4fcf1af3a
         type: string
       metadata_ref:
         description: 'Immutable praxis-metadata-starter commit SHA to install locally.'
