@@ -2516,6 +2516,9 @@ class AgenticAuthoringPreviewServiceTest {
                 .putObject("x-ui")
                 .put("label", "CPF")
                 .put("tableHidden", true);
+        for (int index = 1; index <= 20; index++) {
+            properties.putObject("campoVisivel" + index).put("type", "string");
+        }
         when(schemaRetrievalService.fetchSchemaResult(any(AiSchemaContext.class), any()))
                 .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
 
@@ -2532,13 +2535,14 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.uiCompositionPlan().path("diagnostics").path("resourceSchemaGrounding").path("verified").asBoolean())
                 .isTrue();
         assertThat(result.uiCompositionPlan().path("diagnostics").path("resourceSchemaGrounding").path("fieldCount").asInt())
-                .isEqualTo(4);
+                .isEqualTo(24);
         JsonNode columns = result.uiCompositionPlan().path("widgets").path(0).path("inputs").path("config").path("columns");
-        assertThat(columns).hasSize(3);
+        assertThat(columns).hasSize(23);
         assertThat(columns.path(0).path("field").asText()).isEqualTo("ano");
         assertThat(columns.path(0).path("type").asText()).isEqualTo("number");
         assertThat(columns.path(2).path("field").asText()).isEqualTo("salarioLiquido");
         assertThat(columns.path(2).path("type").asText()).isEqualTo("number");
+        assertThat(columns.path(22).path("field").asText()).isEqualTo("campoVisivel20");
         assertThat(columns.toString()).doesNotContain("cpf");
         assertThat(result.warnings()).contains("table-columns-materialized-from-schema");
         assertThat(result.uiCompositionPlan().path("widgets").toString())

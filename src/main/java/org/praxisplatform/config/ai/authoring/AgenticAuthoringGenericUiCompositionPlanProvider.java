@@ -249,6 +249,11 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         if ("dashboard".equals(artifactKind)) {
             return true;
         }
+        if ("table".equals(artifactKind)
+                && isPrimaryComponent(visualizationDecision, "praxis-table")
+                && hasLayoutKind(visualizationDecision, "single-table")) {
+            return false;
+        }
         if (!"table".equals(artifactKind) && !"component".equals(artifactKind)) {
             return false;
         }

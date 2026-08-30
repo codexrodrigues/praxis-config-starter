@@ -316,6 +316,60 @@ class AgenticAuthoringSemanticDecisionPolicyTest {
     }
 
     @Test
+    void canonicalSingleTableDecisionIsNotRewrittenByDashboardPromptText() {
+        AgenticAuthoringCandidate employees = candidate("/api/human-resources/funcionarios");
+        AgenticAuthoringVisualizationDecision visualizationDecision =
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "governed collection table",
+                        "single-table",
+                        "praxis-table",
+                        List.of(),
+                        false,
+                        true,
+                        "llm-pre-intent-semantic-orientation");
+        AgenticAuthoringLlmIntentResolution llmIntent = new AgenticAuthoringLlmIntentResolution(
+                true,
+                "create",
+                "table",
+                "create_artifact",
+                employees.resourcePath(),
+                null,
+                "none",
+                "",
+                List.of(),
+                List.of(),
+                List.of(),
+                null,
+                visualizationDecision,
+                false,
+                "component_authoring",
+                null,
+                List.of());
+
+        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
+                "Use os dados do dashboard anterior, mas mantenha a tabela única governada.",
+                "create",
+                "table",
+                "create_artifact",
+                employees,
+                List.of(employees),
+                employees,
+                llmIntent,
+                false,
+                false,
+                false,
+                null,
+                null,
+                null));
+
+        assertThat(decision.operationKind()).isEqualTo("create");
+        assertThat(decision.artifactKind()).isEqualTo("table");
+        assertThat(decision.changeKind()).isEqualTo("create_artifact");
+        assertThat(decision.selectedCandidate()).isSameAs(employees);
+    }
+
+    @Test
     void humanDashboardRequestUsesDiscoveredCandidateBeforeFinalSelection() {
         AgenticAuthoringCandidate employees = candidate("/api/human-resources/funcionarios");
 

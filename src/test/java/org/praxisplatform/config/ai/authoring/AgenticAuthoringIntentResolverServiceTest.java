@@ -75,7 +75,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void compactSemanticComponentDecisionAvoidsRedundantFullPassForConstrainedPage() {
+    void explicitFullResolutionFlagIsNeverBypassedByConstrainedCompactDecision() {
         ObjectNode constraints = objectMapper.createObjectNode();
         constraints.put("appliesToDataSelection", true);
         constraints.putArray("filters").addObject()
@@ -99,7 +99,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 "requiresAdditionalIntentResolution",
                 orientation);
 
-        assertThat(requiresAdditionalResolution).isFalse();
+        assertThat(requiresAdditionalResolution).isTrue();
         AgenticAuthoringVisualizationDecision visualizationDecision = ReflectionTestUtils.invokeMethod(
                 service,
                 "preIntentVisualizationDecision",
@@ -11162,6 +11162,150 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void canonicalSingleTableUsesVerifiedGovernedResourceWithoutFullProviderPass() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeCandidate = withEvidence(
+                withEvidence(
+                        withEvidence(
+                                withEvidence(candidateWithEvidence(
+                                        "/api/human-resources/funcionarios",
+                                        0.96d,
+                                        List.of("funcionarios", "nome", "email", "cargo", "departamento")),
+                                        "tool-search-api-resources"),
+                                "semantic-role:operational-resource"),
+                        "domain-binding"),
+                "schema-grounding-verified");
+        employeeCandidate = withEvidence(employeeCandidate, "resource-capabilities-verified");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(employeeCandidate));
+        AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", false);
+        constraints.putArray("filters");
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "A single governed collection is the complete requested composition.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                false,
+                constraints,
+                "table",
+                "praxis-table",
+                "single-table");
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(
+                requestWithContextHints(
+                        "crie uma tabela com os dados disponíveis dos funcionários",
+                        "deterministic-smoke-disabled",
+                        resourceDiscoveryContext(
+                                "table",
+                                List.of(employeeCandidate),
+                                new AgenticAuthoringResourceSearchFocus(
+                                        "human-resources.funcionarios",
+                                        List.of(),
+                                        "tabela única",
+                                        "",
+                                        "foco semântico authorado pela LLM"))),
+                "tenant",
+                "user",
+                "local",
+                orientation);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.selectedCandidate()).isEqualTo(employeeCandidate);
+        assertThat(result.visualizationDecision().layoutKind()).isEqualTo("single-table");
+        assertThat(result.visualizationDecision().primaryComponent()).isEqualTo("praxis-table");
+        assertThat(result.warnings()).contains(
+                "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                "llm-pre-intent-resource-discovery-used");
+        Mockito.verifyNoInteractions(llmIntentResolver);
+    }
+
+    @Test
+    void canonicalSingleTableDoesNotUseFastPathWithoutVerifiedOperationalGrounding() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/human-resources/funcionarios",
+                        0.96d,
+                        List.of("funcionarios", "nome", "email", "cargo", "departamento")),
+                        "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(employeeCandidate));
+        AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", false);
+        constraints.putArray("filters");
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "A single table was requested but grounding is incomplete.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                false,
+                constraints,
+                "table",
+                "praxis-table",
+                "single-table");
+
+        resolver.resolve(
+                requestWithContextHints(
+                        "crie uma tabela com os dados disponíveis dos funcionários",
+                        "deterministic-smoke-disabled",
+                        resourceDiscoveryContext(
+                                "table",
+                                List.of(employeeCandidate),
+                                new AgenticAuthoringResourceSearchFocus(
+                                        "human-resources.funcionarios",
+                                        List.of(),
+                                        "tabela única",
+                                        "",
+                                        "foco semântico authorado pela LLM"))),
+                "tenant",
+                "user",
+                "local",
+                orientation);
+
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+    }
+
+    @Test
     void llmAuthoredGenericDashboardUsesSingleGovernedResourceWithoutRedundantProviderPass() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
@@ -11274,12 +11418,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .put("operator", "equals")
                 .put("value", "tecnologia");
         AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
-                "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                 "Create a governed employee page with the requested business filter.",
                 List.of(),
                 "authoring_or_other",
                 "",
-                true,
+                false,
                 constraints,
                 "page");
 
@@ -11356,14 +11500,16 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .add("engenharia")
                 .add("inteligência artificial");
         AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
-                "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
                 "Create the governed employee table requested by the user.",
                 List.of(),
                 "authoring_or_other",
                 "",
-                true,
+                false,
                 constraints,
-                "table");
+                "table",
+                "praxis-table",
+                "single-table");
 
         AgenticAuthoringIntentResolutionResult result = resolver.resolve(
                 request,
@@ -11483,7 +11629,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void singleGovernedTableReadCandidateSkipsRedundantIntentPass() {
+    void singleGovernedTableReadCandidateWithPendingProbesUsesFullIntentPass() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
@@ -11526,6 +11672,17 @@ class AgenticAuthoringIntentResolverServiceTest {
                 candidateCatalog,
                 llmIntentResolver,
                 null);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(java.util.Optional.empty());
 
         AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
                 "Crie uma tabela para consultar nome, cargo e departamento dos funcionários.",
@@ -11549,10 +11706,10 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.selectedCandidate().submitUrl())
                 .isEqualTo("/api/human-resources/funcionarios/filter/cursor");
-        assertThat(result.warnings()).contains(
+        assertThat(result.warnings()).doesNotContain(
                 "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
                 "llm-pre-intent-resource-discovery-used");
-        Mockito.verify(llmIntentResolver, Mockito.never()).resolve(
+        Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
                 Mockito.any(),
@@ -12296,13 +12453,13 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/vw-perfil-heroi");
         assertThat(result.warnings())
-                .contains(
+                .doesNotContain(
                         "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
                         "llm-pre-intent-resource-discovery-used")
                 .doesNotContain("llm-fast-intent-resolution-used");
         assertThat(result.semanticDecision()).isNotNull();
         assertThat(result.semanticDecision().reviewRequired()).isFalse();
-        Mockito.verify(llmIntentResolver, Mockito.never()).resolve(
+        Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
                 Mockito.any(),
@@ -12376,13 +12533,13 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
         assertThat(result.warnings())
-                .contains(
+                .doesNotContain(
                         "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
                         "llm-pre-intent-resource-discovery-used")
                 .doesNotContain("llm-resource-selection-lower-ranked-than-governed-candidate");
         assertThat(result.semanticDecision()).isNotNull();
         assertThat(result.semanticDecision().reviewRequired()).isFalse();
-        Mockito.verify(llmIntentResolver, Mockito.never()).resolve(
+        Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
                 Mockito.any(),

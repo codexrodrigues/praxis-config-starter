@@ -54,6 +54,7 @@ Classification: `ja-suportado-mal-nomeado-ou-mal-materializado` for state or evi
 
 - the first resource-backed master/detail/filter materializer resolves the official Core preset and enables Table action discovery from backend-owned verification;
 - the Fluxo 3 focal proof closes semantic grounding, transaction lifecycle and UI composition against real HTTP/browser infrastructure for the missions pilot;
+- the existing table materializer already emits one `praxis-table`, schema-derived columns and explicit responsive geometry, while issue #365 promotes that path to the canonical `single-table` semantic archetype and closes its no-second-pass and fail-closed grounding gates;
 - Java and TypeScript share the #357 golden corpus and target attestation, while release-train adoption and coverage of other archetypes remain incomplete.
 
 Classification: `suportado-parcialmente`.
@@ -113,6 +114,19 @@ Minimum lifecycle:
 7. let the runtime consume the published projection.
 
 Keyword, regex, fuzzy matching or aliases may rank candidates only after semantic intent has selected the correct scope. If a required tool or component contract is absent, the result is an explicit platform gap, not a text heuristic or generated host code.
+
+### P1 — Canonical single-table decision and materializer
+
+Issue: [#365](https://github.com/codexrodrigues/praxis-config-starter/issues/365).
+
+The next narrow factory archetype is `layoutKind=single-table`: an AI-authored semantic decision for
+exactly one governed collection resource, `artifactKind=table` and `primaryComponent=praxis-table`.
+It projects one-way to `layoutPreset=single-table-page`, one Table widget and explicit canvas/device
+layouts. The materialized id is not a second semantic alias and does not claim a Core catalog preset.
+The compact path may skip the full intent pass only after one non-lexical operational candidate,
+canonical collection binding, filtered schema and current resource capabilities are verified. Any
+ambiguity or partial grounding remains fail-closed. Schema-visible fields are projected in canonical
+order without the former silent 16-column cap; `hidden` and `tableHidden` remain authoritative.
 
 ### P0 — Shared golden corpus and attestation
 
@@ -190,15 +204,16 @@ No row authorizes the config starter to copy canonical resource, component or ca
 - registry/catalog mismatch fails before consumer deployment;
 - the API quickstart proves the complete path through real HTTP.
 
-## Five reference archetypes
+## Six reference archetypes
 
 The joint UI/config gate must certify:
 
-1. simple CRUD;
-2. master-detail;
-3. parent-child/related resource;
-4. business command with confirmation, error, refresh and read-after-write;
-5. tabs or nested workspace.
+1. single-table;
+2. simple CRUD;
+3. master-detail;
+4. parent-child/related resource;
+5. business command with confirmation, error, refresh and read-after-write;
+6. tabs or nested workspace.
 
 The final proof uses real resource APIs and current capabilities. Mocks may support unit tests but cannot certify an archetype.
 
@@ -209,7 +224,7 @@ The final proof uses real resource APIs and current capabilities. Mocks may supp
 3. integrate target registry and UI conformance simulation;
 4. implement golden cross-language fixtures and the minimum attestation;
 5. prove one transactional master-detail pilot by HTTP;
-6. expand to the five archetypes;
+6. expand to the six archetypes;
 7. synchronize public docs, HTTP corpus, LLM surface and official examples before declaring readiness.
 
 ## Success measures

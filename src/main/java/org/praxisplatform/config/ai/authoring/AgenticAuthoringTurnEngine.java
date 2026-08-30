@@ -3496,7 +3496,9 @@ public class AgenticAuthoringTurnEngine {
         }
         if (reconciliationAlreadyAttempted) {
             return new ArtifactReconciliationOutcome(
-                    blockPersistentArtifactConflict(intentResolution),
+                    blockPersistentArtifactConflict(
+                            plannedResourceDiscovery.artifactKind(),
+                            intentResolution),
                     true);
         }
 
@@ -3542,7 +3544,11 @@ public class AgenticAuthoringTurnEngine {
                 Map.of(
                         "plannedArtifactKind", safeText(plannedResourceDiscovery.artifactKind()),
                         "resolvedArtifactKind", safeText(reconciled == null ? null : reconciled.artifactKind()))));
-        return new ArtifactReconciliationOutcome(blockPersistentArtifactConflict(reconciled), true);
+        return new ArtifactReconciliationOutcome(
+                blockPersistentArtifactConflict(
+                        plannedResourceDiscovery.artifactKind(),
+                        reconciled),
+                true);
     }
 
     private AgenticAuthoringIntentResolutionResult composePlannedDashboardWithChartDecision(
@@ -3706,6 +3712,7 @@ public class AgenticAuthoringTurnEngine {
     }
 
     private AgenticAuthoringIntentResolutionResult blockPersistentArtifactConflict(
+            String plannedArtifactKind,
             AgenticAuthoringIntentResolutionResult resolution) {
         LinkedHashSet<String> warnings = new LinkedHashSet<>(resolution == null || resolution.warnings() == null
                 ? List.of()
@@ -3718,8 +3725,10 @@ public class AgenticAuthoringTurnEngine {
                         : resolution.failureCodes());
         failureCodes.add("semantic-artifact-conflict");
         failureCodes.add("semantic-intent-confirmation-required");
-        List<String> questions = List.of(
-                "Você quer um painel analítico coordenado ou uma página de conteúdo organizada em seções?");
+        String resolvedArtifactKind = resolution == null ? "" : resolution.artifactKind();
+        List<String> questions = List.of(persistentArtifactConflictQuestion(
+                plannedArtifactKind,
+                resolvedArtifactKind));
         AgenticAuthoringGateResult gate = new AgenticAuthoringGateResult(
                 "pre-intent-artifact-invariance@0.1.0",
                 "clarification_required",
@@ -3749,6 +3758,27 @@ public class AgenticAuthoringTurnEngine {
                 resolution == null ? objectMapper.createObjectNode() : resolution.llmDiagnostics(),
                 null,
                 null);
+    }
+
+    private String persistentArtifactConflictQuestion(
+            String plannedArtifactKind,
+            String resolvedArtifactKind) {
+        return "Você confirma qual artefato deve governar a materialização: %s, definido pelo planejamento semântico, ou %s, definido pela resolução semântica?"
+                .formatted(
+                        artifactKindClarificationLabel(plannedArtifactKind),
+                        artifactKindClarificationLabel(resolvedArtifactKind));
+    }
+
+    private String artifactKindClarificationLabel(String artifactKind) {
+        return switch (safeText(artifactKind).toLowerCase(Locale.ROOT)) {
+            case "dashboard" -> "dashboard";
+            case "page" -> "página";
+            case "table" -> "tabela";
+            case "form" -> "formulário";
+            case "chart" -> "gráfico";
+            case "api_catalog" -> "catálogo de APIs";
+            default -> "artefato não identificado";
+        };
     }
 
     private AgenticAuthoringIntentResolutionResult blockUngroundedLiveOptionMaterialization(

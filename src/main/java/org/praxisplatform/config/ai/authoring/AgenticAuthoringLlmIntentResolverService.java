@@ -2009,8 +2009,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 When conversationContext.contextHints.preIntentSemanticOrientation contains primaryComponent or
                 layoutKind, preserve both independent prior AI-authored decisions unless later governed component or
                 resource evidence proves either incompatible. primaryComponent does not override layoutKind: a
-                resource-master-detail composition may use praxis-table as its master and a dynamic form as its detail,
-                while resource-crud means one CRUD host is itself the requested composition.
+                single-table composition is one governed collection table, a resource-master-detail composition may use
+                praxis-table as its master and a dynamic form as its detail, while resource-crud means one CRUD host is
+                itself the requested composition.
                 Treat activeSemanticDecision and recentConversation as prior governed lineage for the current refinement, not as permission to ignore the new user request.
                 When the user's primary meaning is to reverse only the most recently materialized local change,
                 select semanticIntentClass "component_authoring", operationKind "undo", keep artifactKind aligned
@@ -2027,6 +2028,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Select visualizationDecision.primaryComponent only from authorableComponents.
                 For an edit to an existing selected component, choose changeKind from its governed capability candidates. Compare their semantic examples before deciding; candidate order is grounding only. Do not use an operation that only changes a property of an existing target when the requested outcome introduces a new schema-backed item. A row-dependent visual outcome governed by a condition must use a conditional-renderer capability; a base renderer applies uniformly and is not semantically equivalent.
                 For a single requested chart, use artifactKind "chart", operationKind "create", layoutKind "single_chart", primaryComponent "praxis-chart", includeSummary=false, includeDetailTable=false, includeFilters=false, includeKpis=false, and excludedComponentIds for rejected components.
+                For exactly one governed collection table, use artifactKind "table", operationKind "create",
+                layoutKind "single-table", primaryComponent "praxis-table", includeSummary=false, includeFilters=false,
+                includeKpis=false, and no chart axes. Preserve this semantic decision even when the prompt or resource
+                metadata mentions dashboard, CRUD, actions or detail capabilities; those words do not authorize another
+                archetype, and the backend still verifies the selected collection schema and capabilities before apply.
                 For an analytical composition whose meaning depends on multiple coordinated analytical regions, such as filters, KPIs, multiple charts and a detail/list/table surface, use artifactKind "dashboard" rather than a generic page.
                 Preserve the explicitly requested analytical regions in visualizationDecision; do not downgrade a coordinated dashboard to page or accordion merely because a page can host those regions.
                 Use artifactKind "page" for general layout or content composition where analytics are not the dominant requested outcome.

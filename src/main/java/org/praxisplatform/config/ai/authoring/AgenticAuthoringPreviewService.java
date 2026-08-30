@@ -1967,7 +1967,6 @@ public class AgenticAuthoringPreviewService {
             ArrayNode columns = configObject.putArray("columns");
             schemaFields.values().stream()
                     .filter(this::isDefaultTableProjectionField)
-                    .limit(16)
                     .map(this::tableColumnFromSchemaField)
                     .forEach(columns::add);
             if (!columns.isEmpty()) {

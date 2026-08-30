@@ -51,6 +51,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             "praxis-rich-content",
             "praxis-files-upload");
     private static final List<String> COMPACT_RESOURCE_COMPOSITION_LAYOUTS = List.of(
+            "single-table",
             "resource-master-detail",
             "resource-crud");
 
@@ -299,6 +300,11 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             return false;
         }
         String primaryComponent = primaryComponent(result);
+        if ("single-table".equals(layoutKind)
+                && (!("table".equals(text(result, "artifactKind")))
+                        || !"praxis-table".equals(primaryComponent))) {
+            return false;
+        }
         if ("resource-master-detail".equals(layoutKind)
                 && !"praxis-table".equals(primaryComponent)) {
             return false;
@@ -712,9 +718,10 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Use artifactKind dashboard when the requested outcome depends on multiple coordinated analytical
                 regions such as filters, KPIs, multiple charts and a detail/list/table surface. Use artifactKind page
                 for general layout or content composition where analytics are not the dominant requested outcome.
-                Author layoutKind independently: resource-master-detail + praxis-table coordinates collection, selection
-                and detail, including discovered item actions; resource-crud + praxis-crud is one CRUD host. For another
-                layout use null and the full pass. Never keyword-route or substitute primaryComponent for layoutKind.
+                Author layoutKind independently: single-table + artifactKind=table + praxis-table shows all visible
+                schema fields; no full pass when complete. resource-master-detail + praxis-table coordinates master/detail;
+                resource-crud + praxis-crud hosts CRUD. Else null/full pass. Never keyword-route or substitute
+                primaryComponent for layoutKind.
                 Canonical response locale: %s
                 Context JSON: %s
                 """.formatted(selectedDomainDecisionInstruction, responseLocale, context.toString());
@@ -1183,7 +1190,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         primaryComponentEnum.addNull();
         primaryComponent.put(
                 "description",
-                "Semantic primary runtime component selected after intent classification. For a resource-master-detail composition use praxis-table as the master collection; use praxis-crud only when one CRUD host is the requested composition. Governed actions remain metadata/capability-discovered and do not decide layoutKind.");
+                "Semantic primary runtime component selected after intent classification. For single-table use praxis-table with artifactKind=table; for a resource-master-detail composition use praxis-table as the master collection; use praxis-crud only when one CRUD host is the requested composition. Governed actions remain metadata/capability-discovered and do not decide layoutKind.");
         ObjectNode layoutKind = properties.putObject("layoutKind");
         layoutKind.putArray("type").add("string").add("null");
         ArrayNode layoutKindEnum = layoutKind.putArray("enum");
@@ -1191,7 +1198,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         layoutKindEnum.addNull();
         layoutKind.put(
                 "description",
-                "AI-authored semantic composition archetype, independent from primaryComponent. Use resource-master-detail for coordinated collection selection and detail/editor regions, and resource-crud only for a single CRUD host.");
+                "AI-authored semantic composition archetype, independent from primaryComponent. Use single-table for one governed collection table with all schema-visible fields, resource-master-detail for coordinated collection selection and detail/editor regions, and resource-crud only for a single CRUD host.");
         nullableString(properties, "retrievalQuery");
         nullableString(properties, "reason");
         ObjectNode focus = properties.putObject("resourceSearchFocus");

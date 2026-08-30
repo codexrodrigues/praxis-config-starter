@@ -83,6 +83,68 @@ class AgenticAuthoringSemanticMaterializationPolicyTest {
     }
 
     @Test
+    void requiresExactlyOneBoundTableForCanonicalSingleTableLayout() {
+        AgenticAuthoringSemanticDecision.SelectedResource selectedResource =
+                new AgenticAuthoringSemanticDecision.SelectedResource(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                        "/api/human-resources/funcionarios/filter/cursor",
+                        "post");
+        AgenticAuthoringSemanticDecision semanticDecision = new AgenticAuthoringSemanticDecision(
+                AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                "decision-single-table",
+                "create",
+                "table",
+                "create_artifact",
+                selectedResource,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "governed collection table",
+                        "single-table",
+                        "praxis-table",
+                        List.of(),
+                        false,
+                        true,
+                        "llm-authored-semantic-decision"),
+                null,
+                false,
+                "",
+                "",
+                "");
+        ObjectNode materialization = objectMapper.createObjectNode();
+        materialization.put("layoutPreset", "dashboard");
+        materialization.putArray("widgets")
+                .addObject()
+                .put("componentId", "praxis-table");
+
+        AgenticAuthoringSemanticMaterializationPolicy.ValidationResult wrongPreset =
+                AgenticAuthoringSemanticMaterializationPolicy.validate(semanticDecision, materialization);
+        assertThat(wrongPreset.failureCodes()).contains(
+                AgenticAuthoringSemanticMaterializationPolicy.LAYOUT_REQUIRED_FAILURE,
+                AgenticAuthoringSemanticMaterializationPolicy.RESOURCE_BINDING_MISMATCH_FAILURE);
+
+        materialization.put("layoutPreset", "single-table-page");
+        materialization.withArray("widgets").get(0).withObject("/inputs")
+                .put("resourcePath", "/api/human-resources/funcionarios");
+        AgenticAuthoringSemanticMaterializationPolicy.ValidationResult canonical =
+                AgenticAuthoringSemanticMaterializationPolicy.validate(semanticDecision, materialization);
+        assertThat(canonical.failureCodes()).doesNotContain(
+                AgenticAuthoringSemanticMaterializationPolicy.LAYOUT_REQUIRED_FAILURE,
+                AgenticAuthoringSemanticMaterializationPolicy.RESOURCE_BINDING_MISMATCH_FAILURE);
+
+        materialization.withArray("widgets")
+                .addObject()
+                .put("componentId", "praxis-table")
+                .putObject("inputs")
+                .put("resourcePath", "/api/human-resources/funcionarios");
+        AgenticAuthoringSemanticMaterializationPolicy.ValidationResult duplicate =
+                AgenticAuthoringSemanticMaterializationPolicy.validate(semanticDecision, materialization);
+        assertThat(duplicate.failureCodes()).contains(
+                AgenticAuthoringSemanticMaterializationPolicy.LAYOUT_REQUIRED_FAILURE);
+    }
+
+    @Test
     void validatesTheCanonicalPageInsideTheCompiledPatchEnvelope() {
         AgenticAuthoringVisualizationDecision visualizationDecision = new AgenticAuthoringVisualizationDecision(
                 "praxis-agentic-authoring-visualization-decision.v1",

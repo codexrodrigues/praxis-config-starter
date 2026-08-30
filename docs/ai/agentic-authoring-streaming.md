@@ -635,10 +635,13 @@ e schema. Nesse caso `searchApiResources` continua a descoberta e preserva a pro
 materializacao segue sujeita aos gates de elegibilidade, schema, capability, preview e revisao.
 
 O contrato estruturado `praxis-agentic-authoring-pre-intent-tool-plan.v3` projeta tambem o
-`layoutKind` canonico para os dois arquétipos compactos de recurso: `resource-master-detail` e
-`resource-crud`. Layout e componente primario sao decisoes semanticas independentes, mas o par
-precisa ser coerente: master-detail usa `praxis-table`, enquanto um unico host CRUD usa
-`praxis-crud`; pares divergentes sao rejeitados pelo plano estruturado. A orientacao encaminhada ao resolver usa
+`layoutKind` canonico para os tres arquetipos compactos de recurso: `single-table`,
+`resource-master-detail` e `resource-crud`. Layout, tipo de artefato e componente primario sao
+decisoes semanticas independentes, mas o trio precisa ser coerente: tabela simples usa
+`artifactKind=table` com `praxis-table`, master-detail usa `praxis-table`, enquanto um unico host
+CRUD usa `praxis-crud`; pares divergentes sao rejeitados pelo plano estruturado. Quando
+`single-table` preserva integralmente o pedido, `requiresFullIntentResolution=false` evita um segundo
+passe LLM sem relaxar grounding ou apply. A orientacao encaminhada ao resolver usa
 `praxis-agentic-authoring-pre-intent-orientation-context.v2`. A presenca de actions governadas nao
 decide o layout; metadata e capabilities continuam sendo a fonte exclusiva da descoberta de comandos.
 Todo plano de autoria que exija resolucao completa ou entre em grounding de recurso (`api_resource`,
@@ -851,9 +854,11 @@ Regra de aplicacao:
   compilar, mas trocar o componente pedido por outro, deve retornar
   `failureCodes=["semantic-preview-primary-component-required"]`,
   `reviewReason=semantic-preview-materialization-mismatch` e `canApply=false`.
-- Quando a decisao pedir `layoutKind=resource-master-detail`, a materializacao deve resolver o
-  blueprint Core `layoutPreset=master-detail-dashboard`; `resource-crud` permanece no blueprint
-  explicito de um unico host CRUD. Divergencia retorna
+- Quando a decisao pedir `layoutKind=single-table`, a materializacao derivada deve usar
+  `layoutPreset=single-table-page`, canvas/device layouts explicitos e exatamente um `praxis-table`
+  vinculado ao recurso canonico. `resource-master-detail` deve resolver o blueprint Core
+  `layoutPreset=master-detail-dashboard`; `resource-crud` permanece no blueprint explicito de um
+  unico host CRUD. Divergencia retorna
   `failureCodes=["semantic-preview-layout-required"]`,
   `reviewReason=semantic-preview-materialization-mismatch` e `canApply=false`.
 - `keywordFallbackApplied=true`, quando recebido de payload legado ou fixture
