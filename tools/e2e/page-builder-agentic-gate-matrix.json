@@ -6,7 +6,15 @@
     "retries": 1
   },
   "evidence": {
-    "criticalInterceptionGuardTest": "Guard live rejeita interceptacao de endpoint critico antes do registro"
+    "criticalInterceptionGuardTest": "Guard live rejeita interceptacao de endpoint critico antes do registro",
+    "scenarioReceipts": [
+      {
+        "scenarioId": "live-resource-workspace-command",
+        "archetype": "master-detail-command",
+        "testTitle": "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
+        "attachmentName": "mission-workspace-first-pass-receipt.json"
+      }
+    ]
   },
   "modes": {
     "smoke": {

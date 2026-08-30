@@ -1,6 +1,6 @@
 # Governed UI composition factory readiness
 
-Status: first operationally proved master-detail pilot, 2026-08-30.
+Status: first operationally proved master-detail pilot and first-pass receipt instrumentation, 2026-08-30.
 
 ## Decision
 
@@ -58,6 +58,27 @@ Classification: `ja-suportado-mal-nomeado-ou-mal-materializado` for state or evi
 - Java and TypeScript share the #357 golden corpus and target attestation, while release-train adoption and coverage of other archetypes remain incomplete.
 
 Classification: `suportado-parcialmente`.
+
+### First-pass factory evidence
+
+The official production-like gate now owns an additive, sanitized per-scenario receipt for the
+`live-resource-workspace-command` pilot. Angular emits only governed interaction counts, canonical
+blocking diagnostic codes, persistence/reload hashes and ETag equality, runtime outcomes and phase
+durations. Config Starter locates the receipt by the matrix-owned test title and attachment name,
+rejects unknown properties, validates the persisted/runtime proof and combines authoring turns with
+Playwright retries to classify the result as `first-pass` or `eventual-pass`.
+
+This is `ja-suportado-mal-nomeado-ou-mal-materializado`: the browser journey already captured the
+raw turns and all functional assertions, but the published evidence exposed only aggregate test
+counts. The receipt is an internal release-evidence projection; it adds no endpoint, HTTP DTO,
+Angular public API or parallel authoring contract. Raw prompts, URLs, domain fixture identifiers,
+ETag values and chat transcripts are deliberately excluded.
+
+The successful Level 3 baseline from 2026-08-30 predates this receipt and therefore proves eventual
+functionality, not first-pass functionality. The next production-like run after both coordinated
+changes land will establish the first measured result. Until then, the 90% target and the broader
+archetype certification remain open under
+[praxis-config-starter#372](https://github.com/codexrodrigues/praxis-config-starter/issues/372).
 
 ### Implemented attestation contract; rollout still partial
 
@@ -224,8 +245,9 @@ The final proof uses real resource APIs and current capabilities. Mocks may supp
 3. integrate target registry and UI conformance simulation;
 4. implement golden cross-language fixtures and the minimum attestation;
 5. prove one transactional master-detail pilot by HTTP;
-6. expand to the six archetypes;
-7. synchronize public docs, HTTP corpus, LLM surface and official examples before declaring readiness.
+6. publish a fail-closed, sanitized first-pass receipt for the operational pilot;
+7. expand the same receipt to the remaining reference archetypes and measure the rate;
+8. synchronize public docs, HTTP corpus, LLM surface and official examples before declaring readiness.
 
 ## Success measures
 
