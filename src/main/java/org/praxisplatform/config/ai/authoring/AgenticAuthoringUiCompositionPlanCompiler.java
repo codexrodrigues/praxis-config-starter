@@ -8,7 +8,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -629,15 +628,12 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
         copyIfPresent(plan, page, "context");
         copyIfPresent(plan, page, "layout");
         copyIfPresent(plan, page, "layoutPreset");
-        copyIfPresent(plan, page, "layoutPresetOptions");
-        if (plan.path("canvas").isObject()) {
-            page.set("canvas", plan.path("canvas").deepCopy());
-        } else if (shouldMaterializeDefaultCanvas(plan)) {
-            page.set("canvas", defaultCanvas(plan));
-        }
-        copyIfPresent(plan, page, "deviceLayouts");
+        UiCompositionLayoutMaterialization layoutMaterialization = materializeLayout(plan);
+        setIfPresent(page, "layoutPresetOptions", layoutMaterialization.layoutPresetOptions());
+        setIfPresent(page, "canvas", layoutMaterialization.canvas());
+        setIfPresent(page, "deviceLayouts", layoutMaterialization.deviceLayouts());
         copyIfPresent(plan, page, "grouping");
-        copyIfPresent(plan, page, "slotAssignments");
+        setIfPresent(page, "slotAssignments", layoutMaterialization.slotAssignments());
         copyIfPresent(plan, page, "state");
         copyIfPresent(plan, page, "themePreset");
 
@@ -715,12 +711,10 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
         return true;
     }
 
-    private boolean shouldMaterializeDefaultCanvas(JsonNode plan) {
-        boolean hasExplicitLayout = plan.path("layout").isObject();
-        boolean hasLayoutPreset = !plan.path("layoutPreset").asText("").trim().isBlank();
-        boolean hasMasterDetailRoles = hasRole(plan.path("widgets"), "master")
-                && hasRole(plan.path("widgets"), "detail");
-        return !hasExplicitLayout || hasLayoutPreset || hasMasterDetailRoles;
+    private void setIfPresent(ObjectNode target, String field, JsonNode value) {
+        if (value != null && !value.isMissingNode() && !value.isNull()) {
+            target.set(field, value.deepCopy());
+        }
     }
 
     private ArrayNode expandedBindings(JsonNode plan) {
@@ -1046,7 +1040,138 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
 
     private record NestedWidgetArrayLocation(ArrayNode widgets, int nextSegmentIndex) {}
 
-    private ObjectNode defaultCanvas(JsonNode plan) {
+    private UiCompositionLayoutMaterialization materializeLayout(JsonNode plan) {
+        if (!isMasterDetailPlan(plan)) {
+            JsonNode canvas = null;
+            if (plan.path("canvas").isObject()) {
+                canvas = plan.path("canvas");
+            } else if (plan.path("widgets").isArray()
+                    && !plan.path("widgets").isEmpty()
+                    && (!plan.path("layout").isObject()
+                            || !plan.path("layoutPreset").asText("").trim().isBlank())) {
+                canvas = neutralCanvas(plan.path("widgets"));
+            }
+            return new UiCompositionLayoutMaterialization(
+                    objectOrNull(plan.path("layoutPresetOptions")),
+                    canvas,
+                    objectOrNull(plan.path("deviceLayouts")),
+                    objectOrNull(plan.path("slotAssignments")));
+        }
+
+        List<MasterDetailWidget> semantics = analyzeMasterDetailWidgets(plan);
+        ObjectNode slotAssignments = materializeMasterDetailSlots(plan, semantics);
+        ObjectNode canvas = plan.path("canvas").isObject()
+                ? (ObjectNode) plan.path("canvas").deepCopy()
+                : masterDetailCanvas(semantics, 12, "desktop");
+        ObjectNode deviceLayouts = plan.path("deviceLayouts").isObject()
+                ? (ObjectNode) plan.path("deviceLayouts").deepCopy()
+                : materializeMasterDetailDeviceLayouts(semantics, canvas);
+        ObjectNode options = plan.path("layoutPresetOptions").isObject()
+                ? (ObjectNode) plan.path("layoutPresetOptions").deepCopy()
+                : objectMapper.createObjectNode();
+        if (!isKnownMasterDetailPreset(plan) && !options.path("presetFamily").isTextual()) {
+            options.put("presetFamily", "master-detail-dashboard");
+        }
+        return new UiCompositionLayoutMaterialization(
+                options.isEmpty() ? null : options,
+                canvas,
+                deviceLayouts,
+                slotAssignments.isEmpty() ? null : slotAssignments);
+    }
+
+    private JsonNode objectOrNull(JsonNode value) {
+        return value.isObject() ? value.deepCopy() : null;
+    }
+
+    private boolean isMasterDetailPlan(JsonNode plan) {
+        if (isKnownMasterDetailPreset(plan)) {
+            return true;
+        }
+        boolean master = false;
+        boolean detail = false;
+        JsonNode assignments = plan.path("slotAssignments");
+        for (JsonNode widget : plan.path("widgets")) {
+            String region = masterDetailRegion(
+                    assignments.path(widget.path("key").asText()).asText(""),
+                    widget.path("role").asText(""));
+            master |= "master".equals(region);
+            detail |= "detail".equals(region);
+        }
+        return master && detail;
+    }
+
+    private boolean isKnownMasterDetailPreset(JsonNode plan) {
+        return "master-detail-dashboard".equals(plan.path("layoutPreset").asText("").trim())
+                || "master-detail-dashboard".equals(
+                        plan.path("layoutPresetOptions").path("presetFamily").asText("").trim());
+    }
+
+    private List<MasterDetailWidget> analyzeMasterDetailWidgets(JsonNode plan) {
+        List<MasterDetailWidget> semantics = new ArrayList<>();
+        JsonNode assignments = plan.path("slotAssignments");
+        for (JsonNode widget : plan.path("widgets")) {
+            String slot = assignments.path(widget.path("key").asText()).asText("").trim();
+            String region = masterDetailRegion(slot, widget.path("role").asText(""));
+            semantics.add(new MasterDetailWidget(widget, region, slot.isBlank() ? null : slot));
+        }
+        return semantics;
+    }
+
+    private String masterDetailRegion(String slot, String role) {
+        String resolved = !slot.isBlank() ? slot : role.trim();
+        if ("master".equals(resolved)) {
+            return "master";
+        }
+        if (Set.of("detail", "detail-table", "detail-chart-a", "detail-chart-b", "detail-kpis")
+                .contains(resolved)) {
+            return "detail";
+        }
+        if ("filters".equals(resolved)) {
+            return "filters";
+        }
+        if ("actions".equals(resolved)) {
+            return "actions";
+        }
+        return "supporting";
+    }
+
+    private ObjectNode materializeMasterDetailSlots(
+            JsonNode plan,
+            List<MasterDetailWidget> semantics) {
+        ObjectNode assignments = plan.path("slotAssignments").isObject()
+                ? (ObjectNode) plan.path("slotAssignments").deepCopy()
+                : objectMapper.createObjectNode();
+        Set<String> occupied = new HashSet<>();
+        assignments.elements().forEachRemaining(value -> occupied.add(value.asText()));
+        List<String> detailSlots = List.of(
+                "detail-table", "detail-chart-a", "detail-chart-b", "detail-kpis");
+        for (MasterDetailWidget item : semantics) {
+            if (item.slot() != null) {
+                continue;
+            }
+            if ("master".equals(item.region()) && !occupied.contains("master")) {
+                assignments.put(item.widget().path("key").asText(), "master");
+                occupied.add("master");
+                item.slot("master");
+                continue;
+            }
+            if (!"detail".equals(item.region())) {
+                continue;
+            }
+            String role = item.widget().path("role").asText("").trim();
+            String slot = detailSlots.contains(role) && !occupied.contains(role)
+                    ? role
+                    : detailSlots.stream().filter(candidate -> !occupied.contains(candidate)).findFirst().orElse(null);
+            if (slot != null) {
+                assignments.put(item.widget().path("key").asText(), slot);
+                occupied.add(slot);
+                item.slot(slot);
+            }
+        }
+        return assignments;
+    }
+
+    private ObjectNode neutralCanvas(JsonNode widgets) {
         ObjectNode canvas = objectMapper.createObjectNode();
         canvas.put("mode", "grid");
         canvas.put("columns", 12);
@@ -1054,65 +1179,194 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
         canvas.put("gap", "16px");
         canvas.put("autoRows", "fixed");
         ObjectNode items = canvas.putObject("items");
-        boolean masterDetail = plan.path("layoutPreset").asText("").toLowerCase(Locale.ROOT).contains("master-detail")
-                || hasRole(plan.path("widgets"), "master") && hasRole(plan.path("widgets"), "detail");
-        List<JsonNode> orderedWidgets = new ArrayList<>();
-        if (masterDetail) {
-            JsonNode master = firstWidgetWithRole(plan.path("widgets"), "master");
-            orderedWidgets.add(master == null ? plan.path("widgets").path(0) : master);
-            for (JsonNode widget : plan.path("widgets")) {
-                if (!widget.path("key").asText().equals(orderedWidgets.get(0).path("key").asText())) {
-                    orderedWidgets.add(widget);
-                }
-            }
-        } else {
-            plan.path("widgets").forEach(orderedWidgets::add);
-        }
         int row = 1;
-        for (JsonNode widget : orderedWidgets) {
-            int rowSpan = preferredRowSpan(widget);
+        for (JsonNode widget : widgets) {
             ObjectNode item = items.putObject(widget.path("key").asText());
             item.put("col", 1);
             item.put("row", row);
             item.put("colSpan", 12);
-            item.put("rowSpan", rowSpan);
-            row += rowSpan;
+            item.put("rowSpan", 4);
+            row += 4;
         }
         return canvas;
     }
 
-    private boolean hasRole(JsonNode widgets, String role) {
-        return firstWidgetWithRole(widgets, role) != null;
+    private ObjectNode materializeMasterDetailDeviceLayouts(
+            List<MasterDetailWidget> semantics,
+            ObjectNode desktopCanvas) {
+        ObjectNode layouts = objectMapper.createObjectNode();
+        layouts.putObject("desktop").set("canvas", canvasVariant(desktopCanvas));
+        layouts.putObject("tablet").set("canvas", canvasVariant(masterDetailCanvas(semantics, 6, "tablet")));
+        layouts.putObject("mobile").set("canvas", canvasVariant(masterDetailCanvas(semantics, 1, "mobile")));
+        return layouts;
     }
 
-    private JsonNode firstWidgetWithRole(JsonNode widgets, String role) {
-        for (JsonNode widget : widgets) {
-            if (role.equals(widget.path("role").asText(""))) {
-                return widget;
+    private ObjectNode canvasVariant(JsonNode canvas) {
+        ObjectNode variant = objectMapper.createObjectNode();
+        copyIfPresent(canvas, variant, "columns");
+        copyIfPresent(canvas, variant, "rowUnit");
+        copyIfPresent(canvas, variant, "gap");
+        copyIfPresent(canvas, variant, "autoRows");
+        copyIfPresent(canvas, variant, "collisionPolicy");
+        copyIfPresent(canvas, variant, "items");
+        return variant;
+    }
+
+    private ObjectNode masterDetailCanvas(
+            List<MasterDetailWidget> semantics,
+            int columns,
+            String device) {
+        ObjectNode items = objectMapper.createObjectNode();
+        List<MasterDetailWidget> filters = region(semantics, "filters");
+        List<MasterDetailWidget> actions = region(semantics, "actions");
+        List<MasterDetailWidget> masters = region(semantics, "master");
+        List<MasterDetailWidget> details = region(semantics, "detail");
+        List<MasterDetailWidget> supporting = region(semantics, "supporting");
+        int row = 1;
+        if ("desktop".equals(device) && !filters.isEmpty() && !actions.isEmpty()) {
+            int filterEnd = placeHorizontal(items, filters, row, 1, 8, device);
+            int actionEnd = placeHorizontal(items, actions, row, 9, 4, device);
+            row = Math.max(filterEnd, actionEnd);
+        } else {
+            row = placeStacked(items, filters, row, columns, device);
+            row = placeStacked(items, actions, row, columns, device);
+        }
+        if ("desktop".equals(device)) {
+            int contentRow = row;
+            int detailRow = contentRow;
+            for (MasterDetailWidget item : details) {
+                int rowSpan = masterDetailRowSpan(item, device);
+                putCanvasItem(items, item.widget(), 5, detailRow, 8, rowSpan);
+                detailRow += rowSpan;
             }
+            int contentHeight = Math.max(8, detailRow - contentRow);
+            for (MasterDetailWidget item : masters) {
+                putCanvasItem(items, item.widget(), 1, contentRow, 4, contentHeight);
+            }
+            row = contentRow + contentHeight;
+        } else {
+            row = placeStacked(items, masters, row, columns, device);
+            row = placeStacked(items, details, row, columns, device);
         }
-        return null;
+        placeStacked(items, supporting, row, columns, device);
+        return defaultCanvas(items, columns, device);
     }
 
-    private int preferredRowSpan(JsonNode widget) {
-        String componentId = widget.path("componentId").asText("").toLowerCase(Locale.ROOT);
-        String role = widget.path("role").asText("");
-        if (componentId.contains("dynamic-form") || "detail".equals(role)) {
-            return 8;
+    private List<MasterDetailWidget> region(List<MasterDetailWidget> items, String region) {
+        return items.stream().filter(item -> region.equals(item.region())).toList();
+    }
+
+    private int placeHorizontal(
+            ObjectNode items,
+            List<MasterDetailWidget> semantics,
+            int row,
+            int col,
+            int colSpan,
+            String device) {
+        int nextRow = row;
+        for (MasterDetailWidget item : semantics) {
+            int rowSpan = masterDetailRowSpan(item, device);
+            putCanvasItem(items, item.widget(), col, nextRow, colSpan, rowSpan);
+            nextRow += rowSpan;
         }
-        if (componentId.contains("table") || componentId.contains("list")) {
-            return 7;
+        return nextRow;
+    }
+
+    private int placeStacked(
+            ObjectNode items,
+            List<MasterDetailWidget> semantics,
+            int row,
+            int columns,
+            String device) {
+        int nextRow = row;
+        for (MasterDetailWidget item : semantics) {
+            int rowSpan = masterDetailRowSpan(item, device);
+            putCanvasItem(items, item.widget(), 1, nextRow, columns, rowSpan);
+            nextRow += rowSpan;
         }
-        if (componentId.contains("chart")) {
-            return 5;
-        }
-        if (componentId.contains("kpi") || componentId.contains("filter")) {
+        return nextRow;
+    }
+
+    private int masterDetailRowSpan(MasterDetailWidget item, String device) {
+        if (Set.of("filters", "actions").contains(item.region())) {
             return 2;
         }
-        if (componentId.contains("rich-content")) {
-            return 3;
+        if ("master".equals(item.region())) {
+            return "desktop".equals(device) ? 8 : 6;
+        }
+        if ("detail-kpis".equals(item.slot())) {
+            return 2;
+        }
+        if (Set.of("detail-chart-a", "detail-chart-b").contains(item.slot())) {
+            return 5;
+        }
+        if ("detail-table".equals(item.slot()) || "detail".equals(item.region())) {
+            return "mobile".equals(device) ? 6 : 7;
         }
         return 4;
+    }
+
+    private void putCanvasItem(
+            ObjectNode items,
+            JsonNode widget,
+            int col,
+            int row,
+            int colSpan,
+            int rowSpan) {
+        ObjectNode item = items.putObject(widget.path("key").asText());
+        item.put("col", col);
+        item.put("row", row);
+        item.put("colSpan", colSpan);
+        item.put("rowSpan", rowSpan);
+    }
+
+    private ObjectNode defaultCanvas(ObjectNode items, int columns, String device) {
+        ObjectNode canvas = objectMapper.createObjectNode();
+        canvas.put("mode", "grid");
+        canvas.put("columns", columns);
+        canvas.put("rowUnit", switch (device) {
+            case "tablet" -> "72px";
+            case "mobile" -> "64px";
+            default -> "80px";
+        });
+        canvas.put("gap", "desktop".equals(device) ? "16px" : "12px");
+        canvas.put("autoRows", "fixed");
+        canvas.set("items", items);
+        return canvas;
+    }
+
+    private record UiCompositionLayoutMaterialization(
+            JsonNode layoutPresetOptions,
+            JsonNode canvas,
+            JsonNode deviceLayouts,
+            JsonNode slotAssignments) {}
+
+    private static final class MasterDetailWidget {
+        private final JsonNode widget;
+        private final String region;
+        private String slot;
+
+        MasterDetailWidget(JsonNode widget, String region, String slot) {
+            this.widget = widget;
+            this.region = region;
+            this.slot = slot;
+        }
+
+        JsonNode widget() {
+            return widget;
+        }
+
+        String region() {
+            return region;
+        }
+
+        String slot() {
+            return slot;
+        }
+
+        void slot(String slot) {
+            this.slot = slot;
+        }
     }
 
     private ObjectNode linkedOutputs(JsonNode widget, String widgetKey, JsonNode bindings) {

@@ -109,7 +109,18 @@ Keyword, regex, fuzzy matching or aliases may rank candidates only after semanti
 
 Issue: [#357](https://github.com/codexrodrigues/praxis-config-starter/issues/357).
 
-Extend the existing machine-first corpus rather than inventing a second test universe. Add neutral JSON fixtures for valid/invalid plans, defaults, ports, policies, transactional actions and report codes. The same corpus must run in Java and TypeScript.
+Implemented as a neutral, versioned deterministic corpus consumed by Java and TypeScript. The audit
+kept the existing semantic-grounding corpus in its retrieval role and introduced an adjacent
+compiler corpus only for the real uncovered contract. It reuses template
+`registryKey + version + ETag + configSha256`, fingerprints the frozen Corte A.5 target profile,
+compares canonical page projection hashes and stable diagnostics, and runs registry-aware target
+attestation as a separate Angular phase.
+
+The gate includes deliberately divergent projection, target component/port, capability/action and
+template-revision cases. The initial run found and corrected a real Java/TypeScript master-detail
+layout drift rather than hiding it through normalization. Operational details and corpus governance
+are documented in
+[`ui-composition-compiler-parity-corpus-v1.md`](../agentic-authoring/ui-composition-compiler-parity-corpus-v1.md).
 
 The attestation is the evidence that a published materialization is compatible with a concrete target. It is not a new source of UI semantics.
 

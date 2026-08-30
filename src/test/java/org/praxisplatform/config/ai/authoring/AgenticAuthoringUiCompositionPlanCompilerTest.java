@@ -97,8 +97,8 @@ class AgenticAuthoringUiCompositionPlanCompilerTest {
         assertThat(page.at("/widgets/0/definition/id").asText()).isEqualTo("praxis-chart");
         assertThat(page.at("/widgets/0/definition/outputs/selectionChange").asText()).isEqualTo("emit");
         assertThat(page.at("/widgets/1/definition/outputs/selectionChange").asText()).isEqualTo("emit");
-        assertThat(page.at("/canvas/items/comparison-chart/rowSpan").asInt()).isEqualTo(5);
-        assertThat(page.at("/canvas/items/critical-employees/row").asInt()).isEqualTo(6);
+        assertThat(page.at("/canvas/items/comparison-chart/rowSpan").asInt()).isEqualTo(4);
+        assertThat(page.at("/canvas/items/critical-employees/row").asInt()).isEqualTo(5);
         assertThat(page.at("/composition/links/0/to/ref/widget").asText()).isEqualTo("critical-employees");
         assertThat(page.at("/composition/links/0/transform/mode").asText()).isEqualTo("object-fragment");
         assertThat(page.at("/composition/links/0/transform/steps/0/kind").asText()).isEqualTo("object-template");

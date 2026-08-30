@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://praxisplatform.org/schemas/ai/ui-composition-compiler-parity-corpus.v1.schema.json",
+  "title": "Praxis UiCompositionPlan compiler parity and target attestation corpus",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "corpusVersion",
+    "kind",
+    "canonicalization",
+    "targetProfiles",
+    "cases"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "praxis.ui-composition-compiler-parity-corpus/v1" },
+    "corpusVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "kind": { "const": "praxis.ui-composition-compiler-parity-corpus" },
+    "description": { "type": "string", "minLength": 1 },
+    "canonicalization": { "$ref": "#/$defs/canonicalization" },
+    "targetProfiles": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/targetProfile" }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 8,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "canonicalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projection", "templateConfig", "diagnostics"],
+      "properties": {
+        "projection": { "const": "sort-object-keys-preserve-arrays-preserve-null-utf8-sha256" },
+        "templateConfig": { "const": "canonical-json-hash-service-v1-sort-keys-omit-null-preserve-arrays-utf8-sha256" },
+        "diagnostics": { "const": "stable-code-path-severity-provenance" }
+      }
+    },
+    "targetProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "releaseTrain",
+        "registryFingerprint",
+        "components",
+        "capabilities",
+        "actions",
+        "providerEvidenceRefs",
+        "templateRevisions"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "releaseTrain": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "commit", "certification"],
+          "properties": {
+            "repository": { "type": "string", "minLength": 1 },
+            "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            "certification": { "type": "string", "minLength": 1 }
+          }
+        },
+        "registryFingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "components": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "ports"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "ports": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "direction", "semanticKind"],
+                  "properties": {
+                    "id": { "type": "string", "minLength": 1 },
+                    "direction": { "enum": ["input", "output"] },
+                    "semanticKind": { "type": "string", "minLength": 1 }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "capabilities": { "$ref": "#/$defs/stringArray" },
+        "actions": { "$ref": "#/$defs/stringArray" },
+        "providerEvidenceRefs": { "$ref": "#/$defs/stringArray" },
+        "templateRevisions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/templateRevisionIdentity" }
+        }
+      }
+    },
+    "templateRevisionIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["registryKey", "version", "etag", "configSha256"],
+      "properties": {
+        "registryKey": { "type": "string", "minLength": 1 },
+        "version": { "type": "integer", "minimum": 1 },
+        "etag": { "type": "string", "minLength": 1 },
+        "configSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "caseVersion", "semanticIntent", "input", "expected"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "caseVersion": { "const": "1.0.0" },
+        "semanticIntent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["decisionKind", "purpose"],
+          "properties": {
+            "decisionKind": { "const": "ui-composition-materialization" },
+            "purpose": { "type": "string", "minLength": 1 }
+          }
+        },
+        "input": { "$ref": "#/$defs/input" },
+        "expected": { "$ref": "#/$defs/expected" }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan"],
+      "dependentRequired": {
+        "templateReference": ["templateMaterialization"],
+        "templateMaterialization": ["templateReference"]
+      },
+      "properties": {
+        "plan": { "type": "object" },
+        "templateReference": { "type": "object" },
+        "templateMaterialization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["registryKey", "revision", "configJson"],
+          "properties": {
+            "registryKey": { "type": "string", "minLength": 1 },
+            "revision": { "$ref": "#/$defs/templateRevisionIdentity" },
+            "configJson": { "type": "object" }
+          }
+        }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["compilerParity", "targetAttestation"],
+      "properties": {
+        "compilerParity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["phase", "outcome", "diagnostics"],
+          "allOf": [
+            {
+              "if": {
+                "properties": { "outcome": { "enum": ["pass", "warning"] } },
+                "required": ["outcome"]
+              },
+              "then": { "required": ["projectionSha256"] }
+            }
+          ],
+          "properties": {
+            "phase": { "enum": ["template-attestation", "compiler-parity"] },
+            "outcome": { "enum": ["pass", "warning", "block"] },
+            "projectionSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "diagnostics": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/compilerDiagnostic" }
+            }
+          }
+        },
+        "targetAttestation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["profileId", "outcome", "requirements", "diagnostics"],
+          "properties": {
+            "profileId": { "type": "string", "minLength": 1 },
+            "outcome": { "enum": ["pass", "block", "skipped"] },
+            "requirements": { "$ref": "#/$defs/targetRequirements" },
+            "diagnostics": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/targetDiagnostic" }
+            }
+          }
+        }
+      }
+    },
+    "compilerDiagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonicalId", "severity", "provenance", "engineCodes", "pathByEngine"],
+      "properties": {
+        "canonicalId": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["warning", "error"] },
+        "provenance": { "enum": ["template-attestation", "compiler"] },
+        "engineCodes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["java", "typescript"],
+          "properties": {
+            "java": { "type": "string", "minLength": 1 },
+            "typescript": { "type": "string", "minLength": 1 }
+          }
+        },
+        "pathByEngine": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["java", "typescript"],
+          "properties": {
+            "java": { "type": ["string", "null"] },
+            "typescript": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "targetRequirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["components", "ports", "capabilities", "actions"],
+      "properties": {
+        "components": { "$ref": "#/$defs/stringArray" },
+        "ports": { "$ref": "#/$defs/stringArray" },
+        "capabilities": { "$ref": "#/$defs/stringArray" },
+        "actions": { "$ref": "#/$defs/stringArray" },
+        "templateRevision": { "$ref": "#/$defs/templateRevisionIdentity" }
+      }
+    },
+    "targetDiagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "path", "severity", "provenance"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "path": { "type": ["string", "null"] },
+        "severity": { "enum": ["warning", "error"] },
+        "provenance": { "enum": ["target-registry", "semantic-validator", "template-attestation"] }
+      }
+    }
+  }
+}

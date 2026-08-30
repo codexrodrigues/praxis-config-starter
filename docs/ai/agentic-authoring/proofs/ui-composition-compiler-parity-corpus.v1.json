@@ -1,0 +1,689 @@
+{
+  "schemaVersion": "praxis.ui-composition-compiler-parity-corpus/v1",
+  "corpusVersion": "1.0.0",
+  "kind": "praxis.ui-composition-compiler-parity-corpus",
+  "description": "Neutral deterministic corpus for Java/TypeScript UiCompositionPlan compiler parity and separately phased Angular target readiness.",
+  "canonicalization": {
+    "projection": "sort-object-keys-preserve-arrays-preserve-null-utf8-sha256",
+    "templateConfig": "canonical-json-hash-service-v1-sort-keys-omit-null-preserve-arrays-utf8-sha256",
+    "diagnostics": "stable-code-path-severity-provenance"
+  },
+  "targetProfiles": {
+    "praxis-ui-angular-corte-a5": {
+      "id": "praxis-ui-angular-corte-a5",
+      "releaseTrain": {
+        "repository": "codexrodrigues/praxis-ui-angular",
+        "commit": "a4281fae9f64eb336101803399dda85d536fcb2c",
+        "certification": "wave-a.5"
+      },
+      "registryFingerprint": "c343862e90de9cb620b93c50a7375323169d1af5c88536e727a9ca7898820739",
+      "components": [
+        {
+          "id": "praxis-table",
+          "ports": [
+            { "id": "queryContext", "direction": "input", "semanticKind": "query-context" },
+            { "id": "selectionChange", "direction": "output", "semanticKind": "event" }
+          ]
+        },
+        {
+          "id": "praxis-list",
+          "ports": [
+            { "id": "selectionChange", "direction": "output", "semanticKind": "event" }
+          ]
+        },
+        {
+          "id": "praxis-related-resource-outlet",
+          "ports": [
+            { "id": "parentResourceId", "direction": "input", "semanticKind": "scalar" }
+          ]
+        }
+      ],
+      "capabilities": [
+        "composition.preflight",
+        "dynamic-page.materialization",
+        "provider.bootstrap.official"
+      ],
+      "actions": ["trackEvent"],
+      "providerEvidenceRefs": [
+        "projects/praxis-page-builder/docs/corte-a-widget-certification-matrix.md",
+        "src/app/features/dynamic-page-lab/dynamic-page-list-certification-wave-a.spec.ts",
+        "src/app/features/dynamic-page-lab/dynamic-page-related-resource-certification-wave-a4.spec.ts",
+        "src/app/features/dynamic-page-lab/dynamic-page-table-shell-actions-certification-wave-a5.spec.ts"
+      ],
+      "templateRevisions": [
+        {
+          "registryKey": "praxis-dynamic-page:employee-operations-casework",
+          "version": 7,
+          "etag": "123e4567-e89b-12d3-a456-426614174000",
+          "configSha256": "79526136a54368ede7ee42d944e2e120156d22e27036723d2b82a1a2f05e100b"
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "id": "template-valid-simple-composition",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Materialize one governed employee table from an exact pinned template revision."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "widgets": [
+            {
+              "key": "employee-table",
+              "componentId": "praxis-table",
+              "inputs": { "resourcePath": "human-resources/funcionarios" }
+            }
+          ]
+        },
+        "templateReference": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "templateRef": {
+            "registryKey": "praxis-dynamic-page:employee-operations-casework",
+            "configSha256": "79526136a54368ede7ee42d944e2e120156d22e27036723d2b82a1a2f05e100b"
+          },
+          "overrides": {}
+        },
+        "templateMaterialization": {
+          "registryKey": "praxis-dynamic-page:employee-operations-casework",
+          "revision": {
+            "registryKey": "praxis-dynamic-page:employee-operations-casework",
+            "version": 7,
+            "etag": "123e4567-e89b-12d3-a456-426614174000",
+            "configSha256": "79526136a54368ede7ee42d944e2e120156d22e27036723d2b82a1a2f05e100b"
+          },
+          "configJson": {
+            "authoringPlan": {
+              "version": "1.0",
+              "kind": "praxis.ui-composition-plan",
+              "widgets": [
+                {
+                  "key": "employee-table",
+                  "componentId": "praxis-table",
+                  "inputs": { "resourcePath": "human-resources/funcionarios" }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "warning",
+          "projectionSha256": "de5e31247473e3500ed04418019d3c5fcadd58c93de234570480a652fc09fe2b",
+          "diagnostics": [
+            {
+              "canonicalId": "template-reference-resolved",
+              "severity": "warning",
+              "provenance": "template-attestation",
+              "engineCodes": {
+                "java": "ui-composition-template-reference-resolved",
+                "typescript": "ui-composition-template-reference-resolved"
+              },
+              "pathByEngine": { "java": null, "typescript": "templateRef" }
+            }
+          ]
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "pass",
+          "requirements": {
+            "components": ["praxis-table"],
+            "ports": [],
+            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official"],
+            "actions": [],
+            "templateRevision": {
+              "registryKey": "praxis-dynamic-page:employee-operations-casework",
+              "version": 7,
+              "etag": "123e4567-e89b-12d3-a456-426614174000",
+              "configSha256": "79526136a54368ede7ee42d944e2e120156d22e27036723d2b82a1a2f05e100b"
+            }
+          },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "master-detail-selection-context",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Materialize master-detail selection state and parent context propagation."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "layoutPreset": "master-detail",
+          "state": { "values": { "selectedEmployeeId": null } },
+          "widgets": [
+            {
+              "key": "employees",
+              "componentId": "praxis-table",
+              "role": "master",
+              "inputs": { "resourcePath": "human-resources/funcionarios" }
+            },
+            {
+              "key": "employee-related",
+              "componentId": "praxis-related-resource-outlet",
+              "role": "detail"
+            }
+          ],
+          "selectionSyncs": [
+            {
+              "id": "employee-selection",
+              "intent": "selection-sync",
+              "sources": [
+                {
+                  "kind": "component-port",
+                  "widget": "employees",
+                  "port": "selectionChange",
+                  "direction": "output"
+                }
+              ],
+              "target": { "kind": "state", "path": "selectedEmployee" },
+              "mapping": {
+                "selectedEmployeeId": { "path": "row.id", "inputSource": "payload" }
+              }
+            }
+          ],
+          "contextScopes": [
+            {
+              "id": "employee-context",
+              "context": {
+                "parentResourceId": {
+                  "kind": "state",
+                  "path": "selectedEmployee.selectedEmployeeId",
+                  "initial": null
+                }
+              },
+              "targets": [{ "widget": "employee-related" }]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "pass",
+          "projectionSha256": "5fa5d53bd3612666bf773bfd2715a6cb2086a356a354f19d7f1cc35f9be7f371",
+          "diagnostics": []
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "pass",
+          "requirements": {
+            "components": ["praxis-table", "praxis-related-resource-outlet"],
+            "ports": ["praxis-table:selectionChange", "praxis-related-resource-outlet:parentResourceId"],
+            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official"],
+            "actions": []
+          },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "transforms-and-state-binding",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Project a list selection into query context and canonical page state."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "state": { "values": { "selectedEmployeeId": null } },
+          "widgets": [
+            { "key": "employee-list", "componentId": "praxis-list" },
+            { "key": "employee-table", "componentId": "praxis-table" }
+          ],
+          "bindings": [
+            {
+              "id": "list.selection->table.query",
+              "from": {
+                "kind": "component-port",
+                "widget": "employee-list",
+                "port": "selectionChange",
+                "direction": "output"
+              },
+              "to": {
+                "kind": "component-port",
+                "widget": "employee-table",
+                "port": "queryContext",
+                "direction": "input"
+              },
+              "intent": "data-projection",
+              "transform": {
+                "kind": "query-context",
+                "id": "employee-filter",
+                "field": "id",
+                "valueVar": "payload.item.id"
+              }
+            },
+            {
+              "id": "list.selection->state.selectedEmployeeId",
+              "from": {
+                "kind": "component-port",
+                "widget": "employee-list",
+                "port": "selectionChange",
+                "direction": "output"
+              },
+              "to": { "kind": "state", "path": "selectedEmployeeId" },
+              "intent": "state-write",
+              "transform": {
+                "kind": "pick-path",
+                "id": "employee-id",
+                "path": "item.id",
+                "inputSource": "payload"
+              }
+            }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "pass",
+          "projectionSha256": "afa8c879a7d00c5c17d3e206a063b1415a21abc0315c98d6a08216b418c57161",
+          "diagnostics": []
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "pass",
+          "requirements": {
+            "components": ["praxis-list", "praxis-table"],
+            "ports": ["praxis-list:selectionChange", "praxis-table:queryContext"],
+            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official"],
+            "actions": []
+          },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "explicit-device-layouts",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Preserve explicit desktop and mobile layout order and geometry."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "layout": { "kind": "responsive-grid", "columns": 12, "gap": "16px" },
+          "canvas": {
+            "mode": "grid",
+            "columns": 12,
+            "rowUnit": "80px",
+            "gap": "16px",
+            "autoRows": "fixed",
+            "items": {
+              "employees": { "col": 1, "row": 1, "colSpan": 8, "rowSpan": 5 },
+              "summary": { "col": 9, "row": 1, "colSpan": 4, "rowSpan": 5 }
+            }
+          },
+          "deviceLayouts": {
+            "mobile": {
+              "canvas": {
+                "mode": "grid",
+                "columns": 4,
+                "rowUnit": "72px",
+                "gap": "12px",
+                "autoRows": "fixed",
+                "items": {
+                  "employees": { "col": 1, "row": 1, "colSpan": 4, "rowSpan": 5 },
+                  "summary": { "col": 1, "row": 6, "colSpan": 4, "rowSpan": 4 }
+                }
+              }
+            }
+          },
+          "widgets": [
+            { "key": "employees", "componentId": "praxis-table" },
+            { "key": "summary", "componentId": "praxis-list" }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "pass",
+          "projectionSha256": "cd93427fb530bfbc93e1150f2c5b7789c1dfa0c3dcd0f557edf23a50df4f5356",
+          "diagnostics": []
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "pass",
+          "requirements": {
+            "components": ["praxis-table", "praxis-list"],
+            "ports": [],
+            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official"],
+            "actions": []
+          },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "target-missing-component-and-port",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Reject a structurally compilable plan whose target lacks a component and source port."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "widgets": [
+            { "key": "source", "componentId": "praxis-list" },
+            { "key": "missing", "componentId": "praxis-unknown" }
+          ],
+          "bindings": [
+            {
+              "id": "source.missingPort->missing.query",
+              "from": {
+                "kind": "component-port",
+                "widget": "source",
+                "port": "missingPort",
+                "direction": "output"
+              },
+              "to": {
+                "kind": "component-port",
+                "widget": "missing",
+                "port": "queryContext",
+                "direction": "input"
+              },
+              "intent": "data-projection"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "pass",
+          "projectionSha256": "65700963e965030b22b372eacd17a9ccdc5477d0f9f2aae57923bc792ef3fafe",
+          "diagnostics": []
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "block",
+          "requirements": {
+            "components": ["praxis-list", "praxis-unknown"],
+            "ports": ["praxis-list:missingPort"],
+            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official"],
+            "actions": []
+          },
+          "diagnostics": [
+            {
+              "code": "TARGET_COMPONENT_UNAVAILABLE",
+              "path": "components.praxis-unknown",
+              "severity": "error",
+              "provenance": "target-registry"
+            },
+            {
+              "code": "TARGET_PORT_UNAVAILABLE",
+              "path": "components.praxis-list.ports.missingPort",
+              "severity": "error",
+              "provenance": "target-registry"
+            },
+            {
+              "code": "SEMANTIC_COMPONENT_NOT_REGISTERED",
+              "path": "widgets.missing.definition.id",
+              "severity": "error",
+              "provenance": "semantic-validator"
+            },
+            {
+              "code": "SEMANTIC_PORT_NOT_REGISTERED",
+              "path": null,
+              "severity": "error",
+              "provenance": "semantic-validator"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "structurally-invalid-version",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Reject an unsupported plan version before projection or target inspection."
+      },
+      "input": {
+        "plan": {
+          "version": "2.0",
+          "kind": "praxis.ui-composition-plan",
+          "widgets": [{ "key": "employees", "componentId": "praxis-table" }]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "block",
+          "diagnostics": [
+            {
+              "canonicalId": "plan-version-invalid",
+              "severity": "error",
+              "provenance": "compiler",
+              "engineCodes": {
+                "java": "ui-composition-plan-version-invalid",
+                "typescript": "invalid-version"
+              },
+              "pathByEngine": { "java": null, "typescript": "version" }
+            }
+          ]
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "skipped",
+          "requirements": { "components": [], "ports": [], "capabilities": [], "actions": [] },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "template-config-hash-drift",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Reject a pinned template reference whose config content hash drifted."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "widgets": [
+            {
+              "key": "employee-table",
+              "componentId": "praxis-table",
+              "inputs": { "resourcePath": "human-resources/funcionarios" }
+            }
+          ]
+        },
+        "templateReference": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "templateRef": {
+            "registryKey": "praxis-dynamic-page:employee-operations-casework",
+            "configSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "overrides": {}
+        },
+        "templateMaterialization": {
+          "registryKey": "praxis-dynamic-page:employee-operations-casework",
+          "revision": {
+            "registryKey": "praxis-dynamic-page:employee-operations-casework",
+            "version": 7,
+            "etag": "123e4567-e89b-12d3-a456-426614174000",
+            "configSha256": "79526136a54368ede7ee42d944e2e120156d22e27036723d2b82a1a2f05e100b"
+          },
+          "configJson": {
+            "authoringPlan": {
+              "version": "1.0",
+              "kind": "praxis.ui-composition-plan",
+              "widgets": [
+                {
+                  "key": "employee-table",
+                  "componentId": "praxis-table",
+                  "inputs": { "resourcePath": "human-resources/funcionarios" }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "template-attestation",
+          "outcome": "block",
+          "diagnostics": [
+            {
+              "canonicalId": "template-config-hash-mismatch",
+              "severity": "error",
+              "provenance": "template-attestation",
+              "engineCodes": {
+                "java": "ui-composition-template-hash-mismatch",
+                "typescript": "ui-composition-template-hash-mismatch"
+              },
+              "pathByEngine": { "java": null, "typescript": "templateRef" }
+            }
+          ]
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "skipped",
+          "requirements": { "components": [], "ports": [], "capabilities": [], "actions": [] },
+          "diagnostics": []
+        }
+      }
+    },
+    {
+      "id": "target-template-revision-drift",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Keep compiler parity green while blocking a target with a different template version and ETag."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "widgets": [
+            {
+              "key": "employee-table",
+              "componentId": "praxis-table",
+              "inputs": { "resourcePath": "human-resources/funcionarios" }
+            }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "pass",
+          "projectionSha256": "de5e31247473e3500ed04418019d3c5fcadd58c93de234570480a652fc09fe2b",
+          "diagnostics": []
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "block",
+          "requirements": {
+            "components": ["praxis-table"],
+            "ports": [],
+            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official"],
+            "actions": [],
+            "templateRevision": {
+              "registryKey": "praxis-dynamic-page:employee-operations-casework",
+              "version": 8,
+              "etag": "223e4567-e89b-12d3-a456-426614174999",
+              "configSha256": "79526136a54368ede7ee42d944e2e120156d22e27036723d2b82a1a2f05e100b"
+            }
+          },
+          "diagnostics": [
+            {
+              "code": "TARGET_TEMPLATE_VERSION_MISMATCH",
+              "path": "templateRevisions.praxis-dynamic-page:employee-operations-casework.version",
+              "severity": "error",
+              "provenance": "template-attestation"
+            },
+            {
+              "code": "TARGET_TEMPLATE_ETAG_MISMATCH",
+              "path": "templateRevisions.praxis-dynamic-page:employee-operations-casework.etag",
+              "severity": "error",
+              "provenance": "template-attestation"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "target-capability-and-action-unavailable",
+      "caseVersion": "1.0.0",
+      "semanticIntent": {
+        "decisionKind": "ui-composition-materialization",
+        "purpose": "Keep compiler parity separate from unavailable target capability and action handlers."
+      },
+      "input": {
+        "plan": {
+          "version": "1.0",
+          "kind": "praxis.ui-composition-plan",
+          "widgets": [{ "key": "employees", "componentId": "praxis-table" }],
+          "bindings": [
+            {
+              "id": "employees.selection->export",
+              "from": {
+                "kind": "component-port",
+                "widget": "employees",
+                "port": "selectionChange",
+                "direction": "output"
+              },
+              "to": { "kind": "global-action", "actionId": "exportRecords" },
+              "intent": "command-dispatch"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "compilerParity": {
+          "phase": "compiler-parity",
+          "outcome": "pass",
+          "projectionSha256": "44977d0ec0f800df43f7ef505e86ed2a960ae32facc86bdc63a824bc84821bba",
+          "diagnostics": []
+        },
+        "targetAttestation": {
+          "profileId": "praxis-ui-angular-corte-a5",
+          "outcome": "block",
+          "requirements": {
+            "components": ["praxis-table"],
+            "ports": ["praxis-table:selectionChange"],
+            "capabilities": ["composition.preflight", "dynamic-page.materialization", "provider.bootstrap.official", "collection.export.remote"],
+            "actions": ["exportRecords"]
+          },
+          "diagnostics": [
+            {
+              "code": "TARGET_CAPABILITY_UNAVAILABLE",
+              "path": "capabilities.collection.export.remote",
+              "severity": "error",
+              "provenance": "target-registry"
+            },
+            {
+              "code": "TARGET_ACTION_UNAVAILABLE",
+              "path": "actions.exportRecords",
+              "severity": "error",
+              "provenance": "target-registry"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
