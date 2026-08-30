@@ -226,44 +226,66 @@ function Get-PlaywrightSpecs([object[]] $Suites) {
     }
 }
 
-function Get-PlaywrightScenarioEvidenceFromReport([object] $Report, [object[]] $Definitions, [string[]] $SelectedScenarioIds) {
+function Get-PlaywrightScenarioEvidenceFromReport(
+    [object] $Report,
+    [object[]] $Definitions,
+    [string[]] $SelectedScenarioIds,
+    [switch] $AllowPartial
+) {
     $evidence = @()
     $specs = @(Get-PlaywrightSpecs @($Report.suites))
     foreach ($definition in @($Definitions | Where-Object { $_.scenarioId -in $SelectedScenarioIds })) {
-        $matchingSpecs = @($specs | Where-Object { $_.title -eq $definition.testTitle })
-        if ($matchingSpecs.Count -ne 1) {
-            throw "Scenario receipt test title must resolve exactly once: $($definition.testTitle)"
-        }
-        $testCases = @($matchingSpecs[0].tests | Where-Object { $_.status -eq 'expected' })
-        if ($testCases.Count -ne 1) {
-            throw "Scenario receipt test must pass exactly once: $($definition.testTitle)"
-        }
-        $results = @($testCases[0].results)
-        $passedResults = @($results | Where-Object { $_.status -eq 'passed' })
-        if ($passedResults.Count -ne 1) {
-            throw "Scenario receipt requires exactly one successful Playwright result: $($definition.testTitle)"
-        }
-        $attachments = @($passedResults[0].attachments | Where-Object { $_.name -eq $definition.attachmentName })
-        if ($attachments.Count -ne 1 -or $attachments[0].contentType -ne 'application/json' -or
-            [string]::IsNullOrWhiteSpace([string] $attachments[0].body)) {
-            throw "Scenario receipt attachment must be one inline application/json body: $($definition.attachmentName)"
-        }
         try {
-            $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string] $attachments[0].body))
-            $receipt = $json | ConvertFrom-Json
+            $matchingSpecs = @($specs | Where-Object { $_.title -eq $definition.testTitle })
+            if ($matchingSpecs.Count -ne 1) {
+                throw "Scenario receipt test title must resolve exactly once: $($definition.testTitle)"
+            }
+            $testCases = if ($AllowPartial) {
+                @($matchingSpecs[0].tests)
+            } else {
+                @($matchingSpecs[0].tests | Where-Object { $_.status -eq 'expected' })
+            }
+            if ($testCases.Count -ne 1) {
+                throw "Scenario receipt test must pass exactly once: $($definition.testTitle)"
+            }
+            $results = @($testCases[0].results)
+            $passedResults = @($results | Where-Object { $_.status -eq 'passed' })
+            if (-not $AllowPartial -and $passedResults.Count -ne 1) {
+                throw "Scenario receipt requires exactly one successful Playwright result: $($definition.testTitle)"
+            }
+            $receiptResults = if ($AllowPartial) { $results } else { $passedResults }
+            $attachments = @($receiptResults | ForEach-Object {
+                @($_.attachments | Where-Object { $_.name -eq $definition.attachmentName })
+            })
+            if ($attachments.Count -ne 1 -or $attachments[0].contentType -ne 'application/json' -or
+                [string]::IsNullOrWhiteSpace([string] $attachments[0].body)) {
+                throw "Scenario receipt attachment must be one inline application/json body: $($definition.attachmentName)"
+            }
+            try {
+                $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string] $attachments[0].body))
+                $receipt = $json | ConvertFrom-Json
+            } catch {
+                throw "Scenario receipt attachment is not valid base64 JSON: $($definition.attachmentName)"
+            }
+            $retryAttempts = @($results | Where-Object { [int] $_.retry -gt 0 }).Count
+            $evidence += ConvertTo-PraxisPageBuilderScenarioEvidence $receipt $definition $retryAttempts
         } catch {
-            throw "Scenario receipt attachment is not valid base64 JSON: $($definition.attachmentName)"
+            if (-not $AllowPartial) { throw }
+            Write-Warning "Scenario evidence was not collected from the failed Playwright run. scenarioId=$($definition.scenarioId) reason=$($_.Exception.Message)"
         }
-        $retryAttempts = @($results | Where-Object { [int] $_.retry -gt 0 }).Count
-        $evidence += ConvertTo-PraxisPageBuilderScenarioEvidence $receipt $definition $retryAttempts
     }
     return @($evidence)
 }
 
-function Get-PlaywrightScenarioEvidence([string] $ReportPath, [object[]] $Definitions, [string[]] $SelectedScenarioIds) {
+function Get-PlaywrightScenarioEvidence(
+    [string] $ReportPath,
+    [object[]] $Definitions,
+    [string[]] $SelectedScenarioIds,
+    [switch] $AllowPartial
+) {
     if (-not (Test-Path -LiteralPath $ReportPath)) { throw "Playwright JSON report was not generated: $ReportPath" }
     $report = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json
-    return @(Get-PlaywrightScenarioEvidenceFromReport $report $Definitions $SelectedScenarioIds)
+    return @(Get-PlaywrightScenarioEvidenceFromReport $report $Definitions $SelectedScenarioIds -AllowPartial:$AllowPartial)
 }
 
 function Assert-PlaywrightSummaryParserFixture {
@@ -424,6 +446,54 @@ function Assert-PlaywrightScenarioReceiptParserFixture {
     }
 
     $fixture.suites[0].specs[0].tests[0].results[0].retry = 0
+    $tableReceipt = ($receipt | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
+    $tableReceipt.scenarioId = 'table-human-authoring'
+    $tableReceipt.archetype = 'single-table-control'
+    $tableReceipt.functionalAssertions = @('composition.single-table-only')
+    $encodedTableReceipt = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes(($tableReceipt | ConvertTo-Json -Depth 10))
+    )
+    $failedDefinition = [pscustomobject]@{
+        scenarioId = 'table-human-authoring'
+        archetype = 'single-table-control'
+        testTitle = 'failed table authoring'
+        attachmentName = 'single-table-first-pass-receipt.json'
+        requiredFunctionalAssertions = @('composition.single-table-only')
+    }
+    $fixture.suites[0].specs += [pscustomobject]@{
+        title = 'failed table authoring'
+        tests = @([pscustomobject]@{
+            status = 'unexpected'
+            results = @(
+                [pscustomobject]@{
+                    status = 'failed'
+                    retry = 0
+                    attachments = @()
+                },
+                [pscustomobject]@{
+                    status = 'failed'
+                    retry = 1
+                    attachments = @([pscustomobject]@{
+                        name = 'single-table-first-pass-receipt.json'
+                        contentType = 'application/json'
+                        body = $encodedTableReceipt
+                    })
+                }
+            )
+        })
+    }
+    $partial = @(Get-PlaywrightScenarioEvidenceFromReport `
+        $fixture `
+        @($definition, $failedDefinition) `
+        @('live-resource-workspace-command', 'table-human-authoring') `
+        -AllowPartial)
+    if ($partial.Count -ne 2 -or
+        $partial[0].scenarioId -ne 'live-resource-workspace-command' -or
+        $partial[1].scenarioId -ne 'table-human-authoring' -or
+        $partial[1].outcome -ne 'eventual-pass') {
+        throw 'Playwright scenario receipt parser did not preserve valid/retried evidence from a partially failed run.'
+    }
+
     $receipt['prompt'] = 'must never be published'
     $fixture.suites[0].specs[0].tests[0].results[0].attachments[0].body = [Convert]::ToBase64String(
         [Text.Encoding]::UTF8.GetBytes(($receipt | ConvertTo-Json -Depth 10))
@@ -1041,6 +1111,11 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $playwrightExitCode = $LASTEXITCODE
         if (Test-Path -LiteralPath $playwrightReportPath) {
             $playwrightSummary = Get-PlaywrightSummary $playwrightReportPath
+            $scenarioEvidence = @(Get-PlaywrightScenarioEvidence `
+                -ReportPath $playwrightReportPath `
+                -Definitions @($gateMatrix.evidence.scenarioReceipts) `
+                -SelectedScenarioIds $selectedScenarioIds `
+                -AllowPartial)
         }
         if ($playwrightExitCode -ne 0) { throw "Page-builder agentic $ValidationMode E2E failed with exit code $playwrightExitCode." }
         if ($null -eq $playwrightSummary) { throw "Playwright summary is unavailable after a successful execution." }
