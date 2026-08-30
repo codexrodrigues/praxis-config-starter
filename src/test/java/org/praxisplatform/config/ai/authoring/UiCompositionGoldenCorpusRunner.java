@@ -67,7 +67,6 @@ final class UiCompositionGoldenCorpusRunner {
                 .map(ValidationMessage::getMessage)
                 .sorted()
                 .forEach(message -> globalFailures.add("schema:" + message));
-        verifyTargetFingerprints(corpus, globalFailures);
         verifyTargetProfileReferences(corpus, globalFailures);
         verifyCompilerContract(corpus, globalFailures);
 
@@ -246,17 +245,6 @@ final class UiCompositionGoldenCorpusRunner {
                     diagnostic.path("provenance").asText()));
         }
         return identities;
-    }
-
-    private void verifyTargetFingerprints(JsonNode corpus, List<String> failures) {
-        corpus.path("targetProfiles").fields().forEachRemaining(entry -> {
-            ObjectNode profile = entry.getValue().deepCopy();
-            String expected = profile.remove("registryFingerprint").asText();
-            String actual = canonicalHashService.sha256(profile);
-            if (!expected.equals(actual)) {
-                failures.add("target-profile-fingerprint-mismatch:" + entry.getKey());
-            }
-        });
     }
 
     private void verifyTargetProfileReferences(JsonNode corpus, List<String> failures) {

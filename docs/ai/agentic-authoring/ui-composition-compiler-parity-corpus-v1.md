@@ -80,6 +80,11 @@ selected frozen target profile. It checks:
   `providePraxisRelatedResourceOutletMetadata()` in an `EnvironmentInjector`;
 - actions from `providePraxisGlobalActionCatalog()`, not from a hand-maintained fixture.
 
+`registryFingerprint` is the canonical SHA-256 of the runtime provider projection: sorted component
+ids, governed port contracts and sorted action ids returned by that injector. It is not a digest of
+the target-profile JSON. The report distinguishes the ancestral certification baseline from the
+executed `runtimeRevision` and publishes hashes for the exact Core, Table and List modules loaded.
+
 Target failure does not rewrite compiler parity. Cases intentionally prove that an identical,
 valid projection can still be blocked because the target train lacks a component, port,
 capability/action or pinned template revision.
@@ -113,10 +118,8 @@ After building the official provider owners and Page Builder, from the sibling
 `praxis-ui-angular` checkout:
 
 ```bash
-npx ng build praxis-table-rule-builder --configuration production
-npx ng build praxis-table --configuration production
-npx ng build praxis-list --configuration production
-npx ng build praxis-page-builder --configuration production
+node scripts/build-libs.js --prod \
+  --only praxis-page-builder,praxis-table,praxis-list
 npm run build:tools
 npx -y ts-node --project tools/tsconfig.tools.json \
   tools/ai-registry/ui-composition-golden-corpus-runner.spec.ts
@@ -134,7 +137,8 @@ When behavior changes intentionally:
 3. run Java and TypeScript against that same uncommitted corpus;
 4. inspect both projection bodies, diagnostics and hashes;
 5. update an expected hash only after human review explains the semantic change;
-6. update the target profile fingerprint only when its source certification train changes.
+6. update `registryFingerprint` only after reviewing an intentional change in the official provider
+   projection; update the certification baseline and evidence hashes independently.
 
 There is no automatic “accept golden” command. Generated reports live under ignored build output
 and are evidence, not committed sources of truth.

@@ -27,7 +27,7 @@
         "certification": "wave-a.5",
         "primaryEvidenceRef": "projects/praxis-page-builder/docs/corte-a-widget-certification-matrix.md"
       },
-      "registryFingerprint": "1af513f5e0b936e58c004b0a4948935f61c6b95b6af43e9bf57e13b44f5a28b1",
+      "registryFingerprint": "5eec0aa4673471294ed5c218bda75560ea72aedfbfc0354cf325b3f4f47ae5d4",
       "capabilities": [
         "composition.preflight",
         "dynamic-page.materialization",
