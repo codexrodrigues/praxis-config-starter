@@ -956,6 +956,33 @@ Fases recomendadas para authoring:
 - `preview.apply-local`
 - `review`
 
+### Workspace rico orientado a recurso
+
+Para criacao de pagina sobre um recurso semanticamente selecionado, o provider
+generico consome `contextHints.verifiedDomainOperations`. Esse envelope so e
+aceito com `schemaVersion=praxis-agentic-authoring-verified-domain-operations.v1`,
+`source=schemas.filtered+resource.capabilities`, contagem consistente e operacoes
+do mesmo recurso selecionado.
+
+O primeiro slice materializa Filter, Table master e Dynamic Form detail. Os links
+canonicos sao `requestSearch -> queryContext` e
+`selectionChange -> state.selectedItem -> initialValue`. Desktop usa composicao
+7/5 com filtro superior; tablet e mobile usam variantes empilhadas. O filtro
+continua responsavel por schema e option sources metadata-driven, e os widgets
+continuam responsaveis por loading, vazio e erro.
+
+Comandos nao sao convertidos em `api.post` ou `api.patch` pelo Java. Quando existe
+uma operacao verificada sob `/actions/`, o plano materializa discovery de actions
+e capabilities na Table. O runtime apresenta apenas comandos permitidos pela
+fonte canonica e preserva payload, confirmacao e concorrencia do contrato de
+metadata. Envelope ausente, forjado, divergente ou sem comando produz diagnostics
+e omite a affordance operacional.
+
+Preview e compilacao seguem o endpoint existente de `page-preview`. Persistencia
+segue `page-apply`, o resultado terminal emitido pelo servidor e `If-Match`; uma
+tentativa com ETag obsoleto falha antes de alterar a configuracao vencedora. Nao
+existe DTO ou endpoint paralelo de workspace neste slice.
+
 ## Regras para o Page Builder
 
 O Page Builder deve:

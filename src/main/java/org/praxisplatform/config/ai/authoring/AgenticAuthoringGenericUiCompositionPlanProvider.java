@@ -107,7 +107,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             case "table" -> dashboardMaterialization
                     ? dashboardPlan(request, candidate, visualizationDecision)
                     : tablePlan(request, candidate);
-            case "page" -> pagePlan(candidate, visualizationDecision);
+            case "page" -> pagePlan(request, candidate, visualizationDecision);
             default -> dashboardMaterialization
                     ? dashboardPlan(request, candidate, visualizationDecision)
                     : tablePlan(request, candidate);
@@ -710,6 +710,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     }
 
     private ObjectNode pagePlan(
+            AgenticAuthoringPlanRequest request,
             AgenticAuthoringCandidate candidate,
             AgenticAuthoringVisualizationDecision visualizationDecision) {
         if (shouldMaterializeProfilePage(visualizationDecision, candidate)) {
@@ -719,21 +720,115 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             return listPagePlan(candidate);
         }
         ObjectNode plan = basePlan("resource-master-detail");
+        ResourceWorkspaceGrounding grounding = resourceWorkspaceGrounding(request, candidate);
         ArrayNode widgets = plan.putArray("widgets");
+        String filterKey = widgetKey(candidate, "filter");
         String masterKey = widgetKey(candidate, "master");
         String detailKey = widgetKey(candidate, "detail");
-        addTable(widgets, candidate, masterKey, "master");
+        if (grounding.filterOperationCount() > 0) {
+            addWorkspaceFilter(widgets, candidate, filterKey);
+        }
+        addWorkspaceTable(widgets, candidate, masterKey, grounding);
         addDetail(widgets, candidate, detailKey);
-        addMasterDetailCanvas(plan, candidate, masterKey, detailKey);
-        addMasterDetailDeviceLayouts(plan, masterKey, detailKey);
+        addMasterDetailStateAndBindings(plan, filterKey, masterKey, detailKey, grounding.filterOperationCount() > 0);
+        addMasterDetailCanvas(plan, candidate, filterKey, masterKey, detailKey, grounding.filterOperationCount() > 0);
+        addMasterDetailDeviceLayouts(plan, filterKey, masterKey, detailKey, grounding.filterOperationCount() > 0);
+        addResourceWorkspaceGrounding(plan, grounding);
         return plan;
+    }
+
+    private void addMasterDetailStateAndBindings(
+            ObjectNode plan,
+            String filterKey,
+            String masterKey,
+            String detailKey,
+            boolean includeFilter) {
+        plan.putObject("state").putObject("values").putNull("selectedItem");
+        ArrayNode bindings = plan.putArray("bindings");
+
+        if (includeFilter) {
+            ObjectNode filter = bindings.addObject();
+            filter.put("id", filterKey + ".requestSearch->" + masterKey + ".queryContext");
+            filter.put("intent", "data-projection");
+            filter.putObject("from")
+                    .put("kind", "component-port")
+                    .put("widget", filterKey)
+                    .put("port", "requestSearch")
+                    .put("direction", "output");
+            filter.putObject("to")
+                    .put("kind", "component-port")
+                    .put("widget", masterKey)
+                    .put("port", "queryContext")
+                    .put("direction", "input");
+            filter.putObject("policy")
+                    .put("distinct", true)
+                    .put("missingValuePolicy", "skip");
+            filter.putObject("metadata")
+                    .put("source", "ui-composition-plan")
+                    .put("traceKey", "verified-resource-filter-composition")
+                    .putArray("tags")
+                    .add("master-detail")
+                    .add("filter");
+        }
+
+        ObjectNode selection = bindings.addObject();
+        selection.put("id", masterKey + ".selectionChange->state.selectedItem");
+        selection.put("intent", "state-write");
+        selection.putObject("from")
+                .put("kind", "component-port")
+                .put("widget", masterKey)
+                .put("port", "selectionChange")
+                .put("direction", "output");
+        selection.putObject("to")
+                .put("kind", "state")
+                .put("path", "selectedItem");
+        selection.putObject("transform")
+                .put("kind", "pick-path")
+                .put("id", "pick-selected-row")
+                .put("path", "payload.row");
+        selection.putObject("policy")
+                .put("distinct", true)
+                .put("missingValuePolicy", "skip");
+        selection.putObject("metadata")
+                .put("source", "ui-composition-plan")
+                .put("traceKey", "verified-component-port-composition")
+                .putArray("tags")
+                .add("master-detail")
+                .add("selection-state");
+
+        ObjectNode detail = bindings.addObject();
+        detail.put("id", "state.selectedItem->" + detailKey + ".initialValue");
+        detail.put("intent", "state-read");
+        detail.putObject("from")
+                .put("kind", "state")
+                .put("path", "selectedItem");
+        detail.putObject("to")
+                .put("kind", "component-port")
+                .put("widget", detailKey)
+                .put("port", "initialValue")
+                .put("direction", "input");
+        detail.putObject("condition")
+                .putArray("!!")
+                .addObject()
+                .put("var", "state.selectedItem");
+        detail.putObject("policy")
+                .put("distinct", true)
+                .put("missingValuePolicy", "skip");
+        detail.putObject("metadata")
+                .put("source", "ui-composition-plan")
+                .put("traceKey", "verified-component-port-composition")
+                .putArray("tags")
+                .add("master-detail")
+                .add("detail-initial-value");
     }
 
     private void addMasterDetailCanvas(
             ObjectNode plan,
             AgenticAuthoringCandidate candidate,
+            String filterKey,
             String masterKey,
-            String detailKey) {
+            String detailKey,
+            boolean includeFilter) {
         ObjectNode canvas = plan.putObject("canvas");
         canvas.put("mode", "grid");
         canvas.put("columns", 12);
@@ -741,8 +836,14 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         canvas.put("gap", "16px");
         canvas.put("autoRows", "fixed");
         ObjectNode items = canvas.putObject("items");
-        putCanvasItem(items, masterKey, 1, 1, 12, 7);
-        putCanvasItem(items, detailKey, 1, 8, 12, 8);
+        if (includeFilter) {
+            putCanvasItem(items, filterKey, 1, 1, 12, 2);
+            putCanvasItem(items, masterKey, 1, 3, 7, 8);
+            putCanvasItem(items, detailKey, 8, 3, 5, 8);
+        } else {
+            putCanvasItem(items, masterKey, 1, 1, 7, 8);
+            putCanvasItem(items, detailKey, 8, 1, 5, 8);
+        }
 
         ObjectNode options = plan.putObject("layoutPresetOptions");
         options.put("presetFamily", "resource-master-detail");
@@ -753,11 +854,13 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
 
     private void addMasterDetailDeviceLayouts(
             ObjectNode plan,
+            String filterKey,
             String masterKey,
-            String detailKey) {
+            String detailKey,
+            boolean includeFilter) {
         ObjectNode deviceLayouts = plan.putObject("deviceLayouts");
-        addStackedMasterDetailDeviceLayout(deviceLayouts.putObject("mobile"), 1, "88px", "12px", masterKey, detailKey);
-        addStackedMasterDetailDeviceLayout(deviceLayouts.putObject("tablet"), 6, "80px", "14px", masterKey, detailKey);
+        addStackedMasterDetailDeviceLayout(deviceLayouts.putObject("mobile"), 1, "88px", "12px", filterKey, masterKey, detailKey, includeFilter);
+        addStackedMasterDetailDeviceLayout(deviceLayouts.putObject("tablet"), 6, "80px", "14px", filterKey, masterKey, detailKey, includeFilter);
     }
 
     private void addStackedMasterDetailDeviceLayout(
@@ -765,16 +868,23 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             int columns,
             String rowUnit,
             String gap,
+            String filterKey,
             String masterKey,
-            String detailKey) {
+            String detailKey,
+            boolean includeFilter) {
         ObjectNode canvas = variant.putObject("canvas");
         canvas.put("columns", columns);
         canvas.put("rowUnit", rowUnit);
         canvas.put("gap", gap);
         canvas.put("autoRows", "fixed");
         ObjectNode items = canvas.putObject("items");
-        putCanvasItem(items, masterKey, 1, 1, columns, 7);
-        putCanvasItem(items, detailKey, 1, 8, columns, 8);
+        int masterRow = 1;
+        if (includeFilter) {
+            putCanvasItem(items, filterKey, 1, 1, columns, 2);
+            masterRow = 3;
+        }
+        putCanvasItem(items, masterKey, 1, masterRow, columns, 7);
+        putCanvasItem(items, detailKey, 1, masterRow + 7, columns, 8);
     }
 
     private void addSingleTableCanvas(ObjectNode plan, AgenticAuthoringCandidate candidate, String tableKey) {
@@ -929,6 +1039,79 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode config = inputs.putObject("config");
         config.put("title", resourceTitle(candidate));
         config.putArray("columns");
+    }
+
+    private void addWorkspaceTable(
+            ArrayNode widgets,
+            AgenticAuthoringCandidate candidate,
+            String key,
+            ResourceWorkspaceGrounding grounding) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", key);
+        widget.put("componentId", "praxis-table");
+        widget.put("role", "master");
+        widget.putArray("bindingOrder")
+                .add("resourcePath")
+                .add("tableId")
+                .add("componentInstanceId")
+                .add("config")
+                .add("configPersistenceStrategy")
+                .add("enableCustomization");
+        widget.putObject("outputs").put("selectionChange", "emit");
+        ObjectNode inputs = widget.putObject("inputs");
+        String resourcePath = businessResourcePath(candidate.resourcePath());
+        inputs.put("resourcePath", resourcePath);
+        inputs.put("tableId", key);
+        inputs.put("componentInstanceId", key);
+        inputs.put("configPersistenceStrategy", "input-first");
+        inputs.put("enableCustomization", true);
+        ObjectNode config = inputs.putObject("config");
+        config.put("title", resourceTitle(candidate));
+        config.putArray("columns");
+        config.putObject("behavior")
+                .putObject("selection")
+                .put("enabled", true)
+                .put("type", "single");
+        if (grounding.commandOperationCount() > 0) {
+            ObjectNode toolbar = config.putObject("toolbar");
+            toolbar.put("visible", true);
+            toolbar.put("title", resourceTitle(candidate));
+            ObjectNode action = toolbar.putArray("actions").addObject();
+            action.put("id", "inspect-governed-actions");
+            action.put("action", "inspect-actions");
+            action.put("label", "Ações disponíveis");
+            action.put("icon", "bolt");
+            action.put("type", "button");
+            action.put("appearance", "outlined");
+            action.put("position", "end");
+            action.put("order", 100);
+            action.putObject("discovery")
+                    .put("rel", "actions")
+                    .put("scope", "resource")
+                    .put("resourcePath", resourcePath)
+                    .put("resourceKey", grounding.resourceKey());
+        }
+    }
+
+    private void addWorkspaceFilter(
+            ArrayNode widgets,
+            AgenticAuthoringCandidate candidate,
+            String key) {
+        ObjectNode widget = widgets.addObject();
+        widget.put("key", key);
+        widget.put("componentId", "praxis-filter");
+        widget.put("role", "filter");
+        widget.putObject("outputs").put("requestSearch", "emit");
+        ObjectNode inputs = widget.putObject("inputs");
+        inputs.put("resourcePath", businessResourcePath(candidate.resourcePath()));
+        inputs.put("filterId", key);
+        inputs.put("formId", key);
+        inputs.put("componentInstanceId", key);
+        inputs.put("enableCustomization", true);
+        inputs.put("showFilterSettings", true);
+        inputs.put("showSearchButton", true);
+        inputs.put("persistenceKey", key);
+        inputs.put("changeDebounceMs", 300);
     }
 
     private void addCrud(ArrayNode widgets, AgenticAuthoringCandidate candidate, String key) {
@@ -4009,6 +4192,158 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         return recordOpen.isObject() ? recordOpen : MissingNode.getInstance();
     }
 
+    private ResourceWorkspaceGrounding resourceWorkspaceGrounding(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringCandidate candidate) {
+        JsonNode envelope = request == null || request.contextHints() == null
+                ? MissingNode.getInstance()
+                : request.contextHints().path("verifiedDomainOperations");
+        if (!envelope.isObject()) {
+            return ResourceWorkspaceGrounding.unavailable("verified-domain-operations-missing");
+        }
+        String schemaVersion = safe(envelope.path("schemaVersion").asText());
+        String source = safe(envelope.path("source").asText());
+        if (!"praxis-agentic-authoring-verified-domain-operations.v1".equals(schemaVersion)
+                || !"schemas.filtered+resource.capabilities".equals(source)
+                || !envelope.path("entries").isArray()) {
+            return ResourceWorkspaceGrounding.rejected(
+                    schemaVersion,
+                    source,
+                    "verified-domain-operations-envelope-untrusted");
+        }
+        JsonNode entries = envelope.path("entries");
+        if (!envelope.path("operationCount").canConvertToInt()
+                || envelope.path("operationCount").asInt() != entries.size()) {
+            return ResourceWorkspaceGrounding.rejected(
+                    schemaVersion,
+                    source,
+                    "verified-domain-operations-count-mismatch");
+        }
+
+        String selectedResourcePath = businessResourcePath(candidate == null ? "" : candidate.resourcePath());
+        List<JsonNode> verifiedOperations = new ArrayList<>();
+        List<JsonNode> filterOperations = new ArrayList<>();
+        List<JsonNode> commandOperations = new ArrayList<>();
+        String resourceKey = "";
+        for (JsonNode entry : entries) {
+            if (!isCompleteVerifiedOperation(entry)
+                    || !selectedResourcePath.equals(businessResourcePath(entry.path("resourcePath").asText()))) {
+                continue;
+            }
+            verifiedOperations.add(entry.deepCopy());
+            if (resourceKey.isBlank()) {
+                resourceKey = safe(entry.path("resourceKey").asText());
+            }
+            if (isCommandOperation(entry, selectedResourcePath)) {
+                commandOperations.add(entry.deepCopy());
+            }
+            if (isFilterOperation(entry, selectedResourcePath)) {
+                filterOperations.add(entry.deepCopy());
+            }
+        }
+        if (verifiedOperations.isEmpty() || resourceKey.isBlank()) {
+            return ResourceWorkspaceGrounding.rejected(
+                    schemaVersion,
+                    source,
+                    "verified-domain-operations-resource-mismatch");
+        }
+        return new ResourceWorkspaceGrounding(
+                "verified",
+                schemaVersion,
+                source,
+                resourceKey,
+                List.copyOf(verifiedOperations),
+                List.copyOf(filterOperations),
+                List.copyOf(commandOperations),
+                commandOperations.isEmpty() ? "verified-command-operation-missing" : "");
+    }
+
+    private boolean isCompleteVerifiedOperation(JsonNode operation) {
+        return operation != null
+                && operation.isObject()
+                && !safe(operation.path("resourceKey").asText()).isBlank()
+                && !safe(operation.path("resourcePath").asText()).isBlank()
+                && !safe(operation.path("apiPath").asText()).isBlank()
+                && !safe(operation.path("apiMethod").asText()).isBlank()
+                && !safe(operation.path("schemaUrl").asText()).isBlank()
+                && !safe(operation.path("capabilitiesUrl").asText()).isBlank()
+                && !safe(operation.path("capabilityOperationId").asText()).isBlank();
+    }
+
+    private boolean isCommandOperation(JsonNode operation, String resourcePath) {
+        String method = safe(operation.path("apiMethod").asText()).toLowerCase(Locale.ROOT);
+        String apiPath = safe(operation.path("apiPath").asText());
+        return !"get".equals(method)
+                && apiPath.startsWith(resourcePath + "/")
+                && apiPath.contains("/actions/");
+    }
+
+    private boolean isFilterOperation(JsonNode operation, String resourcePath) {
+        String method = safe(operation.path("apiMethod").asText()).toLowerCase(Locale.ROOT);
+        String apiPath = safe(operation.path("apiPath").asText());
+        return "post".equals(method)
+                && (apiPath.equals(resourcePath + "/filter")
+                || apiPath.equals(resourcePath + "/filter/cursor"));
+    }
+
+    private void addResourceWorkspaceGrounding(
+            ObjectNode plan,
+            ResourceWorkspaceGrounding grounding) {
+        ObjectNode diagnostics = plan.path("diagnostics") instanceof ObjectNode existing
+                ? existing
+                : plan.putObject("diagnostics");
+        ObjectNode workspace = diagnostics.putObject("resourceWorkspaceGrounding");
+        workspace.put("schemaVersion", "praxis-resource-workspace-grounding-diagnostics.v1");
+        workspace.put("status", grounding.status());
+        workspace.put("sourceSchemaVersion", grounding.sourceSchemaVersion());
+        workspace.put("source", grounding.source());
+        workspace.put("resourceKey", grounding.resourceKey());
+        workspace.put("operationCount", grounding.operations().size());
+        workspace.put("filterOperationCount", grounding.filterOperationCount());
+        workspace.put("commandOperationCount", grounding.commandOperationCount());
+        if (!grounding.failureCode().isBlank()) {
+            workspace.put("failureCode", grounding.failureCode());
+        }
+        ArrayNode operations = workspace.putArray("operations");
+        ArrayNode sourceRefs = plan.putArray("sourceRefs");
+        addSourceRef(sourceRefs, "intent-resolution");
+        for (JsonNode operation : grounding.operations()) {
+            ObjectNode summary = operations.addObject();
+            copyText(operation, summary, "conceptKey");
+            copyText(operation, summary, "bindingKey");
+            copyText(operation, summary, "apiPath");
+            copyText(operation, summary, "apiMethod");
+            copyText(operation, summary, "schemaUrl");
+            copyText(operation, summary, "capabilitiesUrl");
+            copyText(operation, summary, "capabilityOperationId");
+            copyText(operation, summary, "sourceRelease");
+            summary.put("command", isCommandOperation(operation, businessResourcePath(operation.path("resourcePath").asText())));
+            addSourceRef(sourceRefs, safe(operation.path("schemaUrl").asText()));
+            addSourceRef(sourceRefs, safe(operation.path("capabilitiesUrl").asText()));
+            addSourceRef(sourceRefs, "capability-operation:" + safe(operation.path("capabilityOperationId").asText()));
+        }
+    }
+
+    private void copyText(JsonNode source, ObjectNode target, String field) {
+        String value = safe(source.path(field).asText());
+        if (!value.isBlank()) {
+            target.put(field, value);
+        }
+    }
+
+    private void addSourceRef(ArrayNode sourceRefs, String value) {
+        String normalized = safe(value);
+        if (normalized.isBlank() || "capability-operation:".equals(normalized)) {
+            return;
+        }
+        for (JsonNode existing : sourceRefs) {
+            if (normalized.equals(existing.asText())) {
+                return;
+            }
+        }
+        sourceRefs.add(normalized);
+    }
+
     private String slug(String value) {
         String normalized = Normalizer.normalize(safe(value), Normalizer.Form.NFD)
                 .replaceAll("\\p{M}", "")
@@ -4133,5 +4468,37 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             FieldCandidate field,
             int score,
             int index) {
+    }
+
+    private record ResourceWorkspaceGrounding(
+            String status,
+            String sourceSchemaVersion,
+            String source,
+            String resourceKey,
+            List<JsonNode> operations,
+            List<JsonNode> filterOperations,
+            List<JsonNode> commandOperations,
+            String failureCode) {
+
+        private static ResourceWorkspaceGrounding unavailable(String failureCode) {
+            return new ResourceWorkspaceGrounding(
+                    "unavailable", "", "", "", List.of(), List.of(), List.of(), failureCode);
+        }
+
+        private static ResourceWorkspaceGrounding rejected(
+                String sourceSchemaVersion,
+                String source,
+                String failureCode) {
+            return new ResourceWorkspaceGrounding(
+                    "rejected", sourceSchemaVersion, source, "", List.of(), List.of(), List.of(), failureCode);
+        }
+
+        private int filterOperationCount() {
+            return filterOperations.size();
+        }
+
+        private int commandOperationCount() {
+            return commandOperations.size();
+        }
     }
 }

@@ -52,7 +52,7 @@ Classification: `ja-suportado-mal-nomeado-ou-mal-materializado` for state or evi
 
 ### Partially supported
 
-- component/provider compilation exists, but not yet as a complete resource-backed rich workspace materializer;
+- the first resource-backed master/detail/filter/action-discovery materializer now exists, while the full five-archetype certification still remains incomplete;
 - semantic grounding exists, but transaction lifecycle and UI composition are not closed in one real HTTP proof;
 - validation exists on both sides, but releases do not share one golden cross-language gate.
 
@@ -76,6 +76,15 @@ Classification: `lacuna-real-de-contrato`. Before defining it, implementation mu
 ### P0 — Resource-backed rich workspace decision and materializer
 
 Issue: [#356](https://github.com/codexrodrigues/praxis-config-starter/issues/356).
+
+Implementation status for the first slice: the generic provider now consumes the
+existing verified-operation envelope, emits a resource Filter, Table master and
+Dynamic Form detail, binds `requestSearch -> queryContext` and
+`selectionChange -> state -> initialValue`, publishes responsive device layouts,
+and exposes action discovery only when a verified `/actions/` operation exists.
+The server preview/compiler path and transactional apply/ETag path have focused
+tests. See [the delta audit](RESOURCE-BACKED-WORKSPACE-DELTA-AUDIT.md) for the
+reuse classification and remaining gaps.
 
 The decision must describe semantic intent, archetype, resources, surfaces, actions, capabilities, components, slots, bindings and transactional lifecycle. It should materialize both compact authoring input and portable runtime output without leaking Angular implementation detail into Java.
 
@@ -205,4 +214,7 @@ Implementation of either issue changes public AI/config contracts and therefore 
 - API quickstart proofs;
 - UI examples/playgrounds and schemas when their public artifact changes.
 
-This baseline is documentation-only and does not itself change endpoints, headers, ETag, schemas or runtime behavior.
+The first #356 slice changes generated plan shape but does not add endpoints,
+headers, public DTOs or schemas. Therefore the HTTP corpus and OpenAPI surface do
+not require regeneration for this cut; the cross-language corpus and attestation
+remain tracked by #357.

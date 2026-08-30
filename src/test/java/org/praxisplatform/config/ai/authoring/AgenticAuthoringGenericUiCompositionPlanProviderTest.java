@@ -856,7 +856,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
-    void materializesMasterDetailPageWithFullWidthPresentationCanvas() {
+    void materializesFunctionalMasterDetailPageWithoutInventingOperationalGrounding() {
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "quero criar algo que mostre informacoes dos empregados",
                 "openai",
@@ -874,19 +874,157 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .containsExactly("praxis-table", "praxis-dynamic-form");
         assertThat(plan.path("canvas").path("columns").asInt()).isEqualTo(12);
         assertThat(plan.path("canvas").path("items").path("funcionarios-master").path("colSpan").asInt())
-                .isEqualTo(12);
-        assertThat(plan.path("canvas").path("items").path("funcionarios-master").path("rowSpan").asInt())
                 .isEqualTo(7);
-        assertThat(plan.path("canvas").path("items").path("funcionarios-detail").path("row").asInt())
+        assertThat(plan.path("canvas").path("items").path("funcionarios-master").path("rowSpan").asInt())
+                .isEqualTo(8);
+        assertThat(plan.path("canvas").path("items").path("funcionarios-detail").path("col").asInt())
                 .isEqualTo(8);
         assertThat(plan.path("canvas").path("items").path("funcionarios-detail").path("colSpan").asInt())
-                .isEqualTo(12);
+                .isEqualTo(5);
         assertThat(plan.path("canvas").path("items").path("funcionarios-detail").path("rowSpan").asInt())
                 .isEqualTo(8);
+        assertThat(plan.path("state").path("values").has("selectedItem")).isTrue();
+        assertThat(plan.path("bindings")).hasSize(2);
+        assertThat(plan.path("bindings").path(0).path("from").path("port").asText())
+                .isEqualTo("selectionChange");
+        assertThat(plan.path("bindings").path(0).path("transform").path("path").asText())
+                .isEqualTo("payload.row");
+        assertThat(plan.path("bindings").path(1).path("to").path("port").asText())
+                .isEqualTo("initialValue");
+        assertThat(findWidget(plan, "praxis-table", "master").path("outputs")
+                .path("selectionChange").asText()).isEqualTo("emit");
+        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config").has("toolbar"))
+                .isFalse();
+        assertThat(plan.path("diagnostics").path("resourceWorkspaceGrounding").path("status").asText())
+                .isEqualTo("unavailable");
+        assertThat(plan.path("diagnostics").path("resourceWorkspaceGrounding").path("failureCode").asText())
+                .isEqualTo("verified-domain-operations-missing");
         assertThat(plan.path("deviceLayouts").path("tablet").path("canvas").path("items")
                 .path("funcionarios-detail").path("colSpan").asInt()).isEqualTo(6);
         assertThat(plan.path("deviceLayouts").path("mobile").path("canvas").path("items")
                 .path("funcionarios-detail").path("colSpan").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    void materializesGovernedCommandDiscoveryFromVerifiedResourceOperations() {
+        ObjectNode contextHints = verifiedDomainOperations(
+                "schemas.filtered+resource.capabilities",
+                "/api/operations/missoes",
+                "operations.missoes",
+                true);
+        AgenticAuthoringPlanRequest request = pageRequest(
+                "/api/operations/missoes",
+                contextHints);
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(request).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        JsonNode grounding = plan.path("diagnostics").path("resourceWorkspaceGrounding");
+        assertThat(grounding.path("status").asText()).isEqualTo("verified");
+        assertThat(grounding.path("resourceKey").asText()).isEqualTo("operations.missoes");
+        assertThat(grounding.path("operationCount").asInt()).isEqualTo(4);
+        assertThat(grounding.path("filterOperationCount").asInt()).isEqualTo(1);
+        assertThat(grounding.path("commandOperationCount").asInt()).isEqualTo(1);
+        assertThat(grounding.path("operations").path(3).path("capabilityOperationId").asText())
+                .isEqualTo("start");
+        assertThat(grounding.path("operations").path(3).path("command").asBoolean()).isTrue();
+        assertThat(stringArray(plan.path("sourceRefs")))
+                .contains(
+                        "intent-resolution",
+                        "/schemas/filtered?path=/api/operations/missoes/{id}/actions/start&operation=post&schemaType=request",
+                        "/api/operations/missoes/capabilities",
+                        "capability-operation:start");
+
+        JsonNode action = findWidgetInputs(plan, "praxis-table", "master")
+                .path("config").path("toolbar").path("actions").path(0);
+        assertThat(action.path("action").asText()).isEqualTo("inspect-actions");
+        assertThat(action.path("discovery").path("rel").asText()).isEqualTo("actions");
+        assertThat(action.path("discovery").path("resourcePath").asText())
+                .isEqualTo("/api/operations/missoes");
+        assertThat(action.path("discovery").path("resourceKey").asText())
+                .isEqualTo("operations.missoes");
+        assertThat(action.has("globalAction")).isFalse();
+        assertThat(findWidget(plan, "praxis-filter", "filter").path("outputs")
+                .path("requestSearch").asText()).isEqualTo("emit");
+
+        ObjectNode basePatch = objectMapper.createObjectNode();
+        basePatch.put("profileId", "ui-composition-plan");
+        AgenticAuthoringUiCompositionPlanCompiler.CompileResult compiled =
+                new AgenticAuthoringUiCompositionPlanCompiler(objectMapper).compile(plan, basePatch);
+        assertThat(compiled.valid()).withFailMessage("%s", compiled.failureCodes()).isTrue();
+        JsonNode page = compiled.compiledFormPatch().path("patch").path("page");
+        assertThat(page.path("composition").path("links")).hasSize(3);
+        assertThat(page.path("composition").path("links").path(0)
+                .path("from").path("ref").path("port").asText()).isEqualTo("requestSearch");
+        assertThat(page.path("composition").path("links").path(1)
+                .path("from").path("ref").path("port").asText()).isEqualTo("selectionChange");
+        assertThat(page.path("composition").path("links").path(2)
+                .path("to").path("ref").path("port").asText()).isEqualTo("initialValue");
+    }
+
+    @Test
+    void rejectsUntrustedVerifiedOperationsEnvelopeAndOmitsCommands() {
+        ObjectNode contextHints = verifiedDomainOperations(
+                "prompt-derived-operation-list",
+                "/api/operations/missoes",
+                "operations.missoes",
+                true);
+
+        JsonNode plan = provider.plan(pageRequest("/api/operations/missoes", contextHints))
+                .orElseThrow()
+                .uiCompositionPlan();
+
+        JsonNode grounding = plan.path("diagnostics").path("resourceWorkspaceGrounding");
+        assertThat(grounding.path("status").asText()).isEqualTo("rejected");
+        assertThat(grounding.path("failureCode").asText())
+                .isEqualTo("verified-domain-operations-envelope-untrusted");
+        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config").has("toolbar"))
+                .isFalse();
+        assertThat(plan.path("sourceRefs")).extracting(JsonNode::asText)
+                .containsExactly("intent-resolution");
+    }
+
+    @Test
+    void rejectsVerifiedOperationsForAnotherSemanticResource() {
+        ObjectNode contextHints = verifiedDomainOperations(
+                "schemas.filtered+resource.capabilities",
+                "/api/human-resources/funcionarios",
+                "human-resources.funcionarios",
+                true);
+
+        JsonNode plan = provider.plan(pageRequest("/api/operations/missoes", contextHints))
+                .orElseThrow()
+                .uiCompositionPlan();
+
+        JsonNode grounding = plan.path("diagnostics").path("resourceWorkspaceGrounding");
+        assertThat(grounding.path("status").asText()).isEqualTo("rejected");
+        assertThat(grounding.path("failureCode").asText())
+                .isEqualTo("verified-domain-operations-resource-mismatch");
+        assertThat(plan.path("widgets").findValuesAsText("componentId"))
+                .containsExactly("praxis-table", "praxis-dynamic-form");
+        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config").has("toolbar"))
+                .isFalse();
+    }
+
+    @Test
+    void keepsReadOnlyVerifiedWorkspaceFunctionalWithoutAdvertisingACommand() {
+        ObjectNode contextHints = verifiedDomainOperations(
+                "schemas.filtered+resource.capabilities",
+                "/api/operations/missoes",
+                "operations.missoes",
+                false);
+
+        JsonNode plan = provider.plan(pageRequest("/api/operations/missoes", contextHints))
+                .orElseThrow()
+                .uiCompositionPlan();
+
+        JsonNode grounding = plan.path("diagnostics").path("resourceWorkspaceGrounding");
+        assertThat(grounding.path("status").asText()).isEqualTo("verified");
+        assertThat(grounding.path("commandOperationCount").asInt()).isZero();
+        assertThat(grounding.path("failureCode").asText())
+                .isEqualTo("verified-command-operation-missing");
+        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config").has("toolbar"))
+                .isFalse();
     }
 
     @Test
@@ -2659,6 +2797,74 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         policyRef.put("role", "criticality");
         policyRef.put("resultField", "criticalityLevel");
         return contextHints;
+    }
+
+    private AgenticAuthoringPlanRequest pageRequest(String resourcePath, ObjectNode contextHints) {
+        return new AgenticAuthoringPlanRequest(
+                "Materialize o workspace operacional resolvido.",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                null,
+                intent("create", "page", "create_artifact", resourcePath),
+                "session-1",
+                "turn-1",
+                List.of(),
+                null,
+                List.of(),
+                contextHints);
+    }
+
+    private ObjectNode verifiedDomainOperations(
+            String source,
+            String resourcePath,
+            String resourceKey,
+            boolean includeCommand) {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode envelope = contextHints.putObject("verifiedDomainOperations");
+        envelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v1");
+        envelope.put("source", source);
+        ArrayNode entries = envelope.putArray("entries");
+        addVerifiedOperation(entries, resourcePath, resourceKey, resourcePath + "/all", "get", "all");
+        addVerifiedOperation(entries, resourcePath, resourceKey, resourcePath + "/{id}", "get", "byId");
+        addVerifiedOperation(entries, resourcePath, resourceKey, resourcePath + "/filter", "post", "filter");
+        if (includeCommand) {
+            addVerifiedOperation(
+                    entries,
+                    resourcePath,
+                    resourceKey,
+                    resourcePath + "/{id}/actions/start",
+                    "post",
+                    "start");
+        }
+        envelope.put("operationCount", entries.size());
+        return contextHints;
+    }
+
+    private void addVerifiedOperation(
+            ArrayNode entries,
+            String resourcePath,
+            String resourceKey,
+            String apiPath,
+            String apiMethod,
+            String capabilityOperationId) {
+        ObjectNode operation = entries.addObject();
+        operation.put("conceptKey", resourceKey + ".workspace");
+        operation.put("bindingKey", capabilityOperationId);
+        operation.put("resourceKey", resourceKey);
+        operation.put("resourcePath", resourcePath);
+        operation.put("apiPath", apiPath);
+        operation.put("apiMethod", apiMethod);
+        operation.put("schemaType", "get".equals(apiMethod) ? "response" : "request");
+        operation.put("schemaUrl", "/schemas/filtered?path=" + apiPath
+                + "&operation=" + apiMethod + "&schemaType="
+                + ("get".equals(apiMethod) ? "response" : "request"));
+        operation.put("capabilitiesUrl", resourcePath + "/capabilities");
+        operation.put("capabilityOperationId", capabilityOperationId);
+        operation.put("sourceRelease", "quickstart-mission-pilot-v1");
+        operation.putArray("evidence")
+                .add("schema-grounding-verified")
+                .add("resource-capabilities-verified");
     }
 
     private AgenticAuthoringIntentResolutionResult dashboardIntent(
