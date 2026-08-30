@@ -18,13 +18,13 @@ function Assert-PraxisScenarioEvidenceProperties(
 function Assert-PraxisScenarioEvidenceCore([object] $Evidence) {
     Assert-PraxisScenarioEvidenceProperties $Evidence.interaction @(
         'initialPromptCount', 'totalTurnCount', 'clarificationQuickReplyCount',
-        'governedRevisionCount', 'correctiveTypedPromptCount'
+        'governedRevisionCount', 'correctiveTypedPromptCount', 'deterministicRepairCount'
     ) 'Scenario interaction evidence'
     $interaction = $Evidence.interaction
     Assert-PraxisScenarioEvidenceCondition (
         [int] $interaction.initialPromptCount -eq 1 -and [int] $interaction.totalTurnCount -ge 1 -and
         [int] $interaction.clarificationQuickReplyCount -ge 0 -and [int] $interaction.governedRevisionCount -ge 0 -and
-        [int] $interaction.correctiveTypedPromptCount -ge 0
+        [int] $interaction.correctiveTypedPromptCount -ge 0 -and [int] $interaction.deterministicRepairCount -ge 0
     ) 'Scenario interaction counts are invalid.'
     Assert-PraxisScenarioEvidenceCondition (
         [int] $interaction.totalTurnCount -eq (
@@ -37,10 +37,11 @@ function Assert-PraxisScenarioEvidenceCore([object] $Evidence) {
 
     Assert-PraxisScenarioEvidenceProperties `
         $Evidence.terminal `
-        @('outcome', 'transport', 'blockingDiagnosticCodes') `
+        @('outcome', 'transport', 'blockingDiagnosticCodes', 'referencePresent', 'backendPatchAuthority') `
         'Scenario terminal evidence'
     Assert-PraxisScenarioEvidenceCondition (
-        $Evidence.terminal.outcome -eq 'applicable' -and $Evidence.terminal.transport -eq 'stream'
+        $Evidence.terminal.outcome -eq 'applicable' -and $Evidence.terminal.transport -eq 'stream' -and
+        $Evidence.terminal.referencePresent -eq $true -and $Evidence.terminal.backendPatchAuthority -eq $true
     ) 'Scenario terminal authority is not applicable over stream.'
     $blockingCodes = @($Evidence.terminal.blockingDiagnosticCodes)
     foreach ($code in $blockingCodes) {
@@ -52,6 +53,18 @@ function Assert-PraxisScenarioEvidenceCore([object] $Evidence) {
         @($blockingCodes | Sort-Object -Unique).Count -eq $blockingCodes.Count
     ) 'Scenario evidence contains duplicate blocking diagnostic codes.'
 
+    Assert-PraxisScenarioEvidenceProperties $Evidence.apply @(
+        'terminalReferenceMatched', 'streamIdMatched', 'resultEventIdMatched',
+        'payloadSha256', 'matchesPersistedPayload'
+    ) 'Scenario apply evidence'
+    Assert-PraxisScenarioEvidenceCondition (
+        $Evidence.apply.terminalReferenceMatched -eq $true -and
+        $Evidence.apply.streamIdMatched -eq $true -and
+        $Evidence.apply.resultEventIdMatched -eq $true -and
+        [string] $Evidence.apply.payloadSha256 -match '^[0-9a-f]{64}$' -and
+        $Evidence.apply.matchesPersistedPayload -eq $true
+    ) 'Scenario terminal/apply lineage evidence is incomplete.'
+
     Assert-PraxisScenarioEvidenceProperties $Evidence.persistence @(
         'version', 'etagPresent', 'persistedPayloadSha256', 'reloadPayloadSha256',
         'reloadMatchesPersisted', 'reloadEtagMatches'
@@ -62,6 +75,7 @@ function Assert-PraxisScenarioEvidenceCore([object] $Evidence) {
         [string] $persistence.persistedPayloadSha256 -match '^[0-9a-f]{64}$' -and
         [string] $persistence.reloadPayloadSha256 -match '^[0-9a-f]{64}$' -and
         $persistence.persistedPayloadSha256 -eq $persistence.reloadPayloadSha256 -and
+        $Evidence.apply.payloadSha256 -eq $persistence.persistedPayloadSha256 -and
         $persistence.reloadMatchesPersisted -eq $true -and $persistence.reloadEtagMatches -eq $true
     ) 'Scenario persistence evidence is incomplete or inconsistent.'
 
@@ -80,13 +94,24 @@ function Assert-PraxisScenarioEvidenceCore([object] $Evidence) {
     ) 'Scenario runtime evidence is incomplete.'
 
     Assert-PraxisScenarioEvidenceProperties $Evidence.timingMs @(
-        'authoringToApplicable', 'applyAndReadback', 'runtimeAndCommand', 'reload', 'total'
+        'firstUsefulStatus', 'firstApplicableTerminal', 'applyCompleted',
+        'runtimeFunctional', 'reloadCompleted', 'total'
     ) 'Scenario timing evidence'
-    foreach ($property in @('authoringToApplicable', 'applyAndReadback', 'runtimeAndCommand', 'reload', 'total')) {
+    foreach ($property in @(
+        'firstUsefulStatus', 'firstApplicableTerminal', 'applyCompleted',
+        'runtimeFunctional', 'reloadCompleted', 'total'
+    )) {
         Assert-PraxisScenarioEvidenceCondition (
             [int64] $Evidence.timingMs.$property -ge 0
         ) "Scenario timing $property is invalid."
     }
+    Assert-PraxisScenarioEvidenceCondition (
+        [int64] $Evidence.timingMs.firstUsefulStatus -le [int64] $Evidence.timingMs.firstApplicableTerminal -and
+        [int64] $Evidence.timingMs.firstApplicableTerminal -le [int64] $Evidence.timingMs.applyCompleted -and
+        [int64] $Evidence.timingMs.applyCompleted -le [int64] $Evidence.timingMs.runtimeFunctional -and
+        [int64] $Evidence.timingMs.runtimeFunctional -le [int64] $Evidence.timingMs.reloadCompleted -and
+        [int64] $Evidence.timingMs.reloadCompleted -eq [int64] $Evidence.timingMs.total
+    ) 'Scenario timing milestones are not monotonic.'
 
     return [int] $interaction.totalTurnCount -eq 1 -and
         [int] $interaction.clarificationQuickReplyCount -eq 0 -and
@@ -102,7 +127,7 @@ function ConvertTo-PraxisPageBuilderScenarioEvidence(
 ) {
     Assert-PraxisScenarioEvidenceProperties $Receipt @(
         'schemaVersion', 'scenarioId', 'archetype', 'authoringFirstPass', 'interaction',
-        'terminal', 'persistence', 'runtime', 'timingMs'
+        'terminal', 'apply', 'persistence', 'runtime', 'timingMs'
     ) 'Scenario receipt'
     Assert-PraxisScenarioEvidenceCondition (
         $Receipt.schemaVersion -eq 'praxis.page-builder-agentic-scenario-receipt/v1'
@@ -128,6 +153,7 @@ function ConvertTo-PraxisPageBuilderScenarioEvidence(
         playwrightRetryAttempts = $RetryAttempts
         interaction = $Receipt.interaction
         terminal = $Receipt.terminal
+        apply = $Receipt.apply
         persistence = $Receipt.persistence
         runtime = $Receipt.runtime
         timingMs = $Receipt.timingMs
@@ -138,15 +164,15 @@ function Assert-PraxisPageBuilderScenarioEvidence([object] $Evidence) {
     Assert-PraxisScenarioEvidenceProperties $Evidence @(
         'schemaVersion', 'scenarioId', 'archetype', 'outcome', 'firstPassFunctional',
         'authoringFirstPass', 'playwrightRetryAttempts', 'interaction', 'terminal',
-        'persistence', 'runtime', 'timingMs'
+        'apply', 'persistence', 'runtime', 'timingMs'
     ) 'Scenario evidence'
     Assert-PraxisScenarioEvidenceCondition (
         $Evidence.schemaVersion -eq 'praxis.page-builder-agentic-scenario-receipt/v1'
     ) 'Unexpected scenario evidence schema.'
     Assert-PraxisScenarioEvidenceCondition (
-        -not [string]::IsNullOrWhiteSpace([string] $Evidence.scenarioId) -and
-        -not [string]::IsNullOrWhiteSpace([string] $Evidence.archetype)
-    ) 'Scenario evidence identity is missing.'
+        [string] $Evidence.scenarioId -match '^[a-z0-9][a-z0-9-]{0,79}$' -and
+        [string] $Evidence.archetype -match '^[a-z0-9][a-z0-9-]{0,79}$'
+    ) 'Scenario evidence identity is missing or non-canonical.'
     Assert-PraxisScenarioEvidenceCondition (
         [int] $Evidence.playwrightRetryAttempts -ge 0
     ) 'Scenario evidence retry count is invalid.'
