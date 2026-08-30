@@ -1048,14 +1048,19 @@ public class AgenticAuthoringToolRegistry {
             if (!hasDomainCatalogGrounding) {
                 return "";
             }
-            List<String> resourceKeys = result.candidates().stream()
+            List<AgenticAuthoringCandidate> candidates = result.candidates().stream()
                     .filter(Objects::nonNull)
+                    .toList();
+            List<String> resourceKeys = candidates.stream()
                     .map(AgenticAuthoringCandidate::resourcePath)
                     .map(SearchApiResourcesToolExecutor::canonicalResourceKey)
-                    .filter(resourceKey -> !resourceKey.isBlank())
-                    .distinct()
                     .toList();
-            return resourceKeys.size() == 1 ? resourceKeys.get(0) : "";
+            if (candidates.size() != result.candidates().size()
+                    || resourceKeys.stream().anyMatch(String::isBlank)) {
+                return "";
+            }
+            List<String> distinctResourceKeys = resourceKeys.stream().distinct().toList();
+            return distinctResourceKeys.size() == 1 ? distinctResourceKeys.get(0) : "";
         }
 
         private static String canonicalResourceKey(String resourcePath) {

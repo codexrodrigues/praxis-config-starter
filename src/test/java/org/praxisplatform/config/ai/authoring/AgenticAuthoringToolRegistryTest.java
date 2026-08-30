@@ -448,6 +448,51 @@ class AgenticAuthoringToolRegistryTest {
     }
 
     @Test
+    void doesNotOperationallyVerifyWhenAnyDomainCatalogCandidateLacksCanonicalResourcePath() {
+        AgenticAuthoringResourceDiscoveryService resourceDiscoveryService =
+                Mockito.mock(AgenticAuthoringResourceDiscoveryService.class);
+        AgenticAuthoringOperationalBindingVerificationService verificationService =
+                Mockito.mock(AgenticAuthoringOperationalBindingVerificationService.class);
+        AgenticAuthoringCandidate employees = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios", "post", "schema-a", "submit-a", "POST", 0.91d, "",
+                List.of("domain-catalog-grounding", "semantic-retrieval"));
+        AgenticAuthoringCandidate invalid = new AgenticAuthoringCandidate(
+                "funcionarios", "post", "schema-b", "submit-b", "POST", 0.90d, "",
+                List.of("domain-catalog-grounding", "semantic-retrieval"));
+        when(resourceDiscoveryService.search(
+                        Mockito.any(),
+                        Mockito.any(AiPrincipalContext.class),
+                        eq("http://localhost:8088")))
+                .thenReturn(new AgenticAuthoringResourceCandidatesResult(
+                        true, "searchApiResources", "funcionarios", "table", "",
+                        List.of(employees, invalid), List.of(), List.of()));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                resourceDiscoveryService,
+                null,
+                null,
+                null,
+                objectMapper,
+                null,
+                null,
+                null,
+                verificationService);
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                        "pre_intent_resource_discovery",
+                        new AgenticAuthoringResourceCandidatesRequest(
+                                "funcionarios", "monte uma tabela", "table", 6)),
+                new AiPrincipalContext("tenant", "user", "local", true),
+                "retrieveEvidence",
+                "http://localhost:8088");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(((AgenticAuthoringResourceCandidatesResult) result.payload()).candidates()).hasSize(2);
+        Mockito.verifyNoInteractions(verificationService);
+    }
+
+    @Test
     void usesUniqueOperationallyVerifiedDomainBindingBeforeVectorResourceSearch() {
         AgenticAuthoringResourceDiscoveryService resourceDiscoveryService =
                 Mockito.mock(AgenticAuthoringResourceDiscoveryService.class);
