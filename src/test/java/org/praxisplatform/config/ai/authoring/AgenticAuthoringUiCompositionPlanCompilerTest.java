@@ -115,6 +115,95 @@ class AgenticAuthoringUiCompositionPlanCompilerTest {
     }
 
     @Test
+    void compilesGlobalActionSourcesToCanonicalStateAndComponentTargets() throws Exception {
+        JsonNode plan = objectMapper.readTree("""
+                {
+                  "version": "1.0",
+                  "kind": "praxis.ui-composition-plan",
+                  "state": { "values": { "decisionResult": null } },
+                  "widgets": [
+                    { "key": "decision-summary", "componentId": "praxis-rich-content" }
+                  ],
+                  "bindings": [
+                    {
+                      "id": "peopleOps.decision.accepted->state.decisionResult",
+                      "from": {
+                        "kind": "global-action",
+                        "actionId": "peopleOps.decision.accepted"
+                      },
+                      "to": { "kind": "state", "path": "decisionResult" },
+                      "intent": "state-write"
+                    },
+                    {
+                      "id": "peopleOps.decision.accepted->decision-summary.context",
+                      "from": {
+                        "kind": "global-action",
+                        "actionId": "peopleOps.decision.accepted"
+                      },
+                      "to": {
+                        "kind": "component-port",
+                        "widget": "decision-summary",
+                        "port": "context",
+                        "direction": "input"
+                      },
+                      "intent": "event-propagation"
+                    }
+                  ]
+                }
+                """);
+
+        AgenticAuthoringUiCompositionPlanCompiler.CompileResult result =
+                compiler.compile(plan, objectMapper.createObjectNode());
+
+        assertThat(result.valid())
+                .withFailMessage("Compilation failures: %s", result.failureCodes())
+                .isTrue();
+        JsonNode links = result.compiledFormPatch().at("/patch/page/composition/links");
+        assertThat(links).hasSize(2);
+        assertThat(links.at("/0/from")).isEqualTo(objectMapper.readTree("""
+                { "kind": "global-action", "ref": { "actionId": "peopleOps.decision.accepted" } }
+                """));
+        assertThat(links.at("/0/to/ref/path").asText()).isEqualTo("decisionResult");
+        assertThat(links.at("/1/from")).isEqualTo(links.at("/0/from"));
+        assertThat(links.at("/1/to/ref/widget").asText()).isEqualTo("decision-summary");
+        assertThat(links.at("/1/to/ref/port").asText()).isEqualTo("context");
+    }
+
+    @Test
+    void rejectsNonExecutableGlobalActionSourceFieldsAndRequiresTextualActionId() throws Exception {
+        JsonNode plan = objectMapper.readTree("""
+                {
+                  "version": "1.0",
+                  "kind": "praxis.ui-composition-plan",
+                  "widgets": [],
+                  "bindings": [
+                    {
+                      "id": "invalid-global-action-source",
+                      "from": {
+                        "kind": "global-action",
+                        "actionId": 42,
+                        "payload": { "decisionId": 42 },
+                        "label": "Decision accepted",
+                        "resultType": "decision-room-accepted"
+                      },
+                      "to": { "kind": "state", "path": "decisionResult" },
+                      "intent": "state-write"
+                    }
+                  ]
+                }
+                """);
+
+        AgenticAuthoringUiCompositionPlanCompiler.CompileResult result =
+                compiler.compile(plan, objectMapper.createObjectNode());
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains(
+                "ui-composition-plan-endpoint-global-action-id-required",
+                "ui-composition-plan-endpoint-global-action-source-field-unsupported");
+        assertThat(result.compiledFormPatch()).isEmpty();
+    }
+
+    @Test
     void materializesKeyOnlyAuthoringCopyFromFallbackDictionary() throws Exception {
         JsonNode plan = objectMapper.readTree("""
                 {

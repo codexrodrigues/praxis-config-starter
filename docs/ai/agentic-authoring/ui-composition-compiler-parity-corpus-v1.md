@@ -52,10 +52,12 @@ Both engines validate or resolve the same plan, compile it, and compare:
 - canonical projection SHA-256;
 - stable diagnostic identity (`code`, `path`, `severity`, `provenance`).
 
-Corpus v1.5 carries 18 cases. Its adversarial master-detail coverage mirrors the TypeScript owner:
+Corpus v1.6 carries 20 cases. It adds positive and fail-closed parity for a `global-action`
+continuation source, including the rule that only `actionId` identifies the source and runtime
+dispatch supplies the payload. Its adversarial master-detail coverage mirrors the TypeScript owner:
 unknown preset/slot, role-slot conflict, missing or ambiguous master, missing detail, preset
 conflict, slot cardinality, widget-role fallback and detail-slot fallback. The Java builder identity
-is pinned as `config-ui-composition-plan-compiler@1.2.0`.
+is pinned as `config-ui-composition-plan-compiler@1.3.0`.
 
 Known Java/TypeScript spelling or path differences are explicit per expected diagnostic. The
 runners may not normalize an unexpected divergence into success. Reports publish byte-exact

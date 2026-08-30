@@ -35,8 +35,9 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
             "status-propagation");
     private static final String COMPILED_WARNING = "ui-composition-plan-compiled-by-config";
     private static final String LEGACY_CLIENT_COMPILE_WARNING = "compiled-form-patch-materialized-by-page-builder";
-    static final String BUILDER_VERSION = "config-ui-composition-plan-compiler@1.2.0";
+    static final String BUILDER_VERSION = "config-ui-composition-plan-compiler@1.3.0";
     private static final String MASTER_DETAIL_PRESET_ID = "master-detail-dashboard";
+    private static final Set<String> GLOBAL_ACTION_SOURCE_FIELDS = Set.of("kind", "actionId");
     private static final List<String> MASTER_DETAIL_DETAIL_SLOTS = List.of(
             "detail-table", "detail-chart-a", "detail-chart-b", "detail-kpis");
 
@@ -163,8 +164,8 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
                         || !LINK_INTENTS.contains(binding.path("intent").textValue())) {
                     failures.add("ui-composition-plan-binding-intent-invalid");
                 }
-                validateEndpoint(binding.path("from"), widgetKeys, false, failures);
-                validateEndpoint(binding.path("to"), widgetKeys, true, failures);
+                validateEndpoint(binding.path("from"), widgetKeys, true, failures);
+                validateEndpoint(binding.path("to"), widgetKeys, false, failures);
                 if (binding.has("transform")) {
                     validateTransform(binding.get("transform"), failures);
                 }
@@ -227,7 +228,7 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
                 failures.add("ui-composition-plan-selection-sync-source-required");
             } else {
                 for (JsonNode source : sources) {
-                    validateEndpoint(source, widgetKeys, false, failures);
+                    validateEndpoint(source, widgetKeys, true, failures);
                     if (!"component-port".equals(source.path("kind").asText(""))) {
                         failures.add("ui-composition-plan-selection-sync-source-component-port-required");
                     } else if (!"output".equals(source.path("direction").asText(""))) {
@@ -594,7 +595,7 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
     private void validateEndpoint(
             JsonNode endpoint,
             Set<String> widgetKeys,
-            boolean allowGlobalAction,
+            boolean sourceEndpoint,
             List<String> failures) {
         if (!endpoint.isObject()) {
             failures.add("ui-composition-plan-endpoint-required");
@@ -618,9 +619,17 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
             }
             return;
         }
-        if (allowGlobalAction && "global-action".equals(kind)) {
+        if ("global-action".equals(kind)) {
             if (!isNonBlankText(endpoint.get("actionId"))) {
                 failures.add("ui-composition-plan-endpoint-global-action-id-required");
+            }
+            if (sourceEndpoint) {
+                endpoint.fieldNames().forEachRemaining(field -> {
+                    if (!GLOBAL_ACTION_SOURCE_FIELDS.contains(field)) {
+                        failures.add("ui-composition-plan-endpoint-global-action-source-field-unsupported");
+                    }
+                });
+                return;
             }
             if (endpoint.has("payloadExpr") && !endpoint.path("payloadExpr").isTextual()) {
                 failures.add("ui-composition-plan-endpoint-global-action-payload-expr-invalid");
@@ -1594,8 +1603,8 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
     private ObjectNode compileBinding(JsonNode binding) {
         ObjectNode link = objectMapper.createObjectNode();
         link.put("id", binding.path("id").asText());
-        link.set("from", compileEndpoint(binding.path("from")));
-        link.set("to", compileEndpoint(binding.path("to")));
+        link.set("from", compileEndpoint(binding.path("from"), true));
+        link.set("to", compileEndpoint(binding.path("to"), false));
         copyIfPresent(binding, link, "intent");
         copyIfPresent(binding, link, "condition");
         if (binding.path("transform").isObject()) {
@@ -1606,7 +1615,7 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
         return link;
     }
 
-    private ObjectNode compileEndpoint(JsonNode endpoint) {
+    private ObjectNode compileEndpoint(JsonNode endpoint, boolean sourceEndpoint) {
         ObjectNode compiled = objectMapper.createObjectNode();
         String kind = endpoint.path("kind").asText();
         compiled.put("kind", kind);
@@ -1618,9 +1627,11 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
             copyIfPresent(endpoint, ref, "nestedPath");
         } else if ("global-action".equals(kind)) {
             ref.put("actionId", endpoint.path("actionId").asText());
-            copyIfDefined(endpoint, ref, "payload");
-            copyIfDefined(endpoint, ref, "payloadExpr");
-            copyIfDefined(endpoint, ref, "meta");
+            if (!sourceEndpoint) {
+                copyIfDefined(endpoint, ref, "payload");
+                copyIfDefined(endpoint, ref, "payloadExpr");
+                copyIfDefined(endpoint, ref, "meta");
+            }
         } else {
             ref.put("path", endpoint.path("path").asText());
             copyIfPresent(endpoint, ref, "layer");
