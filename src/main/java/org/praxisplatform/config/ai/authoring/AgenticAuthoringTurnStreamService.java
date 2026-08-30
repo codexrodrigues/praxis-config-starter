@@ -144,6 +144,7 @@ public class AgenticAuthoringTurnStreamService {
             AgenticAuthoringTurnStreamRequest request,
             String baseUrl,
             AiPrincipalContext principalContext) {
+        request = withoutClientVerifiedDomainOperations(request);
         validate(request);
         request = withGroundedRuntimeComponentContext(request);
         request = withRequestBaseUrl(request, baseUrl);
@@ -447,6 +448,36 @@ public class AgenticAuthoringTurnStreamService {
                 : objectMapper.createObjectNode();
         sanitized.remove("groundedRuntimeComponentContext");
         return sanitized;
+    }
+
+    private AgenticAuthoringTurnStreamRequest withoutClientVerifiedDomainOperations(
+            AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
+            return request;
+        }
+        ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
+        sanitized.remove("verifiedDomainOperations");
+        return new AgenticAuthoringTurnStreamRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                sanitized.isEmpty() ? null : sanitized,
+                request.componentCapabilities(),
+                request.activeSemanticDecision(),
+                request.diagnostics(),
+                request.runtimeComponentObservations(),
+                request.runtimeComponentObservationTrustBoundary());
     }
 
     private AgenticAuthoringTurnStreamRequest withRequestBaseUrl(

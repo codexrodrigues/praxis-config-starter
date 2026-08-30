@@ -24,6 +24,11 @@ import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiTurnEventService;
 import org.praxisplatform.config.service.DomainFederationQueryService;
 import org.praxisplatform.config.service.DomainKnowledgeChangeSetService;
+import org.praxisplatform.config.service.DomainRuleChangeWorkspaceService;
+import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
+import org.praxisplatform.config.service.DomainRuleRolloutPolicyService;
+import org.praxisplatform.config.service.DomainRuleRolloutService;
+import org.praxisplatform.config.service.DomainRuleTestRunService;
 import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.ai.model.google.genai.autoconfigure.chat.GoogleGenAiChatAutoConfiguration;
 import org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiEmbeddingConnectionAutoConfiguration;
@@ -91,6 +96,11 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
 
     @MockBean private DomainFederationQueryService domainFederationQueryService;
     @MockBean private DomainKnowledgeChangeSetService domainKnowledgeChangeSetService;
+    @MockBean private DomainRuleChangeWorkspaceService domainRuleChangeWorkspaceService;
+    @MockBean private DomainRuleGovernancePrincipalResolver domainRuleGovernancePrincipalResolver;
+    @MockBean private DomainRuleRolloutPolicyService domainRuleRolloutPolicyService;
+    @MockBean private DomainRuleRolloutService domainRuleRolloutService;
+    @MockBean private DomainRuleTestRunService domainRuleTestRunService;
 
     @BeforeEach
     void resetPersistence() {
@@ -103,7 +113,7 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
     }
 
     @Test
-    void shouldReplayPersistAndRejectReuseOfTheSameTerminalCreateResult() throws Exception {
+    void shouldPersistResourceWorkspaceAndKeepTheWinningVersionAfterStaleApply() throws Exception {
         UUID streamId = UUID.randomUUID();
         UUID threadId = UUID.randomUUID();
         UUID turnId = UUID.randomUUID();
@@ -157,6 +167,17 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 .orElseThrow();
         assertThat(objectMapper.readTree(persisted.config().getPayload()))
                 .isEqualTo(compiledPatch.path("patch").path("page"));
+        JsonNode persistedPage = objectMapper.readTree(persisted.config().getPayload());
+        assertThat(persistedPage.path("widgets").findValuesAsText("id"))
+                .contains("praxis-table", "praxis-dynamic-form");
+        assertThat(persistedPage.at("/composition/links/0/from/ref/port").asText())
+                .isEqualTo("selectionChange");
+        assertThat(persistedPage.at("/composition/links/1/to/ref/port").asText())
+                .isEqualTo("initialValue");
+        assertThat(persistedPage.at("/widgets/0/definition/inputs/config/actions/row/discovery/enabled").asBoolean())
+                .isTrue();
+        assertThat(persistedPage.at("/widgets/0/definition/inputs/config/actions/collection/discovery/enabled").asBoolean())
+                .isFalse();
         JsonNode persistedTags = objectMapper.readTree(persisted.config().getTags());
         assertThat(persistedTags.path("authoringResultEventId").asText())
                 .isEqualTo(terminal.getEventId().toString());
@@ -216,6 +237,19 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 .config()
                 .getVersion())
                 .isEqualTo(2L);
+        JsonNode winningPayload = objectMapper.readTree(userConfigService.getByScope(
+                        UserConfigService.Scope.USER,
+                        TENANT,
+                        USER,
+                        "praxis-dynamic-page",
+                        COMPONENT_ID,
+                        ENVIRONMENT)
+                .orElseThrow()
+                .config()
+                .getPayload());
+        assertThat(winningPayload.path("title").asText()).isEqualTo("Absences by department");
+        assertThat(winningPayload.at("/composition/links/0/from/ref/port").asText())
+                .isEqualTo("selectionChange");
     }
 
     private void persistTurn(UUID threadId, UUID turnId) {
@@ -267,31 +301,79 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
     }
 
     private JsonNode compiledPatch() throws Exception {
-        return objectMapper.readTree("""
+        JsonNode plan = objectMapper.readTree("""
                 {
-                  "profileId": "ui-composition-plan@0.1.0",
-                  "catalogReleaseId": "catalog-terminal-apply-test",
-                  "builderVersion": "0.1.0",
-                  "patch": {
-                    "page": {
-                      "widgets": [
-                        {
-                          "key": "absence-by-department",
-                          "definition": {
-                            "id": "praxis-chart",
-                            "inputs": {
-                              "dataSource": {
-                                "kind": "remote",
-                                "url": "/api/human-resources/absences/stats"
-                              }
-                            }
-                          }
-                        }
-                      ]
+                  "version": "1.0",
+                  "kind": "praxis.ui-composition-plan",
+                  "layoutPreset": "resource-master-detail",
+                  "state": { "values": { "selectedItem": null } },
+                  "canvas": {
+                    "mode": "grid",
+                    "columns": 12,
+                    "rowUnit": "80px",
+                    "gap": "16px",
+                    "autoRows": "fixed",
+                    "items": {
+                      "missions-master": { "col": 1, "row": 1, "colSpan": 7, "rowSpan": 8 },
+                      "missions-detail": { "col": 8, "row": 1, "colSpan": 5, "rowSpan": 8 }
                     }
-                  }
+                  },
+                  "widgets": [
+                    {
+                      "key": "missions-master",
+                      "componentId": "praxis-table",
+                      "inputs": {
+                        "resourcePath": "/api/operations/missoes",
+                        "tableId": "missions-master",
+                        "config": {
+                          "actions": {
+                            "collection": { "discovery": { "enabled": false } },
+                            "row": { "enabled": true, "discovery": { "enabled": true } }
+                          },
+                          "behavior": { "selection": { "enabled": true, "type": "single" } }
+                        }
+                      },
+                      "outputs": { "selectionChange": "emit" }
+                    },
+                    {
+                      "key": "missions-detail",
+                      "componentId": "praxis-dynamic-form",
+                      "inputs": {
+                        "resourcePath": "/api/operations/missoes",
+                        "schemaSource": "resource",
+                        "mode": "view",
+                        "formId": "missions-detail"
+                      }
+                    }
+                  ],
+                  "bindings": [
+                    {
+                      "id": "missions-master.selectionChange->state.selectedItem",
+                      "intent": "state-write",
+                      "from": { "kind": "component-port", "widget": "missions-master", "port": "selectionChange", "direction": "output" },
+                      "to": { "kind": "state", "path": "selectedItem" },
+                      "transform": { "kind": "pick-path", "id": "pick-selected-row", "path": "payload.row" },
+                      "metadata": { "source": "ui-composition-plan", "tags": ["master-detail"] }
+                    },
+                    {
+                      "id": "state.selectedItem->missions-detail.initialValue",
+                      "intent": "state-read",
+                      "from": { "kind": "state", "path": "selectedItem" },
+                      "to": { "kind": "component-port", "widget": "missions-detail", "port": "initialValue", "direction": "input" },
+                      "condition": { "!!": [{ "var": "state.selectedItem" }] },
+                      "metadata": { "source": "ui-composition-plan", "tags": ["master-detail"] }
+                    }
+                  ]
                 }
                 """);
+        ObjectNode basePatch = objectMapper.createObjectNode();
+        basePatch.put("profileId", "ui-composition-plan@0.1.0");
+        basePatch.put("catalogReleaseId", "catalog-terminal-apply-test");
+        basePatch.put("builderVersion", "0.1.0");
+        AgenticAuthoringUiCompositionPlanCompiler.CompileResult result =
+                new AgenticAuthoringUiCompositionPlanCompiler(objectMapper).compile(plan, basePatch);
+        assertThat(result.valid()).withFailMessage("Compilation failures: %s", result.failureCodes()).isTrue();
+        return result.compiledFormPatch();
     }
 
     private AgenticAuthoringSemanticDecision semanticDecision() {

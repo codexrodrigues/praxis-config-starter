@@ -956,6 +956,38 @@ Fases recomendadas para authoring:
 - `preview.apply-local`
 - `review`
 
+### Workspace rico orientado a recurso
+
+Para criacao de pagina sobre um recurso semanticamente selecionado, o provider
+generico consome uma projecao interna `contextHints.verifiedDomainOperations`.
+Ingressos HTTP removem qualquer valor fornecido pelo cliente, mesmo que ele copie
+as strings esperadas de schema e source. Somente o engine de streaming pode
+reinserir o envelope a partir de `OperationProjection` produzida pelo backend
+apos validar schema e capabilities no escopo do principal. `page-preview` direto
+sem esse re-grounding bloqueia discovery de comandos.
+
+O primeiro slice materializa Filter, Table master e Dynamic Form detail. Os links
+canonicos sao `requestSearch -> queryContext` e
+`selectionChange -> state.selectedItem -> initialValue`. Desktop usa composicao
+7/5 com filtro superior; tablet e mobile usam variantes empilhadas. O filtro
+continua responsavel por schema e option sources metadata-driven, e os widgets
+continuam responsaveis por loading, vazio e erro.
+
+Comandos nao sao convertidos em `api.post` ou `api.patch` pelo Java. Para cada
+operacao backend-owned verificada sob `/actions/`, o plano habilita apenas o
+discovery oficial do escopo comprovado: `/{id}/actions/...` para item e
+`/actions/...` para colecao, sem publicar endpoint nem botao sintetico. O runtime
+resolve as acoes concretas no action catalog, aplica availability, abre a
+superficie canonica de Dynamic Form e executa o submit governado. Specs focais do
+runtime cobrem allow/deny/open/execute; o smoke real HTTP/browser ainda nao esta
+integrado. Envelope ausente, forjado, divergente ou sem comando produz diagnostics
+e deixa ambos os scopes desabilitados.
+
+Preview e compilacao seguem o endpoint existente de `page-preview`. Persistencia
+segue `page-apply`, o resultado terminal emitido pelo servidor e `If-Match`; uma
+tentativa com ETag obsoleto falha antes de alterar a configuracao vencedora. Nao
+existe DTO ou endpoint paralelo de workspace neste slice.
+
 ## Regras para o Page Builder
 
 O Page Builder deve:

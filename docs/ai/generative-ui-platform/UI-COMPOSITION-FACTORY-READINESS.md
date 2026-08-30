@@ -52,7 +52,7 @@ Classification: `ja-suportado-mal-nomeado-ou-mal-materializado` for state or evi
 
 ### Partially supported
 
-- component/provider compilation exists, but not yet as a complete resource-backed rich workspace materializer;
+- a partial resource-backed master/detail/filter materializer now exists and can enable the official Table action discovery path from backend-owned verification; cross-language certification and the real HTTP/browser command smoke remain incomplete;
 - semantic grounding exists, but transaction lifecycle and UI composition are not closed in one real HTTP proof;
 - validation exists on both sides, but releases do not share one golden cross-language gate.
 
@@ -76,6 +76,20 @@ Classification: `lacuna-real-de-contrato`. Before defining it, implementation mu
 ### P0 — Resource-backed rich workspace decision and materializer
 
 Issue: [#356](https://github.com/codexrodrigues/praxis-config-starter/issues/356).
+
+Implementation status for the first slice: the generic provider now consumes the
+existing verified-operation envelope, emits a resource Filter, Table master and
+Dynamic Form detail, binds `requestSearch -> queryContext` and
+`selectionChange -> state -> initialValue`, publishes responsive device layouts,
+and enables the official Table item or collection discovery policy only for the
+scope proven by a backend-owned verified `/actions/` operation. An item-only
+command does not enable collection discovery, and a collection-only command does
+not create row actions. Client-provided operation
+envelopes are removed at HTTP ingress. The server preview/compiler path and
+transactional apply/ETag path have focused tests, but this is a partial slice:
+the shared #357 corpus/attestation and a real HTTP/browser command smoke are not
+integrated. See [the delta audit](RESOURCE-BACKED-WORKSPACE-DELTA-AUDIT.md) for
+the reuse classification and remaining gaps.
 
 The decision must describe semantic intent, archetype, resources, surfaces, actions, capabilities, components, slots, bindings and transactional lifecycle. It should materialize both compact authoring input and portable runtime output without leaking Angular implementation detail into Java.
 
@@ -205,4 +219,7 @@ Implementation of either issue changes public AI/config contracts and therefore 
 - API quickstart proofs;
 - UI examples/playgrounds and schemas when their public artifact changes.
 
-This baseline is documentation-only and does not itself change endpoints, headers, ETag, schemas or runtime behavior.
+The first #356 slice changes generated plan shape but does not add endpoints,
+headers, public DTOs or schemas. Therefore the HTTP corpus and OpenAPI surface do
+not require regeneration for this cut; the cross-language corpus and attestation
+remain tracked by #357.

@@ -4629,6 +4629,86 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewCompilesGovernedResourceWorkspaceThroughTheOfficialServerPath() throws Exception {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode envelope = contextHints.putObject("verifiedDomainOperations");
+        envelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v1");
+        envelope.put("source", "schemas.filtered+resource.capabilities");
+        ArrayNode entries = envelope.putArray("entries");
+        addVerifiedWorkspaceOperation(
+                entries,
+                "/api/human-resources/funcionarios/all",
+                "get",
+                "all");
+        addVerifiedWorkspaceOperation(
+                entries,
+                "/api/human-resources/funcionarios/{id}",
+                "get",
+                "byId");
+        addVerifiedWorkspaceOperation(
+                entries,
+                "/api/human-resources/funcionarios/filter",
+                "post",
+                "filter");
+        addVerifiedWorkspaceOperation(
+                entries,
+                "/api/human-resources/funcionarios/{id}/actions/deactivate",
+                "post",
+                "deactivate");
+        envelope.put("operationCount", entries.size());
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Materialize o workspace operacional resolvido.",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                null,
+                selectedMasterDetailIntent(),
+                "session-1",
+                "turn-1",
+                List.of(),
+                null,
+                List.of(),
+                contextHints);
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)))
+                .preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid())
+                .withFailMessage("Preview failure codes: %s", result.failureCodes())
+                .isTrue();
+        assertThat(result.warnings()).contains(
+                "ui-composition-plan-provider:generic-resource-page",
+                "ui-composition-plan-compiled-by-config");
+        assertThat(result.uiCompositionPlan().at(
+                "/diagnostics/resourceWorkspaceGrounding/status").asText()).isEqualTo("verified");
+        assertThat(result.uiCompositionPlan().at(
+                "/diagnostics/resourceWorkspaceGrounding/commandOperationCount").asInt()).isEqualTo(1);
+        JsonNode compiledPage = result.compiledFormPatch().at("/patch/page");
+        assertThat(compiledPage.path("widgets")).hasSize(3);
+        assertThat(compiledPage.at("/canvas/items/funcionarios-filter/colSpan").asInt())
+                .isEqualTo(12);
+        assertThat(compiledPage.at("/canvas/items/funcionarios-master/colSpan").asInt())
+                .isEqualTo(7);
+        assertThat(compiledPage.at("/composition/links/0/from/ref/port").asText())
+                .isEqualTo("requestSearch");
+        assertThat(compiledPage.at("/composition/links/1/from/ref/port").asText())
+                .isEqualTo("selectionChange");
+        assertThat(compiledPage.at("/composition/links/2/to/ref/port").asText())
+                .isEqualTo("initialValue");
+        assertThat(compiledPage.at("/widgets/1/definition/inputs/config/actions/row/discovery/enabled").asBoolean())
+                .isTrue();
+        assertThat(compiledPage.at("/widgets/1/definition/inputs/config/actions/collection/discovery/enabled").asBoolean())
+                .isFalse();
+        assertThat(compiledPage.at("/widgets/1/definition/inputs/config/toolbar/actions").isMissingNode())
+                .isTrue();
+        assertThat(result.compiledFormPatch().toString()).doesNotContain("resourceWorkspaceGrounding");
+    }
+
+    @Test
     void previewResolvesPinnedGovernedTemplateBeforeCompilingThePlan() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Crie uma tela com lista de funcionarios e detalhe lateral",
@@ -4862,6 +4942,30 @@ class AgenticAuthoringPreviewServiceTest {
 
     private AgenticAuthoringPreviewService service() {
         return new AgenticAuthoringPreviewService(planService, patchCompilerService);
+    }
+
+    private void addVerifiedWorkspaceOperation(
+            ArrayNode entries,
+            String apiPath,
+            String apiMethod,
+            String operationId) {
+        ObjectNode operation = entries.addObject();
+        operation.put("conceptKey", "human-resources.funcionarios.workspace");
+        operation.put("bindingKey", operationId);
+        operation.put("resourceKey", "human-resources.funcionarios");
+        operation.put("resourcePath", "/api/human-resources/funcionarios");
+        operation.put("apiPath", apiPath);
+        operation.put("apiMethod", apiMethod);
+        operation.put("schemaType", "get".equals(apiMethod) ? "response" : "request");
+        operation.put("schemaUrl", "/schemas/filtered?path=" + apiPath
+                + "&operation=" + apiMethod + "&schemaType="
+                + ("get".equals(apiMethod) ? "response" : "request"));
+        operation.put("capabilitiesUrl", "/api/human-resources/funcionarios/capabilities");
+        operation.put("capabilityOperationId", operationId);
+        operation.put("sourceRelease", "quickstart-funcionarios-v1");
+        operation.putArray("evidence")
+                .add("schema-grounding-verified")
+                .add("resource-capabilities-verified");
     }
 
     private ObjectNode employeeStatsCapabilities() {
