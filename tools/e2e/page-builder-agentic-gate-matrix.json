@@ -45,6 +45,21 @@
         "compara pedido, decisão, proposedConfig e DOM em todos os turnos"
       ]
     },
+    "capability-continuation": {
+      "description": "Focal live proof that consultative capability guidance reaches an applicable dashboard review through persisted parent-child decisions and governed resource grounding, without retries.",
+      "retries": 0,
+      "scenarios": [
+        "critical-interception-guard",
+        "consultative-capability-continuation"
+      ],
+      "expectedDiscovered": 2,
+      "minimumExecuted": 2,
+      "expectedSkipped": 0,
+      "requiredPassedTests": [
+        "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "Fluxo 0 — Assistente explica capacidades do Page Builder de forma amigável e acionável"
+      ]
+    },
     "full": {
       "description": "Deliberate live LLM matrix with all non-mocked browser scenarios.",
       "scenarios": [

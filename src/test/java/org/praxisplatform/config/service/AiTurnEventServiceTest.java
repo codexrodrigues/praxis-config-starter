@@ -419,6 +419,107 @@ class AiTurnEventServiceTest {
     }
 
     @Test
+    void shouldRejectStaleSemanticDecisionFromAnOlderResultInTheSameThread() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        AiTurnEvent newest = event(
+                UUID.randomUUID(),
+                threadId,
+                UUID.randomUUID(),
+                12L,
+                UUID.randomUUID(),
+                "tenant-a",
+                "user-a",
+                "prod");
+        newest.setEventType("result");
+        newest.setPayload(objectMapper.writeValueAsString(objectMapper.createObjectNode()
+                .putObject("intentResolution")
+                .putObject("semanticDecision")
+                .put("decisionId", "latest-parent")));
+
+        AiTurnEvent older = event(
+                UUID.randomUUID(),
+                threadId,
+                UUID.randomUUID(),
+                8L,
+                UUID.randomUUID(),
+                "tenant-a",
+                "user-a",
+                "prod");
+        older.setEventType("result");
+        ObjectNode olderPayload = objectMapper.createObjectNode();
+        olderPayload.putObject("intentResolution")
+                .putObject("semanticDecision")
+                .put("decisionId", "older-parent");
+        olderPayload.putArray("quickReplies")
+                .addObject()
+                .putObject("semanticDecision")
+                .put("decisionId", "stale-child");
+        older.setPayload(objectMapper.writeValueAsString(olderPayload));
+
+        when(repository.findResultEventsByThreadIdOrderByNewest(threadId)).thenReturn(List.of(newest, older));
+
+        assertThat(service.findPersistedSemanticDecision(
+                        threadId,
+                        "stale-child",
+                        new AiPrincipalContext("tenant-a", "user-a", "prod", true)))
+                .isEmpty();
+    }
+
+    @Test
+    void shouldRequirePersistedParentLineageForGovernedChildDecisions() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        AiTurnEvent result = event(
+                UUID.randomUUID(),
+                threadId,
+                UUID.randomUUID(),
+                8L,
+                UUID.randomUUID(),
+                "tenant-a",
+                "user-a",
+                "prod");
+        result.setEventType("result");
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.putObject("intentResolution")
+                .putObject("semanticDecision")
+                .put("decisionId", "guidance-parent");
+        ObjectNode child = payload.putArray("quickReplies")
+                .addObject()
+                .putObject("semanticDecision");
+        child.put("decisionId", "platform-child");
+        child.put("previousDecisionId", "missing-parent");
+        child.put("refinementOf", "missing-parent");
+        ObjectNode constraints = child.putObject("constraints")
+                .put("source", "server-issued-quick-reply")
+                .put("quickReplyId", "platform-create-admin-dashboard")
+                .put("continuationOf", "platform_capability_catalog");
+        result.setPayload(objectMapper.writeValueAsString(payload));
+        when(repository.findResultEventsByThreadIdOrderByNewest(threadId)).thenReturn(List.of(result));
+
+        AiPrincipalContext principal = new AiPrincipalContext("tenant-a", "user-a", "prod", true);
+        assertThat(service.findPersistedSemanticDecision(threadId, "platform-child", principal)).isEmpty();
+
+        child.put("previousDecisionId", "guidance-parent");
+        child.put("refinementOf", "guidance-parent");
+        result.setPayload(objectMapper.writeValueAsString(payload));
+
+        assertThat(service.findPersistedSemanticDecision(threadId, "platform-child", principal)).isPresent();
+
+        child.put("previousDecisionId", "missing-parent");
+        child.put("refinementOf", "missing-parent");
+        constraints.put("quickReplyId", "resource-discovery-confirm:funcionarios");
+        constraints.put("continuationOf", "resource_discovery");
+        result.setPayload(objectMapper.writeValueAsString(payload));
+
+        assertThat(service.findPersistedSemanticDecision(threadId, "platform-child", principal)).isEmpty();
+
+        child.put("previousDecisionId", "guidance-parent");
+        child.put("refinementOf", "guidance-parent");
+        result.setPayload(objectMapper.writeValueAsString(payload));
+
+        assertThat(service.findPersistedSemanticDecision(threadId, "platform-child", principal)).isPresent();
+    }
+
+    @Test
     void shouldNotResolveSemanticDecisionFromAnotherPrincipal() throws Exception {
         UUID threadId = UUID.randomUUID();
         AiTurnEvent result = event(

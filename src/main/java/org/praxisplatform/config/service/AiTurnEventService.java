@@ -459,20 +459,26 @@ public class AiTurnEventService {
         }
         return turnEventRepository.findResultEventsByThreadIdOrderByNewest(threadId).stream()
                 .filter(event -> isOwnedByPrincipal(event, principalContext))
-                .map(event -> persistedSemanticDecisionContext(parsePayload(event.getPayload()), decisionId))
-                .flatMap(Optional::stream)
-                .findFirst();
+                .findFirst()
+                .flatMap(event -> persistedSemanticDecisionContext(parsePayload(event.getPayload()), decisionId));
     }
 
     private Optional<PersistedSemanticDecisionContext> persistedSemanticDecisionContext(
             JsonNode payload,
             String decisionId) {
+        JsonNode parentDecision = payload == null
+                ? null
+                : payload.path("intentResolution").path("semanticDecision");
         JsonNode quickReplies = payload == null ? null : payload.path("quickReplies");
         if (quickReplies != null && quickReplies.isArray()) {
             for (JsonNode reply : quickReplies) {
                 JsonNode decision = reply.path("semanticDecision");
                 Optional<AgenticAuthoringSemanticDecision> matched = semanticDecision(decision, decisionId);
                 if (matched.isPresent()) {
+                    if (requiresPersistedParentLineage(matched.get())
+                            && !hasPersistedParentLineage(matched.get(), parentDecision)) {
+                        return Optional.empty();
+                    }
                     ArrayNode issuedCandidateApis = issuedCandidateApis(payload);
                     return Optional.of(new PersistedSemanticDecisionContext(
                             matched.get(),
@@ -480,12 +486,31 @@ public class AiTurnEventService {
                 }
             }
         }
-        return semanticDecision(
-                        payload == null ? null : payload.path("intentResolution").path("semanticDecision"),
-                        decisionId)
+        return semanticDecision(parentDecision, decisionId)
                 .map(decision -> new PersistedSemanticDecisionContext(
                         decision,
                         objectMapper.createArrayNode()));
+    }
+
+    private boolean requiresPersistedParentLineage(AgenticAuthoringSemanticDecision decision) {
+        if (decision == null || decision.constraints() == null) {
+            return false;
+        }
+        String continuationOf = decision.constraints().path("continuationOf").asText("");
+        return "platform_capability_catalog".equals(continuationOf)
+                || "resource_discovery".equals(continuationOf);
+    }
+
+    private boolean hasPersistedParentLineage(
+            AgenticAuthoringSemanticDecision childDecision,
+            JsonNode parentDecision) {
+        if (childDecision == null || parentDecision == null || !parentDecision.isObject()) {
+            return false;
+        }
+        String parentDecisionId = parentDecision.path("decisionId").asText("");
+        return !parentDecisionId.isBlank()
+                && parentDecisionId.equals(childDecision.previousDecisionId())
+                && parentDecisionId.equals(childDecision.refinementOf());
     }
 
     private ArrayNode issuedCandidateApis(JsonNode payload) {
