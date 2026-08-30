@@ -5,6 +5,7 @@ param(
     [string] $MetadataRoot = "",
     [string] $UiRoot = "",
     [string] $JarPath = "",
+    [string] $LocalStarterJarPath = "",
     [string] $EnvFile = ".env.openai.local.ps1",
     [string] $JavaHome = $env:JAVA_HOME,
     [string] $EmbeddingProvider = "",
@@ -569,10 +570,15 @@ if ($jarStarterVersion -ne $expectedStarterVersion) {
 if (-not [string]::IsNullOrWhiteSpace($ExpectedMetadataVersion) -and $jarMetadataVersion -ne $ExpectedMetadataVersion) {
     throw "Quickstart jar uses praxis-metadata-starter $jarMetadataVersion, expected $ExpectedMetadataVersion. Repackage it against the declared Metadata version."
 }
-$localStarterJar = Join-Path $starterRoot "target\praxis-config-starter-$expectedStarterVersion.jar"
-if (-not (Test-Path -LiteralPath $localStarterJar -PathType Leaf)) {
-    throw "Local praxis-config-starter jar not found. Build the current checkout before packaging the Quickstart: target/praxis-config-starter-$expectedStarterVersion.jar"
+$localStarterJar = if ([string]::IsNullOrWhiteSpace($LocalStarterJarPath)) {
+    Join-Path $starterRoot "target\praxis-config-starter-$expectedStarterVersion.jar"
+} else {
+    $LocalStarterJarPath
 }
+if (-not (Test-Path -LiteralPath $localStarterJar -PathType Leaf)) {
+    throw "Local praxis-config-starter jar not found at '$localStarterJar'. Build the starter artifact before packaging the Quickstart."
+}
+$localStarterJar = (Resolve-Path -LiteralPath $localStarterJar).Path
 $localStarterJarSha256 = (Get-FileHash -LiteralPath $localStarterJar -Algorithm SHA256).Hash.ToLowerInvariant()
 $configStarterArtifactEvidence = [ordered]@{
     artifactId = "praxis-config-starter"
