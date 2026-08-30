@@ -336,8 +336,22 @@ function Assert-PlaywrightScenarioReceiptParserFixture {
             clarificationQuickReplyCount = 0
             governedRevisionCount = 0
             correctiveTypedPromptCount = 0
+            deterministicRepairCount = 0
         }
-        terminal = [ordered]@{ outcome = 'applicable'; transport = 'stream'; blockingDiagnosticCodes = @() }
+        terminal = [ordered]@{
+            outcome = 'applicable'
+            transport = 'stream'
+            blockingDiagnosticCodes = @()
+            referencePresent = $true
+            backendPatchAuthority = $true
+        }
+        apply = [ordered]@{
+            terminalReferenceMatched = $true
+            streamIdMatched = $true
+            resultEventIdMatched = $true
+            payloadSha256 = ('a' * 64)
+            matchesPersistedPayload = $true
+        }
         persistence = [ordered]@{
             version = 1
             etagPresent = $true
@@ -358,11 +372,12 @@ function Assert-PlaywrightScenarioReceiptParserFixture {
             reloadRendered = $true
         }
         timingMs = [ordered]@{
-            authoringToApplicable = 10
-            applyAndReadback = 20
-            runtimeAndCommand = 30
-            reload = 40
-            total = 110
+            firstUsefulStatus = 10
+            firstApplicableTerminal = 20
+            applyCompleted = 30
+            runtimeFunctional = 40
+            reloadCompleted = 50
+            total = 50
         }
     }
     $encodedReceipt = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($receipt | ConvertTo-Json -Depth 10)))

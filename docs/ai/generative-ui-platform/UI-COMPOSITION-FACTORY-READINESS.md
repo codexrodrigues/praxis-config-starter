@@ -64,7 +64,9 @@ Classification: `suportado-parcialmente`.
 The official production-like gate now owns an additive, sanitized per-scenario receipt for the
 `live-resource-workspace-command` pilot. Angular emits only governed interaction counts, canonical
 blocking diagnostic codes, persistence/reload hashes and ETag equality, runtime outcomes and phase
-durations. Config Starter locates the receipt by the matrix-owned test title and attachment name,
+milestones. The final v1 shape also proves terminal-result/apply correlation without publishing the
+identifiers, compares apply/persisted/reload payload hashes and reports deterministic repair count.
+Config Starter locates the receipt by the matrix-owned test title and attachment name,
 rejects unknown properties, validates the persisted/runtime proof and combines authoring turns with
 Playwright retries to classify the result as `first-pass` or `eventual-pass`.
 

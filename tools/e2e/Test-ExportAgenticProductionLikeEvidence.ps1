@@ -31,8 +31,22 @@ try {
             clarificationQuickReplyCount = 0
             governedRevisionCount = 0
             correctiveTypedPromptCount = 0
+            deterministicRepairCount = 0
         }
-        terminal = [ordered]@{ outcome = "applicable"; transport = "stream"; blockingDiagnosticCodes = @() }
+        terminal = [ordered]@{
+            outcome = "applicable"
+            transport = "stream"
+            blockingDiagnosticCodes = @()
+            referencePresent = $true
+            backendPatchAuthority = $true
+        }
+        apply = [ordered]@{
+            terminalReferenceMatched = $true
+            streamIdMatched = $true
+            resultEventIdMatched = $true
+            payloadSha256 = ("f" * 64)
+            matchesPersistedPayload = $true
+        }
         persistence = [ordered]@{
             version = 1
             etagPresent = $true
@@ -53,11 +67,12 @@ try {
             reloadRendered = $true
         }
         timingMs = [ordered]@{
-            authoringToApplicable = 10
-            applyAndReadback = 20
-            runtimeAndCommand = 30
-            reload = 40
-            total = 110
+            firstUsefulStatus = 10
+            firstApplicableTerminal = 20
+            applyCompleted = 30
+            runtimeFunctional = 40
+            reloadCompleted = 50
+            total = 50
         }
     }
     [ordered]@{
@@ -127,6 +142,20 @@ try {
     if (-not $failedClosed) { throw "Exporter did not reject unsafe scenario evidence." }
     $unsafeResult.scenarioEvidence[0].PSObject.Properties.Remove("prompt")
     $unsafeResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
+
+    $forgedScenarioOutput = Join-Path $root "forged-scenario-published"
+    $forgedResult = Get-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Raw | ConvertFrom-Json
+    $forgedResult.scenarioEvidence[0].apply.payloadSha256 = ("a" * 64)
+    $forgedResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -HttpArtifactRoot $httpArtifactRoot -OutputRoot $forgedScenarioOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "Scenario persistence evidence is incomplete or inconsistent"
+    }
+    if (-not $failedClosed) { throw "Exporter did not reject a forged apply/persistence hash relation." }
+    $forgedResult.scenarioEvidence[0].apply.payloadSha256 = ("f" * 64)
+    $forgedResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
 
     $invalidOutput = Join-Path $root "invalid-published"
     $invalidResult = Get-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Raw | ConvertFrom-Json
