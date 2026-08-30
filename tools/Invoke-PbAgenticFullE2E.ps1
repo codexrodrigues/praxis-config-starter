@@ -24,6 +24,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "e2e\PageBuilderScenarioReceipt.ps1")
 
 function Write-Phase([string] $Message) {
     $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ssK"
@@ -225,6 +226,46 @@ function Get-PlaywrightSpecs([object[]] $Suites) {
     }
 }
 
+function Get-PlaywrightScenarioEvidenceFromReport([object] $Report, [object[]] $Definitions, [string[]] $SelectedScenarioIds) {
+    $evidence = @()
+    $specs = @(Get-PlaywrightSpecs @($Report.suites))
+    foreach ($definition in @($Definitions | Where-Object { $_.scenarioId -in $SelectedScenarioIds })) {
+        $matchingSpecs = @($specs | Where-Object { $_.title -eq $definition.testTitle })
+        if ($matchingSpecs.Count -ne 1) {
+            throw "Scenario receipt test title must resolve exactly once: $($definition.testTitle)"
+        }
+        $testCases = @($matchingSpecs[0].tests | Where-Object { $_.status -eq 'expected' })
+        if ($testCases.Count -ne 1) {
+            throw "Scenario receipt test must pass exactly once: $($definition.testTitle)"
+        }
+        $results = @($testCases[0].results)
+        $passedResults = @($results | Where-Object { $_.status -eq 'passed' })
+        if ($passedResults.Count -ne 1) {
+            throw "Scenario receipt requires exactly one successful Playwright result: $($definition.testTitle)"
+        }
+        $attachments = @($passedResults[0].attachments | Where-Object { $_.name -eq $definition.attachmentName })
+        if ($attachments.Count -ne 1 -or $attachments[0].contentType -ne 'application/json' -or
+            [string]::IsNullOrWhiteSpace([string] $attachments[0].body)) {
+            throw "Scenario receipt attachment must be one inline application/json body: $($definition.attachmentName)"
+        }
+        try {
+            $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string] $attachments[0].body))
+            $receipt = $json | ConvertFrom-Json
+        } catch {
+            throw "Scenario receipt attachment is not valid base64 JSON: $($definition.attachmentName)"
+        }
+        $retryAttempts = @($results | Where-Object { [int] $_.retry -gt 0 }).Count
+        $evidence += ConvertTo-PraxisPageBuilderScenarioEvidence $receipt $definition $retryAttempts
+    }
+    return @($evidence)
+}
+
+function Get-PlaywrightScenarioEvidence([string] $ReportPath, [object[]] $Definitions, [string[]] $SelectedScenarioIds) {
+    if (-not (Test-Path -LiteralPath $ReportPath)) { throw "Playwright JSON report was not generated: $ReportPath" }
+    $report = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json
+    return @(Get-PlaywrightScenarioEvidenceFromReport $report $Definitions $SelectedScenarioIds)
+}
+
 function Assert-PlaywrightSummaryParserFixture {
     $fixture = [pscustomobject]@{
         stats = [pscustomobject]@{
@@ -275,6 +316,116 @@ function Assert-PlaywrightSummaryParserFixture {
         $summary.attempts -ne 3 -or $summary.retryAttempts -ne 1) {
         throw "Playwright summary parser fixture diverged from the expected nested/flaky result."
     }
+}
+
+function Assert-PlaywrightScenarioReceiptParserFixture {
+    $definition = [pscustomobject]@{
+        scenarioId = 'live-resource-workspace-command'
+        archetype = 'master-detail-command'
+        testTitle = 'mission workspace'
+        attachmentName = 'mission-workspace-first-pass-receipt.json'
+    }
+    $receipt = [ordered]@{
+        schemaVersion = 'praxis.page-builder-agentic-scenario-receipt/v1'
+        scenarioId = 'live-resource-workspace-command'
+        archetype = 'master-detail-command'
+        authoringFirstPass = $true
+        interaction = [ordered]@{
+            initialPromptCount = 1
+            totalTurnCount = 1
+            clarificationQuickReplyCount = 0
+            governedRevisionCount = 0
+            correctiveTypedPromptCount = 0
+        }
+        terminal = [ordered]@{ outcome = 'applicable'; transport = 'stream'; blockingDiagnosticCodes = @() }
+        persistence = [ordered]@{
+            version = 1
+            etagPresent = $true
+            persistedPayloadSha256 = ('a' * 64)
+            reloadPayloadSha256 = ('a' * 64)
+            reloadMatchesPersisted = $true
+            reloadEtagMatches = $true
+        }
+        runtime = [ordered]@{
+            masterRendered = $true
+            detailRendered = $true
+            selectionPropagated = $true
+            actionDiscoveryStatus = 200
+            capabilitiesDiscoveryStatus = 200
+            commandStatus = 200
+            duplicateCommandStatus = 409
+            refreshObserved = $true
+            reloadRendered = $true
+        }
+        timingMs = [ordered]@{
+            authoringToApplicable = 10
+            applyAndReadback = 20
+            runtimeAndCommand = 30
+            reload = 40
+            total = 110
+        }
+    }
+    $encodedReceipt = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($receipt | ConvertTo-Json -Depth 10)))
+    $fixture = [pscustomobject]@{
+        suites = @([pscustomobject]@{
+            specs = @([pscustomobject]@{
+                title = 'mission workspace'
+                tests = @([pscustomobject]@{
+                    status = 'expected'
+                    results = @([pscustomobject]@{
+                        status = 'passed'
+                        retry = 0
+                        attachments = @([pscustomobject]@{
+                            name = 'mission-workspace-first-pass-receipt.json'
+                            contentType = 'application/json'
+                            body = $encodedReceipt
+                        })
+                    })
+                })
+            })
+            suites = @()
+        })
+    }
+    $parsed = @(Get-PlaywrightScenarioEvidenceFromReport $fixture @($definition) @('live-resource-workspace-command'))
+    if ($parsed.Count -ne 1 -or $parsed[0].firstPassFunctional -ne $true -or $parsed[0].outcome -ne 'first-pass') {
+        throw 'Playwright scenario receipt parser did not materialize first-pass evidence.'
+    }
+
+    $receipt['authoringFirstPass'] = $false
+    $receipt['interaction']['totalTurnCount'] = 2
+    $receipt['interaction']['clarificationQuickReplyCount'] = 1
+    $fixture.suites[0].specs[0].tests[0].results[0].attachments[0].body = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes(($receipt | ConvertTo-Json -Depth 10))
+    )
+    $eventual = @(Get-PlaywrightScenarioEvidenceFromReport $fixture @($definition) @('live-resource-workspace-command'))
+    if ($eventual.Count -ne 1 -or $eventual[0].firstPassFunctional -ne $false -or $eventual[0].outcome -ne 'eventual-pass') {
+        throw 'Playwright scenario receipt parser did not preserve an eventual-pass authoring result.'
+    }
+
+    $receipt['authoringFirstPass'] = $true
+    $receipt['interaction']['totalTurnCount'] = 1
+    $receipt['interaction']['clarificationQuickReplyCount'] = 0
+    $fixture.suites[0].specs[0].tests[0].results[0].retry = 1
+    $fixture.suites[0].specs[0].tests[0].results[0].attachments[0].body = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes(($receipt | ConvertTo-Json -Depth 10))
+    )
+    $retried = @(Get-PlaywrightScenarioEvidenceFromReport $fixture @($definition) @('live-resource-workspace-command'))
+    if ($retried.Count -ne 1 -or $retried[0].firstPassFunctional -ne $false -or $retried[0].outcome -ne 'eventual-pass') {
+        throw 'Playwright scenario receipt parser did not downgrade a retried result to eventual-pass.'
+    }
+
+    $fixture.suites[0].specs[0].tests[0].results[0].retry = 0
+    $receipt['prompt'] = 'must never be published'
+    $fixture.suites[0].specs[0].tests[0].results[0].attachments[0].body = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes(($receipt | ConvertTo-Json -Depth 10))
+    )
+    $failedClosed = $false
+    try {
+        Get-PlaywrightScenarioEvidenceFromReport $fixture @($definition) @('live-resource-workspace-command') | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match 'unexpected properties'
+    }
+    if (-not $failedClosed) { throw 'Playwright scenario receipt parser did not reject an unsafe extra property.' }
 }
 
 function Invoke-PgvectorPreflight(
@@ -478,8 +629,9 @@ function Invoke-DomainCatalogIngest {
 
 if ($ValidateEvidenceParsersOnly.IsPresent) {
     Assert-PlaywrightSummaryParserFixture
+    Assert-PlaywrightScenarioReceiptParserFixture
     Assert-EphemeralRuntimeSecretFixture
-    Write-Output "Invoke-PbAgenticFullE2E: Playwright summary parser and runtime secret fixtures passed."
+    Write-Output "Invoke-PbAgenticFullE2E: Playwright summary, scenario receipt, and runtime secret fixtures passed."
     exit 0
 }
 
@@ -639,6 +791,7 @@ New-Item -ItemType Directory -Force -Path $artifactRoot, $quickstartLogs | Out-N
 $backendProcess = $null
 $uiProcess = $null
 $playwrightSummary = $null
+$scenarioEvidence = @()
 $capabilitiesEvidence = $null
 $runtimeSecrets = New-EphemeralRuntimeSecrets
 $streamSecret = [string] $runtimeSecrets.streamAuthTokenSecret
@@ -899,6 +1052,10 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
                 throw "Required production-like Playwright proof did not pass exactly once: $requiredTitle"
             }
         }
+        $scenarioEvidence = @(Get-PlaywrightScenarioEvidence `
+            -ReportPath $playwrightReportPath `
+            -Definitions @($gateMatrix.evidence.scenarioReceipts) `
+            -SelectedScenarioIds $selectedScenarioIds)
         Write-Phase "Playwright Page Builder validation completed."
     } finally {
         Remove-Item Env:\PRAXIS_E2E_SCENARIO_IDS -ErrorAction SilentlyContinue
@@ -986,6 +1143,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             retries = $Retries
         }
         playwright = $playwrightSummary
+        scenarioEvidence = @($scenarioEvidence)
         failureType = if ($null -eq $gateFailure) { $null } else { $gateFailure.Exception.GetType().FullName }
     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $resultPath -Encoding utf8
 }

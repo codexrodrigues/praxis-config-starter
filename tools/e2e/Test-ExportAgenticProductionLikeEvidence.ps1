@@ -17,6 +17,49 @@ try {
         [ordered]@{ name = "praxis-ui-angular"; sha = ("a" * 40); treeSha = ("d" * 40); materialization = "working-tree"; dirty = $false }
     )
     $configStarterJarSha256 = ("e" * 64)
+    $scenarioEvidence = [ordered]@{
+        schemaVersion = "praxis.page-builder-agentic-scenario-receipt/v1"
+        scenarioId = "live-resource-workspace-command"
+        archetype = "master-detail-command"
+        outcome = "first-pass"
+        firstPassFunctional = $true
+        authoringFirstPass = $true
+        playwrightRetryAttempts = 0
+        interaction = [ordered]@{
+            initialPromptCount = 1
+            totalTurnCount = 1
+            clarificationQuickReplyCount = 0
+            governedRevisionCount = 0
+            correctiveTypedPromptCount = 0
+        }
+        terminal = [ordered]@{ outcome = "applicable"; transport = "stream"; blockingDiagnosticCodes = @() }
+        persistence = [ordered]@{
+            version = 1
+            etagPresent = $true
+            persistedPayloadSha256 = ("f" * 64)
+            reloadPayloadSha256 = ("f" * 64)
+            reloadMatchesPersisted = $true
+            reloadEtagMatches = $true
+        }
+        runtime = [ordered]@{
+            masterRendered = $true
+            detailRendered = $true
+            selectionPropagated = $true
+            actionDiscoveryStatus = 200
+            capabilitiesDiscoveryStatus = 200
+            commandStatus = 200
+            duplicateCommandStatus = 409
+            refreshObserved = $true
+            reloadRendered = $true
+        }
+        timingMs = [ordered]@{
+            authoringToApplicable = 10
+            applyAndReadback = 20
+            runtimeAndCommand = 30
+            reload = 40
+            total = 110
+        }
+    }
     [ordered]@{
         schemaVersion = "praxis.page-builder-agentic-production-like-result/v1"
         productionLike = $true
@@ -52,8 +95,14 @@ try {
         failureType = $null
         sourceAudit = [ordered]@{ passed = $true }
         git = $identities
-        matrix = [ordered]@{ expectedDiscovered = 2; minimumExecuted = 2; expectedSkipped = 0 }
+        matrix = [ordered]@{
+            scenarios = @("critical-interception-guard", "live-resource-workspace-command")
+            expectedDiscovered = 2
+            minimumExecuted = 2
+            expectedSkipped = 0
+        }
         playwright = [ordered]@{ discovered = 2; executed = 2; passed = 2; skipped = 0; failed = 0 }
+        scenarioEvidence = @($scenarioEvidence)
     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
     @{ passed = $true } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $e2eRoot "source-audit.json") -Encoding utf8
     @{ health = "UP"; terminalSeen = $true; replayChecked = $true; provider = "openai" } |
@@ -64,6 +113,20 @@ try {
     if (($published -join ',') -ne 'http-sse-summary.json,production-like-result.json,source-audit.json') {
         throw "Exporter published an unexpected file set: $($published -join ',')"
     }
+
+    $unsafeOutput = Join-Path $root "unsafe-scenario-published"
+    $unsafeResult = Get-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Raw | ConvertFrom-Json
+    $unsafeResult.scenarioEvidence[0] | Add-Member -NotePropertyName prompt -NotePropertyValue "must never be published"
+    $unsafeResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -HttpArtifactRoot $httpArtifactRoot -OutputRoot $unsafeOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "Scenario evidence has unexpected properties"
+    }
+    if (-not $failedClosed) { throw "Exporter did not reject unsafe scenario evidence." }
+    $unsafeResult.scenarioEvidence[0].PSObject.Properties.Remove("prompt")
+    $unsafeResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
 
     $invalidOutput = Join-Path $root "invalid-published"
     $invalidResult = Get-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Raw | ConvertFrom-Json

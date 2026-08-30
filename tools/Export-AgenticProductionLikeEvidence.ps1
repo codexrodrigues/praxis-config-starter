@@ -13,6 +13,8 @@ function Assert-True([bool] $Condition, [string] $Message) {
     if (-not $Condition) { throw $Message }
 }
 
+. (Join-Path $PSScriptRoot "e2e\PageBuilderScenarioReceipt.ps1")
+
 function Get-LatestRequiredFile([string] $Root, [string] $Filter) {
     $file = Get-ChildItem -LiteralPath $Root -Recurse -File -Filter $Filter -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTimeUtc -Descending |
@@ -73,6 +75,10 @@ Assert-True ([int] $result.playwright.discovered -eq [int] $result.matrix.expect
 Assert-True ([int] $result.playwright.executed -ge [int] $result.matrix.minimumExecuted) "Playwright execution is below the matrix minimum."
 Assert-True ([int] $result.playwright.skipped -eq [int] $result.matrix.expectedSkipped) "Playwright skipped count diverges from the matrix."
 Assert-True ([int] $result.playwright.failed -eq 0 -and [int] $result.playwright.passed -eq [int] $result.playwright.executed) "Not every executed Playwright test passed."
+$scenarioEvidence = @($result.scenarioEvidence)
+$requiresMissionReceipt = @($result.matrix.scenarios) -contains 'live-resource-workspace-command'
+Assert-True (-not $requiresMissionReceipt -or $scenarioEvidence.Count -eq 1) "The live mission scenario requires exactly one sanitized scenario receipt."
+foreach ($evidence in $scenarioEvidence) { Assert-PraxisPageBuilderScenarioEvidence $evidence }
 Assert-True (@($result.git).Count -eq 4) "The four immutable repository identities are required."
 foreach ($identity in @($result.git)) {
     Assert-True (([string] $identity.sha) -match '^[0-9a-f]{40}$') "Invalid immutable SHA for $($identity.name)."
