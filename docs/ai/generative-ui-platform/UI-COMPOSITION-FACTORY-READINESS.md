@@ -1,6 +1,7 @@
 # Governed UI composition factory readiness
 
-Status: first operationally proved master-detail pilot and first-pass receipt instrumentation, 2026-08-30.
+Status: first operationally proved master-detail pilot; first post-instrumentation full gate exposed
+first-pass and evidence-retention gaps, 2026-08-30.
 
 ## Decision
 
@@ -80,9 +81,26 @@ Angular public API or parallel authoring contract. Raw prompts, URLs, domain fix
 ETag values and chat transcripts are deliberately excluded.
 
 The successful Level 3 baseline from 2026-08-30 predates this receipt and therefore proves eventual
-functionality, not first-pass functionality. The next production-like run after both coordinated
-changes land will establish the first measured result. Until then, the 90% target and the broader
-archetype certification remain open under
+functionality, not first-pass functionality. The first post-instrumentation `full` run,
+[Actions #33340504257](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33340504257),
+executed all 11 selected tests against real OpenAI, PostgreSQL/pgvector, Quickstart and Angular
+sources. HTTP/SSE and Domain Catalog prerequisites passed, but the browser gate finished with seven
+stable passes, one flaky pass and three failures after four retry attempts. The
+`master-detail-command` scenario passed without a retry. The first `single-table-control` attempt
+requested clarification with `intent-operation-unknown` and `intent-artifact-unknown`; its retry
+completed the initial persisted/reloaded table lifecycle but failed later in the semantic refinement
+battery because `column.header.set` was absent. It is therefore not a first-pass result and neither
+archetype is certified by this failed run.
+
+That run also exposed an evidence-retention defect: the collector threw on the aggregate Playwright
+failure before extracting valid inline receipts, so `scenarioEvidence` was empty even for the passing
+master-detail scenario. The collector now parses each selected attachment before enforcing aggregate
+success and, only for a failed run, preserves every independently valid sanitized receipt, including a
+receipt attached before a later assertion failed. The result remains `productionLike=false` and the
+publication exporter remains strict; partial evidence is diagnostic and cannot certify a scenario.
+This closes measurement loss without weakening the gate or creating another receipt contract.
+
+The 90% target and broader archetype certification remain open under
 [praxis-config-starter#372](https://github.com/codexrodrigues/praxis-config-starter/issues/372).
 
 ### Implemented attestation contract; rollout still partial
