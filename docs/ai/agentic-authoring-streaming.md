@@ -973,10 +973,11 @@ canonicos sao `requestSearch -> queryContext` e
 continua responsavel por schema e option sources metadata-driven, e os widgets
 continuam responsaveis por loading, vazio e erro.
 
-Comandos nao sao convertidos em `api.post` ou `api.patch` pelo Java. Quando existe
-uma operacao backend-owned verificada sob `/actions/`, o plano habilita o discovery
-oficial de item e colecao da Table, sem publicar endpoint nem botao sintetico. O
-runtime resolve `ITEM`/`COLLECTION` no action catalog, aplica availability, abre a
+Comandos nao sao convertidos em `api.post` ou `api.patch` pelo Java. Para cada
+operacao backend-owned verificada sob `/actions/`, o plano habilita apenas o
+discovery oficial do escopo comprovado: `/{id}/actions/...` para item e
+`/actions/...` para colecao, sem publicar endpoint nem botao sintetico. O runtime
+resolve as acoes concretas no action catalog, aplica availability, abre a
 superficie canonica de Dynamic Form e executa o submit governado. Specs focais do
 runtime cobrem allow/deny/open/execute; o smoke real HTTP/browser ainda nao esta
 integrado. Envelope ausente, forjado, divergente ou sem comando produz diagnostics

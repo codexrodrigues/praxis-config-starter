@@ -81,8 +81,10 @@ Implementation status for the first slice: the generic provider now consumes the
 existing verified-operation envelope, emits a resource Filter, Table master and
 Dynamic Form detail, binds `requestSearch -> queryContext` and
 `selectionChange -> state -> initialValue`, publishes responsive device layouts,
-and enables the official Table item/collection discovery policy only when a
-backend-owned verified `/actions/` operation exists. Client-provided operation
+and enables the official Table item or collection discovery policy only for the
+scope proven by a backend-owned verified `/actions/` operation. An item-only
+command does not enable collection discovery, and a collection-only command does
+not create row actions. Client-provided operation
 envelopes are removed at HTTP ingress. The server preview/compiler path and
 transactional apply/ETag path have focused tests, but this is a partial slice:
 the shared #357 corpus/attestation and a real HTTP/browser command smoke are not

@@ -49,9 +49,10 @@ the generic provider will materialize:
 3. canonical page state for the selected row;
 4. `selectionChange -> state -> initialValue` bindings over registry-certified
    ports;
-5. official Table item and collection discovery only when at least one non-read
-   operation is present in the backend-owned projection; the runtime resolves
-   `ITEM`/`COLLECTION` from the canonical action catalog and HATEOAS context;
+5. official Table discovery only for the command scopes proven by backend-owned
+   non-read operations: `/{id}/actions/...` enables item discovery and
+   `/actions/...` enables collection discovery; the runtime then resolves the
+   concrete actions from the canonical action catalog and HATEOAS context;
 6. diagnostics that preserve grounding source, operation identities, schema and
    capability references, and an explicit reason when operational grounding is
    absent or rejected;
@@ -75,8 +76,9 @@ chain; this slice does not claim a browser or real-HTTP end-to-end proof.
 - Operations for another resource are ignored and diagnosed.
 - No prompt keyword, regex, alias, or fuzzy match decides resource or command
   intent.
-- No backend-owned verified non-read operation means both item and collection
-  command discovery are disabled in the materialized Table config.
+- Item and collection discovery are gated independently. A verified command in
+  one scope does not enable the other; without any backend-owned verified
+  non-read operation both scopes remain disabled.
 - Preview/compiler/apply failures remain fail-closed before persistence.
 - A stale `If-Match` must not mutate the previously stored page.
 

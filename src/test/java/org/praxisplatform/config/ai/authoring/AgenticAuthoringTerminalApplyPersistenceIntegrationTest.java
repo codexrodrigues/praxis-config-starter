@@ -177,7 +177,7 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
         assertThat(persistedPage.at("/widgets/0/definition/inputs/config/actions/row/discovery/enabled").asBoolean())
                 .isTrue();
         assertThat(persistedPage.at("/widgets/0/definition/inputs/config/actions/collection/discovery/enabled").asBoolean())
-                .isTrue();
+                .isFalse();
         JsonNode persistedTags = objectMapper.readTree(persisted.config().getTags());
         assertThat(persistedTags.path("authoringResultEventId").asText())
                 .isEqualTo(terminal.getEventId().toString());
@@ -327,7 +327,7 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                         "tableId": "missions-master",
                         "config": {
                           "actions": {
-                            "collection": { "discovery": { "enabled": true } },
+                            "collection": { "discovery": { "enabled": false } },
                             "row": { "enabled": true, "discovery": { "enabled": true } }
                           },
                           "behavior": { "selection": { "enabled": true, "type": "single" } }

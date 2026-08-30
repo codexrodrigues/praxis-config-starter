@@ -1075,11 +1075,11 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode actions = config.putObject("actions");
         actions.putObject("collection")
                 .putObject("discovery")
-                .put("enabled", grounding.hasCommands());
+                .put("enabled", grounding.hasCollectionCommands());
         ObjectNode row = actions.putObject("row");
-        row.put("enabled", grounding.hasCommands());
+        row.put("enabled", grounding.hasItemCommands());
         row.putObject("discovery")
-                .put("enabled", grounding.hasCommands());
+                .put("enabled", grounding.hasItemCommands());
     }
 
     private void addWorkspaceFilter(
@@ -4293,9 +4293,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ObjectNode commandDiscovery = workspace.putObject("commandDiscovery");
         commandDiscovery.put("status", grounding.commandOperationCount() > 0 ? "enabled" : "blocked");
         commandDiscovery.put("source", "praxis-table-runtime-hateoas-capabilities");
-        commandDiscovery.put("scopeResolution", "runtime-action-catalog");
-        commandDiscovery.put("item", grounding.hasCommands());
-        commandDiscovery.put("collection", grounding.hasCommands());
+        commandDiscovery.put("scopeResolution", "operation-scope-or-canonical-path");
+        commandDiscovery.put("item", grounding.hasItemCommands());
+        commandDiscovery.put("collection", grounding.hasCollectionCommands());
         commandDiscovery.put("endpointMaterializedByAuthoring", false);
         if (!grounding.failureCode().isBlank()) {
             workspace.put("failureCode", grounding.failureCode());
@@ -4497,8 +4497,23 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             return commandOperations.size();
         }
 
-        private boolean hasCommands() {
-            return !commandOperations.isEmpty();
+        private boolean hasItemCommands() {
+            return commandOperations.stream()
+                    .anyMatch(operation -> "ITEM".equals(commandScope(operation)));
+        }
+
+        private boolean hasCollectionCommands() {
+            return commandOperations.stream()
+                    .anyMatch(operation -> "COLLECTION".equals(commandScope(operation)));
+        }
+
+        private String commandScope(JsonNode operation) {
+            String explicitScope = operation == null ? "" : operation.path("scope").asText("").trim();
+            if ("ITEM".equalsIgnoreCase(explicitScope) || "COLLECTION".equalsIgnoreCase(explicitScope)) {
+                return explicitScope.toUpperCase(Locale.ROOT);
+            }
+            String apiPath = operation == null ? "" : operation.path("apiPath").asText("");
+            return apiPath.matches(".*/\\{[^/]+}/actions/.*") ? "ITEM" : "COLLECTION";
         }
     }
 }

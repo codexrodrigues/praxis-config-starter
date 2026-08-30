@@ -906,7 +906,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
-    void enablesOfficialRuntimeScopedCommandDiscoveryFromVerifiedResourceOperations() {
+    void enablesOnlyOfficialItemCommandDiscoveryFromVerifiedResourceOperations() {
         ObjectNode contextHints = verifiedDomainOperations(
                 "schemas.filtered+resource.capabilities",
                 "/api/operations/missoes",
@@ -940,14 +940,14 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(config.path("actions").path("row").path("discovery").path("enabled").asBoolean())
                 .isTrue();
         assertThat(config.path("actions").path("collection").path("discovery").path("enabled").asBoolean())
-                .isTrue();
+                .isFalse();
         assertThat(config.has("toolbar")).isFalse();
         assertThat(grounding.path("commandDiscovery").path("source").asText())
                 .isEqualTo("praxis-table-runtime-hateoas-capabilities");
         assertThat(grounding.path("commandDiscovery").path("item").asBoolean()).isTrue();
-        assertThat(grounding.path("commandDiscovery").path("collection").asBoolean()).isTrue();
+        assertThat(grounding.path("commandDiscovery").path("collection").asBoolean()).isFalse();
         assertThat(grounding.path("commandDiscovery").path("scopeResolution").asText())
-                .isEqualTo("runtime-action-catalog");
+                .isEqualTo("operation-scope-or-canonical-path");
         assertThat(grounding.path("commandDiscovery").path("endpointMaterializedByAuthoring").asBoolean())
                 .isFalse();
         assertThat(findWidget(plan, "praxis-filter", "filter").path("outputs")
@@ -969,7 +969,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
-    void enablesOfficialDiscoveryWithoutFabricatingTheCollectionCommandEndpoint() {
+    void enablesOnlyOfficialCollectionCommandDiscoveryWithoutFabricatingTheEndpoint() {
         ObjectNode contextHints = verifiedDomainOperations(
                 "schemas.filtered+resource.capabilities",
                 "/api/operations/missoes",
@@ -992,13 +992,14 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         JsonNode config = findWidgetInputs(plan, "praxis-table", "master").path("config");
         assertThat(config.path("actions").path("collection").path("discovery").path("enabled").asBoolean())
                 .isTrue();
-        assertThat(config.path("actions").path("row").path("enabled").asBoolean()).isTrue();
+        assertThat(config.path("actions").path("row").path("enabled").asBoolean()).isFalse();
         assertThat(config.has("toolbar")).isFalse();
         JsonNode discovery = plan.path("diagnostics").path("resourceWorkspaceGrounding")
                 .path("commandDiscovery");
         assertThat(discovery.path("collection").asBoolean()).isTrue();
-        assertThat(discovery.path("item").asBoolean()).isTrue();
-        assertThat(discovery.path("scopeResolution").asText()).isEqualTo("runtime-action-catalog");
+        assertThat(discovery.path("item").asBoolean()).isFalse();
+        assertThat(discovery.path("scopeResolution").asText())
+                .isEqualTo("operation-scope-or-canonical-path");
         assertThat(discovery.path("endpointMaterializedByAuthoring").asBoolean()).isFalse();
     }
 

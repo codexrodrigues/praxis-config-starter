@@ -4702,7 +4702,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(compiledPage.at("/widgets/1/definition/inputs/config/actions/row/discovery/enabled").asBoolean())
                 .isTrue();
         assertThat(compiledPage.at("/widgets/1/definition/inputs/config/actions/collection/discovery/enabled").asBoolean())
-                .isTrue();
+                .isFalse();
         assertThat(compiledPage.at("/widgets/1/definition/inputs/config/toolbar/actions").isMissingNode())
                 .isTrue();
         assertThat(result.compiledFormPatch().toString()).doesNotContain("resourceWorkspaceGrounding");
