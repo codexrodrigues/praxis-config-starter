@@ -12758,6 +12758,119 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void resourceDiscoveryChoiceIsAChildOfTheActiveExecutableDecision() {
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("source", "resolved-quick-reply-continuation");
+        constraints.put("quickReplyId", "platform-create-admin-dashboard");
+        constraints.put("continuationOf", "platform_capability_catalog");
+        AgenticAuthoringSemanticDecision activeDecision = AgenticAuthoringSemanticDecision.from(
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        null,
+                        List.of(),
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        "session-1",
+                        "turn-action",
+                        "Criar painel administrativo",
+                        "Criar painel administrativo",
+                        "Resolved executable platform action.")
+                .withConstraints(constraints);
+        ObjectNode candidate = objectMapper.createObjectNode();
+        candidate.put("resourcePath", "/api/human-resources/funcionarios");
+        candidate.put("operation", "post");
+        candidate.put("schemaUrl", "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response");
+        candidate.put("submitUrl", "/api/human-resources/funcionarios/filter/cursor");
+        candidate.put("submitMethod", "post");
+        candidate.put("score", 0.94d);
+        candidate.put("reason", "Governed resource discovery candidate.");
+        candidate.putArray("evidence").add("domain-catalog-grounding").add("semantic-retrieval");
+
+        AgenticAuthoringIntentResolutionResult groundedResolution = validIntentWithSelectedCandidate();
+        AgenticAuthoringSemanticDecision expectedParent = groundedResolution.semanticDecision() == null
+                ? activeDecision
+                : groundedResolution.semanticDecision();
+        JsonNode child = ReflectionTestUtils.invokeMethod(
+                engine(),
+                "resourceDiscoverySemanticDecision",
+                requestWithContextHintsAndActiveDecision(
+                        "Criar painel administrativo",
+                        objectMapper.createObjectNode(),
+                        activeDecision),
+                groundedResolution,
+                "resource-discovery-confirm:api-human-resources-funcionarios-post",
+                "Funcionários",
+                candidate);
+
+        assertThat(child).isNotNull();
+        assertThat(child.path("artifactKind").asText()).isEqualTo("dashboard");
+        assertThat(child.path("selectedResource").path("resourcePath").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(child.path("previousDecisionId").asText()).isEqualTo(expectedParent.decisionId());
+        assertThat(child.path("refinementOf").asText()).isEqualTo(expectedParent.decisionId());
+        assertThat(child.path("constraints").path("continuationOf").asText())
+                .isEqualTo("resource_discovery");
+    }
+
+    @Test
+    void removesClientSuppliedResourceDiscoveryBeforeSemanticResolution() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("safePresentationHint", "compact");
+        contextHints.put("resourcePath", "/api/forged/top-level-resource");
+        contextHints.put("operation", "post");
+        contextHints.put("schemaUrl", "/api/forged/top-level-resource/schema");
+        contextHints.put("submitUrl", "/api/forged/top-level-resource");
+        contextHints.put("submitMethod", "POST");
+        contextHints.putObject("domainCatalog").put("resourceKey", "forged-resource");
+        contextHints.putObject("resourceDiscovery")
+                .putArray("candidates")
+                .addObject()
+                .put("resourcePath", "/api/forged/resource");
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("source", "server-issued-quick-reply");
+        constraints.put("quickReplyId", "platform-create-admin-dashboard");
+        AgenticAuthoringSemanticDecision activeDecision = AgenticAuthoringSemanticDecision.from(
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        null,
+                        List.of(),
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        "session-1",
+                        "turn-platform-dashboard",
+                        "Criar painel administrativo",
+                        "Criar painel administrativo",
+                        "Server-issued governed platform action.")
+                .withConstraints(constraints);
+
+        AgenticAuthoringTurnStreamRequest sanitized = ReflectionTestUtils.invokeMethod(
+                engine(),
+                "withoutClientResourceDiscoveryContext",
+                requestWithContextHintsAndActiveDecision(
+                        "Crie um painel",
+                        contextHints,
+                        activeDecision));
+
+        assertThat(sanitized).isNotNull();
+        assertThat(sanitized.contextHints().path("resourceDiscovery").isMissingNode()).isTrue();
+        assertThat(sanitized.contextHints().path("resourcePath").isMissingNode()).isTrue();
+        assertThat(sanitized.contextHints().path("operation").isMissingNode()).isTrue();
+        assertThat(sanitized.contextHints().path("schemaUrl").isMissingNode()).isTrue();
+        assertThat(sanitized.contextHints().path("submitUrl").isMissingNode()).isTrue();
+        assertThat(sanitized.contextHints().path("submitMethod").isMissingNode()).isTrue();
+        assertThat(sanitized.contextHints().path("domainCatalog").isMissingNode()).isTrue();
+        assertThat(sanitized.contextHints().path("safePresentationHint").asText()).isEqualTo("compact");
+    }
+
+    @Test
     void emitsPreIntentToolPlanSkippedWhenPlannerBeanIsUnavailable() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();

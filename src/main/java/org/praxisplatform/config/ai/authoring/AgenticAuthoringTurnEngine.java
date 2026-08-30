@@ -259,6 +259,7 @@ public class AgenticAuthoringTurnEngine {
         request = withoutAgenticApplyTargetContext(request);
         request = withoutClientAuthoringEvidenceContext(request);
         request = withoutClientVerifiedDomainOperations(request);
+        request = withoutClientResourceDiscoveryContext(request);
         request = withGroundedRuntimeComponentContext(request);
         AgenticAuthoringTurnState state = initialState(request);
         List<AiProviderInvocationTelemetry> turnProviderInvocations = new ArrayList<>();
@@ -2175,7 +2176,8 @@ public class AgenticAuthoringTurnEngine {
                                 ? "Use " + label + " como fonte governada para a tela."
                                 : activeDecision.activeObjective(),
                         "The user may select this governed resource discovered for the active authoring decision.")
-                .withConstraints(constraints);
+                .withConstraints(constraints)
+                .withParentLineage(activeDecision);
         return objectMapper.valueToTree(decision);
     }
 
@@ -6355,6 +6357,29 @@ public class AgenticAuthoringTurnEngine {
         }
         ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
         sanitized.remove("verifiedDomainOperations");
+        return copyWithContextHints(request, sanitized.isEmpty() ? null : sanitized);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withoutClientResourceDiscoveryContext(
+            AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
+            return request;
+        }
+        ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
+        sanitized.remove("resourceDiscovery");
+        AgenticAuthoringSemanticDecision activeDecision = request.activeSemanticDecision();
+        if (activeDecision != null
+                && activeDecision.constraints() != null
+                && "server-issued-quick-reply".equals(
+                        activeDecision.constraints().path("source").asText(""))) {
+            sanitized.remove(List.of(
+                    "resourcePath",
+                    "operation",
+                    "schemaUrl",
+                    "submitUrl",
+                    "submitMethod",
+                    "domainCatalog"));
+        }
         return copyWithContextHints(request, sanitized.isEmpty() ? null : sanitized);
     }
 

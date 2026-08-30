@@ -4,12 +4,12 @@ param(
     [string] $Ref = "main",
     [ValidateSet("openai", "gemini")]
     [string] $Provider = "openai",
-    [string] $QuickstartRef = "cdb9ef3ae29155ec676149fec21d1147979b8211",
-    [string] $MetadataRef = "83e32d40e8a6338953580616c762f4722fa3b4f6",
-    [string] $UiRef = "2882822b4b6202aa94665d2ba5769ee369fe559b",
+    [string] $QuickstartRef = "39b75011f29b5eeb942b923b5af14df4fcf1af3a",
+    [string] $MetadataRef = "800ccb62a4a9881a359d8d7dfa5724adfcc28035",
+    [string] $UiRef = "98aeffc733f3ea9879b993f7e6d5a4877e857c45",
     [int] $QuickstartStartupTimeoutSeconds = 180,
     [switch] $RunPageBuilderFullE2E,
-    [ValidateSet("smoke", "single-table", "full")]
+    [ValidateSet("smoke", "single-table", "capability-continuation", "full")]
     [string] $PageBuilderE2EMode = "smoke",
     [int] $PageBuilderE2ETimeoutMinutes = 30,
     [string] $Token = "",

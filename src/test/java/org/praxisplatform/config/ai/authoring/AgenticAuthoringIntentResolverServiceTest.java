@@ -3053,9 +3053,234 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.quickReplies().get(0).semanticDecision().path("operationKind").asText())
                 .isEqualTo("create");
         assertThat(result.quickReplies().get(0).semanticDecision().path("artifactKind").asText())
-                .isEqualTo("page");
+                .isEqualTo("dashboard");
         assertThat(result.quickReplies().get(0).semanticDecision().path("changeKind").asText())
                 .isEqualTo("create_artifact");
+        assertThat(result.semanticDecision()).isNotNull();
+        JsonNode dashboardDecision = result.quickReplies().get(0).semanticDecision();
+        assertThat(dashboardDecision.path("decisionId").asText())
+                .isNotEqualTo(result.semanticDecision().decisionId());
+        assertThat(dashboardDecision.path("previousDecisionId").asText())
+                .isEqualTo(result.semanticDecision().decisionId());
+        assertThat(dashboardDecision.path("refinementOf").asText())
+                .isEqualTo(result.semanticDecision().decisionId());
+        assertThat(dashboardDecision.path("constraints").path("resourceGroundingRequired").asBoolean())
+                .isTrue();
+        assertThat(dashboardDecision.path("constraints").path("conceptKeys")).isEmpty();
+    }
+
+    @Test
+    void serverIssuedDashboardActionUsesGovernedDiscoveryAndPreservesChildLineage() {
+        AgenticAuthoringSemanticDecision actionDecision = AgenticAuthoringSemanticDecision.from(
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        null,
+                        List.of(),
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        "conversation-1",
+                        "turn-guidance:platform-create-admin-dashboard",
+                        "Criar painel administrativo",
+                        "Criar painel administrativo",
+                        "Backend-issued platform capability action.")
+                .withConstraints(objectMapper.createObjectNode()
+                        .put("source", "server-issued-quick-reply")
+                        .put("quickReplyId", "platform-create-admin-dashboard")
+                        .put("continuationOf", "platform_capability_catalog")
+                        .put("resourceGroundingRequired", true)
+                        .set("conceptKeys", objectMapper.createArrayNode()));
+
+        AgenticAuthoringIntentResolutionResult missingSubject = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Criar painel administrativo",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        "conversation-1",
+                        "turn-action",
+                        List.of(),
+                        null,
+                        List.of(),
+                        null,
+                        actionDecision));
+
+        assertThat(missingSubject.valid()).isFalse();
+        assertThat(missingSubject.operationKind()).isEqualTo("create");
+        assertThat(missingSubject.artifactKind()).isEqualTo("dashboard");
+        assertThat(missingSubject.gate().messages()).contains("resource-candidate-required");
+        assertThat(missingSubject.quickReplies())
+                .anySatisfy(reply -> assertThat(reply.contextHints().path("tool").asText())
+                        .isEqualTo(AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES));
+        assertThat(missingSubject.semanticDecision().previousDecisionId())
+                .isEqualTo(actionDecision.decisionId());
+        assertThat(missingSubject.semanticDecision().refinementOf())
+                .isEqualTo(actionDecision.decisionId());
+
+        AgenticAuthoringCandidate employeeCandidate = candidateWithEvidence(
+                "/api/human-resources/funcionarios",
+                0.94d,
+                List.of(
+                        "domain-catalog-grounding",
+                        "semantic-retrieval",
+                        "schema-grounding-verified",
+                        "resource-capabilities-verified"));
+        ObjectNode contextHints = resourceDiscoveryContext("dashboard", List.of(employeeCandidate));
+        AgenticAuthoringIntentResolutionResult grounded = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Criar painel administrativo",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        "conversation-1",
+                        "turn-action-grounded",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints,
+                        actionDecision));
+
+        assertThat(grounded.selectedCandidate()).isNotNull();
+        assertThat(grounded.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(grounded.artifactKind()).isEqualTo("dashboard");
+        assertThat(grounded.semanticDecision().previousDecisionId())
+                .isEqualTo(actionDecision.decisionId());
+        assertThat(grounded.semanticDecision().refinementOf())
+                .isEqualTo(actionDecision.decisionId());
+
+        AgenticAuthoringSemanticDecision resourceChoiceDecision = AgenticAuthoringSemanticDecision.from(
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        employeeCandidate,
+                        List.of(employeeCandidate),
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        actionDecision,
+                        "conversation-1",
+                        "turn-resource-choice",
+                        "Use Funcionários como fonte governada para a tela.",
+                        "Criar painel administrativo",
+                        "Backend-issued resource discovery choice.")
+                .withConstraints(objectMapper.createObjectNode()
+                        .put("source", "server-issued-quick-reply")
+                        .put("quickReplyId", "resource-discovery-confirm:funcionarios")
+                        .put("continuationOf", "resource_discovery")
+                        .put("resourceGroundingRequired", true)
+                        .set("conceptKeys", objectMapper.createArrayNode()))
+                .withParentLineage(actionDecision);
+        AgenticAuthoringIntentResolutionResult persistedResourceChoice = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Use Funcionários como fonte governada para a tela.",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        "conversation-1",
+                        "turn-resource-choice",
+                        List.of(),
+                        null,
+                        List.of(),
+                        null,
+                        resourceChoiceDecision));
+
+        assertThat(persistedResourceChoice.selectedCandidate()).isNotNull();
+        assertThat(persistedResourceChoice.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(persistedResourceChoice.semanticDecision().previousDecisionId())
+                .isEqualTo(resourceChoiceDecision.decisionId());
+        assertThat(persistedResourceChoice.semanticDecision().constraints()
+                .path("resourceGroundingRequired").asBoolean()).isTrue();
+    }
+
+    @Test
+    void serverIssuedDashboardActionPublishesExecutableResourceChoicesWhenCandidatesAreAmbiguous() {
+        AgenticAuthoringSemanticDecision actionDecision = AgenticAuthoringSemanticDecision.from(
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        null,
+                        List.of(),
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        "conversation-1",
+                        "turn-guidance:platform-create-admin-dashboard",
+                        "Criar painel administrativo",
+                        "Criar painel administrativo",
+                        "Backend-issued platform capability action.")
+                .withConstraints(objectMapper.createObjectNode()
+                        .put("source", "server-issued-quick-reply")
+                        .put("quickReplyId", "platform-create-admin-dashboard")
+                        .put("continuationOf", "platform_capability_catalog")
+                        .put("resourceGroundingRequired", true)
+                        .set("conceptKeys", objectMapper.createArrayNode()));
+        AgenticAuthoringCandidate employeeCandidate = candidateWithEvidence(
+                "/api/human-resources/funcionarios",
+                0.91d,
+                List.of("domain-catalog-grounding", "semantic-retrieval", "schema-grounding-verified"));
+        AgenticAuthoringCandidate departmentCandidate = candidateWithEvidence(
+                "/api/human-resources/departamentos",
+                0.90d,
+                List.of("domain-catalog-grounding", "semantic-retrieval", "schema-grounding-verified"));
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Criar painel administrativo",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/page-builder-ia",
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        "conversation-1",
+                        "turn-resource-discovery",
+                        List.of(),
+                        null,
+                        List.of(),
+                        resourceDiscoveryContext(
+                                "dashboard",
+                                List.of(employeeCandidate, departmentCandidate)),
+                        actionDecision));
+
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.semanticDecision()).isNotNull();
+        assertThat(result.quickReplies()).hasSizeGreaterThanOrEqualTo(2);
+        assertThat(result.quickReplies()).allSatisfy(reply -> {
+            assertThat(reply.contextHints().path("source").asText()).isEqualTo("resourceDiscovery");
+            assertThat(reply.semanticDecision().path("selectedResource").path("resourcePath").asText())
+                    .startsWith("/api/human-resources/");
+            assertThat(reply.semanticDecision().path("previousDecisionId").asText())
+                    .isEqualTo(result.semanticDecision().decisionId());
+            assertThat(reply.semanticDecision().path("refinementOf").asText())
+                    .isEqualTo(result.semanticDecision().decisionId());
+            assertThat(reply.semanticDecision().path("constraints").path("continuationOf").asText())
+                    .isEqualTo("resource_discovery");
+        });
     }
 
     @Test

@@ -796,6 +796,27 @@ Assim, pedidos como "mantem os dados, so muda a visualizacao" preservam a
 fonte/recurso anterior e trocam apenas `artifactKind`, `visualIntent` ou
 `chartType` pela politica canonica.
 
+Guidance consultativa com acoes executaveis segue a mesma regra de lineage de
+forma estrita. O backend cria a decisao-pai consultativa antes de materializar
+os chips e cada `quickReplies[].semanticDecision` aponta para ela por
+`previousDecisionId` e `refinementOf`. A selecao de uma acao produz nova
+decisao; se ainda faltar business subject, ela permanece `canApply=false`,
+executa discovery governado e publica escolhas de recurso como novas filhas.
+Quando o discovery retornar varios candidatos, cada opcao publicada deve carregar
+uma `semanticDecision` filha completa com `selectedResource`; `contextHints`
+tecnicos sao apenas apresentacao e nunca substituem essa autoridade. Isso permite
+que o hardening descarte `resourcePath` vindo do browser sem perder a selecao
+emitida pelo proprio backend.
+Somente candidatos devolvidos pela tool no turno corrente ou uma decisao de
+recurso previamente emitida pelo backend podem entrar na resolucao. Um bloco
+`contextHints.resourceDiscovery` enviado pelo browser e descartado antes da
+resolucao. Em continuacoes emitidas pelo servidor, `resourcePath`, operacao,
+schema, submit target e `domainCatalog` top-level do browser tambem sao
+descartados; a selecao e reconstruida de `activeSemanticDecision.selectedResource`
+persistida. A retomada aceita apenas decisoes do resultado terminal mais recente
+da mesma thread e principal; continuacoes de capability catalog e resource
+discovery sem pai persistido correspondente falham fechadas.
+
 Antes da selecao de recurso, o backend deve montar um pacote canonico de
 evidencias em `semanticDecision.retrievedEvidence`. Esse bundle deve registrar
 evidencias recuperadas de `api_metadata`, `/schemas/filtered`, `capabilities`,

@@ -16,7 +16,7 @@ param(
     [int] $UiStartupTimeoutSec = 600,
     [int] $StreamProcessingTimeoutSeconds = 0,
     [int] $ApiCatalogIndexingTimeoutSec = 900,
-    [ValidateSet("smoke", "single-table", "full")]
+    [ValidateSet("smoke", "single-table", "capability-continuation", "full")]
     [string] $ValidationMode = "smoke",
     [int] $PlaywrightTestTimeoutMs = 0,
     [int] $Retries = -1,
@@ -499,7 +499,7 @@ foreach ($requiredPath in @($QuickstartRoot, $MetadataRoot, $UiRoot, $EnvFile, $
 $gateMatrix = Get-Content -LiteralPath $matrixPath -Raw | ConvertFrom-Json
 $modeMatrix = $gateMatrix.modes.$ValidationMode
 if ($null -eq $modeMatrix) { throw "Validation mode is missing from the canonical gate matrix: $ValidationMode" }
-$isHumanResourcesFocusedMode = $ValidationMode -in @("smoke", "single-table")
+$isHumanResourcesFocusedMode = $ValidationMode -in @("smoke", "single-table", "capability-continuation")
 $selectedScenarioIds = @($modeMatrix.scenarios | ForEach-Object { [string] $_ })
 if ($selectedScenarioIds.Count -eq 0) {
     throw "Validation mode must declare at least one executable scenario: $ValidationMode"
@@ -794,7 +794,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             indexingState = "READY"
             scope = if ($ValidationMode -eq "smoke") {
                 "human-resources-smoke"
-            } elseif ($ValidationMode -eq "single-table") {
+            } elseif ($ValidationMode -in @("single-table", "capability-continuation")) {
                 "human-resources-focused"
             } else {
                 "full"

@@ -143,6 +143,38 @@ public record AgenticAuthoringSemanticDecision(
                 confidence);
     }
 
+    AgenticAuthoringSemanticDecision withParentLineage(AgenticAuthoringSemanticDecision parentDecision) {
+        String parentDecisionId = parentDecision == null ? "" : safe(parentDecision.decisionId());
+        if (parentDecisionId.isBlank()) {
+            return this;
+        }
+        return new AgenticAuthoringSemanticDecision(
+                schemaVersion,
+                decisionId,
+                operationKind,
+                artifactKind,
+                changeKind,
+                selectedResource,
+                visualizationDecision,
+                retrievalEvidence,
+                retrievedEvidence,
+                reviewRequired,
+                reviewReason,
+                parentDecisionId,
+                parentDecisionId,
+                conversationId,
+                turnId,
+                userGoal,
+                activeObjective,
+                artifactIntent,
+                visualIntent,
+                constraints,
+                refinement,
+                parentDecisionId,
+                rationale,
+                confidence);
+    }
+
     static AgenticAuthoringSemanticDecision from(
             String operationKind,
             String artifactKind,
