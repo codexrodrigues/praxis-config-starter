@@ -72,11 +72,21 @@ Assert-True (([string] $result.contractHash) -match '^[0-9a-f]{64}$') "The Confi
 Assert-True ($null -eq $result.failureType) "A successful publication cannot retain a gate failure."
 Assert-True ($null -ne $result.diagnosticEvidence) "Successful publication must expose diagnosticEvidence as an empty array."
 Assert-True (@($result.diagnosticEvidence).Count -eq 0) "Successful publication cannot retain failure diagnostic projections."
+Assert-True (-not [string]::IsNullOrWhiteSpace([string] $result.validationMode)) "The canonical validation mode is missing."
+$evidenceValidation = $result.evidenceValidation
+Assert-True ($null -ne $evidenceValidation -and $evidenceValidation.passed -eq $true) "Raw Playwright evidence validation did not pass."
+$runAttestation = $evidenceValidation.attestation
+Assert-True ($null -ne $runAttestation -and $runAttestation.schemaVersion -eq "praxis.page-builder-agentic-gate-run-attestation/v1") "The sanitized run attestation is missing."
+Assert-True (([string] $runAttestation.reportSha256) -match '^[0-9a-f]{64}$') "The raw Playwright report hash is invalid."
+Assert-True ([int] $runAttestation.retries -eq 0) "The sanitized run attestation contains retries."
 Assert-True ($result.sourceAudit.passed -eq $true -and $sourceAudit.passed -eq $true) "The real-source audit did not pass."
 Assert-True ([int] $result.playwright.discovered -eq [int] $result.matrix.expectedDiscovered) "Playwright discovery diverges from the matrix."
 Assert-True ([int] $result.playwright.executed -ge [int] $result.matrix.minimumExecuted) "Playwright execution is below the matrix minimum."
 Assert-True ([int] $result.playwright.skipped -eq [int] $result.matrix.expectedSkipped) "Playwright skipped count diverges from the matrix."
 Assert-True ([int] $result.playwright.failed -eq 0 -and [int] $result.playwright.passed -eq [int] $result.playwright.executed) "Not every executed Playwright test passed."
+Assert-True ([int] $result.playwright.flaky -eq 0 -and [int] $result.playwright.retryAttempts -eq 0) "Playwright flaky or retry evidence is not publishable."
+Assert-True ([int64] $runAttestation.durationMs -eq [int64] $result.playwright.durationMs) "Attested duration diverges from Playwright."
+Assert-True ([int] $runAttestation.discovered -eq [int] $result.playwright.discovered -and [int] $runAttestation.passed -eq [int] $result.playwright.passed) "Attested test counts diverge from Playwright."
 $scenarioEvidence = @($result.scenarioEvidence)
 $receiptRequirements = @($result.matrix.receiptRequirements)
 $requiresMissionReceipt = @($result.matrix.scenarios) -contains 'live-resource-workspace-command'
@@ -96,6 +106,24 @@ foreach ($evidence in $scenarioEvidence) {
     $actualAssertions = @($evidence.functionalAssertions | Sort-Object)
     $requiredAssertions = @($requirements[0].requiredFunctionalAssertions | Sort-Object)
     Assert-True (($actualAssertions -join ',') -eq ($requiredAssertions -join ',')) "Scenario functional assertions diverge from the published matrix requirement."
+}
+$attestedReceipts = @($runAttestation.receipts)
+Assert-True ($attestedReceipts.Count -eq $receiptRequirements.Count) "Attested receipt count diverges from the matrix."
+foreach ($requirement in $receiptRequirements) {
+    $publishedReceipt = @($scenarioEvidence | Where-Object { $_.scenarioId -eq $requirement.scenarioId })
+    $attestedReceipt = @($attestedReceipts | Where-Object { $_.scenarioId -eq $requirement.scenarioId })
+    Assert-True ($publishedReceipt.Count -eq 1 -and $attestedReceipt.Count -eq 1) "Each matrix receipt must be published and attested exactly once."
+    Assert-True ($attestedReceipt[0].firstPassFunctional -eq $true) "Attested receipt is not first-pass functional."
+    Assert-True ([int64] $attestedReceipt[0].totalMs -eq [int64] $publishedReceipt[0].timingMs.total) "Attested receipt timing diverges from published evidence."
+    Assert-True ([string] $attestedReceipt[0].persistedPayloadSha256 -eq [string] $publishedReceipt[0].persistence.persistedPayloadSha256) "Attested receipt persistence hash diverges from published evidence."
+}
+$semanticRefinementRequirements = @($result.matrix.semanticRefinementRequirements)
+$attestedSemanticRefinements = @($runAttestation.semanticRefinements)
+Assert-True ($attestedSemanticRefinements.Count -eq $semanticRefinementRequirements.Count) "Semantic refinement attestation count diverges from the matrix."
+foreach ($requirement in $semanticRefinementRequirements) {
+    $attestedRefinement = @($attestedSemanticRefinements | Where-Object { $_.scenarioId -eq $requirement.scenarioId })
+    Assert-True ($attestedRefinement.Count -eq 1 -and $attestedRefinement[0].canonical -eq $true) "Canonical semantic refinement attestation is missing."
+    Assert-True ((@($attestedRefinement[0].requiredOperationIds) -join ',') -eq (@($requirement.requiredOperationIds) -join ',')) "Semantic refinement operations diverge from the matrix."
 }
 Assert-True (@($result.git).Count -eq 4) "The four immutable repository identities are required."
 foreach ($identity in @($result.git)) {

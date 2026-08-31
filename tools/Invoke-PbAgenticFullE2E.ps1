@@ -1254,6 +1254,7 @@ $sourceAuditPath = Join-Path $artifactRoot "source-audit.json"
 $playwrightReportPath = Join-Path $artifactRoot "playwright-results.json"
 $evidenceValidationSummaryPath = Join-Path $artifactRoot "evidence-validation-summary.json"
 $evidenceValidationPassed = $false
+$evidenceValidationAttestation = $null
 $gateFailure = $null
 $pgvectorEvidence = $null
 $loopbackVerified = $false
@@ -1550,6 +1551,27 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         if ($LASTEXITCODE -ne 0) {
             throw "Canonical Page Builder evidence validation failed with exit code $LASTEXITCODE."
         }
+        $evidenceValidationSummary = Get-Content -LiteralPath $evidenceValidationSummaryPath -Raw | ConvertFrom-Json
+        $validatedRuns = @($evidenceValidationSummary.runs)
+        if ($evidenceValidationSummary.schemaVersion -ne "praxis.page-builder-agentic-gate-evidence-summary/v1" -or
+            $evidenceValidationSummary.mode -ne $ValidationMode -or
+            [int] $evidenceValidationSummary.expectedRuns -ne 1 -or
+            [int] $evidenceValidationSummary.passedRuns -ne 1 -or
+            $evidenceValidationSummary.stable -ne $true -or
+            $validatedRuns.Count -ne 1) {
+            throw "Canonical Page Builder evidence validator returned an invalid single-run summary."
+        }
+        $validatedRun = $validatedRuns[0]
+        $evidenceValidationAttestation = [ordered]@{
+            schemaVersion = "praxis.page-builder-agentic-gate-run-attestation/v1"
+            reportSha256 = [string] $validatedRun.reportSha256
+            durationMs = [int64] $validatedRun.durationMs
+            discovered = [int] $validatedRun.discovered
+            passed = [int] $validatedRun.passed
+            retries = [int] $validatedRun.retries
+            receipts = @($validatedRun.receipts)
+            semanticRefinements = @($validatedRun.semanticRefinements)
+        }
         $evidenceValidationPassed = $true
         Write-Phase "Playwright Page Builder validation completed."
     } finally {
@@ -1615,6 +1637,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         evidenceValidation = [ordered]@{
             passed = $evidenceValidationPassed
             artifact = "evidence-validation-summary.json"
+            attestation = $evidenceValidationAttestation
         }
         git = $gitIdentities
         versions = [ordered]@{
@@ -1646,6 +1669,10 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             playwrightTestTimeoutMs = $PlaywrightTestTimeoutMs
             retries = $Retries
             humanTurnLimit = if ($humanTurnLimit -gt 0) { $humanTurnLimit } else { $null }
+            domainCatalogRagRequired = $modeDomainCatalogRagRequired
+            domainCatalogResourceKey = if ([string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey)) { $null } else { $modeDomainCatalogResourceKey }
+            apiCatalogGroup = $modeApiCatalogGroup
+            apiCatalogPathPrefixes = @($modeApiCatalogPathPrefixes)
             diagnosticProjectionRequirements = @($gateMatrix.evidence.governedStateProjections |
                 Where-Object { $_.scenarioId -in $selectedScenarioIds } |
                 ForEach-Object {

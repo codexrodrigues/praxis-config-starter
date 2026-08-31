@@ -29,10 +29,18 @@ test('runs the portable evidence validator and publishes semantic requirements',
   assert.match(runnerSource, /validate-page-builder-agentic-gate-evidence\.mjs/);
   assert.match(runnerSource, /--expected-runs 1/);
   assert.match(runnerSource, /--report \$playwrightReportPath/);
+  assert.match(runnerSource, /praxis\.page-builder-agentic-gate-run-attestation\/v1/);
+  assert.match(runnerSource, /reportSha256 = \[string\] \$validatedRun\.reportSha256/);
+  assert.match(runnerSource, /semanticRefinements = @\(\$validatedRun\.semanticRefinements\)/);
   assert.match(runnerSource, /\$evidenceValidationPassed\s*=\s*\$true/);
   assert.match(runnerSource, /passed = \$evidenceValidationPassed/);
+  assert.match(runnerSource, /attestation = \$evidenceValidationAttestation/);
   assert.match(runnerSource, /humanTurnLimit = if \(\$humanTurnLimit -gt 0\)/);
   assert.match(runnerSource, /semanticRefinementRequirements = @\(/);
+  assert.match(runnerSource, /domainCatalogRagRequired = \$modeDomainCatalogRagRequired/);
+  assert.match(runnerSource, /domainCatalogResourceKey = if \(/);
+  assert.match(runnerSource, /apiCatalogGroup = \$modeApiCatalogGroup/);
+  assert.match(runnerSource, /apiCatalogPathPrefixes = @\(\$modeApiCatalogPathPrefixes\)/);
   assert.match(runnerSource, /requiredOperationIds = @\(\$_\.requiredOperationIds\)/);
   assert.match(runnerSource, /\$publishedDiagnosticEvidence\s*=\s*@\(\)/);
   assert.match(runnerSource, /diagnosticEvidence = @\(\$publishedDiagnosticEvidence\)/);

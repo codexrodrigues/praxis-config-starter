@@ -39,6 +39,10 @@ function assertUniqueStrings(values, context, pattern = null) {
   assertCondition(new Set(values).size === values.length, `${context} must not contain duplicates.`);
 }
 
+function assertNonNegativeInteger(value, context) {
+  assertCondition(Number.isInteger(value) && value >= 0, `${context} must be a non-negative integer.`);
+}
+
 function sameOrderedStrings(left, right) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
@@ -305,6 +309,8 @@ export function validateGateEvidenceSet({ reportPaths, expectedRuns, profile }) 
       ...validateGateReport(report, reportPath, profile),
     };
   });
+  assertCondition(new Set(runs.map((run) => run.reportSha256)).size === runs.length,
+    'Run reports must have unique content hashes.');
   return {
     schemaVersion: 'praxis.page-builder-agentic-gate-evidence-summary/v1',
     mode: profile.mode,
@@ -321,17 +327,248 @@ export function validateGateEvidenceSet({ reportPaths, expectedRuns, profile }) 
   };
 }
 
+function validatePublishedReceipt(evidence, definition) {
+  assertObject(evidence, `Published receipt ${definition.scenarioId}`);
+  assertCondition(evidence.outcome === 'first-pass'
+      && evidence.firstPassFunctional === true
+      && evidence.authoringFirstPass === true
+      && evidence.playwrightRetryAttempts === 0,
+  `Published receipt ${definition.scenarioId} is not a zero-retry first-pass result.`);
+  const receipt = {
+    schemaVersion: evidence.schemaVersion,
+    scenarioId: evidence.scenarioId,
+    archetype: evidence.archetype,
+    authoringFirstPass: evidence.authoringFirstPass,
+    interaction: evidence.interaction,
+    terminal: evidence.terminal,
+    apply: evidence.apply,
+    persistence: evidence.persistence,
+    functionalAssertions: evidence.functionalAssertions,
+    timingMs: evidence.timingMs,
+  };
+  return validateReceipt(receipt, definition, evidence.playwrightRetryAttempts);
+}
+
+function validatePublishedAttestation(attestation, result, profile, resultPath) {
+  assertObject(attestation, `Result ${resultPath} evidence attestation`);
+  assertCondition(
+    attestation.schemaVersion === 'praxis.page-builder-agentic-gate-run-attestation/v1',
+    `Result ${resultPath} has an unexpected evidence attestation schemaVersion.`,
+  );
+  assertCondition(/^[0-9a-f]{64}$/.test(attestation.reportSha256),
+    `Result ${resultPath} evidence attestation reportSha256 is invalid.`);
+  assertNonNegativeInteger(attestation.durationMs, `Result ${resultPath} evidence durationMs`);
+  assertNonNegativeInteger(attestation.discovered, `Result ${resultPath} evidence discovered`);
+  assertNonNegativeInteger(attestation.passed, `Result ${resultPath} evidence passed`);
+  assertNonNegativeInteger(attestation.retries, `Result ${resultPath} evidence retries`);
+  assertCondition(attestation.discovered === profile.expectedDiscovered
+      && attestation.passed === profile.expectedDiscovered
+      && attestation.retries === 0,
+  `Result ${resultPath} evidence attestation does not prove the zero-retry profile.`);
+
+  const publishedReceipts = result.scenarioEvidence ?? [];
+  assertCondition(Array.isArray(publishedReceipts)
+      && publishedReceipts.length === profile.receiptRequirements.length,
+  `Result ${resultPath} published receipt count diverges from the gate profile.`);
+  assertCondition(Array.isArray(attestation.receipts)
+      && attestation.receipts.length === profile.receiptRequirements.length,
+  `Result ${resultPath} attested receipt count diverges from the gate profile.`);
+  const receipts = profile.receiptRequirements.map((definition) => {
+    const evidenceMatches = publishedReceipts.filter((entry) => entry?.scenarioId === definition.scenarioId);
+    const attestedMatches = attestation.receipts.filter((entry) => entry?.scenarioId === definition.scenarioId);
+    assertCondition(evidenceMatches.length === 1 && attestedMatches.length === 1,
+      `Result ${resultPath} must publish and attest receipt ${definition.scenarioId} exactly once.`);
+    const validated = validatePublishedReceipt(evidenceMatches[0], definition);
+    const attested = attestedMatches[0];
+    assertCondition(attested.firstPassFunctional === true
+        && attested.totalMs === validated.totalMs
+        && attested.persistedPayloadSha256 === validated.persistedPayloadSha256,
+    `Result ${resultPath} attested receipt ${definition.scenarioId} diverges from published evidence.`);
+    return validated;
+  });
+
+  assertCondition(Array.isArray(attestation.semanticRefinements)
+      && attestation.semanticRefinements.length === profile.semanticRefinementRequirements.length,
+  `Result ${resultPath} semantic refinement attestation count diverges from the gate profile.`);
+  const semanticRefinements = profile.semanticRefinementRequirements.map((definition) => {
+    const matches = attestation.semanticRefinements.filter(
+      (entry) => entry?.scenarioId === definition.scenarioId,
+    );
+    assertCondition(matches.length === 1,
+      `Result ${resultPath} must attest semantic refinement ${definition.scenarioId} exactly once.`);
+    const evidence = matches[0];
+    assertCondition(evidence.canonical === true
+        && evidence.turns === profile.humanTurnLimit
+        && sameOrderedStrings(evidence.requiredOperationIds, definition.requiredOperationIds),
+    `Result ${resultPath} semantic refinement ${definition.scenarioId} diverges from the profile.`);
+    return evidence;
+  });
+
+  return { receipts, semanticRefinements };
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function validatePublishedGateResult(result, resultPath, profile) {
+  assertObject(result, `Published result ${resultPath}`);
+  assertCondition(result.schemaVersion === 'praxis.page-builder-agentic-production-like-result/v1',
+    `Published result ${resultPath} has an unexpected schemaVersion.`);
+  assertCondition(result.productionLike === true
+      && result.executionLane === 'live'
+      && result.e2ePassed === true
+      && result.criticalEndpointMocks === 0
+      && result.criticalInterceptionGuard?.passed === true
+      && result.failureType === null,
+  `Published result ${resultPath} is not a successful production-like execution.`);
+  assertCondition(result.validationMode === profile.mode,
+    `Published result ${resultPath} mode diverges from ${profile.mode}.`);
+  assertCondition(Array.isArray(result.diagnosticEvidence) && result.diagnosticEvidence.length === 0,
+    `Published result ${resultPath} contains failure diagnostic evidence.`);
+
+  const matrix = result.matrix;
+  assertObject(matrix, `Published result ${resultPath} matrix`);
+  assertCondition(matrix.schemaVersion === profile.matrixSchemaVersion
+      && sameOrderedStrings(matrix.scenarios, profile.scenarios)
+      && sameOrderedStrings(matrix.requiredPassedTests, profile.requiredPassedTests)
+      && matrix.expectedDiscovered === profile.expectedDiscovered
+      && matrix.minimumExecuted === profile.minimumExecuted
+      && matrix.expectedSkipped === profile.expectedSkipped
+      && matrix.retries === profile.retries
+      && matrix.domainCatalogRagRequired === profile.domainCatalogRagRequired
+      && matrix.domainCatalogResourceKey === profile.domainCatalogResourceKey
+      && matrix.apiCatalogGroup === profile.apiCatalogGroup
+      && sameOrderedStrings(matrix.apiCatalogPathPrefixes, profile.apiCatalogPathPrefixes),
+  `Published result ${resultPath} matrix projection diverges from the canonical profile.`);
+
+  const playwright = result.playwright;
+  assertObject(playwright, `Published result ${resultPath} Playwright summary`);
+  for (const property of [
+    'discovered', 'executed', 'passed', 'skipped', 'failed', 'flaky',
+    'attempts', 'retryAttempts', 'durationMs',
+  ]) {
+    assertNonNegativeInteger(playwright[property], `Published result ${resultPath} playwright.${property}`);
+  }
+  assertCondition(playwright.discovered === profile.expectedDiscovered
+      && playwright.executed === profile.expectedDiscovered
+      && playwright.passed === profile.expectedDiscovered
+      && playwright.skipped === profile.expectedSkipped
+      && playwright.failed === 0
+      && playwright.flaky === 0
+      && playwright.attempts === profile.expectedDiscovered
+      && playwright.retryAttempts === 0,
+  `Published result ${resultPath} Playwright summary is not exact and zero-retry.`);
+  assertCondition(Array.isArray(playwright.tests) && playwright.tests.length === profile.requiredPassedTests.length,
+    `Published result ${resultPath} Playwright test list diverges from the profile.`);
+  const testTitles = playwright.tests.map((entry) => entry?.title);
+  assertUniqueStrings(testTitles, `Published result ${resultPath} Playwright titles`);
+  assertCondition(sameOrderedStrings(testTitles, profile.requiredPassedTests)
+      && playwright.tests.every((entry) => entry.status === 'expected'
+        && entry.attempts === 1
+        && entry.retryAttempts === 0),
+  `Published result ${resultPath} Playwright tests are not exact zero-retry passes.`);
+
+  assertObject(result.evidenceValidation, `Published result ${resultPath} evidenceValidation`);
+  assertCondition(result.evidenceValidation.passed === true,
+    `Published result ${resultPath} did not pass the raw-report evidence validator.`);
+  const validated = validatePublishedAttestation(
+    result.evidenceValidation.attestation,
+    result,
+    profile,
+    resultPath,
+  );
+  assertCondition(result.evidenceValidation.attestation.durationMs === playwright.durationMs,
+    `Published result ${resultPath} attested duration diverges from Playwright.`);
+
+  const coordinateProjection = {
+    provider: result.provider,
+    model: result.model,
+    embeddingProvider: result.embeddingProvider,
+    contractHash: result.contractHash,
+    git: result.git,
+    versions: result.versions,
+    configStarterDependency: result.dependencyAttestation?.configStarter,
+    aiRegistrySnapshotHash: result.aiRegistry?.snapshotHash,
+    matrix,
+  };
+  const coordinateSha256 = createHash('sha256').update(stableJson(coordinateProjection)).digest('hex');
+  return {
+    resultPath,
+    reportSha256: result.evidenceValidation.attestation.reportSha256,
+    coordinateSha256,
+    durationMs: playwright.durationMs,
+    discovered: playwright.discovered,
+    passed: playwright.passed,
+    retries: 0,
+    ...validated,
+  };
+}
+
+export function validatePublishedGateEvidenceSet({ resultPaths, expectedRuns, profile }) {
+  assertCondition(Number.isInteger(expectedRuns) && expectedRuns > 0,
+    'expectedRuns must be a positive integer.');
+  assertCondition(Array.isArray(resultPaths) && resultPaths.length === expectedRuns,
+    `Expected exactly ${expectedRuns} published result(s), received ${resultPaths?.length ?? 0}.`);
+  const resolvedPaths = resultPaths.map((path) => resolve(path));
+  assertCondition(new Set(resolvedPaths).size === resolvedPaths.length,
+    'Published result paths must be unique.');
+  const runs = resolvedPaths.map((resultPath, index) => {
+    const bytes = readFileSync(resultPath);
+    const result = JSON.parse(bytes.toString('utf8'));
+    return {
+      run: index + 1,
+      resultSha256: createHash('sha256').update(bytes).digest('hex'),
+      ...validatePublishedGateResult(result, resultPath, profile),
+    };
+  });
+  assertCondition(new Set(runs.map((run) => run.reportSha256)).size === runs.length,
+    'Published runs must attest unique raw report hashes.');
+  assertCondition(new Set(runs.map((run) => run.coordinateSha256)).size === 1,
+    'Published runs must exercise identical immutable coordinates.');
+  return {
+    schemaVersion: 'praxis.page-builder-agentic-published-gate-evidence-summary/v1',
+    mode: profile.mode,
+    expectedRuns,
+    passedRuns: runs.length,
+    stable: true,
+    coordinateSha256: runs[0].coordinateSha256,
+    totals: {
+      discovered: runs.reduce((sum, run) => sum + run.discovered, 0),
+      passed: runs.reduce((sum, run) => sum + run.passed, 0),
+      retries: 0,
+      durationMs: runs.reduce((sum, run) => sum + run.durationMs, 0),
+    },
+    runs,
+  };
+}
+
 function parseCliArgs(args) {
-  const options = { matrixPath: defaultMatrixPath, mode: '', expectedRuns: 1, reportPaths: [] };
+  const options = {
+    matrixPath: defaultMatrixPath,
+    mode: '',
+    expectedRuns: 1,
+    reportPaths: [],
+    publicationResultPaths: [],
+  };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--matrix') options.matrixPath = resolve(args[++index] || '');
     else if (argument === '--mode') options.mode = String(args[++index] || '');
     else if (argument === '--expected-runs') options.expectedRuns = Number(args[++index]);
     else if (argument === '--report') options.reportPaths.push(resolve(args[++index] || ''));
+    else if (argument === '--publication-result') {
+      options.publicationResultPaths.push(resolve(args[++index] || ''));
+    }
     else throw new Error(`Unknown argument: ${argument}`);
   }
   assertCondition(options.mode.length > 0, '--mode is required.');
+  assertCondition((options.reportPaths.length > 0) !== (options.publicationResultPaths.length > 0),
+    'Use exactly one evidence source: --report or --publication-result.');
   return options;
 }
 
@@ -339,11 +576,17 @@ if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
   try {
     const options = parseCliArgs(process.argv.slice(2));
     const profile = resolveGateProfile(loadGateMatrix(options.matrixPath), options.mode);
-    const summary = validateGateEvidenceSet({
-      reportPaths: options.reportPaths,
-      expectedRuns: options.expectedRuns,
-      profile,
-    });
+    const summary = options.publicationResultPaths.length > 0
+      ? validatePublishedGateEvidenceSet({
+          resultPaths: options.publicationResultPaths,
+          expectedRuns: options.expectedRuns,
+          profile,
+        })
+      : validateGateEvidenceSet({
+          reportPaths: options.reportPaths,
+          expectedRuns: options.expectedRuns,
+          profile,
+        });
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
   } catch (error) {
     process.stderr.write(`Gate evidence validation failed: ${error.message}\n`);
