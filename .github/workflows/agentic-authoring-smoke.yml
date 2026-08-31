@@ -386,10 +386,17 @@ jobs:
         shell: pwsh
         working-directory: praxis-config-starter
         run: |
-          .\tools\Export-AgenticProductionLikeEvidence.ps1 `
-            -StarterRoot "$env:GITHUB_WORKSPACE\praxis-config-starter" `
-            -HttpArtifactRoot "$env:GITHUB_WORKSPACE\artifacts\ai-sse-smoke" `
-            -OutputRoot "$env:GITHUB_WORKSPACE\praxis-config-starter\artifacts\agentic-authoring-publication"
+          $includeLiveHttpSse = '${{ inputs.run_quickstart_http_smoke }}' -eq 'true' -and
+            '${{ inputs.domain_rule_lifecycle_only }}' -ne 'true'
+          $publicationArgs = @{
+            StarterRoot = "$env:GITHUB_WORKSPACE\praxis-config-starter"
+            OutputRoot = "$env:GITHUB_WORKSPACE\praxis-config-starter\artifacts\agentic-authoring-publication"
+            PublicationProfile = if ($includeLiveHttpSse) { 'page-builder-http-sse' } else { 'page-builder' }
+          }
+          if ($includeLiveHttpSse) {
+            $publicationArgs.HttpArtifactRoot = "$env:GITHUB_WORKSPACE\artifacts\ai-sse-smoke"
+          }
+          .\tools\Export-AgenticProductionLikeEvidence.ps1 @publicationArgs
 
       - name: Upload smoke artifacts
         if: always()

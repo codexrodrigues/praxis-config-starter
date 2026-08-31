@@ -42,7 +42,9 @@ Esse runner:
 - exige AI Registry `ready` com o hash do snapshot Config versionado, Domain Catalog ingerido e API Catalog com indexacao canonica `READY`;
 - exige que o teste negativo de interceptacao critica passe e deriva dele `criticalEndpointMocks=0`; o artifact registra tentativas e retries realmente observados;
 - desabilita trace, video e screenshot na lane live para que a evidencia publicavel permaneça estruturada e sanitizada;
-- valida e copia para `agentic-authoring-publication` apenas o resultado production-like, a auditoria de source e o resumo HTTP/SSE; nenhum log, payload, relatorio HTML ou JSON bruto do Playwright entra no artifact remoto;
+- valida e copia para `agentic-authoring-publication` apenas o resultado production-like e a auditoria de source no perfil explicito `page-builder`; o perfil `page-builder-http-sse` acrescenta o resumo HTTP/SSE somente quando a jornada live correspondente tambem foi executada;
+- nao mistura o lifecycle HTTP deterministico (`domain_rule_lifecycle_only=true`) com evidencia SSE de provider real: esse lifecycle usa `provider=not-used` e permanece uma prova separada, enquanto a publicacao Page Builder continua autocontida;
+- nenhum log, payload, relatorio HTML ou JSON bruto do Playwright entra no artifact remoto;
 - gera segredo de stream efemero, exige working trees limpos para fontes exercitadas diretamente, materializa Metadata da arvore exata de `git archive`, registra commit/tree SHAs e versoes efetivamente empacotadas sem segredos e comprova o teardown dos listeners.
 
 Testes deterministas com interceptacao ficam na config

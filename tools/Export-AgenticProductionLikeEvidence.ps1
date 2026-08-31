@@ -1,8 +1,9 @@
 param(
     [Parameter(Mandatory = $true)]
     [string] $StarterRoot,
-    [Parameter(Mandatory = $true)]
-    [string] $HttpArtifactRoot,
+    [ValidateSet("page-builder", "page-builder-http-sse")]
+    [string] $PublicationProfile = "page-builder-http-sse",
+    [string] $HttpArtifactRoot = "",
     [Parameter(Mandatory = $true)]
     [string] $OutputRoot
 )
@@ -27,17 +28,27 @@ if (Test-Path -LiteralPath $OutputRoot) {
     throw "Sanitized evidence output already exists: $OutputRoot"
 }
 
+$includeHttpSse = $PublicationProfile -eq "page-builder-http-sse"
+if ($includeHttpSse -and [string]::IsNullOrWhiteSpace($HttpArtifactRoot)) {
+    throw "HttpArtifactRoot is required for the page-builder-http-sse publication profile."
+}
+if (-not $includeHttpSse -and -not [string]::IsNullOrWhiteSpace($HttpArtifactRoot)) {
+    throw "HttpArtifactRoot is not valid for the page-builder publication profile."
+}
+
 $e2eRoot = Join-Path $StarterRoot "artifacts\page-builder-agentic-e2e"
 $resultFile = Get-LatestRequiredFile $e2eRoot "result.json"
 $sourceAuditFile = Join-Path $resultFile.Directory.FullName "source-audit.json"
 if (-not (Test-Path -LiteralPath $sourceAuditFile)) {
     throw "Source audit evidence is missing beside the production-like result."
 }
-$httpSummaryFile = Get-LatestRequiredFile $HttpArtifactRoot "summary.json"
-
 $result = Get-Content -LiteralPath $resultFile.FullName -Raw | ConvertFrom-Json
 $sourceAudit = Get-Content -LiteralPath $sourceAuditFile -Raw | ConvertFrom-Json
-$httpSummary = Get-Content -LiteralPath $httpSummaryFile.FullName -Raw | ConvertFrom-Json
+$httpSummary = $null
+if ($includeHttpSse) {
+    $httpSummaryFile = Get-LatestRequiredFile $HttpArtifactRoot "summary.json"
+    $httpSummary = Get-Content -LiteralPath $httpSummaryFile.FullName -Raw | ConvertFrom-Json
+}
 
 Assert-True ($result.schemaVersion -eq "praxis.page-builder-agentic-production-like-result/v1") "Unexpected production-like result schema."
 Assert-True ($result.productionLike -eq $true) "The browser result is not production-like."
@@ -134,13 +145,20 @@ foreach ($identity in @($result.git)) {
         Assert-True ($identity.name -eq 'praxis-metadata-starter' -and $identity.materialization -eq 'git-archive') "Only Metadata may have a normalized checkout, and only when the exact git archive is exercised."
     }
 }
-Assert-True ($httpSummary.health -eq "UP" -and $httpSummary.terminalSeen -eq $true -and $httpSummary.replayChecked -eq $true) "HTTP/SSE evidence is incomplete."
-Assert-True ($httpSummary.provider -ne "mock") "HTTP/SSE evidence used a mock provider."
+if ($includeHttpSse) {
+    Assert-True ($httpSummary.health -eq "UP" -and $httpSummary.terminalSeen -eq $true -and $httpSummary.replayChecked -eq $true) "HTTP/SSE evidence is incomplete."
+    Assert-True ($httpSummary.provider -ne "mock" -and $httpSummary.provider -ne "not-used") "HTTP/SSE evidence did not use a real provider."
+}
 
 $resultJson = $result | ConvertTo-Json -Depth 20
 $sourceAuditJson = $sourceAudit | ConvertTo-Json -Depth 20
-$httpSummaryJson = $httpSummary | ConvertTo-Json -Depth 20
-$publishedText = @($resultJson, $sourceAuditJson, $httpSummaryJson) -join "`n"
+$publishedDocuments = @($resultJson, $sourceAuditJson)
+$httpSummaryJson = $null
+if ($includeHttpSse) {
+    $httpSummaryJson = $httpSummary | ConvertTo-Json -Depth 20
+    $publishedDocuments += $httpSummaryJson
+}
+$publishedText = $publishedDocuments -join "`n"
 $secretPatterns = @(
     '(?i)sk-[a-z0-9_-]{20,}',
     '(?i)gh[pousr]_[a-z0-9]{20,}',
@@ -154,11 +172,14 @@ foreach ($pattern in $secretPatterns) {
 New-Item -ItemType Directory -Path $OutputRoot | Out-Null
 $resultJson | Set-Content -LiteralPath (Join-Path $OutputRoot "production-like-result.json") -Encoding utf8
 $sourceAuditJson | Set-Content -LiteralPath (Join-Path $OutputRoot "source-audit.json") -Encoding utf8
-$httpSummaryJson | Set-Content -LiteralPath (Join-Path $OutputRoot "http-sse-summary.json") -Encoding utf8
+if ($includeHttpSse) {
+    $httpSummaryJson | Set-Content -LiteralPath (Join-Path $OutputRoot "http-sse-summary.json") -Encoding utf8
+}
 $publishedFiles = @(Get-ChildItem -LiteralPath $OutputRoot -Recurse -File)
 
 [pscustomobject]@{
     schemaVersion = "praxis.agentic-authoring-publication/v1"
     passed = $true
+    publicationProfile = $PublicationProfile
     files = @($publishedFiles | ForEach-Object { $_.Name } | Sort-Object)
 } | ConvertTo-Json -Depth 4
