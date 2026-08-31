@@ -246,37 +246,19 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         return
     }
 
-    $intentResolution = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringIntentResolutionHttpE2E.ps1") @commonArgs | ConvertFrom-Json
-    $plan = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringPlanHttpE2E.ps1") @commonArgs | ConvertFrom-Json
-    $compile = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringCompileHttpE2E.ps1") @commonArgs | ConvertFrom-Json
-    $preview = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringPreviewHttpE2E.ps1") @commonArgs | ConvertFrom-Json
     $applyArgs = @{} + $commonArgs
     $applyArgs.StreamProcessingTimeoutSeconds = $StreamProcessingTimeoutSeconds
     $apply = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringApplyHttpE2E.ps1") @applyArgs | ConvertFrom-Json
-    $stream = & (Join-Path $PSScriptRoot "Invoke-QuickstartAiPatchStreamHttpE2E.ps1") `
-        -BaseUrl $base `
-        -Origin $Origin `
-        -TenantId $TenantId `
-        -UserId $UserId `
-        -Environment $Environment `
-        -Provider $Provider | ConvertFrom-Json
-    $domainRuleIntentRoutingSeen = (
-        $intentResolution.gateStatus -eq "route_required" -and
-        -not [bool] $intentResolution.componentEditPlanPresent -and
-        [bool] $intentResolution.pagePreviewSharedRuleRouteBlocked
-    )
 
     [pscustomobject]@{
         health = $health.status
         provider = $Provider
+        liveGateJourney = "governed-authoring-apply"
+        isolatedLegacyProviderProbesRun = $false
         baseUrl = $base
         quickstartRoot = $QuickstartRoot
         jarPath = $JarPath
         startedQuickstart = $startedQuickstart
-        intentRouteRequired = $intentResolution.gateStatus -eq "route_required"
-        intentSelectedResourcePath = $intentResolution.selectedResourcePath
-        domainRuleIntentRoutingSeen = $domainRuleIntentRoutingSeen
-        domainRulePagePreviewRouteBlocked = [bool] $intentResolution.pagePreviewSharedRuleRouteBlocked
         domainRuleAppliedCreationBlocked = [bool] $domainRuleLifecycle.appliedCreationBlocked
         domainRuleSelfApprovalBlocked = [bool] $domainRuleLifecycle.selfApprovalBlocked
         domainRuleAuthenticatedAuthor = [string] $domainRuleLifecycle.authenticatedAuthor
@@ -297,9 +279,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         domainRuleMaterializationSourceHashDiagnosticsSeen = [bool] $domainRuleLifecycle.materializationSourceHashDiagnosticsSeen
         domainRuleProcurementOptionSourcePolicySeen = [bool] $domainRuleLifecycle.procurementOptionSourcePolicySeen
         domainRuleProcurementBackendValidationPolicySeen = [bool] $domainRuleLifecycle.procurementBackendValidationPolicySeen
-        planValid = [bool] $plan.valid
-        compileValid = [bool] $compile.compileValid
-        previewValid = [bool] $preview.valid
+        previewValid = [bool] $apply.previewValid
         applyPersisted = [bool] $apply.applied
         applyCleanupDeleted = [bool] $apply.cleanupDeleted
         applyAuthoringTurnCount = [int] $apply.authoringTurnCount
@@ -307,9 +287,8 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         applyReviewContinuationUsed = [bool] $apply.reviewContinuationUsed
         applyReviewContinuationReplyId = [string] $apply.reviewContinuationReplyId
         applyReviewContinuationDecisionId = [string] $apply.reviewContinuationDecisionId
-        streamTerminalSeen = [bool] $stream.terminalSeen
-        streamReplayChecked = [bool] $stream.replayChecked
-        streamArtifactsDir = $stream.artifactsDir
+        authoringStreamId = [string] $apply.authoringStreamId
+        authoringResultEventId = [string] $apply.authoringResultEventId
     } | ConvertTo-Json -Depth 8
 } finally {
     if ($startedQuickstart -and $null -ne $quickstartProcess) {

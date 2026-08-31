@@ -21,6 +21,11 @@ review them after observing one normal release cycle.
 
 - The `Agentic Authoring HTTP Smoke` workflow is deterministic by default.
 - A paid HTTP/SSE smoke requires `domain_rule_lifecycle_only=false`.
+- The paid gate runs one canonical `governed-authoring-apply` journey. That journey already resolves
+  intent, plans and compiles the materialization, streams the result, persists it with lineage,
+  reads it back and cleans it up. The older isolated intent/plan/compile/preview/provider probes remain
+  available as focal diagnostics, but the release gate does not repeat them because independent LLM
+  classifications add cost and nondeterministic false negatives without strengthening the journey.
 - The apply proof executes one authoring turn by default. If that turn is blocked for governed review,
   it may execute exactly one continuation in the same thread, and only from the unique backend-issued
   `governed-review-revise` quick reply whose structured semantic decision matches the expected

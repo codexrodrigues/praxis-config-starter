@@ -211,6 +211,10 @@ jobs:
           $requiresExternalProvider = -not $domainRuleLifecycleOnly -or $runPageBuilder -or $runComplianceShadow
           $costMode = if ($requiresExternalProvider) { 'external-provider' } else { 'deterministic' }
           "### AI cost mode: $costMode" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if (-not $domainRuleLifecycleOnly) {
+            "- Paid HTTP journey: governed-authoring-apply (single end-to-end journey)" |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
           if ($requiresExternalProvider -and $provider -eq 'openai' -and [string]::IsNullOrWhiteSpace($env:PRAXIS_AI_OPENAI_API_KEY)) {
             throw 'Missing required secret PRAXIS_AI_OPENAI_API_KEY for provider=openai.'
           }
