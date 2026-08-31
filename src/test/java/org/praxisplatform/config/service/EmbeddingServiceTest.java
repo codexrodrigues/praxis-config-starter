@@ -10,8 +10,14 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.genai.errors.ClientException;
+import com.openai.core.http.Headers;
+import com.openai.errors.OpenAIServiceException;
+import java.net.http.HttpHeaders;
+import java.time.Instant;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -89,6 +95,84 @@ class EmbeddingServiceTest {
         assertEquals("gemini", failure.getProvider());
         assertEquals(AiProviderCallException.Kind.QUOTA_EXHAUSTED, failure.getKind());
         assertEquals(429, failure.getStatusCode());
+    }
+
+    @Test
+    void embedPreservesGeminiQuotaFailureAsCanonicalProviderException() {
+        GoogleGenAiTextEmbeddingModel client = Mockito.mock(GoogleGenAiTextEmbeddingModel.class);
+        when(client.call(any(EmbeddingRequest.class))).thenThrow(new ClientException(
+                429,
+                "RESOURCE_EXHAUSTED",
+                "You exceeded your current quota for embed content requests."));
+
+        EmbeddingService service = new EmbeddingService(emptyOpenAiProvider(), provider(client), new ObjectMapper());
+        ReflectionTestUtils.setField(service, "provider", "gemini");
+        ReflectionTestUtils.setField(service, "geminiApiKey", "gemini-key");
+        ReflectionTestUtils.setField(service, "geminiModel", "gemini-embedding-2");
+        ReflectionTestUtils.setField(service, "geminiDimensions", 768);
+
+        AiProviderCallException failure = assertThrows(
+                AiProviderCallException.class,
+                () -> service.embed("only document"));
+
+        assertEquals("gemini", failure.getProvider());
+        assertEquals(AiProviderCallException.Kind.QUOTA_EXHAUSTED, failure.getKind());
+        assertEquals("gemini HTTP 429 (quota_exhausted)", failure.getMessage());
+    }
+
+    @Test
+    void embedPreservesOpenAiRetryAfterWithoutExposingProviderMessage() {
+        OpenAiEmbeddingModel client = Mockito.mock(OpenAiEmbeddingModel.class);
+        OpenAIServiceException providerFailure = Mockito.mock(OpenAIServiceException.class);
+        when(providerFailure.statusCode()).thenReturn(429);
+        when(providerFailure.code()).thenReturn(Optional.of("rate_limit_exceeded"));
+        when(providerFailure.type()).thenReturn(Optional.of("requests"));
+        when(providerFailure.headers()).thenReturn(Headers.builder().put("retry-after-ms", "1500").build());
+        when(client.call(any(EmbeddingRequest.class))).thenThrow(providerFailure);
+
+        EmbeddingService service = new EmbeddingService(provider(client), emptyGoogleGenAiProvider(), new ObjectMapper());
+        ReflectionTestUtils.setField(service, "provider", "openai");
+        ReflectionTestUtils.setField(service, "openaiApiKey", "key");
+        ReflectionTestUtils.setField(service, "openaiModel", "text-embedding-3-large");
+        ReflectionTestUtils.setField(service, "openaiDimensions", 768);
+        Instant before = Instant.now();
+
+        AiProviderCallException failure = assertThrows(
+                AiProviderCallException.class,
+                () -> service.embed("only document"));
+
+        assertEquals(AiProviderCallException.Kind.RATE_LIMIT, failure.getKind());
+        assertEquals("openai HTTP 429 (rate_limit)", failure.getMessage());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                !failure.getRetryAfter().isBefore(before.plusMillis(1500)));
+    }
+
+    @Test
+    void googleRestFailureUsesStructuredQuotaAndRetryInfoWithoutRetainingBody() {
+        EmbeddingService service = new EmbeddingService(
+                emptyOpenAiProvider(), emptyGoogleGenAiProvider(), new ObjectMapper());
+        Instant now = Instant.parse("2026-08-31T12:00:00Z");
+        String body = """
+                {
+                  "error": {
+                    "status": "RESOURCE_EXHAUSTED",
+                    "message": "sensitive provider diagnostic",
+                    "details": [
+                      {"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[]},
+                      {"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"2.5s"}
+                    ]
+                  }
+                }
+                """;
+        HttpHeaders headers = HttpHeaders.of(
+                Map.of("Retry-After", List.of("1")), (name, value) -> true);
+
+        AiProviderCallException failure = service.classifyGoogleGenAiRestFailure(429, body, headers, now);
+
+        assertEquals(AiProviderCallException.Kind.QUOTA_EXHAUSTED, failure.getKind());
+        assertEquals(now.plusMillis(2500), failure.getRetryAfter());
+        assertEquals("gemini HTTP 429 (quota_exhausted)", failure.getMessage());
+        org.junit.jupiter.api.Assertions.assertFalse(failure.getMessage().contains("sensitive"));
     }
 
     @Test

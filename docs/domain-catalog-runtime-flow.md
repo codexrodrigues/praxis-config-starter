@@ -145,8 +145,12 @@ The response includes:
 
 `reconciled=false` or warnings such as `corpus-chunk-count-mismatch` mean the LLM should continue
 to prefer deterministic `/context` retrieval until the derived vector corpus catches up.
-`publication.status=FAILED` with `retryable=false` is terminal for the current revision and
-automation should stop immediately instead of repeatedly polling or matching provider messages.
+`publication.status=FAILED` is terminal for the current revision and automation should stop
+immediately instead of repeatedly polling or matching provider messages. When `retryable=true`,
+`retryAfter` identifies the earliest safe instant for a later explicit ingestion/publication
+attempt; it does not imply an automatic `FAILED -> PUBLISHED` transition. Provider-guided delays
+that fit the bounded internal retry window are honored by the Config publisher before it records
+the terminal state.
 
 ## 5. Query Persisted Items
 

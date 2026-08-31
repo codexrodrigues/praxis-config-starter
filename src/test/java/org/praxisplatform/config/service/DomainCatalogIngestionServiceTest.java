@@ -344,6 +344,31 @@ class DomainCatalogIngestionServiceTest {
     }
 
     @Test
+    void retryDelayHonorsProviderWindowAndDefersLongWindows() {
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                mock(DomainCatalogReleaseRepository.class),
+                mock(DomainCatalogItemRepository.class),
+                objectMapper,
+                mock(RagVectorStoreService.class),
+                validationService(),
+                (DomainKnowledgeProjectionService) null,
+                true,
+                false,
+                100,
+                3,
+                1_000L,
+                event -> { });
+        Instant now = Instant.parse("2026-08-31T12:00:00Z");
+        AiProviderCallException shortWindow = AiProviderCallException.fromHttpStatus(
+                "gemini", 429, "rate_limit", now.plusSeconds(5), null);
+        AiProviderCallException longWindow = AiProviderCallException.fromHttpStatus(
+                "gemini", 429, "rate_limit", now.plusSeconds(61), null);
+
+        assertThat(service.retryDelayMillis(1, shortWindow, now)).isEqualTo(5_000L);
+        assertThat(service.retryDelayMillis(1, longWindow, now)).isEqualTo(-1L);
+    }
+
+    @Test
     void doesNotRetryRagBatchAfterProviderQuotaIsExhausted() throws Exception {
         DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
@@ -1607,8 +1632,9 @@ class DomainCatalogIngestionServiceTest {
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
         when(publicationStateService.request(releaseId, 13L)).thenReturn(7L);
         when(publicationStateService.markPublishing(releaseId, 7L)).thenReturn(true);
+        Instant retryAfter = Instant.parse("2026-09-01T07:00:00Z");
         doThrow(AiProviderCallException.fromHttpStatus(
-                "gemini", 429, "quota exhausted for embedding model"))
+                "gemini", 429, "quota exhausted for embedding model", retryAfter, null))
                 .when(ragVectorStoreService).upsertDocuments(any());
 
         DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
@@ -1617,7 +1643,7 @@ class DomainCatalogIngestionServiceTest {
         verify(releaseRepository).flush();
         verify(ragVectorStoreService, times(1)).upsertDocuments(any());
         verify(publicationStateService).markFailed(
-                releaseId, 7L, "quota_exhausted", false, null);
+                releaseId, 7L, "quota_exhausted", false, retryAfter);
         verify(publicationStateService, never()).markPublished(any(), anyLong(), anyLong());
     }
 

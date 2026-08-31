@@ -3,6 +3,7 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -62,6 +63,7 @@ public class DomainCatalogIngestionService {
 
     private static final int DEFAULT_RAG_PUBLICATION_MAX_ATTEMPTS = 3;
     private static final long DEFAULT_RAG_PUBLICATION_RETRY_BACKOFF_MS = 1_000L;
+    private static final long MAX_INLINE_RAG_PUBLICATION_RETRY_DELAY_MS = 60_000L;
 
     private static final List<String> ITEM_ARRAYS = List.of(
             "contexts",
@@ -861,7 +863,14 @@ public class DomainCatalogIngestionService {
                 if (!isRetryableRagPublicationFailure(ex) || attempt >= ragPublicationMaxAttempts) {
                     throw ex;
                 }
-                long retryDelayMs = retryDelayMillis(attempt);
+                long retryDelayMs = retryDelayMillis(attempt, ex, Instant.now());
+                if (retryDelayMs < 0L) {
+                    log.warn(
+                            "Domain catalog RAG batch retry for release {} was deferred by provider guidance: {}",
+                            release.getReleaseKey(),
+                            AiProviderFailureClassifier.classify(ex));
+                    throw ex;
+                }
                 log.warn(
                         "Domain catalog RAG batch failed for release {} on attempt {}/{}; retrying in {} ms: {}",
                         release.getReleaseKey(),
@@ -907,16 +916,36 @@ public class DomainCatalogIngestionService {
         return null;
     }
 
-    private long retryDelayMillis(int failedAttempt) {
-        if (ragPublicationRetryBackoffMs == 0L) {
-            return 0L;
+    long retryDelayMillis(int failedAttempt, RuntimeException failure, Instant now) {
+        long localDelayMs = 0L;
+        if (ragPublicationRetryBackoffMs > 0L) {
+            int exponent = Math.min(Math.max(failedAttempt - 1, 0), 10);
+            long multiplier = 1L << exponent;
+            localDelayMs = ragPublicationRetryBackoffMs > Long.MAX_VALUE / multiplier
+                    ? MAX_INLINE_RAG_PUBLICATION_RETRY_DELAY_MS
+                    : Math.min(
+                            ragPublicationRetryBackoffMs * multiplier,
+                            MAX_INLINE_RAG_PUBLICATION_RETRY_DELAY_MS);
         }
-        int exponent = Math.min(Math.max(failedAttempt - 1, 0), 10);
-        long multiplier = 1L << exponent;
-        if (ragPublicationRetryBackoffMs > Long.MAX_VALUE / multiplier) {
-            return 60_000L;
+        Instant retryAfter = providerRetryAfter(failure);
+        if (retryAfter == null || !retryAfter.isAfter(now)) {
+            return localDelayMs;
         }
-        return Math.min(ragPublicationRetryBackoffMs * multiplier, 60_000L);
+        Duration providerDelay = Duration.between(now, retryAfter);
+        if (providerDelay.getSeconds() > MAX_INLINE_RAG_PUBLICATION_RETRY_DELAY_MS / 1_000L) {
+            return -1L;
+        }
+        long providerDelayMs = providerDelay.getSeconds() * 1_000L
+                + (providerDelay.getNano() + 999_999L) / 1_000_000L;
+        if (providerDelayMs > MAX_INLINE_RAG_PUBLICATION_RETRY_DELAY_MS) {
+            return -1L;
+        }
+        return Math.max(localDelayMs, Math.max(1L, providerDelayMs));
+    }
+
+    private Instant providerRetryAfter(Throwable failure) {
+        AiProviderCallException providerFailure = findProviderFailure(failure);
+        return providerFailure != null ? providerFailure.getRetryAfter() : null;
     }
 
     private void reconcileRagPublicationAfterPersistence(
@@ -978,7 +1007,7 @@ public class DomainCatalogIngestionService {
                             publicationRevision,
                             AiProviderFailureClassifier.classify(ex),
                             isRetryableRagPublicationFailure(ex),
-                            null);
+                            providerRetryAfter(ex));
                 }
                 log.warn(
                         "Domain catalog release {} was persisted, but RAG publication failed: {}",

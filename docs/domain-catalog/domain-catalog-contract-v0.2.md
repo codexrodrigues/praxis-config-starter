@@ -129,8 +129,14 @@ The block also carries `revision`, `attempt`, expected/published counts and
 lifecycle timestamps. `failureKind` is derived from the shared AI provider
 failure taxonomy; it never contains the raw provider response. Pending or
 publishing work is recovered as pending after application restart. Consumers
-must fail fast when `FAILED` is explicitly non-retryable instead of polling or
-inferring provider state from text.
+must treat `FAILED` as terminal for that publication revision instead of
+polling for an implicit transition or inferring provider state from text.
+`retryable=true` means a later explicit publication request may be attempted;
+it does not promise that a failed revision will schedule itself again.
+`retryAfter`, when present, is the earliest provider-governed instant for that
+later attempt. The publisher honors provider guidance during its bounded
+internal retries and persists longer windows instead of sleeping for less than
+the provider requested.
 
 The expected count is computed from persisted
 catalog items that are eligible for RAG publication: items must have searchable
