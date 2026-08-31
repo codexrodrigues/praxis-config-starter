@@ -1056,6 +1056,19 @@ $modeDomainCatalogResourceKey = if ($null -ne $modeMatrix.domainCatalogResourceK
 } else {
     ""
 }
+$modeApiCatalogGroup = if ($null -ne $modeMatrix.apiCatalogGroup -and
+    -not [string]::IsNullOrWhiteSpace([string] $modeMatrix.apiCatalogGroup)) {
+    [string] $modeMatrix.apiCatalogGroup
+} elseif (-not [string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey)) {
+    $modeDomainCatalogResourceKey.Split('.')[0]
+} else {
+    "human-resources"
+}
+$modeApiCatalogPathPrefixes = if ($null -ne $modeMatrix.apiCatalogPathPrefixes) {
+    @($modeMatrix.apiCatalogPathPrefixes | ForEach-Object { [string] $_ })
+} else {
+    @()
+}
 $modeDomainCatalogRagRequired = $false
 if ($null -ne $modeMatrix.domainCatalogRagRequired) {
     if ($modeMatrix.domainCatalogRagRequired -isnot [bool]) {
@@ -1066,6 +1079,14 @@ if ($null -ne $modeMatrix.domainCatalogRagRequired) {
 if (-not [string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey) -and
     $modeDomainCatalogResourceKey -notmatch '^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$') {
     throw "Validation mode declares an invalid canonical domain catalog resource identity: $modeDomainCatalogResourceKey"
+}
+if ($modeApiCatalogGroup -notmatch '^[a-z0-9][a-z0-9-]*$') {
+    throw "Validation mode declares an invalid canonical API catalog group: $modeApiCatalogGroup"
+}
+foreach ($pathPrefix in $modeApiCatalogPathPrefixes) {
+    if ($pathPrefix -notmatch '^/api/[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)+$') {
+        throw "Validation mode declares an invalid canonical API catalog path prefix: $pathPrefix"
+    }
 }
 $isHumanResourcesFocusedMode = $ValidationMode -in @("smoke", "single-table") -or
     $modeDomainCatalogResourceKey.StartsWith("human-resources.", [StringComparison]::Ordinal)
@@ -1333,7 +1354,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
     $domainCatalogGroups = if ($ValidationMode -eq "full") {
         @("human-resources", "operations")
     } else {
-        @("human-resources")
+        @($modeApiCatalogGroup)
     }
     $domainCatalogEvidence = Invoke-DomainCatalogIngest `
         $backendUrl $uiUrl "desenv" "local" $domainCatalogGroups $modeDomainCatalogResourceKey `
@@ -1356,8 +1377,10 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $env:REQUEST_TIMEOUT_MS = "60000"
         $env:INDEXING_TIMEOUT_MS = "$($ApiCatalogIndexingTimeoutSec * 1000)"
         $env:STATUS_POLL_MS = "1000"
-        if ($isHumanResourcesFocusedMode) {
-            $smokeCatalogPathPrefixes = @(
+        $focusedApiCatalogPathPrefixes = if ($modeApiCatalogPathPrefixes.Count -gt 0) {
+            @($modeApiCatalogPathPrefixes)
+        } elseif ($isHumanResourcesFocusedMode) {
+            @(
                 "/api/human-resources/funcionarios",
                 "/api/human-resources/departamentos",
                 "/api/human-resources/folhas-pagamento",
@@ -1365,9 +1388,13 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
                 "/api/human-resources/eventos-folha",
                 "/api/human-resources/historicos-salariais"
             )
-            $env:API_CATALOG_PATH_PREFIXES = ($smokeCatalogPathPrefixes -join ",")
+        } else {
+            @()
+        }
+        if ($focusedApiCatalogPathPrefixes.Count -gt 0) {
+            $env:API_CATALOG_PATH_PREFIXES = ($focusedApiCatalogPathPrefixes -join ",")
             $env:CHUNK_SIZE = "20"
-            Write-Phase "Focused mode: API catalog upload scoped to $($smokeCatalogPathPrefixes.Count) human-resources path prefixes."
+            Write-Phase "Focused mode: API catalog upload scoped to $($focusedApiCatalogPathPrefixes.Count) $modeApiCatalogGroup path prefixes."
         } else {
             Remove-Item Env:\API_CATALOG_PATH_PREFIXES -ErrorAction SilentlyContinue
             $env:CHUNK_SIZE = "20"
@@ -1380,9 +1407,9 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $apiCatalogEvidence = [ordered]@{
             source = "/schemas/catalog"
             indexingState = "READY"
-            scope = if ($isHumanResourcesFocusedMode) {
+            scope = if ($focusedApiCatalogPathPrefixes.Count -gt 0) {
                 if ([string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey)) {
-                    "human-resources-focused"
+                    "$modeApiCatalogGroup-focused"
                 } else {
                     "resource:$modeDomainCatalogResourceKey"
                 }
