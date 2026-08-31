@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -29,6 +30,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doThrow;
@@ -679,18 +681,26 @@ class DomainCatalogIngestionServiceTest {
         DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
         RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogRagPublicationStateService publicationStateService =
+                mock(DomainCatalogRagPublicationStateService.class);
         DomainCatalogIngestionService service = new DomainCatalogIngestionService(
                 releaseRepository,
                 itemRepository,
                 objectMapper,
                 ragVectorStoreService,
                 validationService(),
+                null,
+                publicationStateService,
                 true,
                 false,
-                100
+                100,
+                3,
+                0L,
+                event -> { }
         );
 
         DomainCatalogRelease latestRelease = DomainCatalogRelease.builder()
+                .id(UUID.fromString("d070c524-b67a-4cc0-b754-d652d7424e14"))
                 .releaseKey("praxis-service:human-resources.funcionarios:sourcehash")
                 .schemaVersion("praxis.domain-catalog/v0.2")
                 .serviceKey("praxis-service")
@@ -757,6 +767,20 @@ class DomainCatalogIngestionServiceTest {
                 eq(1L)))
                 .thenReturn(corpusStatus);
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(publicationStateService.snapshot(latestRelease.getId())).thenReturn(Optional.of(
+                new DomainCatalogRagPublicationStateService.StateSnapshot(
+                        org.praxisplatform.config.domain.DomainCatalogRagPublicationStatus.PUBLISHED,
+                        4L,
+                        2,
+                        1L,
+                        1L,
+                        null,
+                        null,
+                        null,
+                        Instant.parse("2026-04-21T12:00:00Z"),
+                        Instant.parse("2026-04-21T12:00:01Z"),
+                        Instant.parse("2026-04-21T12:00:02Z"),
+                        Instant.parse("2026-04-21T12:00:02Z"))));
 
         var response = service.ragStatus(
                 "praxis-service",
@@ -772,6 +796,10 @@ class DomainCatalogIngestionServiceTest {
         assertThat(response.reconciled()).isTrue();
         assertThat(response.expectedDocumentCount()).isEqualTo(1);
         assertThat(response.actualDocumentCount()).isEqualTo(1);
+        assertThat(response.publication().status()).isEqualTo("PUBLISHED");
+        assertThat(response.publication().revision()).isEqualTo(4L);
+        assertThat(response.publication().attempt()).isEqualTo(2);
+        assertThat(response.publication().publishedDocumentCount()).isEqualTo(1);
         assertThat(response.sources()).singleElement()
                 .satisfies(source -> {
                     assertThat(source.sourceId()).isEqualTo("human-resources.funcionarios.field.cpf");
@@ -1496,6 +1524,53 @@ class DomainCatalogIngestionServiceTest {
                             .containsEntry("resourceId", "governance:human-resources.folhas-pagamento.field.valor-liquido:privacy");
                     assertThat(document.getText()).contains("confidential", "financial", "LGPD");
                 });
+    }
+
+    @Test
+    void persistsNonRetryableQuotaFailureForOperationalConsumers() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogRagPublicationStateService publicationStateService =
+                mock(DomainCatalogRagPublicationStateService.class);
+        UUID releaseId = UUID.fromString("d070c524-b67a-4cc0-b754-d652d7424e14");
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                null,
+                publicationStateService,
+                true,
+                false,
+                100,
+                3,
+                0L,
+                event -> { });
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.empty());
+        when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> {
+            DomainCatalogRelease release = invocation.getArgument(0);
+            release.setId(releaseId);
+            return release;
+        });
+        when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(publicationStateService.request(releaseId, 13L)).thenReturn(7L);
+        when(publicationStateService.markPublishing(releaseId, 7L)).thenReturn(true);
+        doThrow(AiProviderCallException.fromHttpStatus(
+                "gemini", 429, "quota exhausted for embedding model"))
+                .when(ragVectorStoreService).upsertDocuments(any());
+
+        DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        assertThat(response.releaseId()).isEqualTo(releaseId);
+        verify(releaseRepository).flush();
+        verify(ragVectorStoreService, times(1)).upsertDocuments(any());
+        verify(publicationStateService).markFailed(
+                releaseId, 7L, "quota_exhausted", false, null);
+        verify(publicationStateService, never()).markPublished(any(), anyLong(), anyLong());
     }
 
     @Test

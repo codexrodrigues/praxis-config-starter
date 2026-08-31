@@ -116,7 +116,23 @@ list. Tenant and environment headers remain part of the release scope.
 It resolves the latest release for the requested tenant, environment, service
 and optional resource, then reports `domain_catalog` vector-store document
 counts, source breakdowns, visibility breakdowns, latest publication timestamp
-and reconciliation warnings. The expected count is computed from persisted
+and reconciliation warnings. The additive `publication` block exposes the
+persisted materialization lifecycle for that immutable release:
+
+- `PENDING`: a publication revision was requested but has not started;
+- `PUBLISHING`: the current revision was claimed by the publisher;
+- `PUBLISHED`: publication completed, with its published document count;
+- `FAILED`: publication stopped, with a sanitized canonical `failureKind`,
+  `retryable` decision and optional `retryAfter` timestamp.
+
+The block also carries `revision`, `attempt`, expected/published counts and
+lifecycle timestamps. `failureKind` is derived from the shared AI provider
+failure taxonomy; it never contains the raw provider response. Pending or
+publishing work is recovered as pending after application restart. Consumers
+must fail fast when `FAILED` is explicitly non-retryable instead of polling or
+inferring provider state from text.
+
+The expected count is computed from persisted
 catalog items that are eligible for RAG publication: items must have searchable
 content and must not declare `aiUsage.visibility=deny`. This endpoint is an
 operational readiness check for the derived vector corpus; it does not replace

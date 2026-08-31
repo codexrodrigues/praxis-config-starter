@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.StringJoiner;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
@@ -44,7 +45,9 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -76,6 +79,7 @@ public class DomainCatalogIngestionService {
     private final RagVectorStoreService ragVectorStoreService;
     private final DomainCatalogSchemaValidationService schemaValidationService;
     private final DomainKnowledgeProjectionService domainKnowledgeProjectionService;
+    private final DomainCatalogRagPublicationStateService ragPublicationStateService;
     private final boolean domainCatalogRagPublicationEnabled;
     private final boolean asyncRagPublicationEnabled;
     private final int ragPublicationBatchSize;
@@ -153,6 +157,7 @@ public class DomainCatalogIngestionService {
             RagVectorStoreService ragVectorStoreService,
             DomainCatalogSchemaValidationService schemaValidationService,
             ObjectProvider<DomainKnowledgeProjectionService> domainKnowledgeProjectionService,
+            ObjectProvider<DomainCatalogRagPublicationStateService> ragPublicationStateService,
             @Value("${praxis.domain-catalog.rag-publication.enabled:true}")
             boolean domainCatalogRagPublicationEnabled,
             @Value("${praxis.domain-catalog.rag-publication.async-enabled:true}")
@@ -171,12 +176,14 @@ public class DomainCatalogIngestionService {
                 ragVectorStoreService,
                 schemaValidationService,
                 domainKnowledgeProjectionService.getIfAvailable(),
+                ragPublicationStateService.getIfAvailable(),
                 domainCatalogRagPublicationEnabled,
                 asyncRagPublicationEnabled,
                 ragPublicationBatchSize,
                 ragPublicationMaxAttempts,
                 ragPublicationRetryBackoffMs,
-                applicationEventPublisher);
+                applicationEventPublisher,
+                true);
     }
 
     DomainCatalogIngestionService(
@@ -191,9 +198,9 @@ public class DomainCatalogIngestionService {
             int ragPublicationBatchSize,
             ApplicationEventPublisher applicationEventPublisher) {
         this(releaseRepository, itemRepository, objectMapper, ragVectorStoreService, schemaValidationService,
-                domainKnowledgeProjectionService, domainCatalogRagPublicationEnabled, asyncRagPublicationEnabled,
+                domainKnowledgeProjectionService, null, domainCatalogRagPublicationEnabled, asyncRagPublicationEnabled,
                 ragPublicationBatchSize, DEFAULT_RAG_PUBLICATION_MAX_ATTEMPTS,
-                DEFAULT_RAG_PUBLICATION_RETRY_BACKOFF_MS, applicationEventPublisher);
+                DEFAULT_RAG_PUBLICATION_RETRY_BACKOFF_MS, applicationEventPublisher, true);
     }
 
     DomainCatalogIngestionService(
@@ -210,9 +217,29 @@ public class DomainCatalogIngestionService {
             long ragPublicationRetryBackoffMs,
             ApplicationEventPublisher applicationEventPublisher) {
         this(releaseRepository, itemRepository, objectMapper, ragVectorStoreService, schemaValidationService,
-                domainKnowledgeProjectionService, domainCatalogRagPublicationEnabled, asyncRagPublicationEnabled,
+                domainKnowledgeProjectionService, null, domainCatalogRagPublicationEnabled, asyncRagPublicationEnabled,
                 ragPublicationBatchSize, ragPublicationMaxAttempts, ragPublicationRetryBackoffMs,
                 applicationEventPublisher, true);
+    }
+
+    DomainCatalogIngestionService(
+            DomainCatalogReleaseRepository releaseRepository,
+            DomainCatalogItemRepository itemRepository,
+            ObjectMapper objectMapper,
+            RagVectorStoreService ragVectorStoreService,
+            DomainCatalogSchemaValidationService schemaValidationService,
+            DomainKnowledgeProjectionService domainKnowledgeProjectionService,
+            DomainCatalogRagPublicationStateService ragPublicationStateService,
+            boolean domainCatalogRagPublicationEnabled,
+            boolean asyncRagPublicationEnabled,
+            int ragPublicationBatchSize,
+            int ragPublicationMaxAttempts,
+            long ragPublicationRetryBackoffMs,
+            ApplicationEventPublisher applicationEventPublisher) {
+        this(releaseRepository, itemRepository, objectMapper, ragVectorStoreService, schemaValidationService,
+                domainKnowledgeProjectionService, ragPublicationStateService, domainCatalogRagPublicationEnabled,
+                asyncRagPublicationEnabled, ragPublicationBatchSize, ragPublicationMaxAttempts,
+                ragPublicationRetryBackoffMs, applicationEventPublisher, true);
     }
 
     private DomainCatalogIngestionService(
@@ -222,6 +249,7 @@ public class DomainCatalogIngestionService {
             RagVectorStoreService ragVectorStoreService,
             DomainCatalogSchemaValidationService schemaValidationService,
             DomainKnowledgeProjectionService domainKnowledgeProjectionService,
+            DomainCatalogRagPublicationStateService ragPublicationStateService,
             boolean domainCatalogRagPublicationEnabled,
             boolean asyncRagPublicationEnabled,
             int ragPublicationBatchSize,
@@ -235,6 +263,7 @@ public class DomainCatalogIngestionService {
         this.ragVectorStoreService = ragVectorStoreService;
         this.schemaValidationService = schemaValidationService;
         this.domainKnowledgeProjectionService = domainKnowledgeProjectionService;
+        this.ragPublicationStateService = ragPublicationStateService;
         this.domainCatalogRagPublicationEnabled = domainCatalogRagPublicationEnabled;
         this.asyncRagPublicationEnabled = asyncRagPublicationEnabled;
         this.ragPublicationBatchSize = Math.max(1, ragPublicationBatchSize);
@@ -242,6 +271,17 @@ public class DomainCatalogIngestionService {
         this.ragPublicationRetryBackoffMs = Math.max(0L, ragPublicationRetryBackoffMs);
         this.ragPublicationExecutor = asyncRagPublicationEnabled ? createRagPublicationExecutor() : null;
         this.applicationEventPublisher = applicationEventPublisher;
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    void recoverInterruptedRagPublications() {
+        if (!domainCatalogRagPublicationEnabled || ragPublicationStateService == null) {
+            return;
+        }
+        for (UUID releaseId : ragPublicationStateService.recoverInterrupted()) {
+            releaseRepository.findById(releaseId).ifPresent(release ->
+                    publishRagDocumentsAfterPersistence(release, itemRepository.findByRelease(release)));
+        }
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
@@ -326,6 +366,9 @@ public class DomainCatalogIngestionService {
             domainKnowledgeProjectionService.project(release, items);
         }
         if (domainCatalogRagPublicationEnabled) {
+            if (ragPublicationStateService != null) {
+                releaseRepository.flush();
+            }
             publishRagDocumentsAfterPersistence(release, items);
         } else {
             log.debug("Domain catalog RAG publication disabled for release {}", release.getReleaseKey());
@@ -479,7 +522,51 @@ public class DomainCatalogIngestionService {
                 RagResourceTypes.DOMAIN_CATALOG,
                 domainCatalogRagPublicationEnabled,
                 ragVectorStoreService.isAvailable(),
-                status);
+                status,
+                publicationStatus(release, status));
+    }
+
+    private DomainCatalogRagStatusResponse.PublicationStatus publicationStatus(
+            DomainCatalogRelease release,
+            RagVectorStoreService.RagCorpusReleaseStatus corpusStatus) {
+        if (ragPublicationStateService != null) {
+            Optional<DomainCatalogRagPublicationStateService.StateSnapshot> snapshot =
+                    ragPublicationStateService.snapshot(release.getId());
+            if (snapshot.isPresent()) {
+                DomainCatalogRagPublicationStateService.StateSnapshot state = snapshot.get();
+                return new DomainCatalogRagStatusResponse.PublicationStatus(
+                        state.status().name(),
+                        state.revision(),
+                        state.attempt(),
+                        state.expectedDocumentCount(),
+                        state.publishedDocumentCount(),
+                        state.failureKind(),
+                        state.retryable(),
+                        instantText(state.retryAfter()),
+                        instantText(state.requestedAt()),
+                        instantText(state.startedAt()),
+                        instantText(state.completedAt()),
+                        instantText(state.updatedAt()));
+            }
+        }
+        boolean published = corpusStatus != null && corpusStatus.available() && corpusStatus.reconciled();
+        return new DomainCatalogRagStatusResponse.PublicationStatus(
+                published ? "PUBLISHED" : "PENDING",
+                0L,
+                0,
+                corpusStatus != null ? corpusStatus.expectedChunkCount() : 0L,
+                corpusStatus != null ? corpusStatus.documentCount() : 0L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    private String instantText(Instant instant) {
+        return instant != null ? instant.toString() : null;
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -694,9 +781,12 @@ public class DomainCatalogIngestionService {
         return new ArrayList<>(itemsByCanonicalKey.values());
     }
 
-    private void publishRagDocuments(DomainCatalogRelease release, List<DomainCatalogItem> items) {
-        if (!ragVectorStoreService.isAvailable() || items == null || items.isEmpty()) {
-            return;
+    private int publishRagDocuments(DomainCatalogRelease release, List<DomainCatalogItem> items) {
+        if (!ragVectorStoreService.isAvailable()) {
+            throw new IllegalStateException("Domain catalog RAG vector store is unavailable");
+        }
+        if (items == null || items.isEmpty()) {
+            return 0;
         }
         long startedAt = System.nanoTime();
         List<Document> documents = new ArrayList<>();
@@ -738,7 +828,7 @@ public class DomainCatalogIngestionService {
                     .build());
         }
         if (documents.isEmpty()) {
-            return;
+            return 0;
         }
         int publishedDocuments = 0;
         for (int start = 0; start < documents.size(); start += ragPublicationBatchSize) {
@@ -759,6 +849,7 @@ public class DomainCatalogIngestionService {
                 release.getReleaseKey(),
                 TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt),
                 ragPublicationBatchSize);
+        return publishedDocuments;
     }
 
     private void upsertRagBatchWithRetry(DomainCatalogRelease release, List<Document> documents) {
@@ -863,10 +954,32 @@ public class DomainCatalogIngestionService {
     }
 
     private void publishRagDocumentsAfterPersistence(DomainCatalogRelease release, List<DomainCatalogItem> items) {
+        long expectedDocumentCount = items != null
+                ? items.stream().filter(this::isRagIndexable).count()
+                : 0L;
+        long publicationRevision = ragPublicationStateService != null
+                ? ragPublicationStateService.request(release.getId(), expectedDocumentCount)
+                : 0L;
         Runnable task = () -> {
+            if (ragPublicationStateService != null
+                    && !ragPublicationStateService.markPublishing(release.getId(), publicationRevision)) {
+                return;
+            }
             try {
-                publishRagDocuments(release, items);
+                int publishedDocumentCount = publishRagDocuments(release, items);
+                if (ragPublicationStateService != null) {
+                    ragPublicationStateService.markPublished(
+                            release.getId(), publicationRevision, publishedDocumentCount);
+                }
             } catch (RuntimeException ex) {
+                if (ragPublicationStateService != null) {
+                    ragPublicationStateService.markFailed(
+                            release.getId(),
+                            publicationRevision,
+                            AiProviderFailureClassifier.classify(ex),
+                            isRetryableRagPublicationFailure(ex),
+                            null);
+                }
                 log.warn(
                         "Domain catalog release {} was persisted, but RAG publication failed: {}",
                         release.getReleaseKey(),
@@ -882,10 +995,14 @@ public class DomainCatalogIngestionService {
             try {
                 ragPublicationExecutor.execute(task);
             } catch (RuntimeException ex) {
+                if (ragPublicationStateService != null) {
+                    ragPublicationStateService.markFailed(
+                            release.getId(), publicationRevision, "scheduling_failure", true, null);
+                }
                 log.warn(
-                        "Domain catalog release {} was persisted, but RAG publication could not be scheduled: {}",
+                        "Domain catalog release {} was persisted, but RAG publication could not be scheduled ({})",
                         release.getReleaseKey(),
-                        ex.getMessage()
+                        AiProviderFailureClassifier.classify(ex)
                 );
             }
         };
