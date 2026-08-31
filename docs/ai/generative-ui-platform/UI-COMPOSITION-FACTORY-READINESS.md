@@ -118,6 +118,24 @@ and incomplete semantic refinement. The five-run aggregate is
 1,045,517 ms across the five browser executions. This certifies the current single-table slice; it
 does not imply that the broader six-archetype factory or the 90% portfolio target is complete.
 
+The first immutable remote replay after that local series,
+[Actions #33353177201](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33353177201), exposed two
+platform integration defects rather than an LLM retry: the Windows runner did not project the
+matrix-owned `humanTurnLimit`, and exact operational verification discarded the already-governed
+`schemaType=response` from the binding `schemaPointer`. With multiple operations for one resource,
+that allowed a row table to inherit the request schema of `statsGroupBy`. Both defects are classified
+as `ja-suportado-mal-nomeado-ou-mal-materializado`: `humanTurnLimit`, `schemaPointer`, `operationId`
+and the semantic target surface already existed canonically. The runner now projects and cleans the
+focal-turn environment, invokes the same portable evidence validator, and publishes the semantic
+requirements in its result. Post-intent operation grounding now preserves the binding schema type
+and ranks verified collection-read operations for row-oriented surfaces without textual intent
+routing. A post-fix local production-like replay against the exact Config, Quickstart and Angular
+worktrees passed `3/3`, zero retries, in 214,421.715 ms; its report SHA-256 is
+`7b0e1702044efa11dfee198ce9ed5002c67d601df9922dd59305ac50c7bad64c`, with identical employee
+field lineage across schema, plan, compiler and runtime and one canonical `column.header.set` turn.
+This local replay proves the correction before a final remote closure gate; it does not rewrite the
+failed remote run as a pass.
+
 The 90% target and broader archetype certification remain open under
 [praxis-config-starter#372](https://github.com/codexrodrigues/praxis-config-starter/issues/372).
 

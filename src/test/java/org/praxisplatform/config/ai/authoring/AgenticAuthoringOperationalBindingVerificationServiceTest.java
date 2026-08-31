@@ -12,6 +12,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.ResourceActionCatalogFetchResult;
 import org.praxisplatform.config.service.ResourceActionCatalogRetrievalService;
@@ -201,9 +202,18 @@ class AgenticAuthoringOperationalBindingVerificationServiceTest {
         assertThat(result.operations()).singleElement().satisfies(operation -> {
             assertThat(operation.apiMethod()).isEqualTo("post");
             assertThat(operation.operationId()).isEqualTo("cursor");
+            assertThat(operation.schemaType()).isEqualTo("response");
             assertThat(operation.resourcePath()).isEqualTo("/api/human-resources/funcionarios");
             assertThat(operation.apiPath()).endsWith("/filter/cursor");
         });
+        var schemaContext = org.mockito.ArgumentCaptor.forClass(AiSchemaContext.class);
+        org.mockito.Mockito.verify(schemaService, org.mockito.Mockito.times(2))
+                .fetchSchemaResult(schemaContext.capture(), any(), any(), any(), any());
+        assertThat(schemaContext.getAllValues())
+                .filteredOn(context -> context.getPath().endsWith("/filter/cursor"))
+                .singleElement()
+                .extracting(AiSchemaContext::getSchemaType)
+                .isEqualTo("response");
     }
 
     @Test
