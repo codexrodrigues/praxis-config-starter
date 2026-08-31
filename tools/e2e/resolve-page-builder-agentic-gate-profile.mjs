@@ -93,6 +93,20 @@ export function validateGateMatrix(matrix) {
         `modes.${modeName}.domainCatalogResourceKey must be a canonical dotted resource identity.`,
       );
     }
+    if (mode.apiCatalogGroup !== undefined) {
+      assertCondition(
+        typeof mode.apiCatalogGroup === 'string'
+          && /^[a-z0-9][a-z0-9-]*$/.test(mode.apiCatalogGroup),
+        `modes.${modeName}.apiCatalogGroup must be a canonical group id.`,
+      );
+    }
+    if (mode.apiCatalogPathPrefixes !== undefined) {
+      assertUniqueStrings(mode.apiCatalogPathPrefixes, `modes.${modeName}.apiCatalogPathPrefixes`);
+      for (const prefix of mode.apiCatalogPathPrefixes) {
+        assertCondition(/^\/api\/[a-z0-9][a-z0-9-/]*$/.test(prefix),
+          `modes.${modeName}.apiCatalogPathPrefixes must contain canonical /api paths.`);
+      }
+    }
   }
 
   const evidence = matrix.evidence;
@@ -155,6 +169,8 @@ export function resolveGateProfile(matrix, modeName) {
     streamProcessingTimeoutSeconds: matrix.defaults.streamProcessingTimeoutSeconds,
     humanTurnLimit: mode.humanTurnLimit ?? null,
     domainCatalogResourceKey: mode.domainCatalogResourceKey ?? null,
+    apiCatalogGroup: mode.apiCatalogGroup ?? null,
+    apiCatalogPathPrefixes: [...(mode.apiCatalogPathPrefixes ?? [])],
     requiredPassedTests: [...mode.requiredPassedTests],
     receiptRequirements: matrix.evidence.scenarioReceipts
       .filter((entry) => mode.scenarios.includes(entry.scenarioId)),

@@ -62,6 +62,12 @@
       ]
     },
     {
+      "scenarioId": "related-resource-control",
+      "testTitles": [
+        "Parent-child materializa Related Resource Outlet e isola a equipe pela missão no primeiro passe"
+      ]
+    },
+    {
       "scenarioId": "live-resource-workspace-command",
       "testTitles": [
         "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload"
@@ -145,6 +151,25 @@
           "resource.refresh-observed",
           "persistence.reload-equivalent"
         ]
+      },
+      {
+        "scenarioId": "related-resource-control",
+        "archetype": "parent-child-related-resource",
+        "testTitle": "Parent-child materializa Related Resource Outlet e isola a equipe pela missão no primeiro passe",
+        "attachmentName": "related-resource-first-pass-receipt.json",
+        "requiredFunctionalAssertions": [
+          "composition.parent-table-related-outlet",
+          "composition.selection-parent-context",
+          "discovery.surface-catalog.http-200",
+          "related.read.http-200",
+          "related.child-crud-materialized",
+          "related.child-update.http-200",
+          "related.child-delete.http-204",
+          "related.child-create.http-201",
+          "related.child-create-parent-derived",
+          "related.parent-switch-no-data-leak",
+          "persistence.reload-equivalent"
+        ]
       }
     ],
     "semanticRefinements": [
@@ -215,6 +240,27 @@
         "CRUD simples materializa host canônico e executa create read update delete no primeiro passe"
       ]
     },
+    "related-resource": {
+      "description": "Focal live LLM proof for a canonical parent-child page using a governed related-resource surface, without Playwright retries.",
+      "retries": 0,
+      "domainCatalogResourceKey": "operations.missoes",
+      "apiCatalogGroup": "operations",
+      "apiCatalogPathPrefixes": [
+        "/api/operations/missoes",
+        "/api/operations/missao-participantes"
+      ],
+      "scenarios": [
+        "critical-interception-guard",
+        "related-resource-control"
+      ],
+      "expectedDiscovered": 2,
+      "minimumExecuted": 2,
+      "expectedSkipped": 0,
+      "requiredPassedTests": [
+        "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "Parent-child materializa Related Resource Outlet e isola a equipe pela missão no primeiro passe"
+      ]
+    },
     "full": {
       "description": "Deliberate live LLM matrix with all non-mocked browser scenarios.",
       "scenarios": [
@@ -227,12 +273,13 @@
         "live-llm-flow-1",
         "live-llm-flow-2",
         "crud-simple-control",
+        "related-resource-control",
         "live-resource-workspace-command",
         "single-table-control",
         "table-human-refinement"
       ],
-      "expectedDiscovered": 13,
-      "minimumExecuted": 13,
+      "expectedDiscovered": 14,
+      "minimumExecuted": 14,
       "expectedSkipped": 0,
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
@@ -245,6 +292,7 @@
         "Fluxo 1 — Dashboard de pagamentos com linguagem imperfeita: contrato backend-driven validado",
         "Fluxo 2 — Formulário de funcionários com linguagem imperfeita: contrato backend-driven validado",
         "CRUD simples materializa host canônico e executa create read update delete no primeiro passe",
+        "Parent-child materializa Related Resource Outlet e isola a equipe pela missão no primeiro passe",
         "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
         "single-table control persiste, recarrega e renderiza dados reais no primeiro passe",
         "table-human refinement preserva colunas entre decisões semânticas e DOM"

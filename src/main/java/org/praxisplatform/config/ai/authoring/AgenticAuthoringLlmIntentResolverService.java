@@ -2047,6 +2047,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                 a detail/editor region, use artifactKind "page", operationKind "create",
                 layoutKind "resource-master-detail" and primaryComponent "praxis-table". Item actions remain discovered
                 from governed metadata/capabilities; their presence does not downgrade the composition to resource-crud.
+                For a requested parent-child page that coordinates a parent collection and one item-level related-resource
+                surface, use artifactKind "page", operationKind "create", layoutKind
+                "parent-child-related-resource", primaryComponent "praxis-related-resource-outlet", and copy the exact
+                governed surface id requested by the user into targetSurfaceId. Leave targetSurfaceId null when no exact
+                surface is semantically selected; never invent a related surface from a child field or endpoint name.
                 For an existing governed resource action or writable record operation, such as approving, rejecting,
                 deactivating, reactivating, paying, scheduling or editing a concrete record, use component_authoring,
                 operationKind "create", artifactKind "page", changeKind "create_artifact" and primaryComponent
@@ -2542,7 +2547,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 decision.includeFilters(),
                 decision.includeKpis(),
                 valueOrDefault(decision.provenance(), "llm-authored-semantic-decision")
-                        + " + canonical-component-alignment");
+                        + " + canonical-component-alignment",
+                decision.targetSurfaceId());
     }
 
     private String semanticIntentClass(
@@ -2624,7 +2630,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 strings(node.path("excludedComponentIds")),
                 node.path("includeFilters").asBoolean(true),
                 node.path("includeKpis").asBoolean(true),
-                valueOrDefault(nullableText(node, "provenance"), "llm-authored-semantic-decision"));
+                valueOrDefault(nullableText(node, "provenance"), "llm-authored-semantic-decision"),
+                valueOrDefault(nullableText(node, "targetSurfaceId"), ""));
     }
 
     private List<AgenticAuthoringVisualizationAxisDecision> visualizationAxes(JsonNode node) {
@@ -2887,6 +2894,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         properties.putObject("includeFilters").put("type", "boolean");
         properties.putObject("includeKpis").put("type", "boolean");
         properties.putObject("provenance").put("type", "string");
+        nullableString(properties, "targetSurfaceId");
 
         ObjectNode axis = objectMapper.createObjectNode();
         axis.put("type", "object");
@@ -2941,7 +2949,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .add("excludedComponentIds")
                 .add("includeFilters")
                 .add("includeKpis")
-                .add("provenance");
+                .add("provenance")
+                .add("targetSurfaceId");
         decision.put("additionalProperties", false);
         return decision;
     }

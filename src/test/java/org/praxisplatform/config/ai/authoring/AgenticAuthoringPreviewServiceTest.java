@@ -4719,6 +4719,173 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewVerifiesRelatedResourceSurfaceBeforeCompilingThePlan() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma página de missões com a equipe relacionada.",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                null,
+                relatedResourceIntent("team"));
+        when(resourceSurfaceCatalogRetrievalService.fetchCatalogResult(
+                eq("operations.missoes"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceSurfaceCatalogFetchResult.success(
+                        missionSurfaceCatalog("team"),
+                        "http://localhost/schemas/surfaces?resource=operations.missoes"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                null,
+                null,
+                resourceSurfaceCatalogRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid())
+                .withFailMessage("Preview failure codes: %s", result.failureCodes())
+                .isTrue();
+        assertThat(result.warnings()).contains(
+                "related-resource-target-surface-verified",
+                "ui-composition-plan-compiled-by-config");
+        JsonNode grounding = result.uiCompositionPlan().at("/diagnostics/relatedResourceGrounding");
+        assertThat(grounding.path("status").asText()).isEqualTo("verified");
+        assertThat(grounding.path("parentResourceKey").asText()).isEqualTo("operations.missoes");
+        assertThat(grounding.path("childResourceKey").asText())
+                .isEqualTo("operations.missao-participantes");
+        assertThat(grounding.path("childResourcePath").asText())
+                .isEqualTo("/api/operations/missao-participantes");
+        assertThat(grounding.path("childParentField").asText()).isEqualTo("missaoId");
+        assertThat(grounding.path("childOperations").toString())
+                .isEqualTo("[\"FILTER\",\"LIST\",\"CREATE\",\"UPDATE\",\"DELETE\"]");
+        assertThat(result.uiCompositionPlan().path("sourceRefs"))
+                .anySatisfy(source -> assertThat(source.asText())
+                        .isEqualTo("/schemas/surfaces?resource=operations.missoes"));
+        assertThat(result.compiledFormPatch().at("/patch/page/widgets/1/definition/inputs/surfaceId").asText())
+                .isEqualTo("team");
+    }
+
+    @Test
+    void previewFailsClosedWhenRelatedResourceSurfaceIsNotPublished() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma página de missões com a equipe relacionada.",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                null,
+                relatedResourceIntent("invented-team"));
+        when(resourceSurfaceCatalogRetrievalService.fetchCatalogResult(
+                eq("operations.missoes"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceSurfaceCatalogFetchResult.success(
+                        missionSurfaceCatalog("team"),
+                        "http://localhost/schemas/surfaces?resource=operations.missoes"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                null,
+                null,
+                resourceSurfaceCatalogRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("related-resource-target-surface-missing");
+        assertThat(result.uiCompositionPlan().at("/diagnostics/relatedResourceGrounding/status").asText())
+                .isEqualTo("surface-missing");
+    }
+
+    @Test
+    void previewFailsClosedWhenPublishedRelatedResourceContainsAnUnsafeChildPath() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma página de missões com a equipe relacionada.",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                null,
+                relatedResourceIntent("team"));
+        ObjectNode catalog = missionSurfaceCatalog("team");
+        ((ObjectNode) catalog.at("/surfaces/0/relatedResource"))
+                .put("childResourcePath", "https://untrusted.example/participants");
+        when(resourceSurfaceCatalogRetrievalService.fetchCatalogResult(
+                eq("operations.missoes"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceSurfaceCatalogFetchResult.success(
+                        catalog,
+                        "http://localhost/schemas/surfaces?resource=operations.missoes"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                null,
+                null,
+                resourceSurfaceCatalogRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("related-resource-contract-incomplete");
+        assertThat(result.uiCompositionPlan().at("/diagnostics/relatedResourceGrounding/status").asText())
+                .isEqualTo("related-resource-contract-incomplete");
+    }
+
+    @Test
+    void previewFailsClosedWhenRelatedResourceParentBindingDoesNotMatchTheSurfacePath() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma página de missões com a equipe relacionada.",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                null,
+                relatedResourceIntent("team"));
+        ObjectNode catalog = missionSurfaceCatalog("team");
+        ((ObjectNode) catalog.at("/surfaces/0/relatedResource"))
+                .put("parentIdPathVariable", "missionId");
+        when(resourceSurfaceCatalogRetrievalService.fetchCatalogResult(
+                eq("operations.missoes"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceSurfaceCatalogFetchResult.success(
+                        catalog,
+                        "http://localhost/schemas/surfaces?resource=operations.missoes"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                null,
+                null,
+                resourceSurfaceCatalogRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("related-resource-contract-incomplete");
+        assertThat(result.uiCompositionPlan().at("/diagnostics/relatedResourceGrounding/status").asText())
+                .isEqualTo("related-resource-contract-incomplete");
+    }
+
+    @Test
     void previewResolvesPinnedGovernedTemplateBeforeCompilingThePlan() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Crie uma tela com lista de funcionarios e detalhe lateral",
@@ -6187,6 +6354,85 @@ class AgenticAuthoringPreviewServiceTest {
                 List.of(),
                 List.of(),
                 objectMapper.createObjectNode());
+    }
+
+    private AgenticAuthoringIntentResolutionResult relatedResourceIntent(String surfaceId) {
+        AgenticAuthoringVisualizationDecision visualizationDecision =
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "mission-team-workspace",
+                        "parent-child-related-resource",
+                        "praxis-related-resource-outlet",
+                        List.of(),
+                        false,
+                        false,
+                        List.of(),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision",
+                        surfaceId);
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/operations/missoes",
+                        "post",
+                        "/schemas/filtered?path=/api/operations/missoes/filter&operation=post&schemaType=response",
+                        "/api/operations/missoes/filter",
+                        "POST",
+                        0.97d,
+                        "LLM selected the canonical mission resource.",
+                        List.of("domain-catalog", "api-catalog")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie uma página de missões com a equipe relacionada.",
+                "Vou materializar a composição pai-filho governada pela surface selecionada.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of("llm-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                visualizationDecision);
+    }
+
+    private ObjectNode missionSurfaceCatalog(String surfaceId) {
+        ObjectNode catalog = objectMapper.createObjectNode();
+        catalog.put("resourceKey", "operations.missoes");
+        catalog.put("resourcePath", "/api/operations/missoes");
+        ObjectNode surface = catalog.putArray("surfaces").addObject();
+        surface.put("id", surfaceId);
+        surface.put("resourceKey", "operations.missoes");
+        surface.put("kind", "READ_PROJECTION");
+        surface.put("scope", "ITEM");
+        surface.put("path", "/api/operations/missoes/{id}/team");
+        surface.put("responseCardinality", "COLLECTION");
+        surface.putObject("availability")
+                .put("allowed", false)
+                .put("reason", "resource-context-required");
+        ObjectNode relatedResource = surface.putObject("relatedResource");
+        relatedResource.put("parentResourceKey", "operations.missoes");
+        relatedResource.put("parentIdPathVariable", "id");
+        relatedResource.put("childResourceKey", "operations.missao-participantes");
+        relatedResource.put("childResourcePath", "/api/operations/missao-participantes");
+        relatedResource.put("childParentField", "missaoId");
+        relatedResource.put("selectable", true);
+        relatedResource.put("selectionKeyField", "id");
+        relatedResource.putArray("childOperations")
+                .add("FILTER")
+                .add("LIST")
+                .add("CREATE")
+                .add("UPDATE")
+                .add("DELETE");
+        return catalog;
     }
 
     private AgenticAuthoringIntentResolutionResult employeeDashboardFromCreateSurfaceIntent() {

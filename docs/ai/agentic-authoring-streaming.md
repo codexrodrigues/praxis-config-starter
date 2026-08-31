@@ -635,10 +635,11 @@ e schema. Nesse caso `searchApiResources` continua a descoberta e preserva a pro
 materializacao segue sujeita aos gates de elegibilidade, schema, capability, preview e revisao.
 
 O contrato estruturado `praxis-agentic-authoring-pre-intent-tool-plan.v3` projeta tambem o
-`layoutKind` canonico para os tres arquetipos compactos de recurso: `single-table`,
-`resource-master-detail` e `resource-crud`. Layout, tipo de artefato e componente primario sao
+`layoutKind` canonico para os quatro arquetipos compactos de recurso: `single-table`,
+`resource-master-detail`, `parent-child-related-resource` e `resource-crud`. Layout, tipo de artefato e componente primario sao
 decisoes semanticas independentes, mas o trio precisa ser coerente: tabela simples usa
-`artifactKind=table` com `praxis-table`, master-detail usa `praxis-table`, enquanto um unico host
+`artifactKind=table` com `praxis-table`, master-detail usa `praxis-table`, parent-child usa
+`artifactKind=page` com `praxis-related-resource-outlet` e uma `targetSurfaceId` exata, enquanto um unico host
 CRUD usa `praxis-crud`; pares divergentes sao rejeitados pelo plano estruturado. Quando
 `single-table` preserva integralmente o pedido, `requiresFullIntentResolution=false` evita um segundo
 passe LLM sem relaxar grounding ou apply. A orientacao encaminhada ao resolver usa
@@ -868,7 +869,9 @@ Regra de aplicacao:
 - Quando a decisao pedir `layoutKind=single-table`, a materializacao derivada deve usar
   `layoutPreset=single-table-page`, canvas/device layouts explicitos e exatamente um `praxis-table`
   vinculado ao recurso canonico. `resource-master-detail` deve resolver o blueprint Core
-  `layoutPreset=master-detail-dashboard`; `resource-crud` permanece no blueprint explicito de um
+  `layoutPreset=master-detail-dashboard`; `parent-child-related-resource` usa o mesmo blueprint
+  estrutural, mas exige o outlet e `relatedResourceGrounding.status=verified` pela consulta
+  principal-aware a `/schemas/surfaces`; `resource-crud` permanece no blueprint explicito de um
   unico host CRUD. Divergencia retorna
   `failureCodes=["semantic-preview-layout-required"]`,
   `reviewReason=semantic-preview-materialization-mismatch` e `canApply=false`.

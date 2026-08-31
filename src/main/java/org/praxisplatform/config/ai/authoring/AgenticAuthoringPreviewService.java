@@ -40,6 +40,12 @@ public class AgenticAuthoringPreviewService {
             "total",
             "registros",
             "registro");
+    private static final Set<String> RELATED_RESOURCE_CHILD_OPERATIONS = Set.of(
+            "FILTER",
+            "LIST",
+            "CREATE",
+            "UPDATE",
+            "DELETE");
 
     private final AgenticAuthoringPlanService planService;
     private final AgenticAuthoringPatchCompilerService patchCompilerService;
@@ -972,6 +978,22 @@ public class AgenticAuthoringPreviewService {
             boolean technicallyValid = planResult.valid();
             boolean semanticallyValid = planResult.valid();
             JsonNode uiCompositionPlan = prepareCanonicalChartsForPreview(templateResolution.uiCompositionPlan());
+            RelatedResourceSurfaceVerification relatedResourceSurfaceVerification =
+                    verifyRelatedResourceSurfaces(
+                            request,
+                            uiCompositionPlan,
+                            schemaBaseUrl,
+                            tenantId,
+                            userId,
+                            environment,
+                            surfaceCatalogFetchCache);
+            uiCompositionPlan = relatedResourceSurfaceVerification.uiCompositionPlan();
+            addAllOnce(failureCodes, relatedResourceSurfaceVerification.failureCodes());
+            addAllOnce(warnings, relatedResourceSurfaceVerification.warnings());
+            if (!relatedResourceSurfaceVerification.valid()) {
+                technicallyValid = false;
+                semanticallyValid = false;
+            }
             uiCompositionPlan = normalizeCountMetricBindings(uiCompositionPlan, warnings);
             uiCompositionPlan = verifySemanticAxesWithSchema(
                     request,
@@ -2890,6 +2912,229 @@ public class AgenticAuthoringPreviewService {
             }
         }
         return MissingNode.getInstance();
+    }
+
+    private RelatedResourceSurfaceVerification verifyRelatedResourceSurfaces(
+            AgenticAuthoringPlanRequest request,
+            JsonNode uiCompositionPlan,
+            String schemaBaseUrl,
+            String tenantId,
+            String userId,
+            String environment,
+            PreviewResourceSurfaceCatalogFetchCache surfaceCatalogFetchCache) {
+        if (!(uiCompositionPlan instanceof ObjectNode plan) || !plan.path("widgets").isArray()) {
+            return RelatedResourceSurfaceVerification.success(uiCompositionPlan);
+        }
+        List<String> failureCodes = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        boolean foundRelatedOutlet = false;
+        for (JsonNode widget : plan.path("widgets")) {
+            if (!"praxis-related-resource-outlet".equals(widget.path("componentId").asText(""))) {
+                continue;
+            }
+            foundRelatedOutlet = true;
+            String surfaceId = widget.path("inputs").path("surfaceId").asText("").trim();
+            String parentResourcePath = businessResourcePath(
+                    widget.path("inputs").path("parentResourcePath").asText(""));
+            ObjectNode grounding = relatedResourceGrounding(plan);
+            grounding.put("schemaVersion", "praxis-related-resource-authoring-grounding.v1");
+            grounding.put("surfaceId", surfaceId);
+            grounding.put("parentResourcePath", parentResourcePath);
+            grounding.put("relationshipAuthoredByComponent", false);
+            if (surfaceId.isBlank() || parentResourcePath.isBlank()) {
+                grounding.put("status", "invalid-authoring-input");
+                addAllOnce(failureCodes, List.of("related-resource-authoring-input-incomplete"));
+                continue;
+            }
+            String parentResourceKey = relatedResourceParentResourceKey(request, parentResourcePath);
+            if (parentResourceKey.isBlank()) {
+                grounding.put("status", "parent-resource-key-unresolved");
+                addAllOnce(failureCodes, List.of("related-resource-parent-resource-key-unresolved"));
+                continue;
+            }
+            grounding.put("parentResourceKey", parentResourceKey);
+            ResourceSurfaceCatalogFetchResult catalogResult = surfaceCatalogFetchCache == null
+                    ? null
+                    : surfaceCatalogFetchCache.fetch(
+                            parentResourceKey,
+                            schemaBaseUrl,
+                            tenantId,
+                            userId,
+                            environment);
+            if (catalogResult == null || !catalogResult.isSuccess()) {
+                String status = surfaceFetchStatus(catalogResult);
+                grounding.put("status", "surface-catalog-" + status);
+                addAllOnce(failureCodes, List.of("related-resource-surface-catalog-" + status));
+                continue;
+            }
+            JsonNode catalog = catalogResult.getCatalog();
+            if (!parentResourcePath.equals(businessResourcePath(catalog.path("resourcePath").asText("")))) {
+                grounding.put("status", "parent-resource-path-mismatch");
+                addAllOnce(failureCodes, List.of("related-resource-parent-resource-path-mismatch"));
+                continue;
+            }
+            JsonNode surface = findSurface(catalog.path("surfaces"), surfaceId);
+            if (!surface.isObject()
+                    || !parentResourceKey.equals(surface.path("resourceKey").asText(""))) {
+                grounding.put("status", "surface-missing");
+                addAllOnce(failureCodes, List.of("related-resource-target-surface-missing"));
+                continue;
+            }
+            if (!"ITEM".equals(surface.path("scope").asText(""))) {
+                grounding.put("status", "surface-scope-incompatible");
+                addAllOnce(failureCodes, List.of("related-resource-target-surface-scope-incompatible"));
+                continue;
+            }
+            JsonNode availability = surface.path("availability");
+            if (!availability.isObject()
+                    || !availability.has("allowed")
+                    || !availability.path("allowed").isBoolean()) {
+                grounding.put("status", "surface-availability-unverified");
+                addAllOnce(failureCodes, List.of("related-resource-target-surface-availability-unverified"));
+                continue;
+            }
+            boolean allowed = availability.path("allowed").asBoolean(false);
+            String availabilityReason = availability.path("reason").asText("").trim();
+            if (!allowed && !"resource-context-required".equals(availabilityReason)) {
+                grounding.put("status", "surface-unavailable");
+                putText(grounding, "availabilityReason", availabilityReason);
+                addAllOnce(failureCodes, List.of("related-resource-target-surface-unavailable"));
+                continue;
+            }
+            JsonNode relation = surface.path("relatedResource");
+            if (!completeRelatedResourceContract(surface, relation, parentResourceKey)) {
+                grounding.put("status", "related-resource-contract-incomplete");
+                addAllOnce(failureCodes, List.of("related-resource-contract-incomplete"));
+                continue;
+            }
+            grounding.put("status", "verified");
+            grounding.put("source", "schemas.surfaces");
+            grounding.put("childResourceKey", relation.path("childResourceKey").asText(""));
+            grounding.put("childResourcePath", relation.path("childResourcePath").asText(""));
+            grounding.put("childParentField", relation.path("childParentField").asText(""));
+            grounding.set("childOperations", relation.path("childOperations").deepCopy());
+            addSourceRef(plan, "/schemas/surfaces?resource=" + parentResourceKey);
+            addWarningOnce(warnings, "related-resource-target-surface-verified");
+        }
+        return foundRelatedOutlet
+                ? new RelatedResourceSurfaceVerification(
+                        failureCodes.isEmpty(),
+                        plan,
+                        List.copyOf(failureCodes),
+                        List.copyOf(warnings))
+                : RelatedResourceSurfaceVerification.success(plan);
+    }
+
+    private ObjectNode relatedResourceGrounding(ObjectNode plan) {
+        ObjectNode diagnostics = plan.path("diagnostics") instanceof ObjectNode currentDiagnostics
+                ? currentDiagnostics
+                : plan.putObject("diagnostics");
+        return diagnostics.path("relatedResourceGrounding") instanceof ObjectNode currentGrounding
+                ? currentGrounding
+                : diagnostics.putObject("relatedResourceGrounding");
+    }
+
+    private String relatedResourceParentResourceKey(
+            AgenticAuthoringPlanRequest request,
+            String parentResourcePath) {
+        JsonNode contextHints = request == null || request.contextHints() == null
+                ? MissingNode.getInstance()
+                : request.contextHints();
+        JsonNode verifiedOperations = contextHints.path("verifiedDomainOperations").path("entries");
+        if (verifiedOperations.isArray()) {
+            for (JsonNode operation : verifiedOperations) {
+                if (parentResourcePath.equals(businessResourcePath(operation.path("resourcePath").asText("")))) {
+                    String resourceKey = operation.path("resourceKey").asText("").trim();
+                    if (!resourceKey.isBlank()) {
+                        return resourceKey;
+                    }
+                }
+            }
+        }
+        String domainCatalogResourceKey = contextHints.path("domainCatalog").path("resourceKey").asText("").trim();
+        if (!domainCatalogResourceKey.isBlank()) {
+            return domainCatalogResourceKey;
+        }
+        String normalizedPath = value(parentResourcePath);
+        if (normalizedPath.startsWith("/api/")) {
+            normalizedPath = normalizedPath.substring(5);
+        } else if (normalizedPath.startsWith("/")) {
+            normalizedPath = normalizedPath.substring(1);
+        }
+        return normalizedPath.replace('/', '.');
+    }
+
+    private boolean completeRelatedResourceContract(
+            JsonNode surface,
+            JsonNode relation,
+            String expectedParentResourceKey) {
+        String parentResourceKey = relation.path("parentResourceKey").asText("").trim();
+        String parentIdPathVariable = relation.path("parentIdPathVariable").asText("").trim();
+        String childResourceKey = relation.path("childResourceKey").asText("").trim();
+        String childResourcePath = businessResourcePath(
+                relation.path("childResourcePath").asText(""));
+        String childParentField = relation.path("childParentField").asText("").trim();
+        String selectionKeyField = relation.path("selectionKeyField").asText("").trim();
+        String surfacePath = value(surface.path("path").asText(""));
+        String parentPlaceholder = "{" + parentIdPathVariable + "}";
+        String childPathWithoutParentPlaceholder = childResourcePath.replace(parentPlaceholder, "");
+        JsonNode childOperations = relation.path("childOperations");
+        return relation.isObject()
+                && List.of("VIEW", "READ_PROJECTION").contains(surface.path("kind").asText(""))
+                && "COLLECTION".equals(surface.path("responseCardinality").asText(""))
+                && expectedParentResourceKey.equals(parentResourceKey)
+                && parentIdPathVariable.matches("[A-Za-z_][A-Za-z0-9_]{0,127}")
+                && safeRelatedResourcePath(surfacePath)
+                && surfacePath.contains(parentPlaceholder)
+                && childResourceKey.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,199}")
+                && safeRelatedResourcePath(childResourcePath)
+                && !childPathWithoutParentPlaceholder.contains("{")
+                && !childPathWithoutParentPlaceholder.contains("}")
+                && childParentField.matches("[A-Za-z_][A-Za-z0-9_]{0,127}")
+                && relation.path("selectable").isBoolean()
+                && selectionKeyField.matches("[A-Za-z_][A-Za-z0-9_]{0,127}")
+                && childOperations.isArray()
+                && allRelatedResourceChildOperationsAreCanonical(childOperations);
+    }
+
+    private boolean safeRelatedResourcePath(String path) {
+        String pathWithoutPlaceholders = value(path).replaceAll(
+                "\\{[A-Za-z_][A-Za-z0-9_]*}",
+                "");
+        return path.startsWith("/api/")
+                && !path.contains("..")
+                && !path.contains("?")
+                && !path.contains("#")
+                && !path.contains("://")
+                && !path.contains("\\")
+                && path.chars().noneMatch(Character::isWhitespace)
+                && !pathWithoutPlaceholders.contains("{")
+                && !pathWithoutPlaceholders.contains("}");
+    }
+
+    private boolean allRelatedResourceChildOperationsAreCanonical(JsonNode operations) {
+        for (JsonNode operation : operations) {
+            if (!operation.isTextual()
+                    || !RELATED_RESOURCE_CHILD_OPERATIONS.contains(operation.asText(""))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void addSourceRef(ObjectNode plan, String sourceRef) {
+        if (plan == null || sourceRef == null || sourceRef.isBlank()) {
+            return;
+        }
+        ArrayNode sourceRefs = plan.path("sourceRefs") instanceof ArrayNode current
+                ? current
+                : plan.putArray("sourceRefs");
+        for (JsonNode existing : sourceRefs) {
+            if (sourceRef.equals(existing.asText(""))) {
+                return;
+            }
+        }
+        sourceRefs.add(sourceRef);
     }
 
     private Set<String> governedCrossFilterTargetFields(
@@ -6778,6 +7023,17 @@ public class AgenticAuthoringPreviewService {
 
         private static VisibleTableQueryFilterMaterialization success(JsonNode uiCompositionPlan) {
             return new VisibleTableQueryFilterMaterialization(uiCompositionPlan, List.of());
+        }
+    }
+
+    private record RelatedResourceSurfaceVerification(
+            boolean valid,
+            JsonNode uiCompositionPlan,
+            List<String> failureCodes,
+            List<String> warnings) {
+
+        private static RelatedResourceSurfaceVerification success(JsonNode uiCompositionPlan) {
+            return new RelatedResourceSurfaceVerification(true, uiCompositionPlan, List.of(), List.of());
         }
     }
 

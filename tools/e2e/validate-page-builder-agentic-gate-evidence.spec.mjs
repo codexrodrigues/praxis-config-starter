@@ -12,6 +12,7 @@ import {
 
 const profile = resolveGateProfile(loadGateMatrix(), 'single-table');
 const crudProfile = resolveGateProfile(loadGateMatrix(), 'crud-simple');
+const relatedProfile = resolveGateProfile(loadGateMatrix(), 'related-resource');
 const hash = 'a'.repeat(64);
 
 function jsonAttachment(name, value) {
@@ -135,6 +136,27 @@ function crudReceipt() {
   };
 }
 
+function relatedReceipt() {
+  return {
+    ...receipt(),
+    scenarioId: 'related-resource-control',
+    archetype: 'parent-child-related-resource',
+    functionalAssertions: [
+      'composition.parent-table-related-outlet',
+      'composition.selection-parent-context',
+      'discovery.surface-catalog.http-200',
+      'related.read.http-200',
+      'related.child-crud-materialized',
+      'related.child-update.http-200',
+      'related.child-delete.http-204',
+      'related.child-create.http-201',
+      'related.child-create-parent-derived',
+      'related.parent-switch-no-data-leak',
+      'persistence.reload-equivalent',
+    ],
+  };
+}
+
 function result(attachments = []) {
   return {
     status: 'passed',
@@ -222,6 +244,30 @@ function crudReport() {
   };
 }
 
+function relatedReport() {
+  return {
+    config: {},
+    suites: [{
+      title: 'related-resource-focal',
+      file: 'related-resource-focal.spec.ts',
+      column: 1,
+      line: 1,
+      specs: relatedProfile.requiredPassedTests.map((title) => title.startsWith('Parent-child')
+        ? spec(title, [jsonAttachment('related-resource-first-pass-receipt.json', relatedReceipt())])
+        : spec(title)),
+    }],
+    errors: [],
+    stats: {
+      startTime: '2026-08-31T00:00:00.000Z',
+      duration: 100,
+      expected: 2,
+      skipped: 0,
+      unexpected: 0,
+      flaky: 0,
+    },
+  };
+}
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -253,6 +299,18 @@ test('accepts a complete zero-retry CRUD report', () => {
   assert.equal(summary.receipts[0].firstPassFunctional, true);
 });
 
+test('accepts a complete zero-retry related-resource report', () => {
+  const summary = validateGateReport(
+    relatedReport(),
+    '/tmp/related-resource-report.json',
+    relatedProfile,
+  );
+  assert.equal(summary.discovered, 2);
+  assert.equal(summary.retries, 0);
+  assert.equal(summary.receipts[0].scenarioId, 'related-resource-control');
+  assert.equal(summary.receipts[0].firstPassFunctional, true);
+});
+
 test('rejects CRUD evidence that omits one functional operation', () => {
   const value = crudReport();
   mutateAttachment(value, 'CRUD simples', 'crud-simple-first-pass-receipt.json', (body) => {
@@ -262,6 +320,19 @@ test('rejects CRUD evidence that omits one functional operation', () => {
   });
   assert.throws(
     () => validateGateReport(value, '/tmp/crud-report.json', crudProfile),
+    /functional assertions diverge/,
+  );
+});
+
+test('rejects related-resource evidence that only exposes child actions without executing them', () => {
+  const value = relatedReport();
+  mutateAttachment(value, 'Parent-child materializa', 'related-resource-first-pass-receipt.json', (body) => {
+    body.functionalAssertions = body.functionalAssertions.filter(
+      (assertion) => assertion !== 'related.child-create.http-201',
+    );
+  });
+  assert.throws(
+    () => validateGateReport(value, '/tmp/related-resource-report.json', relatedProfile),
     /functional assertions diverge/,
   );
 });
