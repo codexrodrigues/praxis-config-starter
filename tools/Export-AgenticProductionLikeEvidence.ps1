@@ -70,6 +70,7 @@ Assert-True (-not [string]::IsNullOrWhiteSpace([string] $result.versions.metadat
 Assert-True ($result.versions.configStarter -eq $result.versions.quickstartConfigDependency) "Quickstart did not package the exercised Config version."
 Assert-True (([string] $result.contractHash) -match '^[0-9a-f]{64}$') "The Config/Angular contract hash is missing."
 Assert-True ($null -eq $result.failureType) "A successful publication cannot retain a gate failure."
+Assert-True (@($result.diagnosticEvidence).Count -eq 0) "Successful publication cannot retain failure diagnostic projections."
 Assert-True ($result.sourceAudit.passed -eq $true -and $sourceAudit.passed -eq $true) "The real-source audit did not pass."
 Assert-True ([int] $result.playwright.discovered -eq [int] $result.matrix.expectedDiscovered) "Playwright discovery diverges from the matrix."
 Assert-True ([int] $result.playwright.executed -ge [int] $result.matrix.minimumExecuted) "Playwright execution is below the matrix minimum."

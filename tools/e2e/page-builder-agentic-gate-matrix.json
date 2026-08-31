@@ -7,6 +7,18 @@
   },
   "evidence": {
     "criticalInterceptionGuardTest": "Guard live rejeita interceptacao de endpoint critico antes do registro",
+    "governedStateProjections": [
+      {
+        "scenarioId": "human-refinement-pr7",
+        "testTitle": "PR7 — jornada humana cria tabela e refina para gráficos preservando governança do backend",
+        "attachmentName": "pr7-governed-state-projection.json"
+      },
+      {
+        "scenarioId": "consultative-capability-continuation",
+        "testTitle": "Fluxo 0 — Assistente explica capacidades do Page Builder de forma amigável e acionável",
+        "attachmentName": "consultative-governed-state-projection.json"
+      }
+    ],
     "scenarioReceipts": [
       {
         "scenarioId": "live-resource-workspace-command",
@@ -26,9 +38,9 @@
         ]
       },
       {
-        "scenarioId": "table-human-authoring",
+        "scenarioId": "single-table-control",
         "archetype": "single-table-control",
-        "testTitle": "compara pedido, decisão, proposedConfig e DOM em todos os turnos",
+        "testTitle": "single-table control persiste, recarrega e renderiza dados reais no primeiro passe",
         "attachmentName": "single-table-first-pass-receipt.json",
         "requiredFunctionalAssertions": [
           "composition.single-table-only",
@@ -64,18 +76,20 @@
       ]
     },
     "single-table": {
-      "description": "Focal live LLM proof for the canonical table/praxis-table/single-table creation path plus the invariant critical-endpoint interception guard, without retries.",
+      "description": "Focal live LLM proof for canonical single-table creation and semantic refinement plus the invariant critical-endpoint interception guard, without Playwright retries.",
       "retries": 0,
       "scenarios": [
         "critical-interception-guard",
-        "table-human-authoring"
+        "single-table-control",
+        "table-human-refinement"
       ],
-      "expectedDiscovered": 2,
-      "minimumExecuted": 2,
+      "expectedDiscovered": 3,
+      "minimumExecuted": 3,
       "expectedSkipped": 0,
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
-        "compara pedido, decisão, proposedConfig e DOM em todos os turnos"
+        "single-table control persiste, recarrega e renderiza dados reais no primeiro passe",
+        "table-human refinement preserva colunas entre decisões semânticas e DOM"
       ]
     },
     "full": {
@@ -90,10 +104,11 @@
         "live-llm-flow-1",
         "live-llm-flow-2",
         "live-resource-workspace-command",
-        "table-human-authoring"
+        "single-table-control",
+        "table-human-refinement"
       ],
-      "expectedDiscovered": 11,
-      "minimumExecuted": 11,
+      "expectedDiscovered": 12,
+      "minimumExecuted": 12,
       "expectedSkipped": 0,
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
@@ -106,7 +121,8 @@
         "Fluxo 1 — Dashboard de pagamentos com linguagem imperfeita: contrato backend-driven validado",
         "Fluxo 2 — Formulário de funcionários com linguagem imperfeita: contrato backend-driven validado",
         "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
-        "compara pedido, decisão, proposedConfig e DOM em todos os turnos"
+        "single-table control persiste, recarrega e renderiza dados reais no primeiro passe",
+        "table-human refinement preserva colunas entre decisões semânticas e DOM"
       ]
     }
   }

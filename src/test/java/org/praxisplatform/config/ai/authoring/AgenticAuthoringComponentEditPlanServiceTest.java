@@ -1169,7 +1169,7 @@ class AgenticAuthoringComponentEditPlanServiceTest {
     }
 
     @Test
-    void scopesCanonicalTableRelabelToColumnHeaderOperation() throws Exception {
+    void preservesCanonicalColumnHeaderOperationAndTargetAcrossTableRefinement() throws Exception {
         JsonNode manifest = objectMapper.readTree("""
                 {
                   "componentId": "praxis-table",
@@ -1217,19 +1217,32 @@ class AgenticAuthoringComponentEditPlanServiceTest {
 
         AgenticAuthoringComponentEditPlanResult result = service.generateAndCompile(
                 new AgenticAuthoringPlanRequest(
-                        "Troque apenas o rótulo Ativo para Status",
+                        "Ativo vira Status.",
                         "openai",
                         "gpt-5.6-terra",
                         "secret",
-                        semanticIntent("rename_or_relabel")),
+                        semanticIntent("column.header.set")),
                 "praxis-table",
-                objectMapper.createObjectNode(),
+                objectMapper.readTree("""
+                        {
+                          "columns": [
+                            {"field": "ativo", "header": "Ativo"},
+                            {"field": "nome", "header": "Nome"}
+                          ]
+                        }
+                        """),
                 objectMapper.createObjectNode(),
                 "tenant",
                 "user",
                 "local");
 
         assertThat(result.valid()).isTrue();
+        assertThat(result.plan().path("operations").path(0).path("operationId").asText())
+                .isEqualTo("column.header.set");
+        assertThat(result.plan().path("operations").path(0).path("target").path("field").asText())
+                .isEqualTo("ativo");
+        assertThat(result.plan().path("operations").path(0).path("input").path("header").asText())
+                .isEqualTo("Status");
         ArgumentCaptor<AiJsonSchema> schema = ArgumentCaptor.forClass(AiJsonSchema.class);
         verify(providerManagementService, times(2)).generateJson(
                 any(), schema.capture(), any(), eq("tenant"), eq("user"), eq("local"));

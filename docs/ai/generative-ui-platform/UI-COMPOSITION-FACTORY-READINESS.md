@@ -172,11 +172,12 @@ canonical collection binding, filtered schema and current resource capabilities 
 ambiguity or partial grounding remains fail-closed. Schema-visible fields are projected in canonical
 order without the former silent 16-column cap; `hidden` and `tableHidden` remain authoritative.
 
-Inventory update: `table-human-authoring` now persists its initial one-prompt canonical creation,
-proves apply/readback/reload equality and real resource rows, emits the common receipt and only then
-continues the deliberate multi-turn semantic-edit battery. The implementation is instrumented as
-the `single-table-control`; it remains `suportado-parcialmente` until the first real production-like
-run publishes that evidence.
+Inventory update: the browser proof separates `single-table-control`, which persists the initial
+one-prompt canonical creation, proves apply/readback/reload equality and real resource rows and emits
+the common receipt, from `table-human-refinement`, which runs the deliberate multi-turn semantic-edit
+battery without redefining that receipt. Both the focal single-table gate and the full gate require
+the control and refinement scenarios; only the control owns the certification receipt. The capability
+remains `suportado-parcialmente` until a real production-like run publishes stable first-pass evidence.
 
 ### P0 — Shared golden corpus and attestation
 

@@ -194,3 +194,212 @@ function Assert-PraxisPageBuilderScenarioEvidence([object] $Evidence) {
         [string] $Evidence.outcome -eq $expectedOutcome
     ) 'Scenario outcome is inconsistent.'
 }
+
+function Assert-PraxisGovernedProjectionString(
+    [AllowNull()][object] $Value,
+    [int] $MaxLength,
+    [string] $Context
+) {
+    if ($null -eq $Value) { return }
+    Assert-PraxisScenarioEvidenceCondition ($Value -is [string]) "$Context must be a string or null."
+    Assert-PraxisScenarioEvidenceCondition ($Value.Length -le $MaxLength) "$Context exceeds $MaxLength characters."
+}
+
+function Assert-PraxisGovernedProjectionStringArray(
+    [object] $Value,
+    [int] $MaxItems,
+    [string] $Context
+) {
+    $items = @($Value)
+    Assert-PraxisScenarioEvidenceCondition ($items.Count -le $MaxItems) "$Context exceeds $MaxItems items."
+    foreach ($item in $items) {
+        Assert-PraxisGovernedProjectionString $item 160 $Context
+    }
+    Assert-PraxisScenarioEvidenceCondition (
+        @($items | Sort-Object -Unique).Count -eq $items.Count
+    ) "$Context contains duplicate values."
+}
+
+function ConvertTo-PraxisGovernedStateProjection(
+    [object] $Projection,
+    [object] $Definition
+) {
+    Assert-PraxisScenarioEvidenceProperties $Projection @(
+        'schemaVersion', 'scenarioId', 'observedDisposition', 'decisionDiagnostics', 'preview',
+        'applyEligibility', 'blockingDiagnosticCodes', 'quickReplyIds',
+        'governedRepairActionIds', 'canonicalActionPresent', 'canonicalActions',
+        'applyLineage', 'execution'
+    ) 'Governed state projection'
+    Assert-PraxisScenarioEvidenceCondition (
+        $Projection.schemaVersion -eq 'praxis.page-builder.governed-state-projection/v1'
+    ) 'Unexpected governed state projection schema.'
+    Assert-PraxisScenarioEvidenceCondition (
+        [string] $Projection.scenarioId -eq [string] $Definition.scenarioId
+    ) 'Governed state projection scenarioId diverges from its definition.'
+
+    Assert-PraxisScenarioEvidenceProperties $Projection.observedDisposition @(
+        'testObservedState', 'controllerState', 'domState'
+    ) 'Governed state observedDisposition'
+    foreach ($name in @('testObservedState', 'controllerState', 'domState')) {
+        Assert-PraxisGovernedProjectionString $Projection.observedDisposition.$name 160 "observedDisposition.$name"
+    }
+
+    Assert-PraxisScenarioEvidenceProperties $Projection.decisionDiagnostics @(
+        'status', 'reason', 'decisionValid', 'requiresReview'
+    ) 'Governed state decisionDiagnostics'
+    Assert-PraxisGovernedProjectionString $Projection.decisionDiagnostics.status 160 'decisionDiagnostics.status'
+    Assert-PraxisGovernedProjectionString $Projection.decisionDiagnostics.reason 240 'decisionDiagnostics.reason'
+    foreach ($name in @('decisionValid', 'requiresReview')) {
+        $value = $Projection.decisionDiagnostics.$name
+        Assert-PraxisScenarioEvidenceCondition (
+            $null -eq $value -or $value -is [bool]
+        ) "decisionDiagnostics.$name must be boolean or null."
+    }
+
+    Assert-PraxisScenarioEvidenceProperties $Projection.preview @('present', 'valid') 'Governed state preview'
+    Assert-PraxisScenarioEvidenceCondition ($Projection.preview.present -is [bool]) 'preview.present must be boolean.'
+    Assert-PraxisScenarioEvidenceCondition (
+        $null -eq $Projection.preview.valid -or $Projection.preview.valid -is [bool]
+    ) 'preview.valid must be boolean or null.'
+    Assert-PraxisScenarioEvidenceProperties $Projection.applyEligibility @(
+        'controllerCanApply', 'persistEnabled'
+    ) 'Governed state applyEligibility'
+    Assert-PraxisScenarioEvidenceCondition (
+        $Projection.applyEligibility.controllerCanApply -is [bool] -and
+        $Projection.applyEligibility.persistEnabled -is [bool]
+    ) 'Governed state apply eligibility values must be boolean.'
+
+    Assert-PraxisGovernedProjectionStringArray $Projection.blockingDiagnosticCodes 24 'blockingDiagnosticCodes'
+    Assert-PraxisGovernedProjectionStringArray $Projection.quickReplyIds 12 'quickReplyIds'
+    Assert-PraxisGovernedProjectionStringArray $Projection.governedRepairActionIds 12 'governedRepairActionIds'
+
+    $semanticActionKeys = @(
+        'kind', 'actionId', 'operationId', 'operationKind', 'artifactKind', 'changeKind',
+        'semanticIntentClass', 'capabilityId'
+    )
+    $presenceActionKeys = @(
+        'resourcePathPresent', 'targetPresent', 'componentTargetPresent',
+        'resourceTargetPresent', 'surfaceTargetPresent', 'widgetTargetPresent',
+        'decisionTargetPresent'
+    )
+    $allowedActionKeys = @($semanticActionKeys + $presenceActionKeys)
+    $canonicalActions = @()
+    foreach ($entry in @($Projection.canonicalActions)) {
+        Assert-PraxisScenarioEvidenceProperties $entry @(
+            'replyId', 'source', 'canonicalAction', 'canonicalActionToken'
+        ) 'Governed canonical action entry'
+        Assert-PraxisGovernedProjectionString $entry.replyId 160 'canonicalActions.replyId'
+        Assert-PraxisScenarioEvidenceCondition (
+            $entry.source -in @('reply.canonicalAction', 'reply.contextHints.canonicalAction')
+        ) 'canonicalActions.source is not allowed.'
+        Assert-PraxisGovernedProjectionString $entry.canonicalActionToken 160 'canonicalActions.canonicalActionToken'
+        if ($null -ne $entry.canonicalActionToken) {
+            Assert-PraxisScenarioEvidenceCondition (
+                [string] $entry.canonicalActionToken -match '^[a-z0-9][a-z0-9._:-]{0,159}$'
+            ) 'canonicalActionToken is not canonical.'
+        }
+        Assert-PraxisScenarioEvidenceCondition (
+            $null -eq $entry.canonicalAction -or $entry.canonicalAction -is [psobject]
+        ) 'canonicalActions.canonicalAction must be an object or null.'
+        $actionProperties = if ($null -eq $entry.canonicalAction) {
+            @()
+        } else {
+            @($entry.canonicalAction.PSObject.Properties)
+        }
+        foreach ($property in $actionProperties) {
+            Assert-PraxisScenarioEvidenceCondition (
+                $property.Name -in $allowedActionKeys
+            ) "canonicalActions contains a non-whitelisted key: $($property.Name)"
+            $value = $property.Value
+            if ($property.Name -in $presenceActionKeys) {
+                Assert-PraxisScenarioEvidenceCondition (
+                    $value -is [bool]
+                ) "canonicalActions.$($property.Name) must be boolean."
+            } else {
+                Assert-PraxisScenarioEvidenceCondition (
+                    $null -eq $value -or $value -is [string] -or $value -is [bool] -or
+                    $value -is [int] -or $value -is [long] -or $value -is [double] -or $value -is [decimal]
+                ) "canonicalActions.$($property.Name) must be scalar or null."
+            }
+            if ($value -is [string]) {
+                Assert-PraxisGovernedProjectionString $value 160 "canonicalActions.$($property.Name)"
+                Assert-PraxisScenarioEvidenceCondition (
+                    $value -match '^[a-z0-9][a-z0-9._:-]{0,159}$'
+                ) "canonicalActions.$($property.Name) is not a canonical token."
+            }
+        }
+        $directAction = $entry.source -eq 'reply.canonicalAction'
+        Assert-PraxisScenarioEvidenceCondition (
+            ($directAction -and $actionProperties.Count -gt 0 -and $null -eq $entry.canonicalActionToken) -or
+            (-not $directAction -and $actionProperties.Count -eq 0 -and $null -ne $entry.canonicalActionToken)
+        ) 'canonicalActions source, object and token are inconsistent.'
+        if ($actionProperties.Count -gt 0 -or $null -ne $entry.canonicalActionToken) {
+            $canonicalActions += [ordered]@{
+                replyId = [string] $entry.replyId
+                source = [string] $entry.source
+                canonicalAction = $entry.canonicalAction
+                canonicalActionToken = $entry.canonicalActionToken
+            }
+        }
+    }
+    Assert-PraxisScenarioEvidenceCondition ($canonicalActions.Count -le 12) 'canonicalActions exceeds 12 items.'
+    Assert-PraxisScenarioEvidenceCondition (
+        $Projection.canonicalActionPresent -is [bool] -and
+        [bool] $Projection.canonicalActionPresent -eq ($canonicalActions.Count -gt 0)
+    ) 'canonicalActionPresent diverges from sanitized canonicalActions.'
+
+    Assert-PraxisScenarioEvidenceProperties $Projection.applyLineage @(
+        'status', 'reason', 'patchAuthority', 'terminalReferencePresent'
+    ) 'Governed state applyLineage'
+    Assert-PraxisGovernedProjectionString $Projection.applyLineage.status 160 'applyLineage.status'
+    Assert-PraxisGovernedProjectionString $Projection.applyLineage.reason 240 'applyLineage.reason'
+    Assert-PraxisGovernedProjectionString $Projection.applyLineage.patchAuthority 160 'applyLineage.patchAuthority'
+    Assert-PraxisScenarioEvidenceCondition (
+        $Projection.applyLineage.terminalReferencePresent -is [bool]
+    ) 'applyLineage.terminalReferencePresent must be boolean.'
+
+    Assert-PraxisScenarioEvidenceProperties $Projection.execution @(
+        'turnCount', 'attemptCount', 'retryCount'
+    ) 'Governed state execution'
+    foreach ($name in @('turnCount', 'attemptCount', 'retryCount')) {
+        Assert-PraxisScenarioEvidenceCondition (
+            [int] $Projection.execution.$name -ge 0
+        ) "execution.$name must be non-negative."
+    }
+    Assert-PraxisScenarioEvidenceCondition (
+        [int] $Projection.execution.retryCount -le [int] $Projection.execution.attemptCount
+    ) 'execution.retryCount cannot exceed attemptCount.'
+
+    return [ordered]@{
+        scenarioId = [string] $Definition.scenarioId
+        testTitle = [string] $Definition.testTitle
+        attachmentName = [string] $Definition.attachmentName
+        projection = [ordered]@{
+            schemaVersion = [string] $Projection.schemaVersion
+            scenarioId = [string] $Projection.scenarioId
+            observedDisposition = $Projection.observedDisposition
+            decisionDiagnostics = $Projection.decisionDiagnostics
+            preview = $Projection.preview
+            applyEligibility = $Projection.applyEligibility
+            blockingDiagnosticCodes = @($Projection.blockingDiagnosticCodes)
+            quickReplyIds = @($Projection.quickReplyIds)
+            governedRepairActionIds = @($Projection.governedRepairActionIds)
+            canonicalActionPresent = [bool] $Projection.canonicalActionPresent
+            canonicalActions = @($canonicalActions)
+            applyLineage = $Projection.applyLineage
+            execution = $Projection.execution
+        }
+    }
+}
+
+function Assert-PraxisGovernedStateProjectionEvidence([object] $Evidence) {
+    Assert-PraxisScenarioEvidenceProperties $Evidence @(
+        'scenarioId', 'testTitle', 'attachmentName', 'projection'
+    ) 'Governed state projection evidence'
+    $definition = [pscustomobject]@{
+        scenarioId = [string] $Evidence.scenarioId
+        testTitle = [string] $Evidence.testTitle
+        attachmentName = [string] $Evidence.attachmentName
+    }
+    ConvertTo-PraxisGovernedStateProjection $Evidence.projection $definition | Out-Null
+}
