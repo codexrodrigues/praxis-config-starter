@@ -86,6 +86,13 @@ export function validateGateMatrix(matrix) {
     if (mode.humanTurnLimit !== undefined) {
       assertPositiveInteger(mode.humanTurnLimit, `modes.${modeName}.humanTurnLimit`);
     }
+    if (mode.domainCatalogResourceKey !== undefined) {
+      assertCondition(
+        typeof mode.domainCatalogResourceKey === 'string'
+          && /^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+$/.test(mode.domainCatalogResourceKey),
+        `modes.${modeName}.domainCatalogResourceKey must be a canonical dotted resource identity.`,
+      );
+    }
   }
 
   const evidence = matrix.evidence;
@@ -147,6 +154,7 @@ export function resolveGateProfile(matrix, modeName) {
     playwrightTestTimeoutMs: matrix.defaults.playwrightTestTimeoutMs,
     streamProcessingTimeoutSeconds: matrix.defaults.streamProcessingTimeoutSeconds,
     humanTurnLimit: mode.humanTurnLimit ?? null,
+    domainCatalogResourceKey: mode.domainCatalogResourceKey ?? null,
     requiredPassedTests: [...mode.requiredPassedTests],
     receiptRequirements: matrix.evidence.scenarioReceipts
       .filter((entry) => mode.scenarios.includes(entry.scenarioId)),

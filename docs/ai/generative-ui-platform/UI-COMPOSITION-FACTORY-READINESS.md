@@ -1,7 +1,8 @@
 # Governed UI composition factory readiness
 
 Status: first operationally proved master-detail pilot; canonical single-table creation and semantic
-refinement stable in five consecutive local production-like runs, 2026-08-31.
+refinement stable in five consecutive local production-like runs; canonical CRUD-simple certified
+in five consecutive local production-like runs with zero retries, 2026-08-31.
 
 ## Decision
 
@@ -151,6 +152,17 @@ Windows runner gate owns the remaining proof.
 The 90% target and broader archetype certification remain open under
 [praxis-config-starter#372](https://github.com/codexrodrigues/praxis-config-starter/issues/372).
 
+The next incremental lane is `crud-simple`. It deliberately does not reuse the older `Fluxo 2` as
+certification evidence: that journey accepts up to five typed prompts, persists a standalone
+`praxis-dynamic-form` and does not execute a business write. The focal CRUD scenario requires one
+semantic turn to materialize exactly one `praxis-crud`, then exercises discovery of the real
+Quickstart capability snapshot (including canonical Create/Update/Delete operations) and the
+request schema loaded on demand, plus Create, read-after-create, Update,
+read-after-update, Delete and read-after-delete through the runtime UI. The common receipt remains
+generic; the matrix owns the exact CRUD assertion ids. Fixture cleanup is fail-closed and a direct
+DELETE is used only as recovery after the browser journey, never as functional proof. See
+[praxis-ui-angular#453](https://github.com/codexrodrigues/praxis-ui-angular/issues/453).
+
 ### Implemented attestation contract; rollout still partial
 
 The #357 interoperable attestation now binds the evidence it actually owns:
@@ -228,6 +240,32 @@ the control and refinement scenarios; only the control owns the certification re
 is now operationally certified for this narrow profile by five consecutive production-like runs.
 It remains `suportado-parcialmente` at platform level because the broader archetype matrix,
 publication artifact and consumer rollout are not yet complete.
+
+### P1 — Canonical CRUD-simple certification
+
+Issues: [#372](https://github.com/codexrodrigues/praxis-config-starter/issues/372) and
+[praxis-ui-angular#453](https://github.com/codexrodrigues/praxis-ui-angular/issues/453).
+
+The platform already materializes `layoutKind=resource-crud` as one `praxis-crud` whose metadata
+contains the canonical resource identity and no copied action catalog. The runtime owns the
+table/form/open-mode lifecycle and discovers schemas and capabilities from the backend. Explicit
+workflow action/surface catalogs remain optional business contracts and are not fabricated for
+ordinary CRUD. Classification: `suportado-parcialmente`; no new endpoint, DTO, public Angular contract,
+component or page DSL is justified. Certification requires the focal zero-retry profile and its
+consecutive production-like evidence series.
+
+The 2026-08-31 local series passed five independent production-like executions: 10/10 required tests,
+zero Playwright retries and five receipts with `firstPassFunctional=true`. Every run persisted and
+reloaded the same semantic payload SHA-256, while using unique domain fixtures and cleaning them after
+Create, read, Update and Delete through the runtime UI. The series also exposed and closed a systemic
+Quickstart mapper defect that reassigned route-owned JPA identity during update; the host fix and its
+generated-mapper regression gate are tracked by
+[praxis-api-quickstart#241](https://github.com/codexrodrigues/praxis-api-quickstart/issues/241).
+
+This certifies the narrow `crud-simple` profile for platform-internal use and removes it from the list
+of unproved archetypes. Platform readiness remains `suportado-parcialmente` until parent-child/related
+resource, richer business-command and tabs/nested-workspace profiles complete the matrix required by
+#372 before broad Ergo promotion.
 
 ### P0 — Shared golden corpus and attestation
 
