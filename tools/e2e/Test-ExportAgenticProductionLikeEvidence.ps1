@@ -71,6 +71,7 @@ try {
         criticalEndpointMocks = 0
         criticalInterceptionGuard = [ordered]@{ passed = $true }
         executionLane = "live"
+        validationMode = "smoke"
         e2ePassed = $true
         provider = "openai"
         model = "gpt-test"
@@ -101,17 +102,58 @@ try {
         sourceAudit = [ordered]@{ passed = $true }
         git = $identities
         matrix = [ordered]@{
+            schemaVersion = "praxis.page-builder-agentic-gate-matrix/v1"
             scenarios = @("critical-interception-guard", "live-resource-workspace-command")
+            retries = 0
+            domainCatalogRagRequired = $false
+            domainCatalogResourceKey = $null
+            apiCatalogGroup = "human-resources"
+            apiCatalogPathPrefixes = @()
+            requiredPassedTests = @("critical guard", "live mission")
             receiptRequirements = @([ordered]@{
                 scenarioId = "live-resource-workspace-command"
                 archetype = "master-detail-command"
                 requiredFunctionalAssertions = @('composition.master-visible', 'composition.detail-visible')
             })
+            semanticRefinementRequirements = @()
             expectedDiscovered = 2
             minimumExecuted = 2
             expectedSkipped = 0
         }
-        playwright = [ordered]@{ discovered = 2; executed = 2; passed = 2; skipped = 0; failed = 0 }
+        playwright = [ordered]@{
+            discovered = 2
+            executed = 2
+            passed = 2
+            skipped = 0
+            failed = 0
+            flaky = 0
+            attempts = 2
+            retryAttempts = 0
+            durationMs = 100
+            tests = @(
+                [ordered]@{ title = "critical guard"; status = "expected"; attempts = 1; retryAttempts = 0 },
+                [ordered]@{ title = "live mission"; status = "expected"; attempts = 1; retryAttempts = 0 }
+            )
+        }
+        evidenceValidation = [ordered]@{
+            passed = $true
+            artifact = "evidence-validation-summary.json"
+            attestation = [ordered]@{
+                schemaVersion = "praxis.page-builder-agentic-gate-run-attestation/v1"
+                reportSha256 = ("9" * 64)
+                durationMs = 100
+                discovered = 2
+                passed = 2
+                retries = 0
+                receipts = @([ordered]@{
+                    scenarioId = "live-resource-workspace-command"
+                    firstPassFunctional = $true
+                    totalMs = 50
+                    persistedPayloadSha256 = ("f" * 64)
+                })
+                semanticRefinements = @()
+            }
+        }
         scenarioEvidence = @($scenarioEvidence)
         diagnosticEvidence = @()
     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8

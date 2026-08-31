@@ -109,6 +109,35 @@ Input:
   definidos somente em `tools/e2e/page-builder-agentic-gate-matrix.json`
 - `page_builder_e2e_mode=full` somente para matriz completa deliberada
 
+Para certificar uma serie hospedada, execute os cinco workflows de forma
+estritamente sequencial e baixe o artifact de cada run em um diretorio distinto.
+O relatorio Playwright bruto continua fora do artifact remoto; cada
+`production-like-result.json` publica apenas a atestacao sanitizada produzida
+pelo validador dentro do runner, incluindo hash do relatorio, contagens,
+zero-retry e receipts resumidos. Valide a serie pelos resultados publicados:
+
+```bash
+gh run download RUN_ID_1 --repo codexrodrigues/praxis-config-starter \
+  --name agentic-authoring-smoke-artifacts --dir /tmp/praxis-related/run-1
+# Repita para RUN_ID_2 ate RUN_ID_5, sempre em diretorios distintos.
+
+node tools/e2e/validate-page-builder-agentic-gate-evidence.mjs \
+  --mode related-resource \
+  --expected-runs 5 \
+  --publication-result /tmp/praxis-related/run-1/praxis-config-starter/artifacts/agentic-authoring-publication/production-like-result.json \
+  --publication-result /tmp/praxis-related/run-2/praxis-config-starter/artifacts/agentic-authoring-publication/production-like-result.json \
+  --publication-result /tmp/praxis-related/run-3/praxis-config-starter/artifacts/agentic-authoring-publication/production-like-result.json \
+  --publication-result /tmp/praxis-related/run-4/praxis-config-starter/artifacts/agentic-authoring-publication/production-like-result.json \
+  --publication-result /tmp/praxis-related/run-5/praxis-config-starter/artifacts/agentic-authoring-publication/production-like-result.json
+```
+
+O agregador rejeita hashes de relatorio repetidos, drift de provider/modelo,
+SHAs, versoes, contrato, snapshot do registry, escopo de Domain/API Catalog,
+requisito de RAG ou matriz, alem de qualquer
+retry, flaky, skip, falha, receipt incompleto ou divergencia entre a atestacao e
+o resultado sanitizado. Nao substitua esse fechamento por cinco links verdes de
+Actions.
+
 ## Cenarios obrigatorios por fase
 
 ## Fase 1 - Turn engine e tools minimas
