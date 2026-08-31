@@ -8,13 +8,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.text.Normalizer;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -79,9 +75,34 @@ public class DomainKnowledgeChangeSetService {
     private final DomainKnowledgeEvidenceRepository evidenceRepository;
     private final DomainKnowledgeChangeSetValidator validator;
     private final ObjectMapper objectMapper;
+    private final CanonicalJsonHashService canonicalJsonHashService;
     private final ProjectKnowledgeDerivedIndexService projectKnowledgeDerivedIndexService;
 
     @Autowired
+    public DomainKnowledgeChangeSetService(
+            DomainKnowledgeChangeSetRepository repository,
+            DomainKnowledgeConceptRepository conceptRepository,
+            DomainKnowledgeAliasRepository aliasRepository,
+            DomainKnowledgeBindingRepository bindingRepository,
+            DomainKnowledgeRelationshipRepository relationshipRepository,
+            DomainKnowledgeEvidenceRepository evidenceRepository,
+            DomainKnowledgeChangeSetValidator validator,
+            ObjectMapper objectMapper,
+            CanonicalJsonHashService canonicalJsonHashService,
+            ObjectProvider<ProjectKnowledgeDerivedIndexService> projectKnowledgeDerivedIndexService) {
+        this(
+                repository,
+                conceptRepository,
+                aliasRepository,
+                bindingRepository,
+                relationshipRepository,
+                evidenceRepository,
+                validator,
+                objectMapper,
+                canonicalJsonHashService,
+                projectKnowledgeDerivedIndexService.getIfAvailable(NoopProjectKnowledgeDerivedIndexService::new));
+    }
+
     public DomainKnowledgeChangeSetService(
             DomainKnowledgeChangeSetRepository repository,
             DomainKnowledgeConceptRepository conceptRepository,
@@ -101,6 +122,7 @@ public class DomainKnowledgeChangeSetService {
                 evidenceRepository,
                 validator,
                 objectMapper,
+                new CanonicalJsonHashService(objectMapper),
                 projectKnowledgeDerivedIndexService.getIfAvailable(NoopProjectKnowledgeDerivedIndexService::new));
     }
 
@@ -114,6 +136,30 @@ public class DomainKnowledgeChangeSetService {
             DomainKnowledgeChangeSetValidator validator,
             ObjectMapper objectMapper,
             ProjectKnowledgeDerivedIndexService projectKnowledgeDerivedIndexService) {
+        this(
+                repository,
+                conceptRepository,
+                aliasRepository,
+                bindingRepository,
+                relationshipRepository,
+                evidenceRepository,
+                validator,
+                objectMapper,
+                new CanonicalJsonHashService(objectMapper),
+                projectKnowledgeDerivedIndexService);
+    }
+
+    private DomainKnowledgeChangeSetService(
+            DomainKnowledgeChangeSetRepository repository,
+            DomainKnowledgeConceptRepository conceptRepository,
+            DomainKnowledgeAliasRepository aliasRepository,
+            DomainKnowledgeBindingRepository bindingRepository,
+            DomainKnowledgeRelationshipRepository relationshipRepository,
+            DomainKnowledgeEvidenceRepository evidenceRepository,
+            DomainKnowledgeChangeSetValidator validator,
+            ObjectMapper objectMapper,
+            CanonicalJsonHashService canonicalJsonHashService,
+            ProjectKnowledgeDerivedIndexService projectKnowledgeDerivedIndexService) {
         this.repository = repository;
         this.conceptRepository = conceptRepository;
         this.aliasRepository = aliasRepository;
@@ -122,6 +168,7 @@ public class DomainKnowledgeChangeSetService {
         this.evidenceRepository = evidenceRepository;
         this.validator = validator;
         this.objectMapper = objectMapper;
+        this.canonicalJsonHashService = canonicalJsonHashService;
         this.projectKnowledgeDerivedIndexService = projectKnowledgeDerivedIndexService == null
                 ? new NoopProjectKnowledgeDerivedIndexService()
                 : projectKnowledgeDerivedIndexService;
@@ -146,7 +193,7 @@ public class DomainKnowledgeChangeSetService {
         String normalizedEnvironment = normalize(environment);
         String changeSetKey = requireText(request.changeSetKey(), "changeSetKey");
         String patch = writePatch(request.patch());
-        String patchHash = sha256(patch);
+        String patchHash = canonicalPatchHash(patch);
         String authorType = normalizeOrDefault(request.authorType(), "llm");
         String authorId = normalize(request.authorId());
         String status = normalizeOrDefault(request.status(), DomainKnowledgeChangeSetValidator.STATUS_PROPOSED);
@@ -390,7 +437,10 @@ public class DomainKnowledgeChangeSetService {
                 patch);
         DomainKnowledgeChangeSetValidationResponse validation =
                 validator.validateCreateRequest(changeSet.getTenantId(), changeSet.getEnvironment(), validationRequest);
-        changeSet.setValidationResult(writeValidationResult(validation, sha256(writePatch(patch)), patch));
+        changeSet.setValidationResult(writeValidationResult(
+                validation,
+                canonicalPatchHash(changeSet.getPatch()),
+                patch));
         repository.save(changeSet);
         return validation;
     }
@@ -1000,16 +1050,30 @@ public class DomainKnowledgeChangeSetService {
             String patchHash,
             String authorType,
             String authorId) {
-        JsonNode validationResult = read(existing.getValidationResult());
-        boolean samePatch = patchHash.equals(validationResult.path("patchHash").asText(null));
+        // The stored JSONB patch is the authoritative semantic artifact. PostgreSQL may reorder
+        // object properties and validation diagnostics are only a derived projection, so both
+        // sides must be compared through the shared canonical JSON hash.
+        boolean samePatch = patchHash.equals(canonicalPatchHash(existing.getPatch()));
         boolean sameAuthorType = normalize(existing.getAuthorType()).equals(authorType);
         boolean sameAuthorId = normalize(existing.getAuthorId()).equals(authorId);
         if (samePatch && sameAuthorType && sameAuthorId) {
             return toResponse(existing);
         }
+        List<String> semanticMismatches = new ArrayList<>();
+        if (!samePatch) {
+            semanticMismatches.add("patch-hash");
+        }
+        if (!sameAuthorType) {
+            semanticMismatches.add("author-type");
+        }
+        if (!sameAuthorId) {
+            semanticMismatches.add("author-id");
+        }
         throw new ConfigurationIngestionException(
                 "Domain knowledge change set key already exists with different semantics: "
-                        + request.changeSetKey());
+                        + request.changeSetKey()
+                        + "; mismatches="
+                        + semanticMismatches);
     }
 
     private DomainKnowledgeChangeSetResponse toResponse(DomainKnowledgeChangeSet changeSet) {
@@ -1305,12 +1369,7 @@ public class DomainKnowledgeChangeSetService {
         return java.util.Objects.equals(normalize(expected), normalize(actual));
     }
 
-    private String sha256(String value) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(digest.digest(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 digest unavailable", ex);
-        }
+    private String canonicalPatchHash(String patch) {
+        return canonicalJsonHashService.sha256(read(patch));
     }
 }

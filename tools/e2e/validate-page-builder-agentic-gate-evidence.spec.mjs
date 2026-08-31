@@ -11,6 +11,7 @@ import {
 } from './validate-page-builder-agentic-gate-evidence.mjs';
 
 const profile = resolveGateProfile(loadGateMatrix(), 'single-table');
+const crudProfile = resolveGateProfile(loadGateMatrix(), 'crud-simple');
 const hash = 'a'.repeat(64);
 
 function jsonAttachment(name, value) {
@@ -112,6 +113,28 @@ function refinement() {
   };
 }
 
+function crudReceipt() {
+  return {
+    ...receipt(),
+    scenarioId: 'crud-simple-control',
+    archetype: 'crud-simple',
+    functionalAssertions: [
+      'composition.crud-single-host',
+      'discovery.capabilities.http-200',
+      'discovery.capabilities.crud-operations',
+      'discovery.create-schema.http-200',
+      'crud.create.http-201',
+      'crud.read-after-create-rendered',
+      'crud.update.http-200',
+      'crud.read-after-update-rendered',
+      'crud.delete.http-204',
+      'crud.read-after-delete-absent',
+      'resource.refresh-observed',
+      'persistence.reload-equivalent',
+    ],
+  };
+}
+
 function result(attachments = []) {
   return {
     status: 'passed',
@@ -175,6 +198,30 @@ function report() {
   };
 }
 
+function crudReport() {
+  return {
+    config: {},
+    suites: [{
+      title: 'crud-focal',
+      file: 'crud-focal.spec.ts',
+      column: 1,
+      line: 1,
+      specs: crudProfile.requiredPassedTests.map((title) => title.startsWith('CRUD simples')
+        ? spec(title, [jsonAttachment('crud-simple-first-pass-receipt.json', crudReceipt())])
+        : spec(title)),
+    }],
+    errors: [],
+    stats: {
+      startTime: '2026-08-31T00:00:00.000Z',
+      duration: 100,
+      expected: 2,
+      skipped: 0,
+      unexpected: 0,
+      flaky: 0,
+    },
+  };
+}
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -196,6 +243,27 @@ test('accepts a complete zero-retry single-table report', () => {
   assert.equal(summary.retries, 0);
   assert.equal(summary.receipts[0].firstPassFunctional, true);
   assert.equal(summary.semanticRefinements[0].canonical, true);
+});
+
+test('accepts a complete zero-retry CRUD report', () => {
+  const summary = validateGateReport(crudReport(), '/tmp/crud-report.json', crudProfile);
+  assert.equal(summary.discovered, 2);
+  assert.equal(summary.retries, 0);
+  assert.equal(summary.receipts[0].scenarioId, 'crud-simple-control');
+  assert.equal(summary.receipts[0].firstPassFunctional, true);
+});
+
+test('rejects CRUD evidence that omits one functional operation', () => {
+  const value = crudReport();
+  mutateAttachment(value, 'CRUD simples', 'crud-simple-first-pass-receipt.json', (body) => {
+    body.functionalAssertions = body.functionalAssertions.filter(
+      (assertion) => assertion !== 'crud.delete.http-204',
+    );
+  });
+  assert.throws(
+    () => validateGateReport(value, '/tmp/crud-report.json', crudProfile),
+    /functional assertions diverge/,
+  );
 });
 
 test('rejects Playwright retry or flaky evidence', () => {

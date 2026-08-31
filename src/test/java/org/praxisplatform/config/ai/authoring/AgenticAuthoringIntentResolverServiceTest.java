@@ -11236,6 +11236,88 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void canonicalCrudPageUsesVerifiedGovernedResourceWithoutFullProviderPass() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate departmentCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/departamentos",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/departamentos&operation=post&schemaType=request",
+                "/api/human-resources/departamentos",
+                "POST",
+                1.0d,
+                "Canonical department binding verified against schema and resource capabilities.",
+                List.of(
+                        "tool-search-api-resources",
+                        "domain-binding",
+                        "schema-grounding-verified",
+                        "resource-capabilities-verified"));
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(departmentCandidate));
+        AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", false);
+        constraints.putArray("filters");
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "A single governed CRUD host is the complete requested composition.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                false,
+                constraints,
+                "page",
+                "praxis-crud",
+                "resource-crud");
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(
+                requestWithContextHints(
+                        "crie uma pagina CRUD para administrar departamentos",
+                        "deterministic-smoke-disabled",
+                        resourceDiscoveryContext(
+                                "page",
+                                List.of(departmentCandidate),
+                                new AgenticAuthoringResourceSearchFocus(
+                                        "human-resources.departamentos",
+                                        List.of(),
+                                        "CRUD governado",
+                                        "",
+                                        "foco semantico authorado pela LLM"))),
+                "tenant",
+                "user",
+                "local",
+                orientation);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/departamentos");
+        assertThat(result.selectedCandidate().evidence()).contains(
+                "domain-binding",
+                "schema-grounding-verified",
+                "resource-capabilities-verified");
+        assertThat(result.visualizationDecision().layoutKind()).isEqualTo("resource-crud");
+        assertThat(result.visualizationDecision().primaryComponent()).isEqualTo("praxis-crud");
+        assertThat(result.warnings()).contains(
+                "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                "llm-pre-intent-resource-discovery-used");
+        Mockito.verifyNoInteractions(llmIntentResolver);
+    }
+
+    @Test
     void canonicalSingleTableIgnoresRedundantFullPassFlagWhenSemanticCompositionIsComplete() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);

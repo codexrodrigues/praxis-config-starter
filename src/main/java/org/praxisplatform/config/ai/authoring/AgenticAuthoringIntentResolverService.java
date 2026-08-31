@@ -2811,7 +2811,7 @@ public class AgenticAuthoringIntentResolverService {
         AgenticAuthoringCandidate focusedCandidate =
                 resourceDiscoveryFocusedCandidate(request, prompt, artifactKind, candidates);
         AgenticAuthoringCandidate singleGovernedArtifactCandidate =
-                singleGovernedArtifactCandidate(request, artifactKind, candidates);
+                singleGovernedArtifactCandidate(request, artifactKind, candidates, semanticOrientation);
         if (singleGovernedArtifactCandidate != null) {
             focusedCandidate = singleGovernedArtifactCandidate;
         }
@@ -3336,8 +3336,10 @@ public class AgenticAuthoringIntentResolverService {
     private AgenticAuthoringCandidate singleGovernedArtifactCandidate(
             AgenticAuthoringIntentResolutionRequest request,
             String artifactKind,
-            List<AgenticAuthoringCandidate> candidates) {
-        if (!List.of("form", "table", "dashboard").contains(artifactKind)
+            List<AgenticAuthoringCandidate> candidates,
+            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
+        boolean compactCrudPage = isCompleteCompactCrudPage(semanticOrientation);
+        if (!(List.of("form", "table", "dashboard").contains(artifactKind) || compactCrudPage)
                 || request == null
                 || candidates == null
                 || candidates.isEmpty()
@@ -3351,11 +3353,31 @@ public class AgenticAuthoringIntentResolverService {
                 .filter(candidate -> hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE)
                         || hasVerifiedOperationalBindingEvidence(candidate))
                 .filter(candidate -> !isDerivedProjectionCandidate(candidate))
-                .filter(candidate -> isCanonicalArtifactEndpointCandidate(artifactKind, candidate))
+                .filter(candidate -> isCanonicalArtifactEndpointCandidate(artifactKind, candidate)
+                        || compactCrudPage && isCanonicalCompactCrudResourceCandidate(candidate))
                 .filter(this::hasTrustedSelectionEvidence)
                 .filter(candidate -> !isWeakLexicalCandidate(candidate))
                 .toList();
         return eligible.size() == 1 ? eligible.get(0) : null;
+    }
+
+    private boolean isCompleteCompactCrudPage(AgenticAuthoringPreIntentToolPlan semanticOrientation) {
+        return hasCompleteCompactResourceComposition(semanticOrientation)
+                && "page".equals(semanticOrientation.artifactKind())
+                && "praxis-crud".equals(semanticOrientation.primaryComponent())
+                && "resource-crud".equals(semanticOrientation.layoutKind());
+    }
+
+    private boolean isCanonicalCompactCrudResourceCandidate(AgenticAuthoringCandidate candidate) {
+        if (candidate == null || !hasVerifiedOperationalBindingEvidence(candidate)) {
+            return false;
+        }
+        String resourcePath = normalizePath(candidate.resourcePath());
+        String submitUrl = normalizePath(valueOrDefault(candidate.submitUrl(), resourcePath));
+        return !resourcePath.isBlank()
+                && !resourcePath.contains("{")
+                && !valueOrDefault(candidate.schemaUrl(), "").isBlank()
+                && (submitUrl.equals(resourcePath) || submitUrl.startsWith(resourcePath + "/"));
     }
 
     private boolean hasVerifiedOperationalBindingEvidence(AgenticAuthoringCandidate candidate) {

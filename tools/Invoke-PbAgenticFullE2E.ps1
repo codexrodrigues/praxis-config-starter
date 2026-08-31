@@ -16,7 +16,6 @@ param(
     [int] $UiStartupTimeoutSec = 600,
     [int] $StreamProcessingTimeoutSeconds = 0,
     [int] $ApiCatalogIndexingTimeoutSec = 900,
-    [ValidateSet("smoke", "single-table", "full")]
     [string] $ValidationMode = "smoke",
     [int] $PlaywrightTestTimeoutMs = 0,
     [int] $Retries = -1,
@@ -872,7 +871,8 @@ function Invoke-DomainCatalogIngest {
         [string] $Origin,
         [string] $TenantId,
         [string] $Environment,
-        [string[]] $Groups
+        [string[]] $Groups,
+        [string] $ResourceKey = ""
     )
 
     $headers = @{
@@ -882,6 +882,35 @@ function Invoke-DomainCatalogIngest {
     }
     $jsonHeaders = $headers.Clone()
     $jsonHeaders["Content-Type"] = "application/json"
+
+    if (-not [string]::IsNullOrWhiteSpace($ResourceKey)) {
+        $encodedResourceKey = [Uri]::EscapeDataString($ResourceKey)
+        Write-Phase "Loading governed domain catalog from $BaseUrl/schemas/domain?resourceKey=$encodedResourceKey."
+        $catalog = Invoke-RestMethod `
+            -Method Get `
+            -Uri "$BaseUrl/schemas/domain?resourceKey=$encodedResourceKey" `
+            -Headers @{ "Origin" = $Origin } `
+            -TimeoutSec 60
+        if ($catalog.schemaVersion -ne "praxis.domain-catalog/v0.2") {
+            throw "Expected praxis.domain-catalog/v0.2 for resource $ResourceKey, got $($catalog.schemaVersion)."
+        }
+        $body = $catalog | ConvertTo-Json -Depth 100
+        Write-Phase "Ingesting governed domain catalog resource $ResourceKey into praxis-config-starter."
+        Invoke-RestMethod `
+            -Method Post `
+            -Uri "$BaseUrl/api/praxis/config/domain-catalog/ingest" `
+            -Headers $jsonHeaders `
+            -Body $body `
+            -TimeoutSec 900 | Out-Null
+        Write-Phase "Governed domain catalog ingest completed for resource $ResourceKey."
+        return [ordered]@{
+            schemaVersion = "praxis.domain-catalog/v0.2"
+            source = "/schemas/domain"
+            ingested = $true
+            groups = @()
+            resourceKeys = @($ResourceKey)
+        }
+    }
 
     if ($null -eq $Groups -or $Groups.Count -eq 0) {
         throw "At least one governed domain catalog group is required."
@@ -941,9 +970,22 @@ foreach ($requiredPath in @($QuickstartRoot, $MetadataRoot, $UiRoot, $EnvFile, $
 }
 
 $gateMatrix = Get-Content -LiteralPath $matrixPath -Raw | ConvertFrom-Json
+if ($ValidationMode -notmatch '^[a-z0-9][a-z0-9-]*$') {
+    throw "Validation mode must be a canonical matrix token: $ValidationMode"
+}
 $modeMatrix = $gateMatrix.modes.$ValidationMode
 if ($null -eq $modeMatrix) { throw "Validation mode is missing from the canonical gate matrix: $ValidationMode" }
-$isHumanResourcesFocusedMode = $ValidationMode -in @("smoke", "single-table")
+$modeDomainCatalogResourceKey = if ($null -ne $modeMatrix.domainCatalogResourceKey) {
+    [string] $modeMatrix.domainCatalogResourceKey
+} else {
+    ""
+}
+if (-not [string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey) -and
+    $modeDomainCatalogResourceKey -notmatch '^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$') {
+    throw "Validation mode declares an invalid canonical domain catalog resource identity: $modeDomainCatalogResourceKey"
+}
+$isHumanResourcesFocusedMode = $ValidationMode -in @("smoke", "single-table") -or
+    $modeDomainCatalogResourceKey.StartsWith("human-resources.", [StringComparison]::Ordinal)
 $selectedScenarioIds = @($modeMatrix.scenarios | ForEach-Object { [string] $_ })
 if ($selectedScenarioIds.Count -eq 0) {
     throw "Validation mode must declare at least one executable scenario: $ValidationMode"
@@ -1206,7 +1248,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         @("human-resources")
     }
     $domainCatalogEvidence = Invoke-DomainCatalogIngest `
-        $backendUrl $uiUrl "desenv" "local" $domainCatalogGroups
+        $backendUrl $uiUrl "desenv" "local" $domainCatalogGroups $modeDomainCatalogResourceKey
 
     Push-Location $UiRoot
     try {
@@ -1249,10 +1291,12 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $apiCatalogEvidence = [ordered]@{
             source = "/schemas/catalog"
             indexingState = "READY"
-            scope = if ($ValidationMode -eq "smoke") {
-                "human-resources-smoke"
-            } elseif ($ValidationMode -eq "single-table") {
-                "human-resources-focused"
+            scope = if ($isHumanResourcesFocusedMode) {
+                if ([string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey)) {
+                    "human-resources-focused"
+                } else {
+                    "resource:$modeDomainCatalogResourceKey"
+                }
             } else {
                 "full"
             }

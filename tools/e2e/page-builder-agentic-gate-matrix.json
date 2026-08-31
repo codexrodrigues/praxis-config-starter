@@ -56,6 +56,12 @@
       ]
     },
     {
+      "scenarioId": "crud-simple-control",
+      "testTitles": [
+        "CRUD simples materializa host canônico e executa create read update delete no primeiro passe"
+      ]
+    },
+    {
       "scenarioId": "live-resource-workspace-command",
       "testTitles": [
         "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload"
@@ -119,6 +125,26 @@
           "persistence.readback-equivalent",
           "persistence.reload-equivalent"
         ]
+      },
+      {
+        "scenarioId": "crud-simple-control",
+        "archetype": "crud-simple",
+        "testTitle": "CRUD simples materializa host canônico e executa create read update delete no primeiro passe",
+        "attachmentName": "crud-simple-first-pass-receipt.json",
+        "requiredFunctionalAssertions": [
+          "composition.crud-single-host",
+          "discovery.capabilities.http-200",
+          "discovery.capabilities.crud-operations",
+          "discovery.create-schema.http-200",
+          "crud.create.http-201",
+          "crud.read-after-create-rendered",
+          "crud.update.http-200",
+          "crud.read-after-update-rendered",
+          "crud.delete.http-204",
+          "crud.read-after-delete-absent",
+          "resource.refresh-observed",
+          "persistence.reload-equivalent"
+        ]
       }
     ],
     "semanticRefinements": [
@@ -173,6 +199,22 @@
         "table-human refinement preserva colunas entre decisões semânticas e DOM"
       ]
     },
+    "crud-simple": {
+      "description": "Focal live LLM proof for a canonical single-host CRUD page executing create, read, update and delete through real discovered metadata, without Playwright retries.",
+      "retries": 0,
+      "domainCatalogResourceKey": "human-resources.departamentos",
+      "scenarios": [
+        "critical-interception-guard",
+        "crud-simple-control"
+      ],
+      "expectedDiscovered": 2,
+      "minimumExecuted": 2,
+      "expectedSkipped": 0,
+      "requiredPassedTests": [
+        "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "CRUD simples materializa host canônico e executa create read update delete no primeiro passe"
+      ]
+    },
     "full": {
       "description": "Deliberate live LLM matrix with all non-mocked browser scenarios.",
       "scenarios": [
@@ -184,12 +226,13 @@
         "consultative-capability-continuation",
         "live-llm-flow-1",
         "live-llm-flow-2",
+        "crud-simple-control",
         "live-resource-workspace-command",
         "single-table-control",
         "table-human-refinement"
       ],
-      "expectedDiscovered": 12,
-      "minimumExecuted": 12,
+      "expectedDiscovered": 13,
+      "minimumExecuted": 13,
       "expectedSkipped": 0,
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
@@ -201,6 +244,7 @@
         "Fluxo 0 — Assistente explica capacidades do Page Builder de forma amigável e acionável",
         "Fluxo 1 — Dashboard de pagamentos com linguagem imperfeita: contrato backend-driven validado",
         "Fluxo 2 — Formulário de funcionários com linguagem imperfeita: contrato backend-driven validado",
+        "CRUD simples materializa host canônico e executa create read update delete no primeiro passe",
         "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
         "single-table control persiste, recarrega e renderiza dados reais no primeiro passe",
         "table-human refinement preserva colunas entre decisões semânticas e DOM"

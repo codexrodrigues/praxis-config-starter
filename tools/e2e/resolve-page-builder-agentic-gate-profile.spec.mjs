@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -10,6 +11,11 @@ import {
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
+
+const windowsRunnerSource = readFileSync(
+  new URL('../Invoke-PbAgenticFullE2E.ps1', import.meta.url),
+  'utf8',
+);
 
 test('validates the canonical matrix and resolves the single-table profile', () => {
   const matrix = loadGateMatrix();
@@ -33,10 +39,61 @@ test('validates the canonical matrix and resolves the single-table profile', () 
   ]);
 });
 
+test('resolves the focal CRUD profile with its matrix-owned receipt', () => {
+  const matrix = loadGateMatrix();
+  const profile = resolveGateProfile(matrix, 'crud-simple');
+
+  assert.equal(profile.expectedDiscovered, 2);
+  assert.equal(profile.minimumExecuted, 2);
+  assert.equal(profile.expectedSkipped, 0);
+  assert.equal(profile.retries, 0);
+  assert.equal(profile.humanTurnLimit, null);
+  assert.equal(profile.domainCatalogResourceKey, 'human-resources.departamentos');
+  assert.deepEqual(profile.scenarios, [
+    'critical-interception-guard',
+    'crud-simple-control',
+  ]);
+  assert.deepEqual(profile.receiptRequirements.map((entry) => entry.scenarioId), [
+    'crud-simple-control',
+  ]);
+  assert.deepEqual(profile.receiptRequirements[0].requiredFunctionalAssertions, [
+    'composition.crud-single-host',
+    'discovery.capabilities.http-200',
+    'discovery.capabilities.crud-operations',
+    'discovery.create-schema.http-200',
+    'crud.create.http-201',
+    'crud.read-after-create-rendered',
+    'crud.update.http-200',
+    'crud.read-after-update-rendered',
+    'crud.delete.http-204',
+    'crud.read-after-delete-absent',
+    'resource.refresh-observed',
+    'persistence.reload-equivalent',
+  ]);
+});
+
+test('keeps the Windows runner matrix-driven for new focal modes and domain scope', () => {
+  assert.doesNotMatch(
+    windowsRunnerSource,
+    /\[ValidateSet\("smoke", "single-table", "full"\)\]/,
+  );
+  assert.match(windowsRunnerSource, /\$modeMatrix\.domainCatalogResourceKey/);
+  assert.match(windowsRunnerSource, /schemas\/domain\?resourceKey=/);
+});
+
 test('rejects a non-positive human turn limit', () => {
   const matrix = clone(loadGateMatrix());
   matrix.modes['single-table'].humanTurnLimit = 0;
   assert.throws(() => validateGateMatrix(matrix), /humanTurnLimit must be a positive integer/);
+});
+
+test('rejects a non-canonical domain catalog resource identity', () => {
+  const matrix = clone(loadGateMatrix());
+  matrix.modes['crud-simple'].domainCatalogResourceKey = '/api/human-resources/departamentos';
+  assert.throws(
+    () => validateGateMatrix(matrix),
+    /domainCatalogResourceKey must be a canonical dotted resource identity/,
+  );
 });
 
 test('rejects mode counts that drift from the scenario-to-test catalog', () => {

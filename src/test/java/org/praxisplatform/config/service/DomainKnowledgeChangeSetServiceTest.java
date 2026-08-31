@@ -9,12 +9,14 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -133,6 +135,81 @@ class DomainKnowledgeChangeSetServiceTest {
     }
 
     @Test
+    void remainsIdempotentAfterExplicitValidationRewritesTheStoredDiagnostics() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSetCreateRequest request = validRequest();
+        AtomicReference<DomainKnowledgeChangeSet> stored = new AtomicReference<>();
+        when(repository.findByTenantIdAndEnvironmentAndChangeSetKey(TENANT, ENVIRONMENT, CHANGE_SET_KEY))
+                .thenAnswer(ignored -> Optional.ofNullable(stored.get()));
+        when(repository.findById(any(UUID.class)))
+                .thenAnswer(ignored -> Optional.ofNullable(stored.get()));
+        when(repository.save(any(DomainKnowledgeChangeSet.class))).thenAnswer(invocation -> {
+            DomainKnowledgeChangeSet changeSet = invocation.getArgument(0);
+            if (changeSet.getId() == null) {
+                changeSet.onInsert();
+            }
+            stored.set(changeSet);
+            return changeSet;
+        });
+
+        var created = service.create(request, TENANT, ENVIRONMENT);
+        service.validate(created.id(), TENANT, ENVIRONMENT);
+        var retried = service.create(request, TENANT, ENVIRONMENT);
+
+        assertThat(retried.id()).isEqualTo(created.id());
+        assertThat(retried.changeSetKey()).isEqualTo(created.changeSetKey());
+    }
+
+    @Test
+    void reusesAuthoritativeStoredPatchWhenLegacyValidationHashIsStale() {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSetCreateRequest request = validRequest();
+        DomainKnowledgeChangeSet existing = persisted(request);
+        existing.setValidationResult("""
+                {
+                  "validationStatus": "valid",
+                  "patchHash": "legacy-reserialized-patch-hash",
+                  "errorCount": 0,
+                  "warningCount": 0,
+                  "issues": []
+                }
+                """);
+        when(repository.findByTenantIdAndEnvironmentAndChangeSetKey(TENANT, ENVIRONMENT, CHANGE_SET_KEY))
+                .thenReturn(Optional.of(existing));
+
+        var response = service.create(request, TENANT, ENVIRONMENT);
+
+        assertThat(response.id()).isEqualTo(existing.getId());
+        assertThat(response.changeSetKey()).isEqualTo(CHANGE_SET_KEY);
+    }
+
+    @Test
+    void reusesSemanticallyEqualPatchAfterJsonbReordersObjectProperties() throws Exception {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSetCreateRequest request = validRequest();
+        DomainKnowledgeChangeSet existing = persisted(request);
+        JsonNode storedPatch = objectMapper.readTree(existing.getPatch());
+        ObjectNode operation = (ObjectNode) storedPatch.get(0);
+        ObjectNode reorderedOperation = objectMapper.createObjectNode();
+        java.util.stream.StreamSupport.stream(
+                        java.util.Spliterators.spliteratorUnknownSize(operation.fieldNames(), 0),
+                        false)
+                .sorted(java.util.Comparator.reverseOrder())
+                .forEach(field -> reorderedOperation.set(field, operation.get(field)));
+        existing.setPatch(objectMapper.createArrayNode().add(reorderedOperation).toString());
+        when(repository.findByTenantIdAndEnvironmentAndChangeSetKey(TENANT, ENVIRONMENT, CHANGE_SET_KEY))
+                .thenReturn(Optional.of(existing));
+
+        var response = service.create(request, TENANT, ENVIRONMENT);
+
+        assertThat(response.id()).isEqualTo(existing.getId());
+        assertThat(response.changeSetKey()).isEqualTo(CHANGE_SET_KEY);
+    }
+
+    @Test
     void rejectsSameKeyWithDifferentPatch() {
         DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
         DomainKnowledgeChangeSetService service = service(repository);
@@ -155,7 +232,8 @@ class DomainKnowledgeChangeSetServiceTest {
 
         assertThatThrownBy(() -> service.create(changed, TENANT, ENVIRONMENT))
                 .isInstanceOf(ConfigurationIngestionException.class)
-                .hasMessageContaining("already exists with different semantics");
+                .hasMessageContaining("already exists with different semantics")
+                .hasMessageContaining("mismatches=[patch-hash]");
     }
 
     @Test
@@ -261,6 +339,25 @@ class DomainKnowledgeChangeSetServiceTest {
         verify(repository).save(captor.capture());
         assertThat(captor.getValue().getValidationResult()).contains("\"validationStatus\":\"invalid\"");
         assertThat(captor.getValue().getValidationResult()).contains("destructive_operation_not_supported");
+    }
+
+    @Test
+    void validationPreservesTheCanonicalHashOfTheAuthoritativeStoredPatch() throws Exception {
+        DomainKnowledgeChangeSetRepository repository = mock(DomainKnowledgeChangeSetRepository.class);
+        DomainKnowledgeChangeSetService service = service(repository);
+        DomainKnowledgeChangeSet existing = persisted(validRequest());
+        String storedPatch = objectMapper.writerWithDefaultPrettyPrinter()
+                .writeValueAsString(objectMapper.readTree(existing.getPatch()));
+        existing.setPatch(storedPatch);
+        when(repository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(repository.save(any(DomainKnowledgeChangeSet.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.validate(existing.getId(), TENANT, ENVIRONMENT);
+
+        ArgumentCaptor<DomainKnowledgeChangeSet> captor = ArgumentCaptor.forClass(DomainKnowledgeChangeSet.class);
+        verify(repository).save(captor.capture());
+        assertThat(read(captor.getValue().getValidationResult()).path("patchHash").asText())
+                .isEqualTo(new CanonicalJsonHashService(objectMapper).sha256(read(storedPatch)));
     }
 
     @Test
