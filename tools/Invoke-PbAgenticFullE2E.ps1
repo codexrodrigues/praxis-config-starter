@@ -136,6 +136,17 @@ function Assert-EphemeralRuntimeSecretFixture {
     }
 }
 
+function Assert-EmptyDiagnosticEvidenceSerializationFixture {
+    $publishedDiagnosticEvidence = @()
+    $fixture = [pscustomobject]@{
+        productionLike = $true
+        diagnosticEvidence = @($publishedDiagnosticEvidence)
+    } | ConvertTo-Json -Depth 4 | ConvertFrom-Json
+    if ($null -eq $fixture.diagnosticEvidence -or @($fixture.diagnosticEvidence).Count -ne 0) {
+        throw "Successful production-like evidence must serialize diagnosticEvidence as an empty JSON array."
+    }
+}
+
 function Get-QuickstartDependencyEvidence([string] $Path, [string] $ArtifactId) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $outer = [IO.Compression.ZipFile]::OpenRead($Path)
@@ -911,7 +922,8 @@ if ($ValidateEvidenceParsersOnly.IsPresent) {
     Assert-PlaywrightScenarioReceiptParserFixture
     Assert-PlaywrightGovernedStateProjectionParserFixture
     Assert-EphemeralRuntimeSecretFixture
-    Write-Output "Invoke-PbAgenticFullE2E: Playwright summary, scenario receipt, governed projection, and runtime secret fixtures passed."
+    Assert-EmptyDiagnosticEvidenceSerializationFixture
+    Write-Output "Invoke-PbAgenticFullE2E: Playwright summary, scenario receipt, governed projection, runtime secret, and empty diagnostic evidence fixtures passed."
     exit 0
 }
 
@@ -943,6 +955,14 @@ foreach ($scenarioId in $selectedScenarioIds) {
 }
 if (@($selectedScenarioIds | Sort-Object -Unique).Count -ne $selectedScenarioIds.Count) {
     throw "Validation mode contains duplicate executable scenario ids: $ValidationMode"
+}
+$humanTurnLimit = if ($null -ne $modeMatrix.humanTurnLimit) {
+    [int] $modeMatrix.humanTurnLimit
+} else {
+    0
+}
+if ($humanTurnLimit -lt 0) {
+    throw "Validation mode humanTurnLimit cannot be negative: $ValidationMode"
 }
 if ($StreamProcessingTimeoutSeconds -le 0) {
     $StreamProcessingTimeoutSeconds = [int] $gateMatrix.defaults.streamProcessingTimeoutSeconds
@@ -1073,6 +1093,7 @@ $uiProcess = $null
 $playwrightSummary = $null
 $scenarioEvidence = @()
 $governedStateProjections = @()
+$publishedDiagnosticEvidence = @()
 $capabilitiesEvidence = $null
 $runtimeSecrets = New-EphemeralRuntimeSecrets
 $streamSecret = [string] $runtimeSecrets.streamAuthTokenSecret
@@ -1080,6 +1101,8 @@ $resourceVersionEtagSecret = [string] $runtimeSecrets.resourceVersionEtagSecret
 $resultPath = Join-Path $artifactRoot "result.json"
 $sourceAuditPath = Join-Path $artifactRoot "source-audit.json"
 $playwrightReportPath = Join-Path $artifactRoot "playwright-results.json"
+$evidenceValidationSummaryPath = Join-Path $artifactRoot "evidence-validation-summary.json"
+$evidenceValidationPassed = $false
 $gateFailure = $null
 $pgvectorEvidence = $null
 $loopbackVerified = $false
@@ -1304,6 +1327,13 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $env:PRAXIS_E2E_AGENTIC_EXECUTION_LANE = "live"
         $env:PRAXIS_E2E_SCENARIO_IDS = $selectedScenarioIds -join ","
         $env:PRAXIS_E2E_JSON_REPORT_PATH = $playwrightReportPath
+        if ($humanTurnLimit -gt 0) {
+            $env:PRAXIS_E2E_HUMAN_TURN_LIMIT = "$humanTurnLimit"
+            $env:PRAXIS_E2E_HUMAN_TURN_LIMIT_SOURCE = "canonical-gate-profile"
+        } else {
+            Remove-Item Env:\PRAXIS_E2E_HUMAN_TURN_LIMIT -ErrorAction SilentlyContinue
+            Remove-Item Env:\PRAXIS_E2E_HUMAN_TURN_LIMIT_SOURCE -ErrorAction SilentlyContinue
+        }
         if ($PlaywrightTestTimeoutMs -gt 0) {
             $env:PRAXIS_E2E_TEST_TIMEOUT_MS = "$PlaywrightTestTimeoutMs"
         } else {
@@ -1351,9 +1381,21 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             -ReportPath $playwrightReportPath `
             -Definitions @($gateMatrix.evidence.governedStateProjections) `
             -SelectedScenarioIds $selectedScenarioIds)
+        $evidenceValidatorPath = Join-Path $starterRoot "tools\e2e\validate-page-builder-agentic-gate-evidence.mjs"
+        & node $evidenceValidatorPath `
+            --matrix $matrixPath `
+            --mode $ValidationMode `
+            --expected-runs 1 `
+            --report $playwrightReportPath *> $evidenceValidationSummaryPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Canonical Page Builder evidence validation failed with exit code $LASTEXITCODE."
+        }
+        $evidenceValidationPassed = $true
         Write-Phase "Playwright Page Builder validation completed."
     } finally {
         Remove-Item Env:\PRAXIS_E2E_SCENARIO_IDS -ErrorAction SilentlyContinue
+        Remove-Item Env:\PRAXIS_E2E_HUMAN_TURN_LIMIT -ErrorAction SilentlyContinue
+        Remove-Item Env:\PRAXIS_E2E_HUMAN_TURN_LIMIT_SOURCE -ErrorAction SilentlyContinue
         Pop-Location
     }
 
@@ -1372,6 +1414,9 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         if ($backendProcessWasStarted) { Assert-PortReleased $BackendPort "Quickstart backend" }
     } catch {
         if ($null -eq $gateFailure) { $gateFailure = $_ }
+    }
+    if ($null -ne $gateFailure) {
+        $publishedDiagnosticEvidence = @($governedStateProjections)
     }
 
     $modelId = if ($Provider -eq "openai") { $env:PRAXIS_AI_OPENAI_MODEL } else { $env:PRAXIS_AI_GEMINI_MODEL }
@@ -1407,6 +1452,10 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         )
         artifactRoot = $artifactRoot
         sourceAudit = [ordered]@{ passed = (Test-Path -LiteralPath $sourceAuditPath); artifact = "source-audit.json" }
+        evidenceValidation = [ordered]@{
+            passed = $evidenceValidationPassed
+            artifact = "evidence-validation-summary.json"
+        }
         git = $gitIdentities
         versions = [ordered]@{
             configStarter = $expectedStarterVersion
@@ -1436,6 +1485,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             streamProcessingTimeoutSeconds = $StreamProcessingTimeoutSeconds
             playwrightTestTimeoutMs = $PlaywrightTestTimeoutMs
             retries = $Retries
+            humanTurnLimit = if ($humanTurnLimit -gt 0) { $humanTurnLimit } else { $null }
             diagnosticProjectionRequirements = @($gateMatrix.evidence.governedStateProjections |
                 Where-Object { $_.scenarioId -in $selectedScenarioIds } |
                 ForEach-Object {
@@ -1454,10 +1504,21 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
                         requiredFunctionalAssertions = @($_.requiredFunctionalAssertions)
                     }
                 })
+            semanticRefinementRequirements = @($gateMatrix.evidence.semanticRefinements |
+                Where-Object { $_.scenarioId -in $selectedScenarioIds } |
+                ForEach-Object {
+                    [ordered]@{
+                        scenarioId = [string] $_.scenarioId
+                        testTitle = [string] $_.testTitle
+                        attachmentName = [string] $_.attachmentName
+                        turnLimitSource = [string] $_.turnLimitSource
+                        requiredOperationIds = @($_.requiredOperationIds)
+                    }
+                })
         }
         playwright = $playwrightSummary
         scenarioEvidence = @($scenarioEvidence)
-        diagnosticEvidence = if ($null -eq $gateFailure) { @() } else { @($governedStateProjections) }
+        diagnosticEvidence = @($publishedDiagnosticEvidence)
         failureType = if ($null -eq $gateFailure) { $null } else { $gateFailure.Exception.GetType().FullName }
     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $resultPath -Encoding utf8
 }

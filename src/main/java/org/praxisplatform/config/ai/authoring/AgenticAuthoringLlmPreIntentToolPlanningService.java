@@ -469,7 +469,15 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         // its canonical business entity, the single pre-intent read must retrieve an executable
         // API resource. Spending that call on the concept already named by the orientation forces
         // a second full-model pass and discards the stronger operational binding evidence.
-        if (!"domain_decision".equals(groundingProfile)
+        boolean concreteResourceBackedAuthoringProjection =
+                "authoring_or_other".equals(semanticIntentClass)
+                        && List.of("page", "dashboard", "chart", "table", "form")
+                                .contains(text(result, "artifactKind"))
+                        && (AUTHORABLE_PRIMARY_COMPONENTS.contains(primaryComponent(result))
+                                || resourceSearchFocus != null
+                                        && StringUtils.hasText(resourceSearchFocus.primaryBusinessEntity()));
+        if ((!"domain_decision".equals(groundingProfile)
+                        || concreteResourceBackedAuthoringProjection)
                 && "authoring_or_other".equals(semanticIntentClass)
                 && (result.path("requiresFullIntentResolution").asBoolean(false)
                         || resourceSearchFocus != null

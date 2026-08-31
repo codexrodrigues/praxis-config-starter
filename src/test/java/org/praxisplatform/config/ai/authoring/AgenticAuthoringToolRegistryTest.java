@@ -325,7 +325,8 @@ class AgenticAuthoringToolRegistryTest {
         AgenticAuthoringOperationalBindingVerificationService verificationService =
                 Mockito.mock(AgenticAuthoringOperationalBindingVerificationService.class);
         AgenticAuthoringResourceSearchFocus semanticFocus = new AgenticAuthoringResourceSearchFocus(
-                "pessoas da empresa", List.of(), "table", "", "LLM-authored business subject");
+                "human-resources.pessoas", List.of(), "table", "possible canonical alias",
+                "LLM-authored business subject");
         AgenticAuthoringCandidate discoveredCandidate = new AgenticAuthoringCandidate(
                 "/api/human-resources/funcionarios",
                 "post",
@@ -394,6 +395,11 @@ class AgenticAuthoringToolRegistryTest {
                         .containsEntry("operationalGroundingSource", "unique-domain-catalog-resource"));
         AgenticAuthoringResourceCandidatesResult payload =
                 (AgenticAuthoringResourceCandidatesResult) result.payload();
+        assertThat(payload.resourceSearchFocus())
+                .satisfies(focus -> {
+                    assertThat(focus.primaryBusinessEntity()).isEqualTo("human-resources.funcionarios");
+                    assertThat(focus.uncertainty()).isEmpty();
+                });
         assertThat(payload.candidates()).singleElement().satisfies(candidate -> assertThat(candidate.evidence())
                 .contains("domain-binding", "schema-grounding-verified", "resource-capabilities-verified"));
         Mockito.verify(verificationService).verify(
@@ -493,7 +499,7 @@ class AgenticAuthoringToolRegistryTest {
     }
 
     @Test
-    void usesUniqueOperationallyVerifiedDomainBindingBeforeVectorResourceSearch() {
+    void prioritizesVerifiedRowCollectionOperationForTableMaterialization() {
         AgenticAuthoringResourceDiscoveryService resourceDiscoveryService =
                 Mockito.mock(AgenticAuthoringResourceDiscoveryService.class);
         AgenticAuthoringDomainBindingService bindingService =
@@ -522,6 +528,25 @@ class AgenticAuthoringToolRegistryTest {
                         true,
                         "human-resources.funcionarios",
                         List.of(
+                                new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
+                                        "hr:employee-management",
+                                        "stats:human-resources.funcionarios",
+                                        "resource_operation",
+                                        "human-resources.funcionarios",
+                                        "/api/human-resources/funcionarios",
+                                        "/api/human-resources/funcionarios/stats/group-by",
+                                        "post",
+                                        "response",
+                                        "http://localhost/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Ffuncionarios%2Fstats%2Fgroup-by&operation=post&schemaType=response",
+                                        "http://localhost/api/human-resources/funcionarios/capabilities",
+                                        "statsGroupBy",
+                                        "",
+                                        "",
+                                        "principal_capability",
+                                        new AgenticAuthoringOperationalBindingVerificationService.AvailabilityProjection(
+                                                true, "", "resource_capabilities"),
+                                        "hr-v1",
+                                        binding.evidence()),
                                 new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
                                         "hr:employee-management",
                                         "resource:human-resources.funcionarios",
@@ -607,7 +632,7 @@ class AgenticAuthoringToolRegistryTest {
 
         assertThat(result.valid()).isTrue();
         assertThat(result.safeDiagnostics())
-                .containsEntry("candidateCount", 2)
+                .containsEntry("candidateCount", 3)
                 .containsEntry("retrievalSource", "domain_binding")
                 .extractingByKey("resourceDiscoveryDiagnostics")
                 .isInstanceOfSatisfying(Map.class, diagnostics -> assertThat(diagnostics)
@@ -624,6 +649,10 @@ class AgenticAuthoringToolRegistryTest {
                         org.assertj.core.groups.Tuple.tuple(
                                 "/api/human-resources/funcionarios",
                                 "/api/human-resources/funcionarios/filter/cursor",
+                                "POST"),
+                        org.assertj.core.groups.Tuple.tuple(
+                                "/api/human-resources/funcionarios",
+                                "/api/human-resources/funcionarios/stats/group-by",
                                 "POST"),
                         org.assertj.core.groups.Tuple.tuple(
                                 "/api/human-resources/funcionarios",

@@ -5,6 +5,75 @@
     "playwrightTestTimeoutMs": 600000,
     "retries": 1
   },
+  "scenarioTests": [
+    {
+      "scenarioId": "critical-interception-guard",
+      "testTitles": [
+        "Guard live rejeita interceptacao de endpoint critico antes do registro"
+      ]
+    },
+    {
+      "scenarioId": "governed-capabilities-provenance",
+      "testTitles": [
+        "Auditoria live: capabilities reais possuem proveniência governada e não degradada"
+      ]
+    },
+    {
+      "scenarioId": "governed-domain-rule-timeline",
+      "testTitles": [
+        "Shared-rule handoff — timeline governada renderizada no cockpit"
+      ]
+    },
+    {
+      "scenarioId": "project-knowledge-revert-and-apply",
+      "testTitles": [
+        "Project Knowledge — evidencia revertida deixa de aparecer no authoring browser",
+        "Project Knowledge — cockpit aplica change-set governado via backend real"
+      ]
+    },
+    {
+      "scenarioId": "human-refinement-pr7",
+      "testTitles": [
+        "PR7 — jornada humana cria tabela e refina para gráficos preservando governança do backend"
+      ]
+    },
+    {
+      "scenarioId": "consultative-capability-continuation",
+      "testTitles": [
+        "Fluxo 0 — Assistente explica capacidades do Page Builder de forma amigável e acionável"
+      ]
+    },
+    {
+      "scenarioId": "live-llm-flow-1",
+      "testTitles": [
+        "Fluxo 1 — Dashboard de pagamentos com linguagem imperfeita: contrato backend-driven validado"
+      ]
+    },
+    {
+      "scenarioId": "live-llm-flow-2",
+      "testTitles": [
+        "Fluxo 2 — Formulário de funcionários com linguagem imperfeita: contrato backend-driven validado"
+      ]
+    },
+    {
+      "scenarioId": "live-resource-workspace-command",
+      "testTitles": [
+        "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload"
+      ]
+    },
+    {
+      "scenarioId": "single-table-control",
+      "testTitles": [
+        "single-table control persiste, recarrega e renderiza dados reais no primeiro passe"
+      ]
+    },
+    {
+      "scenarioId": "table-human-refinement",
+      "testTitles": [
+        "table-human refinement preserva colunas entre decisões semânticas e DOM"
+      ]
+    }
+  ],
   "evidence": {
     "criticalInterceptionGuardTest": "Guard live rejeita interceptacao de endpoint critico antes do registro",
     "governedStateProjections": [
@@ -51,6 +120,17 @@
           "persistence.reload-equivalent"
         ]
       }
+    ],
+    "semanticRefinements": [
+      {
+        "scenarioId": "table-human-refinement",
+        "testTitle": "table-human refinement preserva colunas entre decisões semânticas e DOM",
+        "attachmentName": "table-human-refinement-sanitized-evidence.json",
+        "turnLimitSource": "canonical-gate-profile",
+        "requiredOperationIds": [
+          "column.header.set"
+        ]
+      }
     ]
   },
   "modes": {
@@ -78,6 +158,7 @@
     "single-table": {
       "description": "Focal live LLM proof for canonical single-table creation and semantic refinement plus the invariant critical-endpoint interception guard, without Playwright retries.",
       "retries": 0,
+      "humanTurnLimit": 1,
       "scenarios": [
         "critical-interception-guard",
         "single-table-control",

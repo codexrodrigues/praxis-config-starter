@@ -69,7 +69,7 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                     AiSchemaContext.builder()
                             .path(binding.apiPath())
                             .operation(method)
-                            .schemaType(schemaType(method))
+                            .schemaType(schemaType(binding, method))
                             .build(),
                     requestBaseUrl,
                     principalContext.tenantId(),
@@ -114,7 +114,7 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                     capabilitiesResourcePath,
                     binding.apiPath(),
                     method,
-                    schemaType(method),
+                    schemaType(binding, method),
                     schema.getEndpointUrl(),
                     capabilities.getEndpointUrl(),
                     capabilityDecision.operationId(),
@@ -417,6 +417,27 @@ public class AgenticAuthoringOperationalBindingVerificationService {
 
     private String schemaType(String method) {
         return "get".equals(method) ? "response" : "request";
+    }
+
+    private String schemaType(
+            AgenticAuthoringDomainBindingService.BindingProjection binding,
+            String method) {
+        String schemaPointer = binding == null ? "" : binding.schemaPointer();
+        if (StringUtils.hasText(schemaPointer)) {
+            int queryStart = schemaPointer.indexOf('?');
+            if (queryStart >= 0 && queryStart + 1 < schemaPointer.length()) {
+                for (String parameter : schemaPointer.substring(queryStart + 1).split("&")) {
+                    String[] pair = parameter.split("=", 2);
+                    if (pair.length == 2 && "schemaType".equalsIgnoreCase(pair[0])) {
+                        String declaredSchemaType = pair[1].trim().toLowerCase(Locale.ROOT);
+                        if ("request".equals(declaredSchemaType) || "response".equals(declaredSchemaType)) {
+                            return declaredSchemaType;
+                        }
+                    }
+                }
+            }
+        }
+        return schemaType(method);
     }
 
     private String schemaStatus(SchemaFetchResult result) {

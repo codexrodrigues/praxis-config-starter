@@ -1023,7 +1023,7 @@ public class AgenticAuthoringToolRegistry {
                             "The uniquely grounded Domain Catalog resource did not pass exact schema and capability verification.");
                 }
                 AgenticAuthoringResourceCandidatesResult verifiedResult = verifiedBindingResult(
-                        request,
+                        withOperationallyVerifiedResourceFocus(request, discoveredResourceKey),
                         principalContext,
                         verification,
                         false,
@@ -1033,6 +1033,27 @@ public class AgenticAuthoringToolRegistry {
                 }
             }
             return success(call, result);
+        }
+
+        private AgenticAuthoringResourceCandidatesRequest withOperationallyVerifiedResourceFocus(
+                AgenticAuthoringResourceCandidatesRequest request,
+                String canonicalResourceKey) {
+            if (request == null || canonicalResourceKey == null || canonicalResourceKey.isBlank()) {
+                return request;
+            }
+            AgenticAuthoringResourceSearchFocus previous = request.resourceSearchFocus();
+            AgenticAuthoringResourceSearchFocus reconciled = new AgenticAuthoringResourceSearchFocus(
+                    canonicalResourceKey,
+                    previous == null ? List.of() : previous.supportingConcepts(),
+                    previous == null ? request.artifactKind() : previous.desiredSurface(),
+                    "",
+                    "Canonical resource identity reconciled by unique Domain Catalog grounding and exact operational verification.");
+            return new AgenticAuthoringResourceCandidatesRequest(
+                    request.retrievalQuery(),
+                    request.userPrompt(),
+                    request.artifactKind(),
+                    request.limit(),
+                    reconciled);
         }
 
         private String uniqueDomainCatalogGroundedResourceKey(
@@ -1110,7 +1131,9 @@ public class AgenticAuthoringToolRegistry {
             if (distinctResources != 1) {
                 return null;
             }
-            List<AgenticAuthoringCandidate> candidates = verification.operations().stream()
+            List<AgenticAuthoringCandidate> candidates = operationsForMaterialization(
+                            verification.operations(), request)
+                    .stream()
                     .filter(AgenticAuthoringOperationalBindingVerificationService.OperationProjection::executableCandidate)
                     .map(operation -> verifiedBindingCandidate(operation, principalContext))
                     .toList();
@@ -1134,6 +1157,49 @@ public class AgenticAuthoringToolRegistry {
                             "bindingVerification", "schemas.filtered+resource.capabilities+schemas.actions",
                             "vectorRetrievalSkipped", vectorRetrievalSkipped,
                             "operationalGroundingSource", operationalGroundingSource));
+        }
+
+        private List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection>
+                operationsForMaterialization(
+                        List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection> operations,
+                        AgenticAuthoringResourceCandidatesRequest request) {
+            if (operations == null || operations.isEmpty()) {
+                return List.of();
+            }
+            String desiredSurface = request != null && request.resourceSearchFocus() != null
+                    ? safeText(request.resourceSearchFocus().desiredSurface())
+                    : "";
+            String artifactKind = firstNonBlank(desiredSurface, request == null ? "" : request.artifactKind())
+                    .trim()
+                    .toLowerCase(java.util.Locale.ROOT);
+            if (!"table".equals(artifactKind) && !"list".equals(artifactKind)) {
+                return operations;
+            }
+            // The semantic intent has already selected a row-oriented surface and one governed
+            // resource. Rank that resource's verified canonical operations by their declared
+            // operation identity; this is operation grounding, never primary text intent routing.
+            return operations.stream()
+                    .sorted(java.util.Comparator.comparingInt(
+                                    SearchApiResourcesToolExecutor::rowCollectionOperationFit)
+                            .reversed())
+                    .toList();
+        }
+
+        private static int rowCollectionOperationFit(
+                AgenticAuthoringOperationalBindingVerificationService.OperationProjection operation) {
+            if (operation == null || !operation.executableCandidate()) {
+                return 0;
+            }
+            String operationId = safeText(operation.operationId()).trim();
+            if ("cursor".equals(operationId)) {
+                return 4;
+            }
+            if (Set.of("filter", "all", "list").contains(operationId)) {
+                return 3;
+            }
+            boolean collectionResponse = "response".equals(operation.schemaType())
+                    && !safeText(operation.apiPath()).contains("{");
+            return collectionResponse ? 2 : 1;
         }
 
         private AgenticAuthoringCandidate verifiedBindingCandidate(
