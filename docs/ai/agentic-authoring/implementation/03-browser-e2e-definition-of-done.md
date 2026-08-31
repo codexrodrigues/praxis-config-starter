@@ -34,7 +34,9 @@ Esse runner:
 - sobe o quickstart exclusivamente em `http://127.0.0.1:8088`;
 - sobe o Angular em `http://localhost:4003`;
 - executa `npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-production-like.playwright.config.ts`;
-- usa `-ValidationMode smoke` como gate de release e reserva `-ValidationMode full` para investigacao deliberada da matriz completa.
+- usa `-ValidationMode smoke` como gate de release, os modos focais `single-table`,
+  `crud-simple` e `related-resource` para certificacao dos respectivos arquetipos,
+  e reserva `-ValidationMode full` para investigacao deliberada da matriz completa;
 - le timeouts, retries e contagens esperadas de `tools/e2e/page-builder-agentic-gate-matrix.json`;
 - rejeita provider/embeddings mock, datasource nao PostgreSQL, JAR divergente, contrato Config/Angular divergente, capabilities degradadas e interceptacao de endpoint critico;
 - exige AI Registry `ready` com o hash do snapshot Config versionado, Domain Catalog ingerido e API Catalog com indexacao canonica `READY`;
@@ -102,6 +104,9 @@ Input:
 
 - `run_page_builder_full_e2e=true`
 - `page_builder_e2e_mode=smoke` para release
+- `page_builder_e2e_mode=single-table`, `crud-simple` ou `related-resource` para
+  certificacao focal; escopo de catalogo, RAG, cenarios e retries continuam
+  definidos somente em `tools/e2e/page-builder-agentic-gate-matrix.json`
 - `page_builder_e2e_mode=full` somente para matriz completa deliberada
 
 ## Cenarios obrigatorios por fase
