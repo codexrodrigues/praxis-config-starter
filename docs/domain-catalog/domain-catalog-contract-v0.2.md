@@ -80,6 +80,11 @@ disable this materialization with
 `praxis.domain-catalog.rag-publication.enabled=false`; `/items` and `/context`
 continue to read the canonical transactional store.
 
+Each pgvector batch is written through the canonical `ON CONFLICT (id) DO
+UPDATE` operation. Existing documents are not deleted before embedding and
+upsert, so a provider failure cannot turn a partial refresh into corpus data
+loss; a later idempotent ingest can safely resume reconciliation.
+
 The operational status surface for this derived materialization is:
 
 ```text

@@ -380,11 +380,6 @@ public class RagVectorStoreService {
             List<Document> batch = validDocuments.subList(start, end).stream()
                     .map(this::withEmbeddingProfile)
                     .toList();
-            List<String> batchIds = batch.stream()
-                    .map(Document::getId)
-                    .distinct()
-                    .toList();
-            vectorStore.delete(batchIds);
             vectorStore.add(batch);
         }
     }
