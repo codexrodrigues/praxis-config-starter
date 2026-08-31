@@ -82,6 +82,7 @@ class AiProviderManagementServiceTest {
 
     @Test
     void testConnectionUsesSelectedProvider() {
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
         when(openai.generateText(any(), any())).thenReturn("ok");
 
         AiProviderTestResponse response = service.testConnection(
@@ -90,7 +91,8 @@ class AiProviderManagementServiceTest {
         assertTrue(response.isSuccess());
         assertEquals("open-ai", response.getProvider());
         assertEquals("gpt-4o-mini", response.getModel());
-        verify(openai).generateText(any(), any());
+        verify(openai).generateText(any(), configCaptor.capture());
+        assertEquals(16, configCaptor.getValue().getMaxTokens());
     }
 
     @Test
