@@ -61,6 +61,21 @@ class QuickstartGovernanceLabSmokeContractTest {
     }
 
     @Test
+    void shouldUseOneGovernedAuthoringApplyJourneyForThePaidProviderGate() throws IOException {
+        String script = Files.readString(SMOKE_SCRIPT);
+
+        assertThat(script)
+                .contains("Invoke-QuickstartAgenticAuthoringApplyHttpE2E.ps1")
+                .contains("liveGateJourney = \"governed-authoring-apply\"")
+                .contains("isolatedLegacyProviderProbesRun = $false")
+                .doesNotContain("Invoke-QuickstartAgenticAuthoringIntentResolutionHttpE2E.ps1")
+                .doesNotContain("Invoke-QuickstartAgenticAuthoringPlanHttpE2E.ps1")
+                .doesNotContain("Invoke-QuickstartAgenticAuthoringCompileHttpE2E.ps1")
+                .doesNotContain("Invoke-QuickstartAgenticAuthoringPreviewHttpE2E.ps1")
+                .doesNotContain("Invoke-QuickstartAiPatchStreamHttpE2E.ps1");
+    }
+
+    @Test
     void shouldPublishDomainRulesWithTheDedicatedPublisherIdentity() throws IOException {
         String script = Files.readString(LIFECYCLE_SCRIPT);
 
