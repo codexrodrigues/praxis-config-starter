@@ -39,7 +39,11 @@ class SpringAiOpenAiServiceTest {
                     new AiProviderInvocationTrace("intent_full", 1, "openai", "gpt-5.4-mini");
 
             String result = service.generateText(
-                    "ping", AiCallConfig.builder().invocationTrace(trace).build());
+                    "ping", AiCallConfig.builder()
+                            .environment("ci")
+                            .executionProfile(AiExecutionProfile.AGENTIC_AUTHORING)
+                            .invocationTrace(trace)
+                            .build());
             AiProviderInvocationTelemetry telemetry = trace.snapshot();
 
             assertEquals("pong", result);
@@ -48,6 +52,13 @@ class SpringAiOpenAiServiceTest {
             assertFalse(capturedRequest.get().path("store").asBoolean(true));
             assertTrue(capturedRequest.get().path("temperature").isMissingNode());
             assertEquals("none", capturedRequest.get().path("reasoning").path("effort").asText());
+            JsonNode metadata = capturedRequest.get().path("metadata");
+            assertEquals("ci-live-gate", metadata.path("praxis_origin_class").asText());
+            assertEquals("ci", metadata.path("praxis_environment").asText());
+            assertEquals("agentic_authoring", metadata.path("praxis_execution_profile").asText());
+            assertEquals("intent_full", metadata.path("praxis_call_phase").asText());
+            assertEquals("1", metadata.path("praxis_call_attempt").asText());
+            assertEquals("text", metadata.path("praxis_response_mode").asText());
             assertEquals("openai-responses-sdk", telemetry.transport());
             assertEquals("gpt-5.4-mini-2026-06-01", telemetry.model());
             assertEquals("resp-safe-123", telemetry.responseId());
@@ -599,6 +610,7 @@ class SpringAiOpenAiServiceTest {
         ReflectionTestUtils.setField(service, "maxTokens", 128);
         ReflectionTestUtils.setField(service, "jsonMinCompletionTokens", 8192);
         ReflectionTestUtils.setField(service, "timeoutSeconds", 5);
+        ReflectionTestUtils.setField(service, "usageOriginClass", "ci-live-gate");
         return service;
     }
 

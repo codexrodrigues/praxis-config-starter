@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -106,6 +107,9 @@ public class SpringAiOpenAiService implements AiProvider {
 
     @Value("${praxis.ai.timeout-seconds:30}")
     private int timeoutSeconds;
+
+    @Value("${praxis.ai.usage-origin-class:${PRAXIS_AI_USAGE_ORIGIN_CLASS:unspecified}}")
+    private String usageOriginClass = "unspecified";
 
     @Override
     public JsonNode generateJson(String prompt) {
@@ -470,8 +474,49 @@ public class SpringAiOpenAiService implements AiProvider {
         if (jsonMode) {
             builder.text(buildTextConfig(preparedSchema));
         }
+        addUsageMetadata(builder, config, jsonMode);
         addHostedSkills(builder, config);
         return builder.build();
+    }
+
+    /**
+     * Attaches only bounded, non-content operational metadata to the provider request. Prompts,
+     * responses, credentials, tenant identifiers and user identifiers are deliberately excluded.
+     */
+    private void addUsageMetadata(ResponseCreateParams.Builder response, AiCallConfig config, boolean jsonMode) {
+        ResponseCreateParams.Metadata.Builder metadata = ResponseCreateParams.Metadata.builder()
+                .putAdditionalProperty("praxis_origin_class", JsonValue.from(metadataValue(usageOriginClass, "unspecified")))
+                .putAdditionalProperty("praxis_response_mode", JsonValue.from(jsonMode ? "structured-json" : "text"));
+        if (config != null) {
+            putMetadata(metadata, "praxis_environment", config.getEnvironment());
+            if (config.getExecutionProfile() != null) {
+                putMetadata(
+                        metadata,
+                        "praxis_execution_profile",
+                        config.getExecutionProfile().name().toLowerCase(Locale.ROOT));
+            }
+            if (config.getInvocationTrace() != null) {
+                AiProviderInvocationTelemetry trace = config.getInvocationTrace().snapshot();
+                putMetadata(metadata, "praxis_call_phase", trace.phase());
+                putMetadata(metadata, "praxis_call_attempt", Integer.toString(trace.attempt()));
+            }
+        }
+        response.metadata(metadata.build());
+    }
+
+    private void putMetadata(ResponseCreateParams.Metadata.Builder metadata, String key, String value) {
+        String normalized = metadataValue(value, null);
+        if (normalized != null) {
+            metadata.putAdditionalProperty(key, JsonValue.from(normalized));
+        }
+    }
+
+    private String metadataValue(String value, String fallback) {
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        String normalized = value.trim().replace('\r', ' ').replace('\n', ' ');
+        return normalized.length() <= 160 ? normalized : normalized.substring(0, 160);
     }
 
     private void addHostedSkills(ResponseCreateParams.Builder response, AiCallConfig config) {

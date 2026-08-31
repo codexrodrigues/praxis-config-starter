@@ -53,11 +53,10 @@ O smoke manual:
 - empacota o `praxis-api-quickstart` contra essa versao local, sem depender do Maven Central;
 - usa por padrao um ref pinado do `praxis-api-quickstart` para evitar que releases do starter fiquem bloqueados por dependencias ainda nao publicadas no consumidor;
 - sobe o quickstart empacotado;
-- ingere no mesmo tenant/ambiente do smoke o corpus minimo dos cenarios exercitados, extraido dos grupos OpenAPI de compras e operacoes do Quickstart; isso inclui fornecedor, pedido de compra e incidente, garantindo que `api_metadata` seja evidencia scoped, competitiva entre dominios e reproduzivel sem seed manual no banco;
-- confirma que o plano intermediario e o preview usam a mesma materializacao por `/schemas/filtered`, preservam os campos obrigatorios `descricao` e `ocorridoEm` e rejeitam campos inexistentes como `titulo`;
-- persiste e valida `intent-resolution.json` antes de solicitar o plano, incluindo a rota semantica `create/form/create_artifact` e o recurso canonico selecionado, para que uma falha posterior nao elimine a evidencia da decisao;
-- usa uma projecao transitória estrita do schema somente na fronteira do provedor e valida o documento decodificado contra o contrato canônico do `MinimalFormPlan`;
-- valida `minimal-form-plan`, `compiled-form-patch`, `page-preview`, `page-apply`, SSE, replay e cleanup.
+- executa uma unica jornada paga `governed-authoring-apply`, que resolve a intencao, planeja e compila a materializacao, transmite o turno por SSE, aplica o resultado terminal com linhagem, le a configuracao persistida e executa cleanup;
+- preserva no mesmo thread a decisao semantica emitida pelo backend e permite no maximo uma continuacao `governed-review-revise`; label e prompt sao apenas apresentacao, e ausencia, duplicidade ou novo bloqueio terminam fail-closed;
+- mantem os scripts isolados de `intent-resolution`, `minimal-form-plan`, `compiled-form-patch`, `page-preview` e patch stream como diagnosticos focais, sem repeti-los no gate pago de release;
+- valida o recurso canonico `/api/operations/incidentes`, os campos obrigatorios do formulario, `page-apply`, readback, linhagem SSE e cleanup.
 - quando `run_page_builder_full_e2e=true`, valida tambem o fluxo agentic do page-builder com browser real; use `page_builder_e2e_mode=smoke` como gate de release e `page_builder_e2e_mode=full` apenas para investigacoes deliberadas da matriz completa;
 - usa os defaults de `tools/e2e/page-builder-agentic-gate-matrix.json`, atualmente com `praxis.ai.stream.processing-timeout-seconds=360`, para acomodar turnos reais com discovery, RAG, multiplas chamadas LLM e materializacao;
 - instala Metadata e Config a partir de copias temporarias exatas de `git archive HEAD`, sem diretorio `.git`; Config/Quickstart/Angular falham antes de usar o provider se seus working trees estiverem dirty, enquanto Metadata registra commit + tree SHA e declara `materialization=git-archive`, pois seu checkout historico normaliza line endings que nao participam do build;
