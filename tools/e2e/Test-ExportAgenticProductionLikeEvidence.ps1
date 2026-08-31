@@ -161,11 +161,42 @@ try {
     @{ health = "UP"; terminalSeen = $true; replayChecked = $true; provider = "openai" } |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $httpRunRoot "summary.json") -Encoding utf8
 
-    & $scriptPath -StarterRoot $starterRoot -HttpArtifactRoot $httpArtifactRoot -OutputRoot $outputRoot | Out-Null
+    & $scriptPath -StarterRoot $starterRoot -PublicationProfile "page-builder-http-sse" -HttpArtifactRoot $httpArtifactRoot -OutputRoot $outputRoot | Out-Null
     $published = @(Get-ChildItem -LiteralPath $outputRoot -File | Select-Object -ExpandProperty Name | Sort-Object)
     if (($published -join ',') -ne 'http-sse-summary.json,production-like-result.json,source-audit.json') {
         throw "Exporter published an unexpected file set: $($published -join ',')"
     }
+
+    $pageBuilderOutput = Join-Path $root "page-builder-published"
+    $pageBuilderPublication = & $scriptPath `
+        -StarterRoot $starterRoot `
+        -PublicationProfile "page-builder" `
+        -OutputRoot $pageBuilderOutput | ConvertFrom-Json
+    if ($pageBuilderPublication.publicationProfile -ne "page-builder") {
+        throw "Exporter did not report the selected page-builder publication profile."
+    }
+    $pageBuilderPublished = @(Get-ChildItem -LiteralPath $pageBuilderOutput -File | Select-Object -ExpandProperty Name | Sort-Object)
+    if (($pageBuilderPublished -join ',') -ne 'production-like-result.json,source-audit.json') {
+        throw "Page Builder profile published an unexpected file set: $($pageBuilderPublished -join ',')"
+    }
+
+    $missingHttpOutput = Join-Path $root "missing-http-published"
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -PublicationProfile "page-builder-http-sse" -OutputRoot $missingHttpOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "HttpArtifactRoot is required"
+    }
+    if (-not $failedClosed) { throw "Exporter did not require HTTP/SSE evidence for the combined publication profile." }
+
+    $unexpectedHttpOutput = Join-Path $root "unexpected-http-published"
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -PublicationProfile "page-builder" -HttpArtifactRoot $httpArtifactRoot -OutputRoot $unexpectedHttpOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "HttpArtifactRoot is not valid"
+    }
+    if (-not $failedClosed) { throw "Exporter silently mixed HTTP/SSE evidence into the Page Builder profile." }
 
     $diagnosticOutput = Join-Path $root "diagnostic-published"
     $diagnosticResult = Get-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Raw | ConvertFrom-Json

@@ -58,6 +58,21 @@ test('exposes every canonical matrix mode through workflow dispatch', () => {
   assert.deepEqual(options, Object.keys(matrix.modes));
 });
 
+test('publishes HTTP/SSE evidence only for the live provider HTTP lane', () => {
+  assert.match(
+    workflowSource,
+    /\$includeLiveHttpSse\s*=\s*'\$\{\{ inputs\.run_quickstart_http_smoke \}\}' -eq 'true' -and[\s\S]*?'\$\{\{ inputs\.domain_rule_lifecycle_only \}\}' -ne 'true'/,
+  );
+  assert.match(
+    workflowSource,
+    /PublicationProfile = if \(\$includeLiveHttpSse\) \{ 'page-builder-http-sse' \} else \{ 'page-builder' \}/,
+  );
+  assert.match(
+    workflowSource,
+    /if \(\$includeLiveHttpSse\) \{[\s\S]*?\$publicationArgs\.HttpArtifactRoot/,
+  );
+});
+
 test('materializes focused catalog scope from the canonical gate profile', () => {
   assert.match(runnerSource, /\$modeApiCatalogGroup\s*=\s*if \(/);
   assert.match(runnerSource, /@\(\$modeMatrix\.apiCatalogPathPrefixes/);
