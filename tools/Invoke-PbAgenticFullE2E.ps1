@@ -288,6 +288,69 @@ function Get-PlaywrightScenarioEvidence(
     return @(Get-PlaywrightScenarioEvidenceFromReport $report $Definitions $SelectedScenarioIds -AllowPartial:$AllowPartial)
 }
 
+function Get-PlaywrightGovernedStateProjectionsFromReport(
+    [object] $Report,
+    [object[]] $Definitions,
+    [string[]] $SelectedScenarioIds,
+    [switch] $AllowPartial
+) {
+    $projections = @()
+    $specs = @(Get-PlaywrightSpecs @($Report.suites))
+    foreach ($definition in @($Definitions | Where-Object { $_.scenarioId -in $SelectedScenarioIds })) {
+        try {
+            $matchingSpecs = @($specs | Where-Object { $_.title -eq $definition.testTitle })
+            if ($matchingSpecs.Count -ne 1) {
+                throw "Governed state projection test title must resolve exactly once: $($definition.testTitle)"
+            }
+            $testCases = if ($AllowPartial) {
+                @($matchingSpecs[0].tests)
+            } else {
+                @($matchingSpecs[0].tests | Where-Object { $_.status -eq 'expected' })
+            }
+            if ($testCases.Count -ne 1) {
+                throw "Governed state projection test must resolve exactly once: $($definition.testTitle)"
+            }
+            $results = @($testCases[0].results)
+            $projectionResults = if ($AllowPartial) {
+                $results
+            } else {
+                @($results | Where-Object { $_.status -eq 'passed' })
+            }
+            $attachments = @($projectionResults | ForEach-Object {
+                @($_.attachments | Where-Object { $_.name -eq $definition.attachmentName })
+            })
+            if ($attachments.Count -ne 1 -or $attachments[0].contentType -ne 'application/json' -or
+                [string]::IsNullOrWhiteSpace([string] $attachments[0].body)) {
+                throw "Governed state projection must be one inline application/json attachment: $($definition.attachmentName)"
+            }
+            try {
+                $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string] $attachments[0].body))
+                $projection = $json | ConvertFrom-Json
+            } catch {
+                throw "Governed state projection attachment is not valid base64 JSON: $($definition.attachmentName)"
+            }
+            $projections += ConvertTo-PraxisGovernedStateProjection $projection $definition
+        } catch {
+            throw
+        }
+    }
+    return @($projections)
+}
+
+function Get-PlaywrightGovernedStateProjections(
+    [string] $ReportPath,
+    [object[]] $Definitions,
+    [string[]] $SelectedScenarioIds,
+    [switch] $AllowPartial
+) {
+    if (-not (Test-Path -LiteralPath $ReportPath)) {
+        throw "Playwright JSON report was not generated: $ReportPath"
+    }
+    $report = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json
+    return @(Get-PlaywrightGovernedStateProjectionsFromReport `
+        $report $Definitions $SelectedScenarioIds -AllowPartial:$AllowPartial)
+}
+
 function Assert-PlaywrightSummaryParserFixture {
     $fixture = [pscustomobject]@{
         stats = [pscustomobject]@{
@@ -447,21 +510,71 @@ function Assert-PlaywrightScenarioReceiptParserFixture {
 
     $fixture.suites[0].specs[0].tests[0].results[0].retry = 0
     $tableReceipt = ($receipt | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
-    $tableReceipt.scenarioId = 'table-human-authoring'
+    $tableReceipt.scenarioId = 'single-table-control'
     $tableReceipt.archetype = 'single-table-control'
     $tableReceipt.functionalAssertions = @('composition.single-table-only')
     $encodedTableReceipt = [Convert]::ToBase64String(
         [Text.Encoding]::UTF8.GetBytes(($tableReceipt | ConvertTo-Json -Depth 10))
     )
-    $failedDefinition = [pscustomobject]@{
-        scenarioId = 'table-human-authoring'
+    $tableDefinition = [pscustomobject]@{
+        scenarioId = 'single-table-control'
         archetype = 'single-table-control'
-        testTitle = 'failed table authoring'
+        testTitle = 'single-table control'
         attachmentName = 'single-table-first-pass-receipt.json'
         requiredFunctionalAssertions = @('composition.single-table-only')
     }
     $fixture.suites[0].specs += [pscustomobject]@{
-        title = 'failed table authoring'
+        title = 'single-table control'
+        tests = @([pscustomobject]@{
+            status = 'expected'
+            results = @([pscustomobject]@{
+                status = 'passed'
+                retry = 0
+                attachments = @([pscustomobject]@{
+                    name = 'single-table-first-pass-receipt.json'
+                    contentType = 'application/json'
+                    body = $encodedTableReceipt
+                })
+            })
+        })
+    }
+    $fixture.suites[0].specs += [pscustomobject]@{
+        title = 'failed table refinement'
+        tests = @([pscustomobject]@{
+            status = 'unexpected'
+            results = @([pscustomobject]@{
+                status = 'failed'
+                retry = 0
+                attachments = @()
+            })
+        })
+    }
+    $partial = @(Get-PlaywrightScenarioEvidenceFromReport `
+        $fixture `
+        @($definition, $tableDefinition) `
+        @('live-resource-workspace-command', 'single-table-control', 'table-human-refinement') `
+        -AllowPartial)
+    if ($partial.Count -ne 2 -or
+        $partial[0].scenarioId -ne 'live-resource-workspace-command' -or
+        $partial[1].scenarioId -ne 'single-table-control' -or
+        $partial[1].outcome -ne 'first-pass') {
+        throw 'Playwright scenario receipt parser did not preserve the control receipt when refinement failed.'
+    }
+
+    $failedReceipt = ($tableReceipt | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
+    $failedReceipt.scenarioId = 'failed-control-receipt'
+    $encodedFailedReceipt = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes(($failedReceipt | ConvertTo-Json -Depth 10))
+    )
+    $failedDefinition = [pscustomobject]@{
+        scenarioId = 'failed-control-receipt'
+        archetype = 'single-table-control'
+        testTitle = 'failed control after receipt'
+        attachmentName = 'single-table-first-pass-receipt.json'
+        requiredFunctionalAssertions = @('composition.single-table-only')
+    }
+    $fixture.suites[0].specs += [pscustomobject]@{
+        title = 'failed control after receipt'
         tests = @([pscustomobject]@{
             status = 'unexpected'
             results = @(
@@ -476,22 +589,22 @@ function Assert-PlaywrightScenarioReceiptParserFixture {
                     attachments = @([pscustomobject]@{
                         name = 'single-table-first-pass-receipt.json'
                         contentType = 'application/json'
-                        body = $encodedTableReceipt
+                        body = $encodedFailedReceipt
                     })
                 }
             )
         })
     }
-    $partial = @(Get-PlaywrightScenarioEvidenceFromReport `
+    $failedButRecoverable = @(Get-PlaywrightScenarioEvidenceFromReport `
         $fixture `
-        @($definition, $failedDefinition) `
-        @('live-resource-workspace-command', 'table-human-authoring') `
+        @($failedDefinition) `
+        @('failed-control-receipt') `
         -AllowPartial)
-    if ($partial.Count -ne 2 -or
-        $partial[0].scenarioId -ne 'live-resource-workspace-command' -or
-        $partial[1].scenarioId -ne 'table-human-authoring' -or
-        $partial[1].outcome -ne 'eventual-pass') {
-        throw 'Playwright scenario receipt parser did not preserve valid/retried evidence from a partially failed run.'
+    if ($failedButRecoverable.Count -ne 1 -or
+        $failedButRecoverable[0].scenarioId -ne 'failed-control-receipt' -or
+        $failedButRecoverable[0].outcome -ne 'eventual-pass' -or
+        $failedButRecoverable[0].firstPassFunctional -ne $false) {
+        throw 'Playwright scenario receipt parser did not preserve valid/retried evidence from a failed test result.'
     }
 
     $receipt['prompt'] = 'must never be published'
@@ -505,6 +618,93 @@ function Assert-PlaywrightScenarioReceiptParserFixture {
         $failedClosed = $_.Exception.Message -match 'unexpected properties'
     }
     if (-not $failedClosed) { throw 'Playwright scenario receipt parser did not reject an unsafe extra property.' }
+}
+
+function Assert-PlaywrightGovernedStateProjectionParserFixture {
+    $definition = [pscustomobject]@{
+        scenarioId = 'human-refinement-pr7'
+        testTitle = 'PR7 projection fixture'
+        attachmentName = 'pr7-governed-state-projection.json'
+    }
+    $projection = [ordered]@{
+        schemaVersion = 'praxis.page-builder.governed-state-projection/v1'
+        scenarioId = 'human-refinement-pr7'
+        observedDisposition = [ordered]@{
+            testObservedState = 'review'
+            controllerState = 'review'
+            domState = 'table-visible'
+        }
+        decisionDiagnostics = [ordered]@{
+            status = 'review'
+            reason = $null
+            decisionValid = $true
+            requiresReview = $true
+        }
+        preview = [ordered]@{ present = $true; valid = $true }
+        applyEligibility = [ordered]@{ controllerCanApply = $true; persistEnabled = $true }
+        blockingDiagnosticCodes = @()
+        quickReplyIds = @('review-apply')
+        governedRepairActionIds = @()
+        canonicalActionPresent = $true
+        canonicalActions = @([ordered]@{
+            replyId = 'review-apply'
+            source = 'reply.contextHints.canonicalAction'
+            canonicalAction = $null
+            canonicalActionToken = 'apply.reviewed.preview'
+        })
+        applyLineage = [ordered]@{
+            status = 'verified'
+            reason = $null
+            patchAuthority = 'backend-compiled'
+            terminalReferencePresent = $true
+        }
+        execution = [ordered]@{ turnCount = 1; attemptCount = 1; retryCount = 0 }
+    }
+    $encoded = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes(($projection | ConvertTo-Json -Depth 10))
+    )
+    $fixture = [pscustomobject]@{
+        suites = @([pscustomobject]@{
+            specs = @([pscustomobject]@{
+                title = 'PR7 projection fixture'
+                tests = @([pscustomobject]@{
+                    status = 'expected'
+                    results = @([pscustomobject]@{
+                        status = 'passed'
+                        retry = 0
+                        attachments = @([pscustomobject]@{
+                            name = 'pr7-governed-state-projection.json'
+                            contentType = 'application/json'
+                            body = $encoded
+                        })
+                    })
+                })
+            })
+            suites = @()
+        })
+    }
+    $parsed = @(Get-PlaywrightGovernedStateProjectionsFromReport `
+        $fixture @($definition) @('human-refinement-pr7'))
+    if ($parsed.Count -ne 1 -or
+        $parsed[0].scenarioId -ne 'human-refinement-pr7' -or
+        $parsed[0].projection.canonicalActions.Count -ne 1) {
+        throw 'Playwright governed state projection parser did not preserve the sanitized projection.'
+    }
+
+    $projection['prompt'] = 'must never be collected'
+    $fixture.suites[0].specs[0].tests[0].results[0].attachments[0].body = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes(($projection | ConvertTo-Json -Depth 10))
+    )
+    $failedClosed = $false
+    try {
+        Get-PlaywrightGovernedStateProjectionsFromReport `
+            $fixture @($definition) @('human-refinement-pr7') | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match 'unexpected properties'
+    }
+    if (-not $failedClosed) {
+        throw 'Playwright governed state projection parser did not reject an unsafe extra property.'
+    }
 }
 
 function Invoke-PgvectorPreflight(
@@ -709,8 +909,9 @@ function Invoke-DomainCatalogIngest {
 if ($ValidateEvidenceParsersOnly.IsPresent) {
     Assert-PlaywrightSummaryParserFixture
     Assert-PlaywrightScenarioReceiptParserFixture
+    Assert-PlaywrightGovernedStateProjectionParserFixture
     Assert-EphemeralRuntimeSecretFixture
-    Write-Output "Invoke-PbAgenticFullE2E: Playwright summary, scenario receipt, and runtime secret fixtures passed."
+    Write-Output "Invoke-PbAgenticFullE2E: Playwright summary, scenario receipt, governed projection, and runtime secret fixtures passed."
     exit 0
 }
 
@@ -871,6 +1072,7 @@ $backendProcess = $null
 $uiProcess = $null
 $playwrightSummary = $null
 $scenarioEvidence = @()
+$governedStateProjections = @()
 $capabilitiesEvidence = $null
 $runtimeSecrets = New-EphemeralRuntimeSecrets
 $streamSecret = [string] $runtimeSecrets.streamAuthTokenSecret
@@ -1116,6 +1318,11 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
                 -Definitions @($gateMatrix.evidence.scenarioReceipts) `
                 -SelectedScenarioIds $selectedScenarioIds `
                 -AllowPartial)
+            $governedStateProjections = @(Get-PlaywrightGovernedStateProjections `
+                -ReportPath $playwrightReportPath `
+                -Definitions @($gateMatrix.evidence.governedStateProjections) `
+                -SelectedScenarioIds $selectedScenarioIds `
+                -AllowPartial)
         }
         if ($playwrightExitCode -ne 0) { throw "Page-builder agentic $ValidationMode E2E failed with exit code $playwrightExitCode." }
         if ($null -eq $playwrightSummary) { throw "Playwright summary is unavailable after a successful execution." }
@@ -1139,6 +1346,10 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $scenarioEvidence = @(Get-PlaywrightScenarioEvidence `
             -ReportPath $playwrightReportPath `
             -Definitions @($gateMatrix.evidence.scenarioReceipts) `
+            -SelectedScenarioIds $selectedScenarioIds)
+        $governedStateProjections = @(Get-PlaywrightGovernedStateProjections `
+            -ReportPath $playwrightReportPath `
+            -Definitions @($gateMatrix.evidence.governedStateProjections) `
             -SelectedScenarioIds $selectedScenarioIds)
         Write-Phase "Playwright Page Builder validation completed."
     } finally {
@@ -1225,6 +1436,15 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             streamProcessingTimeoutSeconds = $StreamProcessingTimeoutSeconds
             playwrightTestTimeoutMs = $PlaywrightTestTimeoutMs
             retries = $Retries
+            diagnosticProjectionRequirements = @($gateMatrix.evidence.governedStateProjections |
+                Where-Object { $_.scenarioId -in $selectedScenarioIds } |
+                ForEach-Object {
+                    [ordered]@{
+                        scenarioId = [string] $_.scenarioId
+                        testTitle = [string] $_.testTitle
+                        attachmentName = [string] $_.attachmentName
+                    }
+                })
             receiptRequirements = @($gateMatrix.evidence.scenarioReceipts |
                 Where-Object { $_.scenarioId -in $selectedScenarioIds } |
                 ForEach-Object {
@@ -1237,6 +1457,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         }
         playwright = $playwrightSummary
         scenarioEvidence = @($scenarioEvidence)
+        diagnosticEvidence = if ($null -eq $gateFailure) { @() } else { @($governedStateProjections) }
         failureType = if ($null -eq $gateFailure) { $null } else { $gateFailure.Exception.GetType().FullName }
     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $resultPath -Encoding utf8
 }

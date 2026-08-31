@@ -479,7 +479,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                     providerInvocations);
             Optional<AgenticAuthoringLlmIntentResolution> resolution =
                     toResolution(result).map(value -> withFastCandidateResourceWhenUnambiguous(value, fastCandidates));
-            if ((liveOptionRefinement || focusedResourceAuthoring)
+            if (liveOptionRefinement
                     && resolution.isPresent()
                     && !resolution.get().resolved()) {
                 return resolution.map(this::withFastIntentWarning);

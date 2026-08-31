@@ -644,6 +644,11 @@ CRUD usa `praxis-crud`; pares divergentes sao rejeitados pelo plano estruturado.
 passe LLM sem relaxar grounding ou apply. A orientacao encaminhada ao resolver usa
 `praxis-agentic-authoring-pre-intent-orientation-context.v2`. A presenca de actions governadas nao
 decide o layout; metadata e capabilities continuam sendo a fonte exclusiva da descoberta de comandos.
+Quando o passe compacto focal retorna `resolved=false`, ele nao encerra a decisao: o resolver executa
+uma unica fase `intent_full` e preserva no mesmo `providerInvocations` a sequencia
+`intent_fast` -> `intent_full`, distinguindo fallback semantico de retry do provider pelo nome da fase.
+Se o passe completo tambem ficar inconclusivo, a resolucao permanece `unknown` e fail-closed; o plano
+pre-intent nao e promovido deterministicamente a uma decisao.
 Todo plano de autoria que exija resolucao completa ou entre em grounding de recurso (`api_resource`,
 `domain_binding` ou `operation_verification`) precisa declarar
 `resourceSearchFocus.primaryBusinessEntity`, inclusive quando `layoutKind` ja preservar toda a
@@ -651,6 +656,12 @@ semantica visual e `requiresFullIntentResolution=false`. Perfis progressivos de 
 conceito e decisao sem resolucao completa podem ainda estar descobrindo esse alvo.
 O campo identifica o assunto canonico para grounding; nao autoriza a operacao nem substitui bindings,
 schema ou capabilities.
+
+O runner production-like pode coletar, apenas em `result.json` de uma execucao falha, attachments
+`praxis.page-builder.governed-state-projection/v1` declarados na matriz canonica. O collector valida
+shape fechado, limites, IDs/tokens e a whitelist de `canonicalAction`; prompts, `contextHints`, paths
+ou payloads livres sao rejeitados. Execucoes bem-sucedidas mantem `diagnosticEvidence=[]`, e o exporter
+de evidencia certificada tambem exige essa colecao vazia.
 
 ### OpenAI Light reasoning profile
 

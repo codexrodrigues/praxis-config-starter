@@ -252,6 +252,126 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 """.formatted(axes));
     }
 
+    private AgenticAuthoringIntentResolutionRequest focusedTableRequest() {
+        return new AgenticAuthoringIntentResolutionRequest(
+                "Crie uma tabela de funcionários usando a fonte governada e preserve todas as colunas disponíveis.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                "session-focused-table-fallback",
+                "turn-focused-table-fallback",
+                List.of(),
+                null,
+                List.of(),
+                focusedTableContextHints());
+    }
+
+    private ObjectNode focusedTableContextHints() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode resourceDiscovery = contextHints.putObject("resourceDiscovery");
+        resourceDiscovery.put("artifactKind", "table");
+        ObjectNode focus = resourceDiscovery.putObject("resourceSearchFocus");
+        focus.put("primaryBusinessEntity", "human-resources.funcionarios");
+        focus.putArray("supportingConcepts").add("departamento");
+        focus.put("desiredSurface", "tabela única de funcionários");
+        ObjectNode orientation = contextHints.putObject("preIntentSemanticOrientation");
+        orientation.put("schemaVersion", "praxis-agentic-authoring-pre-intent-orientation-context.v2");
+        orientation.put("semanticIntentClass", "authoring_or_other");
+        orientation.put("artifactKind", "table");
+        orientation.put("requiresFullIntentResolution", true);
+        ObjectNode constraints = orientation.putObject("queryConstraints");
+        constraints.put("appliesToDataSelection", true);
+        constraints.putArray("filters").addObject()
+                .put("concept", "departamento")
+                .put("field", "departamento")
+                .put("operator", "eq")
+                .put("value", "tecnologia");
+        return contextHints;
+    }
+
+    private AgenticAuthoringCandidate focusedTableCandidate() {
+        return new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter",
+                "post",
+                0.98d,
+                "Fonte governada de funcionários.",
+                List.of("tool-search-api-resources", "semantic-retrieval"));
+    }
+
+    private JsonNode unresolvedIntent() throws Exception {
+        return objectMapper.readTree("""
+                {
+                  "resolved": false,
+                  "semanticIntentClass": "unknown",
+                  "operationKind": "unknown",
+                  "artifactKind": "unknown",
+                  "changeKind": "unknown",
+                  "selectedResourcePath": null,
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
+                  "assistantMessage": "Ainda não consegui confirmar a intenção.",
+                  "visualizationDecision": null,
+                  "queryConstraints": {"appliesToDataSelection": false, "filters": []},
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": ["Você quer criar uma tabela governada?"],
+                  "warnings": []
+                }
+                """);
+    }
+
+    private JsonNode resolvedFocusedTableIntent() throws Exception {
+        return objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "semanticIntentClass": "component_authoring",
+                  "operationKind": "create",
+                  "artifactKind": "table",
+                  "changeKind": "create_artifact",
+                  "selectedResourcePath": "/api/human-resources/funcionarios",
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "requiresGovernedAuthoring": false,
+                  "assistantMessage": "Vou preparar a tabela governada de funcionários.",
+                  "visualizationDecision": {
+                    "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
+                    "intent": "employee-collection",
+                    "layoutKind": "single-table",
+                    "primaryComponent": "praxis-table",
+                    "axes": [],
+                    "includeSummary": false,
+                    "includeDetailTable": true,
+                    "excludedComponentIds": [],
+                    "includeFilters": true,
+                    "includeKpis": false,
+                    "provenance": "llm-full-semantic-resolution"
+                  },
+                  "queryConstraints": {
+                    "appliesToDataSelection": true,
+                    "filters": [{
+                      "concept": "departamento",
+                      "field": "departamento",
+                      "operator": "eq",
+                      "value": "tecnologia"
+                    }]
+                  },
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """);
+    }
+
     @Test
     void resolveCanUseFastLlmIntentPassWhenCompactEvidenceIsSufficient() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -601,6 +721,83 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 eq("tenant"),
                 eq("user"),
                 eq("local"));
+    }
+
+    @Test
+    void fallsBackFromUnresolvedFocusedTableIntentToFullResolutionWithContinuousTelemetry() throws Exception {
+        when(providerManagementService.generateJson(
+                any(), any(AiJsonSchema.class), any(AiCallConfig.class),
+                eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(unresolvedIntent(), resolvedFocusedTableIntent());
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        focusedTableRequest(),
+                        focusedTableRequest().userPrompt(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(focusedTableCandidate()),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(result.resolved()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.selectedResourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.providerInvocations())
+                .extracting(
+                        AiProviderInvocationTelemetry::phase,
+                        AiProviderInvocationTelemetry::attempt,
+                        AiProviderInvocationTelemetry::status)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("intent_fast", 1, "success"),
+                        org.assertj.core.groups.Tuple.tuple("intent_full", 1, "success"));
+        Mockito.verify(providerManagementService, Mockito.times(2)).generateJson(
+                any(), any(AiJsonSchema.class), any(AiCallConfig.class),
+                eq("tenant"), eq("user"), eq("local"));
+    }
+
+    @Test
+    void remainsUnresolvedWhenFocusedAndFullTableIntentPassesCannotConfirmSemantics() throws Exception {
+        when(providerManagementService.generateJson(
+                any(), any(AiJsonSchema.class), any(AiCallConfig.class),
+                eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(unresolvedIntent(), unresolvedIntent());
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        focusedTableRequest(),
+                        focusedTableRequest().userPrompt(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(focusedTableCandidate()),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(result.resolved()).isFalse();
+        assertThat(result.operationKind()).isEqualTo("unknown");
+        assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.providerInvocations())
+                .extracting(
+                        AiProviderInvocationTelemetry::phase,
+                        AiProviderInvocationTelemetry::attempt,
+                        AiProviderInvocationTelemetry::status)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("intent_fast", 1, "success"),
+                        org.assertj.core.groups.Tuple.tuple("intent_full", 1, "success"));
+        Mockito.verify(providerManagementService, Mockito.times(2)).generateJson(
+                any(), any(AiJsonSchema.class), any(AiCallConfig.class),
+                eq("tenant"), eq("user"), eq("local"));
     }
 
     @Test

@@ -113,6 +113,7 @@ try {
         }
         playwright = [ordered]@{ discovered = 2; executed = 2; passed = 2; skipped = 0; failed = 0 }
         scenarioEvidence = @($scenarioEvidence)
+        diagnosticEvidence = @()
     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
     @{ passed = $true } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $e2eRoot "source-audit.json") -Encoding utf8
     @{ health = "UP"; terminalSeen = $true; replayChecked = $true; provider = "openai" } |
@@ -123,6 +124,25 @@ try {
     if (($published -join ',') -ne 'http-sse-summary.json,production-like-result.json,source-audit.json') {
         throw "Exporter published an unexpected file set: $($published -join ',')"
     }
+
+    $diagnosticOutput = Join-Path $root "diagnostic-published"
+    $diagnosticResult = Get-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Raw | ConvertFrom-Json
+    $diagnosticResult.diagnosticEvidence = @([ordered]@{
+        scenarioId = "human-refinement-pr7"
+        testTitle = "diagnostic fixture"
+        attachmentName = "pr7-governed-state-projection.json"
+        projection = [ordered]@{}
+    })
+    $diagnosticResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -HttpArtifactRoot $httpArtifactRoot -OutputRoot $diagnosticOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "Successful publication cannot retain failure diagnostic projections"
+    }
+    if (-not $failedClosed) { throw "Exporter did not reject failure diagnostics from a successful publication." }
+    $diagnosticResult.diagnosticEvidence = @()
+    $diagnosticResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
 
     $unsafeOutput = Join-Path $root "unsafe-scenario-published"
     $unsafeResult = Get-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Raw | ConvertFrom-Json
