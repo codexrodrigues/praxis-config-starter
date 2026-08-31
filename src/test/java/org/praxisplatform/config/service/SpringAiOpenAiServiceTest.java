@@ -63,6 +63,24 @@ class SpringAiOpenAiServiceTest {
     }
 
     @Test
+    void generateTextClampsOutputTokensToTheOpenAiMinimum() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = responseServer(completedResponse("pong"), capturedRequest);
+        SpringAiOpenAiService service = service(server, "gpt-5-mini");
+        server.start();
+        try {
+            String result = service.generateText(
+                    "ping", AiCallConfig.builder().maxTokens(8).build());
+
+            assertEquals("pong", result);
+            assertEquals(16, capturedRequest.get().path("max_output_tokens").asInt());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
     void economicalGpt56ModelsUseTheLightReasoningProfile() throws Exception {
         List<JsonNode> capturedRequests = new ArrayList<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

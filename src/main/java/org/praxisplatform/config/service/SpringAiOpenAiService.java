@@ -77,6 +77,7 @@ public class SpringAiOpenAiService implements AiProvider {
     private static final String STRUCTURED_OUTPUT_NAME = "praxis_response";
     private static final String DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe";
     private static final String DEFAULT_LIGHT_REASONING_MODELS = "gpt-5.6-luna,gpt-5.6-terra";
+    private static final int MIN_OUTPUT_TOKENS = 16;
 
     private final ObjectMapper objectMapper;
     private final OpenAiHostedSkillProperties hostedSkillProperties;
@@ -459,7 +460,7 @@ public class SpringAiOpenAiService implements AiProvider {
         ResponseCreateParams.Builder builder = ResponseCreateParams.builder()
                 .model(resolvedModel)
                 .input(prompt)
-                .maxOutputTokens(Math.max(1, resolvedMaxTokens))
+                .maxOutputTokens(Math.max(MIN_OUTPUT_TOKENS, resolvedMaxTokens))
                 .store(false);
         if (!usesFixedDefaultTemperature(resolvedModel)) {
             builder.temperature(resolveTemperature(config));
