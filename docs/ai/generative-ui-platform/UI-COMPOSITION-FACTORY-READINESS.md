@@ -136,6 +136,18 @@ field lineage across schema, plan, compiler and runtime and one canonical `colum
 This local replay proves the correction before a final remote closure gate; it does not rewrite the
 failed remote run as a pass.
 
+The corrected immutable remote replay,
+[Actions #33355148829](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33355148829),
+then passed the HTTP/SSE smoke, Domain Catalog v2 smoke and the complete `single-table` Playwright
+step: `3/3`, zero retries, 82,102 ms, `productionLike=true`, `evidenceValidation.passed=true` and a
+first-pass receipt with equivalent apply/persisted/reload hashes. Its post-E2E publication step
+still failed because an inline PowerShell conditional serialized the successful empty
+`diagnosticEvidence` collection as JSON `null`; the strict exporter correctly rejected it. The
+runner now materializes that property from a stable empty collection, and its Windows parser-only
+gate includes an explicit JSON-array serialization fixture. This publication fix does not require
+another LLM/browser execution; the remote functional evidence remains valid and the lightweight
+Windows runner gate owns the remaining proof.
+
 The 90% target and broader archetype certification remain open under
 [praxis-config-starter#372](https://github.com/codexrodrigues/praxis-config-starter/issues/372).
 

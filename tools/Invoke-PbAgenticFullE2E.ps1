@@ -136,6 +136,17 @@ function Assert-EphemeralRuntimeSecretFixture {
     }
 }
 
+function Assert-EmptyDiagnosticEvidenceSerializationFixture {
+    $publishedDiagnosticEvidence = @()
+    $fixture = [pscustomobject]@{
+        productionLike = $true
+        diagnosticEvidence = @($publishedDiagnosticEvidence)
+    } | ConvertTo-Json -Depth 4 | ConvertFrom-Json
+    if ($null -eq $fixture.diagnosticEvidence -or @($fixture.diagnosticEvidence).Count -ne 0) {
+        throw "Successful production-like evidence must serialize diagnosticEvidence as an empty JSON array."
+    }
+}
+
 function Get-QuickstartDependencyEvidence([string] $Path, [string] $ArtifactId) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $outer = [IO.Compression.ZipFile]::OpenRead($Path)
@@ -911,7 +922,8 @@ if ($ValidateEvidenceParsersOnly.IsPresent) {
     Assert-PlaywrightScenarioReceiptParserFixture
     Assert-PlaywrightGovernedStateProjectionParserFixture
     Assert-EphemeralRuntimeSecretFixture
-    Write-Output "Invoke-PbAgenticFullE2E: Playwright summary, scenario receipt, governed projection, and runtime secret fixtures passed."
+    Assert-EmptyDiagnosticEvidenceSerializationFixture
+    Write-Output "Invoke-PbAgenticFullE2E: Playwright summary, scenario receipt, governed projection, runtime secret, and empty diagnostic evidence fixtures passed."
     exit 0
 }
 
@@ -1081,6 +1093,7 @@ $uiProcess = $null
 $playwrightSummary = $null
 $scenarioEvidence = @()
 $governedStateProjections = @()
+$publishedDiagnosticEvidence = @()
 $capabilitiesEvidence = $null
 $runtimeSecrets = New-EphemeralRuntimeSecrets
 $streamSecret = [string] $runtimeSecrets.streamAuthTokenSecret
@@ -1402,6 +1415,9 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
     } catch {
         if ($null -eq $gateFailure) { $gateFailure = $_ }
     }
+    if ($null -ne $gateFailure) {
+        $publishedDiagnosticEvidence = @($governedStateProjections)
+    }
 
     $modelId = if ($Provider -eq "openai") { $env:PRAXIS_AI_OPENAI_MODEL } else { $env:PRAXIS_AI_GEMINI_MODEL }
     $criticalGuardTitle = [string] $gateMatrix.evidence.criticalInterceptionGuardTest
@@ -1502,7 +1518,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         }
         playwright = $playwrightSummary
         scenarioEvidence = @($scenarioEvidence)
-        diagnosticEvidence = if ($null -eq $gateFailure) { @() } else { @($governedStateProjections) }
+        diagnosticEvidence = @($publishedDiagnosticEvidence)
         failureType = if ($null -eq $gateFailure) { $null } else { $gateFailure.Exception.GetType().FullName }
     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $resultPath -Encoding utf8
 }

@@ -27,4 +27,7 @@ test('runs the portable evidence validator and publishes semantic requirements',
   assert.match(runnerSource, /humanTurnLimit = if \(\$humanTurnLimit -gt 0\)/);
   assert.match(runnerSource, /semanticRefinementRequirements = @\(/);
   assert.match(runnerSource, /requiredOperationIds = @\(\$_\.requiredOperationIds\)/);
+  assert.match(runnerSource, /\$publishedDiagnosticEvidence\s*=\s*@\(\)/);
+  assert.match(runnerSource, /diagnosticEvidence = @\(\$publishedDiagnosticEvidence\)/);
+  assert.doesNotMatch(runnerSource, /diagnosticEvidence = if \(/);
 });
