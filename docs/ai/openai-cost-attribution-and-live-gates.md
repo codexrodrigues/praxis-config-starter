@@ -21,12 +21,19 @@ review them after observing one normal release cycle.
 
 - The `Agentic Authoring HTTP Smoke` workflow is deterministic by default.
 - A paid HTTP/SSE smoke requires `domain_rule_lifecycle_only=false`.
+- The apply proof executes one authoring turn by default. If that turn is blocked for governed review,
+  it may execute exactly one continuation in the same thread, and only from the unique backend-issued
+  `governed-review-revise` quick reply whose structured semantic decision matches the expected
+  canonical resource. Labels and prompts never authorize the continuation. A missing, ambiguous or
+  still-blocked continuation fails closed after at most two turns.
 - Enabling the Page Builder full E2E or the LLM compliance shadow is also an explicit paid-provider
   choice.
 - A newer run on the same ref cancels the older in-progress run, avoiding duplicated provider calls.
 - GitHub Actions is a release/final gate. Development validation remains local and focal.
 
-The workflow summary records whether the execution is `deterministic` or `external-provider`.
+The workflow summary records whether the execution is `deterministic` or `external-provider`. The
+HTTP smoke receipt also records the apply turn count and whether the governed review continuation was
+used, including the backend-issued reply and decision identifiers.
 
 ## Provider metadata
 

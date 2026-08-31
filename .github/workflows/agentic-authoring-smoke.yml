@@ -143,6 +143,7 @@ jobs:
         run: |
           .\tools\e2e\Test-ExportAgenticProductionLikeEvidence.ps1
           .\tools\Invoke-PbAgenticFullE2E.ps1 -ValidateEvidenceParsersOnly
+          .\tools\Invoke-QuickstartAgenticAuthoringApplyHttpE2E.ps1 -ValidateContinuationContractOnly
 
       - name: Checkout praxis-api-quickstart
         uses: actions/checkout@v5

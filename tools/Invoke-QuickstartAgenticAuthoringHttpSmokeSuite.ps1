@@ -302,6 +302,11 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         previewValid = [bool] $preview.valid
         applyPersisted = [bool] $apply.applied
         applyCleanupDeleted = [bool] $apply.cleanupDeleted
+        applyAuthoringTurnCount = [int] $apply.authoringTurnCount
+        applyAuthoringThreadId = [string] $apply.authoringThreadId
+        applyReviewContinuationUsed = [bool] $apply.reviewContinuationUsed
+        applyReviewContinuationReplyId = [string] $apply.reviewContinuationReplyId
+        applyReviewContinuationDecisionId = [string] $apply.reviewContinuationDecisionId
         streamTerminalSeen = [bool] $stream.terminalSeen
         streamReplayChecked = [bool] $stream.replayChecked
         streamArtifactsDir = $stream.artifactsDir
