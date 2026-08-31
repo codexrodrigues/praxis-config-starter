@@ -223,6 +223,54 @@ class DomainCatalogIngestionServiceTest {
     }
 
     @Test
+    void requestsANewPublicationRevisionWhenAnUnreconciledReleaseIsReingested() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogRagPublicationStateService publicationStateService =
+                mock(DomainCatalogRagPublicationStateService.class);
+        UUID releaseId = UUID.fromString("d070c524-b67a-4cc0-b754-d652d7424e14");
+        DomainCatalogRelease existingRelease = existingRelease();
+        existingRelease.setId(releaseId);
+        DomainCatalogItem existingItem = existingIndexableItem(existingRelease);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                null,
+                publicationStateService,
+                true,
+                false,
+                100,
+                3,
+                0L,
+                event -> { });
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.of(existingRelease));
+        when(itemRepository.countByRelease(existingRelease)).thenReturn(1L);
+        when(itemRepository.findByRelease(existingRelease)).thenReturn(List.of(existingItem));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.corpusReleaseStatus(
+                "tenant-a",
+                "dev",
+                "praxis-api-quickstart:test",
+                RagResourceTypes.DOMAIN_CATALOG,
+                1L))
+                .thenReturn(ragStatus(false, 0L, 1L));
+        when(publicationStateService.request(releaseId, 1L)).thenReturn(8L);
+        when(publicationStateService.markPublishing(releaseId, 8L)).thenReturn(true);
+
+        service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        verify(publicationStateService).request(releaseId, 1L);
+        verify(publicationStateService).markPublishing(releaseId, 8L);
+        verify(publicationStateService).markPublished(releaseId, 8L, 1L);
+        verify(ragVectorStoreService).upsertDocuments(any());
+    }
+
+    @Test
     void skipsRagRepublishWhenAnExistingReleaseIsAlreadyReconciled() throws Exception {
         DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
