@@ -2921,6 +2921,9 @@ public class AgenticAuthoringIntentResolverService {
         if (semanticOrientation == null || !semanticOrientation.requiresFullIntentResolution()) {
             return false;
         }
+        if (hasCompleteCompactResourceComposition(semanticOrientation)) {
+            return false;
+        }
         JsonNode constraints = semanticOrientation.queryConstraints();
         // A governed page/table selection with explicit semantic filters is already a complete
         // authoring decision. Other cases (notably forms and workflow actions) still need the
@@ -2930,6 +2933,33 @@ public class AgenticAuthoringIntentResolverService {
                 || !constraints.path("filters").isArray()
                 || constraints.path("filters").isEmpty()
                 || !List.of("page", "table").contains(semanticOrientation.artifactKind());
+    }
+
+    private boolean hasCompleteCompactResourceComposition(
+            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
+        if (semanticOrientation == null
+                || !"authoring_or_other".equals(semanticOrientation.semanticIntentClass())) {
+            return false;
+        }
+        JsonNode constraints = semanticOrientation.queryConstraints();
+        if (constraints == null
+                || !constraints.path("appliesToDataSelection").isBoolean()
+                || !constraints.path("filters").isArray()) {
+            return false;
+        }
+        if (constraints.path("appliesToDataSelection").asBoolean(false)
+                && constraints.path("filters").isEmpty()) {
+            return false;
+        }
+        return switch (valueOrDefault(semanticOrientation.layoutKind(), "")) {
+            case "single-table" -> "table".equals(semanticOrientation.artifactKind())
+                    && "praxis-table".equals(semanticOrientation.primaryComponent());
+            case "resource-master-detail" -> "page".equals(semanticOrientation.artifactKind())
+                    && "praxis-table".equals(semanticOrientation.primaryComponent());
+            case "resource-crud" -> "page".equals(semanticOrientation.artifactKind())
+                    && "praxis-crud".equals(semanticOrientation.primaryComponent());
+            default -> false;
+        };
     }
 
     private AgenticAuthoringLlmIntentResolution preIntentSemanticOrientationResolution(
@@ -3172,9 +3202,13 @@ public class AgenticAuthoringIntentResolverService {
                 return true;
             }
             // The exact identity-to-path reconciliation is itself governed post-semantic
-            // grounding. Further confirmation is only required when the model declared a
-            // material uncertainty that remains unresolved.
-            if (focus.uncertainty().isBlank()) {
+            // grounding. A residual model uncertainty does not invalidate an exact canonical
+            // identity that the Domain Catalog grounded to the same focused candidate. This
+            // confirms identity only; schema/capability/preview gates remain independently
+            // responsible for operational eligibility.
+            if (focus.uncertainty().isBlank()
+                    || hasEvidence(candidate, AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)
+                    && hasEvidence(candidate, "llm-resource-focus")) {
                 return false;
             }
         }

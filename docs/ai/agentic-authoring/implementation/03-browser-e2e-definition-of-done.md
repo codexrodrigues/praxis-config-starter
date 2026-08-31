@@ -56,6 +56,30 @@ cd ../praxis-ui-angular
 ./tools/local-e2e/run-page-builder-agentic-full-local.sh
 ```
 
+Para a prova focal repetível de `single-table`, preserve um JSON por execução e
+valide o conjunto pela política canônica do Config:
+
+```bash
+PRAXIS_E2E_AGENTIC_VALIDATION_MODE=single-table \
+PRAXIS_E2E_JSON_REPORT_PATH=/tmp/praxis-single-table/run-1.json \
+./tools/local-e2e/run-page-builder-agentic-full-local.sh
+
+node ../praxis-config-starter/tools/e2e/validate-page-builder-agentic-gate-evidence.mjs \
+  --mode single-table \
+  --expected-runs 5 \
+  --report /tmp/praxis-single-table/run-1.json \
+  --report /tmp/praxis-single-table/run-2.json \
+  --report /tmp/praxis-single-table/run-3.json \
+  --report /tmp/praxis-single-table/run-4.json \
+  --report /tmp/praxis-single-table/run-5.json
+```
+
+O validador exige cobertura exata da matriz, zero retry/flaky/skipped, recibo de
+primeira passagem com correlação terminal/apply/persistência/reload e evidência
+de refinamento com limite focal atestado pela própria matriz, linhagem da decisão
+semântica ativa e operação governada materializada. Um relatório Playwright verde
+sem esses anexos não certifica a trilha.
+
 O default e `smoke`. Use
 `PRAXIS_E2E_AGENTIC_VALIDATION_MODE=full` apenas para a matriz deliberada. O
 smoke atualiza o API catalog escopado e uma projecao minima do Domain Catalog;

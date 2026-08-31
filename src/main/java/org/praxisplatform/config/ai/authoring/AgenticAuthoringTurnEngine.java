@@ -6748,12 +6748,84 @@ public class AgenticAuthoringTurnEngine {
     private void putAuthoringEvidenceDiagnostics(
             Map<String, Object> diagnostics,
             AgenticAuthoringTurnStreamRequest request) {
-        JsonNode evidenceContext = request == null || request.contextHints() == null
+        JsonNode contextHints = request == null || request.contextHints() == null
                 ? objectMapper.missingNode()
-                : request.contextHints().path("authoringEvidence");
+                : request.contextHints();
+        JsonNode evidenceContext = contextHints.isMissingNode()
+                ? objectMapper.missingNode()
+                : contextHints.path("authoringEvidence");
         JsonNode evidence = evidenceContext.path("evidence");
         diagnostics.put("authoringEvidenceCount", evidence.isArray() ? evidence.size() : 0);
         diagnostics.put("authoringEvidenceSourceRefs", sourceRefs(evidence));
+        diagnostics.put(
+                "authoringEvidenceOperationCandidateIds",
+                canonicalOperationIds(evidenceContext.path("operationCandidates")));
+        diagnostics.put("authoringEvidenceComponentId", safeText(evidenceContext.path("componentId").asText("")));
+        diagnostics.put("authoringEvidencePhase", safeText(evidenceContext.path("phase").asText("")));
+
+        JsonNode resourceDiscovery = contextHints.path("resourceDiscovery");
+        JsonNode resourceFocus = resourceDiscovery.path("resourceSearchFocus");
+        diagnostics.put(
+                "resourceSearchFocusPrimaryBusinessEntity",
+                safeText(resourceFocus.path("primaryBusinessEntity").asText("")));
+        diagnostics.put(
+                "resourceSearchFocusDesiredSurface",
+                safeText(resourceFocus.path("desiredSurface").asText("")));
+        diagnostics.put(
+                "resourceSearchFocusUncertaintyPresent",
+                !safeText(resourceFocus.path("uncertainty").asText("")).isBlank());
+        diagnostics.put(
+                "resourceDiscoveryCandidateSummaries",
+                resourceDiscoveryCandidateSummaries(resourceDiscovery.path("candidates")));
+    }
+
+    private List<String> canonicalOperationIds(JsonNode candidates) {
+        if (candidates == null || !candidates.isArray()) {
+            return List.of();
+        }
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        for (JsonNode candidate : candidates) {
+            String id = firstNonBlank(
+                    candidate.path("operationId").asText(""),
+                    candidate.path("id").asText(""));
+            if (!id.isBlank()) {
+                ids.add(id);
+            }
+            if (ids.size() >= 24) {
+                break;
+            }
+        }
+        return List.copyOf(ids);
+    }
+
+    private List<Map<String, Object>> resourceDiscoveryCandidateSummaries(JsonNode candidates) {
+        if (candidates == null || !candidates.isArray()) {
+            return List.of();
+        }
+        List<Map<String, Object>> summaries = new ArrayList<>();
+        for (JsonNode candidate : candidates) {
+            Map<String, Object> summary = new LinkedHashMap<>();
+            summary.put("resourcePath", safeText(candidate.path("resourcePath").asText("")));
+            summary.put("score", candidate.path("score").asDouble(0d));
+            List<String> evidence = new ArrayList<>();
+            if (candidate.path("evidence").isArray()) {
+                for (JsonNode item : candidate.path("evidence")) {
+                    String value = safeText(item.asText(""));
+                    if (!value.isBlank() && !evidence.contains(value)) {
+                        evidence.add(value);
+                    }
+                    if (evidence.size() >= 16) {
+                        break;
+                    }
+                }
+            }
+            summary.put("evidence", List.copyOf(evidence));
+            summaries.add(Map.copyOf(summary));
+            if (summaries.size() >= 12) {
+                break;
+            }
+        }
+        return List.copyOf(summaries);
     }
 
     private List<String> sourceRefs(JsonNode evidence) {

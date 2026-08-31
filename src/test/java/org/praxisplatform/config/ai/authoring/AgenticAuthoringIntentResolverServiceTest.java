@@ -11236,6 +11236,79 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void canonicalSingleTableIgnoresRedundantFullPassFlagWhenSemanticCompositionIsComplete() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeCandidate = withEvidence(
+                withEvidence(
+                        withEvidence(
+                                withEvidence(candidateWithEvidence(
+                                        "/api/human-resources/funcionarios",
+                                        0.96d,
+                                        List.of("funcionarios", "nome", "email", "cargo", "departamento")),
+                                        "tool-search-api-resources"),
+                                "semantic-role:operational-resource"),
+                        "domain-binding"),
+                "schema-grounding-verified");
+        employeeCandidate = withEvidence(employeeCandidate, "resource-capabilities-verified");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(employeeCandidate));
+        AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", false);
+        constraints.putArray("filters");
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "The canonical single-table composition is already complete.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                true,
+                constraints,
+                "table",
+                "praxis-table",
+                "single-table");
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(
+                requestWithContextHints(
+                        "crie uma tabela com os dados disponíveis dos funcionários",
+                        "deterministic-smoke-disabled",
+                        resourceDiscoveryContext(
+                                "table",
+                                List.of(employeeCandidate),
+                                new AgenticAuthoringResourceSearchFocus(
+                                        "human-resources.funcionarios",
+                                        List.of(),
+                                        "tabela única",
+                                        "",
+                                        "foco semântico authorado pela LLM"))),
+                "tenant",
+                "user",
+                "local",
+                orientation);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.selectedCandidate()).isEqualTo(employeeCandidate);
+        assertThat(result.visualizationDecision().layoutKind()).isEqualTo("single-table");
+        assertThat(result.warnings()).contains(
+                "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                "llm-pre-intent-resource-discovery-used");
+        Mockito.verifyNoInteractions(llmIntentResolver);
+    }
+
+    @Test
     void canonicalSingleTableDoesNotUseFastPathWithoutVerifiedOperationalGrounding() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
@@ -14739,6 +14812,91 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/operations/incidentes");
         assertThat(result.warnings())
                 .contains("llm-intent-resolution-used")
+                .doesNotContain("llm-resource-selection-unconfirmed-by-ai-authored-focus");
+    }
+
+    @Test
+    void exactCanonicalDomainCatalogFocusResolvesResidualModelUncertaintyWithoutBypassingOperationalGates() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate employeeCandidate = withEvidence(
+                withEvidence(
+                        withEvidence(
+                                withEvidence(candidateWithEvidence(
+                                        "/api/human-resources/funcionarios",
+                                        0.92d,
+                                        List.of("funcionários", "cadastro", "departamento")),
+                                        "tool-search-api-resources"),
+                                AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING),
+                        "llm-resource-focus"),
+                "semantic-role:operational-resource");
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "table",
+                        "create_artifact",
+                        employeeCandidate.resourcePath(),
+                        null,
+                        "none",
+                        "Vou preparar a tabela governada de funcionários.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService service = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode contextHints = resourceDiscoveryContext(
+                "table",
+                List.of(employeeCandidate),
+                new AgenticAuthoringResourceSearchFocus(
+                        "human-resources.funcionarios",
+                        List.of("cadastro"),
+                        "single table listing employees",
+                        "confirm the exact governed source",
+                        "LLM-authored canonical resource identity"));
+        ObjectNode queryConstraints = objectMapper.createObjectNode();
+        queryConstraints.put("appliesToDataSelection", false);
+        queryConstraints.putArray("filters");
+        AgenticAuthoringPreIntentToolPlan semanticOrientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "Create one governed employee table.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                true,
+                queryConstraints,
+                "table",
+                "praxis-table");
+
+        AgenticAuthoringIntentResolutionResult result = service.resolve(
+                requestWithContextHints(
+                        "Crie uma tabela simples de funcionários.",
+                        "deterministic-smoke-disabled",
+                        contextHints),
+                "tenant",
+                "user",
+                "local",
+                semanticOrientation);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.warnings())
                 .doesNotContain("llm-resource-selection-unconfirmed-by-ai-authored-focus");
     }
 

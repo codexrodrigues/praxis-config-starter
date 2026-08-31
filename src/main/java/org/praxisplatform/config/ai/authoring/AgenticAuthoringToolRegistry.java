@@ -1023,7 +1023,7 @@ public class AgenticAuthoringToolRegistry {
                             "The uniquely grounded Domain Catalog resource did not pass exact schema and capability verification.");
                 }
                 AgenticAuthoringResourceCandidatesResult verifiedResult = verifiedBindingResult(
-                        request,
+                        withOperationallyVerifiedResourceFocus(request, discoveredResourceKey),
                         principalContext,
                         verification,
                         false,
@@ -1033,6 +1033,27 @@ public class AgenticAuthoringToolRegistry {
                 }
             }
             return success(call, result);
+        }
+
+        private AgenticAuthoringResourceCandidatesRequest withOperationallyVerifiedResourceFocus(
+                AgenticAuthoringResourceCandidatesRequest request,
+                String canonicalResourceKey) {
+            if (request == null || canonicalResourceKey == null || canonicalResourceKey.isBlank()) {
+                return request;
+            }
+            AgenticAuthoringResourceSearchFocus previous = request.resourceSearchFocus();
+            AgenticAuthoringResourceSearchFocus reconciled = new AgenticAuthoringResourceSearchFocus(
+                    canonicalResourceKey,
+                    previous == null ? List.of() : previous.supportingConcepts(),
+                    previous == null ? request.artifactKind() : previous.desiredSurface(),
+                    "",
+                    "Canonical resource identity reconciled by unique Domain Catalog grounding and exact operational verification.");
+            return new AgenticAuthoringResourceCandidatesRequest(
+                    request.retrievalQuery(),
+                    request.userPrompt(),
+                    request.artifactKind(),
+                    request.limit(),
+                    reconciled);
         }
 
         private String uniqueDomainCatalogGroundedResourceKey(

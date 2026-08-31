@@ -325,7 +325,8 @@ class AgenticAuthoringToolRegistryTest {
         AgenticAuthoringOperationalBindingVerificationService verificationService =
                 Mockito.mock(AgenticAuthoringOperationalBindingVerificationService.class);
         AgenticAuthoringResourceSearchFocus semanticFocus = new AgenticAuthoringResourceSearchFocus(
-                "pessoas da empresa", List.of(), "table", "", "LLM-authored business subject");
+                "human-resources.pessoas", List.of(), "table", "possible canonical alias",
+                "LLM-authored business subject");
         AgenticAuthoringCandidate discoveredCandidate = new AgenticAuthoringCandidate(
                 "/api/human-resources/funcionarios",
                 "post",
@@ -394,6 +395,11 @@ class AgenticAuthoringToolRegistryTest {
                         .containsEntry("operationalGroundingSource", "unique-domain-catalog-resource"));
         AgenticAuthoringResourceCandidatesResult payload =
                 (AgenticAuthoringResourceCandidatesResult) result.payload();
+        assertThat(payload.resourceSearchFocus())
+                .satisfies(focus -> {
+                    assertThat(focus.primaryBusinessEntity()).isEqualTo("human-resources.funcionarios");
+                    assertThat(focus.uncertainty()).isEmpty();
+                });
         assertThat(payload.candidates()).singleElement().satisfies(candidate -> assertThat(candidate.evidence())
                 .contains("domain-binding", "schema-grounding-verified", "resource-capabilities-verified"));
         Mockito.verify(verificationService).verify(

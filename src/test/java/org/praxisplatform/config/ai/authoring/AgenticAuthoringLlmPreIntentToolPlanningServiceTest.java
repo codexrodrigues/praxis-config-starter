@@ -423,6 +423,48 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
     }
 
     @Test
+    void reconcilesDomainDecisionProfileToApiResourceForConcreteSingleTableAuthoring() throws Exception {
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                          "semanticIntentClass": "authoring_or_other",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "requiresFullIntentResolution": false,
+                          "queryConstraints": {"appliesToDataSelection": false, "filters": []},
+                          "groundingProfile": "domain_decision",
+                          "artifactKind": "table",
+                          "primaryComponent": "praxis-table",
+                          "layoutKind": "single-table",
+                          "retrievalQuery": "funcionários",
+                          "resourceSearchFocus": {
+                            "primaryBusinessEntity": "human-resources.funcionarios",
+                            "supportingConcepts": [],
+                            "desiredSurface": "tabela única com todos os campos visíveis",
+                            "uncertainty": null,
+                            "rationale": "A entidade e a superfície já foram resolvidas semanticamente."
+                          },
+                          "reason": "A IA resolveu uma composição de tabela, não uma consulta de decisões."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("crie uma tabela de funcionários com todos os campos disponíveis"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().semanticIntentClass()).isEqualTo("authoring_or_other");
+        assertThat(result.plan().artifactKind()).isEqualTo("table");
+        assertThat(result.plan().primaryComponent()).isEqualTo("praxis-table");
+        assertThat(result.plan().toolCalls()).singleElement().satisfies(call ->
+                assertThat(call.name()).isEqualTo(AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES));
+    }
+
+    @Test
     void rejectsIncompatibleCompactLayoutAndPrimaryComponentPair() throws Exception {
         ObjectNode result = (ObjectNode) objectMapper.readTree("""
                 {

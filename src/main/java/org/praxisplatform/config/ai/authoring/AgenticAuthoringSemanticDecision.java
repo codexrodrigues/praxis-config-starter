@@ -183,7 +183,14 @@ public record AgenticAuthoringSemanticDecision(
                 contains(warnings, "resource-selection-unanchored-low-confidence");
         String followUpKind = llmIntent == null ? "" : safe(llmIntent.followUpKind());
         String previousDecisionId = activeDecision == null ? "" : safe(activeDecision.decisionId());
-        boolean refinement = visualProjectionRefinement
+        // An explicit active decision plus a canonical modification is already sufficient
+        // semantic lineage. Requiring the provider to also repeat followUpKind=refinement made
+        // refinementOf probabilistic even though the client had supplied the governed decision.
+        boolean activeDecisionModification = activeDecision != null
+                && !previousDecisionId.isBlank()
+                && "modify".equals(safe(operationKind));
+        boolean refinement = activeDecisionModification
+                || visualProjectionRefinement
                 || decisionMemoryRefinement
                 || semanticRefinementApplied
                 || "refinement".equals(followUpKind);
