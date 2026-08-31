@@ -18,6 +18,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -218,18 +219,20 @@ public class EmbeddingService {
         }
         ApiException geminiFailure = findCause(failure, ApiException.class);
         if (geminiFailure != null) {
-            return AiProviderCallException.fromHttpStatus(
+            return AiProviderCallException.fromHttpStatusSanitized(
                     providerName,
                     geminiFailure.code(),
                     geminiFailure.message(),
+                    null,
                     geminiFailure);
         }
         OpenAIServiceException openAiFailure = findCause(failure, OpenAIServiceException.class);
         if (openAiFailure != null) {
-            return AiProviderCallException.fromHttpStatus(
+            return AiProviderCallException.fromHttpStatusSanitized(
                     providerName,
                     openAiFailure.statusCode(),
-                    rootCauseMessage(openAiFailure),
+                    openAiFailure.code().orElseGet(() -> openAiFailure.type().orElse("unknown")),
+                    openAiRetryAfter(openAiFailure, Instant.now()),
                     openAiFailure);
         }
         Throwable root = rootCause(failure);
@@ -307,7 +310,7 @@ public class EmbeddingService {
             try {
                 return embedWithGoogleGenAi(text, override, effectiveApiKey);
             } catch (Exception e) {
-                throw new IllegalStateException("Gemini embedding failed.", e);
+                throw classifyEmbeddingFailure(PROVIDER_GEMINI, e);
             }
         }
         if (PROVIDER_OPENAI.equals(selected)) {
@@ -321,7 +324,7 @@ public class EmbeddingService {
                 Integer effectiveDimensions = overrideDimensions != null ? overrideDimensions : resolveDefaultDimensions(selected);
                 return embedWithOpenAi(text, override, effectiveApiKey, effectiveModel, effectiveDimensions);
             } catch (Exception e) {
-                throw new IllegalStateException("OpenAI embedding failed: " + rootCauseMessage(e), e);
+                throw classifyEmbeddingFailure(PROVIDER_OPENAI, e);
             }
         }
         throw new IllegalStateException(
@@ -570,7 +573,8 @@ public class EmbeddingService {
                 .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() >= 400) {
-            throw new IllegalStateException("Gemini embedding HTTP " + response.statusCode() + ": " + response.body());
+            throw classifyGoogleGenAiRestFailure(
+                    response.statusCode(), response.body(), response.headers(), Instant.now());
         }
         JsonNode root = objectMapper.readTree(response.body());
         JsonNode values = root.path("embedding").path("values");
@@ -647,15 +651,42 @@ public class EmbeddingService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private String rootCauseMessage(Throwable throwable) {
-        Throwable current = throwable;
-        while (current.getCause() != null) {
-            current = current.getCause();
+    AiProviderCallException classifyGoogleGenAiRestFailure(
+            int statusCode,
+            String responseBody,
+            java.net.http.HttpHeaders headers,
+            Instant now) {
+        AiProviderRetryAfter.GoogleFailureMetadata metadata =
+                AiProviderRetryAfter.fromGoogleErrorBody(objectMapper, responseBody, now);
+        Instant headerRetryAfter = headers != null
+                ? AiProviderRetryAfter.fromHeaders(
+                        headers.allValues("retry-after-ms"), headers.allValues("retry-after"), now)
+                : null;
+        return AiProviderCallException.fromHttpStatusSanitized(
+                PROVIDER_GEMINI,
+                statusCode,
+                metadata.reason(),
+                later(metadata.retryAfter(), headerRetryAfter),
+                null);
+    }
+
+    private Instant openAiRetryAfter(OpenAIServiceException failure, Instant now) {
+        if (failure.headers() == null) {
+            return null;
         }
-        String message = current.getMessage();
-        if (message == null || message.isBlank()) {
-            return current.getClass().getSimpleName();
+        return AiProviderRetryAfter.fromHeaders(
+                failure.headers().values("retry-after-ms"),
+                failure.headers().values("retry-after"),
+                now);
+    }
+
+    private Instant later(Instant first, Instant second) {
+        if (first == null) {
+            return second;
         }
-        return message.replaceAll("sk-[A-Za-z0-9_-]+", "sk-***");
+        if (second == null) {
+            return first;
+        }
+        return first.isAfter(second) ? first : second;
     }
 }
