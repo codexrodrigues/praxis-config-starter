@@ -1,6 +1,7 @@
 package org.praxisplatform.config.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -8,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.genai.errors.ClientException;
 import java.util.Iterator;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
@@ -64,6 +66,29 @@ class EmbeddingServiceTest {
 
         assertEquals(2, vector.size());
         assertEquals(0.5f, vector.get(0));
+    }
+
+    @Test
+    void embedAllPreservesGeminiQuotaFailureAsCanonicalProviderException() {
+        GoogleGenAiTextEmbeddingModel client = Mockito.mock(GoogleGenAiTextEmbeddingModel.class);
+        when(client.call(any(EmbeddingRequest.class))).thenThrow(new ClientException(
+                429,
+                "RESOURCE_EXHAUSTED",
+                "You exceeded your current quota for embed content requests."));
+
+        EmbeddingService service = new EmbeddingService(emptyOpenAiProvider(), provider(client), new ObjectMapper());
+        ReflectionTestUtils.setField(service, "provider", "gemini");
+        ReflectionTestUtils.setField(service, "geminiApiKey", "gemini-key");
+        ReflectionTestUtils.setField(service, "geminiModel", "gemini-embedding-2");
+        ReflectionTestUtils.setField(service, "geminiDimensions", 768);
+
+        AiProviderCallException failure = assertThrows(
+                AiProviderCallException.class,
+                () -> service.embedAll(List.of("first", "second")));
+
+        assertEquals("gemini", failure.getProvider());
+        assertEquals(AiProviderCallException.Kind.QUOTA_EXHAUSTED, failure.getKind());
+        assertEquals(429, failure.getStatusCode());
     }
 
     @Test

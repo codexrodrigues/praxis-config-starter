@@ -49,6 +49,11 @@ public final class AiProviderCallException extends RuntimeException {
     }
 
     public static AiProviderCallException fromHttpStatus(String provider, int statusCode, String reason) {
+        return fromHttpStatus(provider, statusCode, reason, null);
+    }
+
+    public static AiProviderCallException fromHttpStatus(
+            String provider, int statusCode, String reason, Throwable cause) {
         Kind kind;
         if (statusCode == 408 || statusCode == 504) {
             kind = Kind.TIMEOUT;
@@ -68,7 +73,7 @@ public final class AiProviderCallException extends RuntimeException {
         String message = provider + " HTTP " + statusCode + (reason == null || reason.isBlank()
                 ? ""
                 : ": " + reason);
-        return new AiProviderCallException(provider, kind, statusCode, message, null);
+        return new AiProviderCallException(provider, kind, statusCode, message, cause);
     }
 
     private static boolean isQuotaExhausted(String reason) {

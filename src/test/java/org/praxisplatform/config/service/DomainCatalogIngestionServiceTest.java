@@ -275,7 +275,8 @@ class DomainCatalogIngestionServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
-        doThrow(new IllegalStateException("transient embedding failure"))
+        doThrow(AiProviderCallException.transport(
+                        "gemini", new java.net.ConnectException("embedding endpoint unavailable")))
                 .doNothing()
                 .when(ragVectorStoreService)
                 .upsertDocuments(any());
@@ -290,6 +291,43 @@ class DomainCatalogIngestionServiceTest {
                 eq("human-resources.folhas-pagamento"),
                 eq("praxis-api-quickstart_test"),
                 eq(RagResourceTypes.DOMAIN_CATALOG));
+    }
+
+    @Test
+    void doesNotRetryRagBatchAfterProviderQuotaIsExhausted() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                (DomainKnowledgeProjectionService) null,
+                true,
+                false,
+                100,
+                3,
+                0L,
+                event -> { });
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.empty());
+        when(releaseRepository.save(any(DomainCatalogRelease.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        doThrow(AiProviderCallException.fromHttpStatus(
+                        "gemini", 429, "You exceeded your current quota."))
+                .when(ragVectorStoreService)
+                .upsertDocuments(any());
+
+        DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:test");
+        verify(ragVectorStoreService, times(1)).upsertDocuments(any());
+        verify(ragVectorStoreService, never()).deleteDocumentsByCanonicalScopeExceptRelease(
+                any(), any(), any(), any(), any(), any());
     }
 
     @Test

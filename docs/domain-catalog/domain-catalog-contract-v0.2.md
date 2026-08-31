@@ -76,7 +76,13 @@ catalog. By default the starter schedules RAG publication after the catalog
 transaction commits (`praxis.domain-catalog.rag-publication.async-enabled=true`)
 and publishes documents in bounded batches
 (`praxis.domain-catalog.rag-publication.batch-size=100`). A failed batch is
-retried in place without reprocessing successful earlier batches; the bounded
+retried in place without reprocessing successful earlier batches only when the
+canonical provider failure is recoverable (`rate_limit`, `capacity`,
+`server_error`, `transport` or `timeout`). Exhausted quota, authentication,
+client and unknown provider failures stop the current publication attempt
+immediately; the structural release remains persisted and a later idempotent
+ingest can resume from the missing documents. Logs expose only the normalized
+failure kind, never the provider body or embedding input. The bounded retry
 policy is configured by
 `praxis.domain-catalog.rag-publication.max-attempts=3` and exponential backoff
 starting at

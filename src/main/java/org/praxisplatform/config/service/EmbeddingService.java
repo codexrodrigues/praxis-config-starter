@@ -3,9 +3,17 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.genai.errors.ApiException;
+import com.google.genai.errors.GenAiIOException;
+import com.openai.errors.OpenAIServiceException;
+import java.net.ConnectException;
 import java.net.URI;
 import java.net.URLEncoder;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
+import java.net.http.HttpTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -157,7 +165,7 @@ public class EmbeddingService {
                 }
                 return vectors;
             } catch (Exception ex) {
-                throw new IllegalStateException("OpenAI embedding batch failed: " + rootCauseMessage(ex), ex);
+                throw classifyEmbeddingFailure(PROVIDER_OPENAI, ex);
             }
         }
         if (PROVIDER_GEMINI.equals(selected)) {
@@ -173,7 +181,7 @@ public class EmbeddingService {
                 }
                 return vectors;
             } catch (Exception ex) {
-                throw new IllegalStateException("Gemini embedding batch failed.", ex);
+                throw classifyEmbeddingFailure(PROVIDER_GEMINI, ex);
             }
         }
         throw new IllegalStateException(
@@ -201,6 +209,65 @@ public class EmbeddingService {
             batches.add(List.copyOf(current));
         }
         return batches;
+    }
+
+    private AiProviderCallException classifyEmbeddingFailure(String providerName, Throwable failure) {
+        AiProviderCallException normalized = findCause(failure, AiProviderCallException.class);
+        if (normalized != null) {
+            return normalized;
+        }
+        ApiException geminiFailure = findCause(failure, ApiException.class);
+        if (geminiFailure != null) {
+            return AiProviderCallException.fromHttpStatus(
+                    providerName,
+                    geminiFailure.code(),
+                    geminiFailure.message(),
+                    geminiFailure);
+        }
+        OpenAIServiceException openAiFailure = findCause(failure, OpenAIServiceException.class);
+        if (openAiFailure != null) {
+            return AiProviderCallException.fromHttpStatus(
+                    providerName,
+                    openAiFailure.statusCode(),
+                    rootCauseMessage(openAiFailure),
+                    openAiFailure);
+        }
+        Throwable root = rootCause(failure);
+        if (root instanceof HttpTimeoutException
+                || root instanceof SocketTimeoutException
+                || root instanceof java.util.concurrent.TimeoutException) {
+            return AiProviderCallException.timeout(providerName, root);
+        }
+        if (root instanceof GenAiIOException
+                || root instanceof ConnectException
+                || root instanceof SocketException
+                || root instanceof UnknownHostException
+                || root instanceof java.io.IOException) {
+            return AiProviderCallException.transport(providerName, root);
+        }
+        return AiProviderCallException.unknown(providerName, root);
+    }
+
+    private <T extends Throwable> T findCause(Throwable failure, Class<T> type) {
+        Throwable current = failure;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return type.cast(current);
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private Throwable rootCause(Throwable failure) {
+        Throwable current = failure;
+        while (current != null && current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current != null ? current : failure;
     }
 
     private String formatRagInput(String text, RagEmbeddingPurpose purpose, EmbeddingCallConfig override) {

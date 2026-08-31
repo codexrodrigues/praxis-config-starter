@@ -767,7 +767,7 @@ public class DomainCatalogIngestionService {
                 ragVectorStoreService.upsertDocuments(documents);
                 return;
             } catch (RuntimeException ex) {
-                if (attempt >= ragPublicationMaxAttempts) {
+                if (!isRetryableRagPublicationFailure(ex) || attempt >= ragPublicationMaxAttempts) {
                     throw ex;
                 }
                 long retryDelayMs = retryDelayMillis(attempt);
@@ -777,7 +777,7 @@ public class DomainCatalogIngestionService {
                         attempt,
                         ragPublicationMaxAttempts,
                         retryDelayMs,
-                        ex.getMessage());
+                        AiProviderFailureClassifier.classify(ex));
                 try {
                     TimeUnit.MILLISECONDS.sleep(retryDelayMs);
                 } catch (InterruptedException interrupted) {
@@ -788,6 +788,32 @@ public class DomainCatalogIngestionService {
                 }
             }
         }
+    }
+
+    private boolean isRetryableRagPublicationFailure(RuntimeException failure) {
+        AiProviderCallException providerFailure = findProviderFailure(failure);
+        if (providerFailure == null) {
+            // Preserve the existing conservative retry for untyped vector-store failures.
+            return true;
+        }
+        return switch (providerFailure.getKind()) {
+            case RATE_LIMIT, CAPACITY, SERVER_ERROR, TRANSPORT, TIMEOUT -> true;
+            case QUOTA_EXHAUSTED, AUTH, CLIENT_ERROR, UNKNOWN -> false;
+        };
+    }
+
+    private AiProviderCallException findProviderFailure(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof AiProviderCallException providerFailure) {
+                return providerFailure;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private long retryDelayMillis(int failedAttempt) {
@@ -844,7 +870,7 @@ public class DomainCatalogIngestionService {
                 log.warn(
                         "Domain catalog release {} was persisted, but RAG publication failed: {}",
                         release.getReleaseKey(),
-                        ex.getMessage()
+                        AiProviderFailureClassifier.classify(ex)
                 );
             }
         };
