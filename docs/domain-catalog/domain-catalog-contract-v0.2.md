@@ -75,8 +75,13 @@ RAG publication is a derived materialization, not the source of truth for the
 catalog. By default the starter schedules RAG publication after the catalog
 transaction commits (`praxis.domain-catalog.rag-publication.async-enabled=true`)
 and publishes documents in bounded batches
-(`praxis.domain-catalog.rag-publication.batch-size=100`). Operators can still
-disable this materialization with
+(`praxis.domain-catalog.rag-publication.batch-size=100`). A failed batch is
+retried in place without reprocessing successful earlier batches; the bounded
+policy is configured by
+`praxis.domain-catalog.rag-publication.max-attempts=3` and exponential backoff
+starting at
+`praxis.domain-catalog.rag-publication.retry-backoff-ms=1000` (capped at 60
+seconds). Operators can still disable this materialization with
 `praxis.domain-catalog.rag-publication.enabled=false`; `/items` and `/context`
 continue to read the canonical transactional store.
 

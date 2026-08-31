@@ -7,7 +7,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -20,7 +19,6 @@ import org.praxisplatform.config.rag.RagDocumentIdentity;
 import org.praxisplatform.config.rag.RagMetadataKeys;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
-import org.springframework.beans.factory.ObjectProvider;
 import org.praxisplatform.config.repository.DomainCatalogItemRepository;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.springframework.ai.document.Document;
@@ -50,11 +48,9 @@ class DomainCatalogIngestionServiceTest {
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
         RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
         ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
-        @SuppressWarnings("unchecked")
-        ObjectProvider<DomainKnowledgeProjectionService> projectionProvider = mock(ObjectProvider.class);
         DomainCatalogIngestionService service = new DomainCatalogIngestionService(
                 releaseRepository, itemRepository, objectMapper, ragVectorStoreService, validationService(),
-                projectionProvider, false, false, 100, eventPublisher);
+                (DomainKnowledgeProjectionService) null, false, false, 100, eventPublisher);
         when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
                 .thenReturn(Optional.empty());
         when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -256,7 +252,7 @@ class DomainCatalogIngestionServiceTest {
     }
 
     @Test
-    void retriesRagMaterializationOnIdempotentIngestionAfterTransientFailure() throws Exception {
+    void retriesRagBatchAfterTransientFailureWithoutWaitingForReingestion() throws Exception {
         DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
         RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
@@ -265,40 +261,25 @@ class DomainCatalogIngestionServiceTest {
                 itemRepository,
                 objectMapper,
                 ragVectorStoreService,
-                validationService());
-        AtomicReference<DomainCatalogRelease> persistedRelease = new AtomicReference<>();
-        AtomicReference<List<DomainCatalogItem>> persistedItems = new AtomicReference<>(List.of());
+                validationService(),
+                (DomainKnowledgeProjectionService) null,
+                true,
+                false,
+                100,
+                3,
+                0L,
+                event -> { });
         when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
-                .thenAnswer(ignored -> Optional.ofNullable(persistedRelease.get()));
-        when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> {
-            DomainCatalogRelease release = invocation.getArgument(0);
-            persistedRelease.set(release);
-            return release;
-        });
-        when(itemRepository.saveAll(any())).thenAnswer(invocation -> {
-            @SuppressWarnings("unchecked")
-            List<DomainCatalogItem> items = invocation.getArgument(0);
-            persistedItems.set(items);
-            return items;
-        });
-        when(itemRepository.countByRelease(any(DomainCatalogRelease.class)))
-                .thenAnswer(ignored -> (long) persistedItems.get().size());
-        when(itemRepository.findByRelease(any(DomainCatalogRelease.class)))
-                .thenAnswer(ignored -> persistedItems.get());
+                .thenReturn(Optional.empty());
+        when(releaseRepository.save(any(DomainCatalogRelease.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
-        when(ragVectorStoreService.corpusReleaseStatus(
-                eq("tenant-a"),
-                eq("dev"),
-                eq("praxis-api-quickstart:test"),
-                eq(RagResourceTypes.DOMAIN_CATALOG),
-                eq(13L)))
-                .thenReturn(ragStatus(false, 0L, 13L));
         doThrow(new IllegalStateException("transient embedding failure"))
                 .doNothing()
                 .when(ragVectorStoreService)
                 .upsertDocuments(any());
 
-        service.ingest(sampleCatalog(), "tenant-a", "dev");
         service.ingest(sampleCatalog(), "tenant-a", "dev");
 
         verify(ragVectorStoreService, times(2)).upsertDocuments(any());
