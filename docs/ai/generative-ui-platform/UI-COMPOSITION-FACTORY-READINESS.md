@@ -287,14 +287,17 @@ result of `resource-context-required` is accepted as the legitimate pre-selectio
 unavailable or incomplete surfaces block before apply. The semantic policy independently requires
 `relatedResourceGrounding.status=verified`.
 
-The Config gate matrix now owns the focal `related-resource` profile, operations catalog scope and
-sanitized receipt. The Angular scenario uses the Quickstart mission/team pilot and the Core runtime
-fix that keeps contextual read URL separate from the flat child command resource. Focused Java and
-Node gates pass, but the archetype is not certified: the first integrated attempt failed to close API
-Catalog vector publication and its no-refresh rerun received provider
-`429 credit_balance_exhausted` before the browser tests. After provider recovery, the required order
-is one successful focal run followed by five independent zero-retry, zero-corrective-prompt runs
-accepted by the Config evidence validator.
+The Config gate matrix now owns the focal `related-resource` profile, operations catalog scope,
+sanitized receipt and `domainCatalogRagRequired=true`. Both managed runners consume that decision:
+they enable Domain Catalog RAG and require the typed publication state to reach
+`PUBLISHED + reconciled` before Angular or Playwright starts. The Angular scenario uses the
+Quickstart mission/team pilot and the Core runtime fix that keeps contextual read URL separate from
+the flat child command resource. Focused Java and Node gates pass, but the archetype is not
+certified: the first integrated attempt failed to close vector publication and its no-refresh rerun
+received provider `429 credit_balance_exhausted` before the browser tests. After provider recovery,
+the required order is one successful focal run followed by five independent zero-retry,
+zero-corrective-prompt runs accepted by the Config evidence validator. A run with
+`--no-domain-catalog-rag` is diagnostic only and cannot certify this profile.
 
 Classification remains `suportado-parcialmente` until that production-like evidence closes. No Ergo
 consumer migration should begin from this slice before certification.

@@ -243,6 +243,7 @@
     "related-resource": {
       "description": "Focal live LLM proof for a canonical parent-child page using a governed related-resource surface, without Playwright retries.",
       "retries": 0,
+      "domainCatalogRagRequired": true,
       "domainCatalogResourceKey": "operations.missoes",
       "apiCatalogGroup": "operations",
       "apiCatalogPathPrefixes": [

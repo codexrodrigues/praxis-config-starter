@@ -851,6 +851,69 @@ function Wait-AiRegistryReady(
     throw "AI Registry did not become ready with the expected immutable snapshot hash."
 }
 
+function Wait-DomainCatalogRagReady(
+    [string] $BaseUrl,
+    [string] $Origin,
+    [string] $TenantId,
+    [string] $Environment,
+    [string] $ServiceKey,
+    [string] $ResourceKey,
+    [int] $TimeoutSec
+) {
+    $encodedServiceKey = [Uri]::EscapeDataString($ServiceKey)
+    $statusUrl = "$BaseUrl/api/praxis/config/domain-catalog/rag/status?serviceKey=$encodedServiceKey"
+    if (-not [string]::IsNullOrWhiteSpace($ResourceKey)) {
+        $statusUrl += "&resourceKey=$([Uri]::EscapeDataString($ResourceKey))"
+    }
+    $headers = @{
+        "Origin" = $Origin
+        "X-Tenant-ID" = $TenantId
+        "X-Env" = $Environment
+    }
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    do {
+        try {
+            $status = Invoke-RestMethod `
+                -Method Get `
+                -Uri $statusUrl `
+                -Headers $headers `
+                -TimeoutSec 10
+            if ($status.schemaVersion -eq "praxis.domain-catalog-rag-status/v0.1" -and
+                $null -ne $status.publication) {
+                $publicationStatus = ([string] $status.publication.status).ToUpperInvariant()
+                if ($publicationStatus -eq "FAILED") {
+                    $failureKind = if ([string]::IsNullOrWhiteSpace([string] $status.publication.failureKind)) {
+                        "unknown"
+                    } else {
+                        [string] $status.publication.failureKind
+                    }
+                    throw "Domain Catalog RAG publication failed with sanitized failure kind: $failureKind"
+                }
+                if ($publicationStatus -eq "PUBLISHED" -and
+                    $status.statusAvailable -eq $true -and
+                    $status.reconciled -eq $true -and
+                    [long] $status.expectedDocumentCount -gt 0) {
+                    return [ordered]@{
+                        schemaVersion = [string] $status.schemaVersion
+                        status = $publicationStatus
+                        reconciled = $true
+                        expectedDocumentCount = [long] $status.expectedDocumentCount
+                        actualDocumentCount = [long] $status.actualDocumentCount
+                        revision = [long] $status.publication.revision
+                        attempt = [int] $status.publication.attempt
+                    }
+                }
+            }
+        } catch {
+            if ($_.Exception.Message.StartsWith("Domain Catalog RAG publication failed with sanitized failure kind:")) {
+                throw
+            }
+        }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+    throw "Domain Catalog RAG did not reach PUBLISHED + reconciled before timeout."
+}
+
 function Stop-ProcAndPort($Process, [int] $Port) {
     if ($null -eq $Process) {
         return
@@ -872,7 +935,9 @@ function Invoke-DomainCatalogIngest {
         [string] $TenantId,
         [string] $Environment,
         [string[]] $Groups,
-        [string] $ResourceKey = ""
+        [string] $ResourceKey = "",
+        [bool] $RequireRag = $false,
+        [int] $RagTimeoutSec = 900
     )
 
     $headers = @{
@@ -903,12 +968,23 @@ function Invoke-DomainCatalogIngest {
             -Body $body `
             -TimeoutSec 900 | Out-Null
         Write-Phase "Governed domain catalog ingest completed for resource $ResourceKey."
+        $ragEvidence = $null
+        if ($RequireRag) {
+            $serviceKey = [string] $catalog.service.serviceKey
+            if ([string]::IsNullOrWhiteSpace($serviceKey)) {
+                throw "Governed domain catalog does not declare service.serviceKey for RAG readiness."
+            }
+            Write-Phase "Waiting for typed Domain Catalog RAG publication evidence."
+            $ragEvidence = Wait-DomainCatalogRagReady `
+                $BaseUrl $Origin $TenantId $Environment $serviceKey $ResourceKey $RagTimeoutSec
+        }
         return [ordered]@{
             schemaVersion = "praxis.domain-catalog/v0.2"
             source = "/schemas/domain"
             ingested = $true
             groups = @()
             resourceKeys = @($ResourceKey)
+            rag = $ragEvidence
         }
     }
 
@@ -980,6 +1056,13 @@ $modeDomainCatalogResourceKey = if ($null -ne $modeMatrix.domainCatalogResourceK
 } else {
     ""
 }
+$modeDomainCatalogRagRequired = $false
+if ($null -ne $modeMatrix.domainCatalogRagRequired) {
+    if ($modeMatrix.domainCatalogRagRequired -isnot [bool]) {
+        throw "Validation mode domainCatalogRagRequired must be a boolean: $ValidationMode"
+    }
+    $modeDomainCatalogRagRequired = [bool] $modeMatrix.domainCatalogRagRequired
+}
 if (-not [string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey) -and
     $modeDomainCatalogResourceKey -notmatch '^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$') {
     throw "Validation mode declares an invalid canonical domain catalog resource identity: $modeDomainCatalogResourceKey"
@@ -1012,6 +1095,10 @@ if ($StreamProcessingTimeoutSeconds -le 0) {
 if ($PlaywrightTestTimeoutMs -le 0) {
     $PlaywrightTestTimeoutMs = [int] $gateMatrix.defaults.playwrightTestTimeoutMs
 }
+$domainCatalogRagTimeoutSec = [Math]::Max(
+    $StartupTimeoutSec,
+    [int] [Math]::Ceiling($PlaywrightTestTimeoutMs / 1000.0)
+)
 if ($Retries -lt 0) {
     $Retries = if ($null -ne $modeMatrix.retries) {
         [int] $modeMatrix.retries
@@ -1022,6 +1109,7 @@ if ($Retries -lt 0) {
 
 $null = . $EnvFile
 $resolvedEmbeddingProvider = if ([string]::IsNullOrWhiteSpace($EmbeddingProvider)) { $Provider } else { $EmbeddingProvider }
+$domainCatalogRagPublicationEnabled = $modeDomainCatalogRagRequired.ToString().ToLowerInvariant()
 if ($resolvedEmbeddingProvider -ieq "mock") {
     throw "EMBEDDING_PROVIDER=mock is not valid for the production-like Page Builder gate."
 }
@@ -1221,7 +1309,7 @@ Set-Location '$QuickstartRoot'
 `$env:PRAXIS_AI_RAG_VECTOR_STORE_ENABLED = 'true'
 `$env:PRAXIS_API_METADATA_RAG_PUBLICATION_ENABLED = 'true'
 `$env:EMBEDDING_PROVIDER = '$resolvedEmbeddingProvider'
-`$env:PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ENABLED = 'false'
+`$env:PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ENABLED = '$domainCatalogRagPublicationEnabled'
 `$env:PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ASYNC_ENABLED = 'true'
 `$env:PRAXIS_PROJECT_KNOWLEDGE_RAG_PUBLICATION_ENABLED = 'true'
 `$env:PRAXIS_PROJECT_KNOWLEDGE_RAG_RETRIEVAL_ENABLED = 'true'
@@ -1248,7 +1336,8 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         @("human-resources")
     }
     $domainCatalogEvidence = Invoke-DomainCatalogIngest `
-        $backendUrl $uiUrl "desenv" "local" $domainCatalogGroups $modeDomainCatalogResourceKey
+        $backendUrl $uiUrl "desenv" "local" $domainCatalogGroups $modeDomainCatalogResourceKey `
+        $modeDomainCatalogRagRequired $domainCatalogRagTimeoutSec
 
     Push-Location $UiRoot
     try {

@@ -26,6 +26,7 @@ test('validates the canonical matrix and resolves the single-table profile', () 
   assert.equal(profile.expectedSkipped, 0);
   assert.equal(profile.retries, 0);
   assert.equal(profile.humanTurnLimit, 1);
+  assert.equal(profile.domainCatalogRagRequired, false);
   assert.deepEqual(profile.scenarios, [
     'critical-interception-guard',
     'single-table-control',
@@ -77,6 +78,7 @@ test('resolves the focal related-resource profile with governed mission scope', 
 
   assert.equal(profile.expectedDiscovered, 2);
   assert.equal(profile.retries, 0);
+  assert.equal(profile.domainCatalogRagRequired, true);
   assert.equal(profile.domainCatalogResourceKey, 'operations.missoes');
   assert.equal(profile.apiCatalogGroup, 'operations');
   assert.deepEqual(profile.apiCatalogPathPrefixes, [
@@ -102,7 +104,11 @@ test('keeps the Windows runner matrix-driven for new focal modes and domain scop
     /\[ValidateSet\("smoke", "single-table", "full"\)\]/,
   );
   assert.match(windowsRunnerSource, /\$modeMatrix\.domainCatalogResourceKey/);
+  assert.match(windowsRunnerSource, /\$modeMatrix\.domainCatalogRagRequired/);
   assert.match(windowsRunnerSource, /schemas\/domain\?resourceKey=/);
+  assert.match(windowsRunnerSource, /domain-catalog\/rag\/status/);
+  assert.match(windowsRunnerSource, /PUBLISHED/);
+  assert.match(windowsRunnerSource, /reconciled/);
 });
 
 test('rejects a non-positive human turn limit', () => {
@@ -117,6 +123,15 @@ test('rejects a non-canonical domain catalog resource identity', () => {
   assert.throws(
     () => validateGateMatrix(matrix),
     /domainCatalogResourceKey must be a canonical dotted resource identity/,
+  );
+});
+
+test('rejects a non-boolean Domain Catalog RAG requirement', () => {
+  const matrix = clone(loadGateMatrix());
+  matrix.modes['related-resource'].domainCatalogRagRequired = 'true';
+  assert.throws(
+    () => validateGateMatrix(matrix),
+    /domainCatalogRagRequired must be a boolean/,
   );
 });
 
