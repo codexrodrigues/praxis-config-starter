@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -82,7 +84,9 @@ class AiProviderManagementServiceTest {
 
     @Test
     void testConnectionUsesSelectedProvider() {
-        when(openai.generateText(any(), any())).thenReturn("ok");
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        doCallRealMethod().when(openai).testConnection(any());
+        when(openai.listModels(any())).thenReturn(List.of());
 
         AiProviderTestResponse response = service.testConnection(
                 AiProviderTestRequest.builder().provider("open-ai").model("gpt-4o-mini").build());
@@ -90,7 +94,10 @@ class AiProviderManagementServiceTest {
         assertTrue(response.isSuccess());
         assertEquals("open-ai", response.getProvider());
         assertEquals("gpt-4o-mini", response.getModel());
-        verify(openai).generateText(any(), any());
+        verify(openai).testConnection(configCaptor.capture());
+        assertEquals(32, configCaptor.getValue().getMaxTokens());
+        verify(openai).listModels(any());
+        verify(openai, never()).generateText(any(), any());
     }
 
     @Test

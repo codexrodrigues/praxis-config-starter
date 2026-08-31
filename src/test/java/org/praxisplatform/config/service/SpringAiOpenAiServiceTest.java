@@ -92,6 +92,32 @@ class SpringAiOpenAiServiceTest {
     }
 
     @Test
+    void connectionProbeAuthenticatesThroughModelDiscoveryWithoutInference() throws Exception {
+        AtomicInteger modelRequests = new AtomicInteger();
+        AtomicInteger inferenceRequests = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/models", exchange -> {
+            modelRequests.incrementAndGet();
+            writeJson(exchange, 200, "{\"data\":[{\"id\":\"gpt-5-mini\",\"owned_by\":\"openai\"}]}");
+        });
+        server.createContext("/v1/responses", exchange -> {
+            inferenceRequests.incrementAndGet();
+            writeJson(exchange, 500, "{\"error\":{\"message\":\"inference must not be called\"}}");
+        });
+        SpringAiOpenAiService service = service(server, "gpt-5-mini");
+        server.start();
+        try {
+            service.testConnection(AiCallConfig.builder().maxTokens(32).build());
+
+            assertEquals(1, modelRequests.get());
+            assertEquals(0, inferenceRequests.get());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
     void economicalGpt56ModelsUseTheLightReasoningProfile() throws Exception {
         List<JsonNode> capturedRequests = new ArrayList<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

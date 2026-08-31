@@ -73,5 +73,16 @@ public interface AiProvider {
 
     List<AiProviderModel> listModels(AiCallConfig config);
 
+    /**
+     * Verifies that the configured credentials can reach the provider without performing a paid
+     * inference whenever the provider exposes an authenticated discovery endpoint.
+     *
+     * <p>Providers whose discovery path is local-only must override this probe with the smallest
+     * remote operation that proves connectivity.</p>
+     */
+    default void testConnection(AiCallConfig config) {
+        listModels(config);
+    }
+
     String getProviderName();
 }
