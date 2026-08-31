@@ -37,7 +37,7 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class AiProviderManagementService {
 
-    private static final String TEST_PROMPT = "ping";
+    private static final int CONNECTION_PROBE_MAX_TOKENS = 32;
     private static final String GLOBAL_CONFIG_COMPONENT_TYPE = "praxis-global-config-editor";
     private static final String GLOBAL_CONFIG_KEY = "praxis:global-config";
     private static final int DEFAULT_STORED_CONFIG_LOOKUP_TIMEOUT_SECONDS = 3;
@@ -140,7 +140,7 @@ public class AiProviderManagementService {
                 .apiKey(resolveApiKey(request != null ? request.getApiKey() : null, stored))
                 .model(resolveModel(request != null ? request.getModel() : null, stored))
                 .temperature(0.0)
-                .maxTokens(8)
+                .maxTokens(CONNECTION_PROBE_MAX_TOKENS)
                 .build();
         String model = config.getModel();
         try {
@@ -148,7 +148,7 @@ public class AiProviderManagementService {
             if (selectedProvider == null) {
                 throw new IllegalStateException("No providers available");
             }
-            selectedProvider.generateText(TEST_PROMPT, config);
+            selectedProvider.testConnection(config);
             return AiProviderTestResponse.builder()
                     .provider(provider)
                     .model(model)

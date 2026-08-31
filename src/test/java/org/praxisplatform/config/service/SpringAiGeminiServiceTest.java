@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -171,6 +172,21 @@ class SpringAiGeminiServiceTest {
 
         assertTrue(service.supportsTextStreaming(AiCallConfig.builder().build()));
         assertTrue(service.supportsTurnCancellation(AiCallConfig.builder().build()));
+    }
+
+    @Test
+    void connectionProbeUsesMinimalGenerationWhenVertexHasNoApiKeyDiscoveryEndpoint() {
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
+        ReflectionTestUtils.setField(service, "model", "gemini-2.0-flash");
+        ReflectionTestUtils.setField(service, "temperature", 0.1d);
+        ReflectionTestUtils.setField(service, "maxTokens", 128);
+        ReflectionTestUtils.setField(service, "preferGenaiApi", false);
+        when(chatClient.call(any(Prompt.class)))
+                .thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("pong")))));
+
+        service.testConnection(AiCallConfig.builder().maxTokens(32).build());
+
+        verify(chatClient).call(any(Prompt.class));
     }
 
     @Test

@@ -243,6 +243,16 @@ public class SpringAiGeminiService implements AiProvider {
     }
 
     @Override
+    public void testConnection(AiCallConfig config) {
+        String resolvedKey = resolveApiKey(config);
+        if (resolvedKey != null && !resolvedKey.isBlank()) {
+            AiProvider.super.testConnection(config);
+            return;
+        }
+        generateText("ping", config);
+    }
+
+    @Override
     public String getProviderName() {
         return "gemini";
     }
