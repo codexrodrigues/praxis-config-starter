@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -31,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -181,6 +184,131 @@ class DomainCatalogIngestionServiceTest {
         assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:test");
         assertThat(response.itemCount()).isEqualTo(13);
         verify(releaseRepository, never()).save(any(DomainCatalogRelease.class));
+    }
+
+    @Test
+    void reconcilesPartialRagCorpusWhenAnExistingReleaseIsReingested() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService());
+        DomainCatalogRelease existingRelease = existingRelease();
+        DomainCatalogItem existingItem = existingIndexableItem(existingRelease);
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.of(existingRelease));
+        when(itemRepository.countByRelease(existingRelease)).thenReturn(1L);
+        when(itemRepository.findByRelease(existingRelease)).thenReturn(List.of(existingItem));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.corpusReleaseStatus(
+                "tenant-a",
+                "dev",
+                "praxis-api-quickstart:test",
+                RagResourceTypes.DOMAIN_CATALOG,
+                1L))
+                .thenReturn(ragStatus(false, 0L, 1L));
+
+        service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        verify(ragVectorStoreService).upsertDocuments(any());
+        verify(ragVectorStoreService).deleteDocumentsByCanonicalScopeExceptRelease(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("praxis-api-quickstart"),
+                eq("human-resources.folhas-pagamento"),
+                eq("praxis-api-quickstart_test"),
+                eq(RagResourceTypes.DOMAIN_CATALOG));
+    }
+
+    @Test
+    void skipsRagRepublishWhenAnExistingReleaseIsAlreadyReconciled() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService());
+        DomainCatalogRelease existingRelease = existingRelease();
+        DomainCatalogItem existingItem = existingIndexableItem(existingRelease);
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.of(existingRelease));
+        when(itemRepository.countByRelease(existingRelease)).thenReturn(1L);
+        when(itemRepository.findByRelease(existingRelease)).thenReturn(List.of(existingItem));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.corpusReleaseStatus(
+                "tenant-a",
+                "dev",
+                "praxis-api-quickstart:test",
+                RagResourceTypes.DOMAIN_CATALOG,
+                1L))
+                .thenReturn(ragStatus(true, 1L, 1L));
+
+        service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        verify(ragVectorStoreService, never()).upsertDocuments(any());
+    }
+
+    @Test
+    void retriesRagMaterializationOnIdempotentIngestionAfterTransientFailure() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService());
+        AtomicReference<DomainCatalogRelease> persistedRelease = new AtomicReference<>();
+        AtomicReference<List<DomainCatalogItem>> persistedItems = new AtomicReference<>(List.of());
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenAnswer(ignored -> Optional.ofNullable(persistedRelease.get()));
+        when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> {
+            DomainCatalogRelease release = invocation.getArgument(0);
+            persistedRelease.set(release);
+            return release;
+        });
+        when(itemRepository.saveAll(any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            List<DomainCatalogItem> items = invocation.getArgument(0);
+            persistedItems.set(items);
+            return items;
+        });
+        when(itemRepository.countByRelease(any(DomainCatalogRelease.class)))
+                .thenAnswer(ignored -> (long) persistedItems.get().size());
+        when(itemRepository.findByRelease(any(DomainCatalogRelease.class)))
+                .thenAnswer(ignored -> persistedItems.get());
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.corpusReleaseStatus(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("praxis-api-quickstart:test"),
+                eq(RagResourceTypes.DOMAIN_CATALOG),
+                eq(13L)))
+                .thenReturn(ragStatus(false, 0L, 13L));
+        doThrow(new IllegalStateException("transient embedding failure"))
+                .doNothing()
+                .when(ragVectorStoreService)
+                .upsertDocuments(any());
+
+        service.ingest(sampleCatalog(), "tenant-a", "dev");
+        service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        verify(ragVectorStoreService, times(2)).upsertDocuments(any());
+        verify(ragVectorStoreService, times(1)).deleteDocumentsByCanonicalScopeExceptRelease(
+                eq("tenant-a"),
+                eq("dev"),
+                eq("praxis-api-quickstart"),
+                eq("human-resources.folhas-pagamento"),
+                eq("praxis-api-quickstart_test"),
+                eq(RagResourceTypes.DOMAIN_CATALOG));
     }
 
     @Test
@@ -1460,6 +1588,50 @@ class DomainCatalogIngestionServiceTest {
 
         assertThat(response.releaseKey()).isEqualTo("praxis-api-quickstart:v1");
         assertThat(response.itemCount()).isEqualTo(1);
+    }
+
+    private DomainCatalogRelease existingRelease() {
+        return DomainCatalogRelease.builder()
+                .releaseKey("praxis-api-quickstart:test")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-api-quickstart")
+                .resourceKey("human-resources.folhas-pagamento")
+                .sourceHash("sha256:test")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .build();
+    }
+
+    private DomainCatalogItem existingIndexableItem(DomainCatalogRelease release) {
+        return DomainCatalogItem.builder()
+                .release(release)
+                .itemType("node")
+                .itemKey("human-resources.folhas-pagamento")
+                .contextKey("human-resources")
+                .nodeType("concept")
+                .payload("{\"nodeKey\":\"human-resources.folhas-pagamento\"}")
+                .searchableText("Folha de pagamento")
+                .build();
+    }
+
+    private RagVectorStoreService.RagCorpusReleaseStatus ragStatus(
+            boolean reconciled,
+            long documentCount,
+            long expectedDocumentCount) {
+        return new RagVectorStoreService.RagCorpusReleaseStatus(
+                true,
+                reconciled,
+                "tenant-a",
+                "dev",
+                "praxis-api-quickstart_test",
+                expectedDocumentCount,
+                documentCount,
+                Math.toIntExact(documentCount),
+                documentCount > 0 ? Map.of("summary", documentCount) : Map.of(),
+                documentCount > 0 ? Map.of("allow", documentCount) : Map.of(),
+                List.of(),
+                "",
+                reconciled ? List.of() : List.of("corpus-chunk-count-mismatch"));
     }
 
     private DomainCatalogItem nodeItem(DomainCatalogRelease release, String resourceKey, String label) {

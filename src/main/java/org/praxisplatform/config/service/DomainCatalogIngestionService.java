@@ -237,9 +237,12 @@ public class DomainCatalogIngestionService {
                 log.info("Repaired missing resourceKey for domain catalog release {}", release.getReleaseKey());
             }
             long existingItemCount = itemRepository.countByRelease(release);
-            if (domainKnowledgeProjectionService != null && existingItemCount > 0L) {
-                List<DomainCatalogItem> existingItems = itemRepository.findByRelease(release);
-                if (!existingItems.isEmpty()) {
+            List<DomainCatalogItem> existingItems = existingItemCount > 0L
+                    && (domainKnowledgeProjectionService != null || domainCatalogRagPublicationEnabled)
+                    ? itemRepository.findByRelease(release)
+                    : List.of();
+            if (!existingItems.isEmpty()) {
+                if (domainKnowledgeProjectionService != null) {
                     domainKnowledgeProjectionService.project(release, existingItems);
                     publishReleaseChanged(release);
                     log.info(
@@ -247,6 +250,7 @@ public class DomainCatalogIngestionService {
                             release.getReleaseKey(),
                             existingItems.size());
                 }
+                reconcileRagPublicationAfterPersistence(release, existingItems);
             }
             log.info(
                     "Skipped domain catalog release {} because sourceHash {} is already ingested",
@@ -720,6 +724,40 @@ public class DomainCatalogIngestionService {
                 release.getReleaseKey(),
                 TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt),
                 ragPublicationBatchSize);
+    }
+
+    private void reconcileRagPublicationAfterPersistence(
+            DomainCatalogRelease release,
+            List<DomainCatalogItem> items) {
+        if (!domainCatalogRagPublicationEnabled
+                || !ragVectorStoreService.isAvailable()
+                || items == null
+                || items.isEmpty()) {
+            return;
+        }
+        long expectedDocumentCount = items.stream()
+                .filter(this::isRagIndexable)
+                .count();
+        RagVectorStoreService.RagCorpusReleaseStatus status = ragVectorStoreService.corpusReleaseStatus(
+                release.getTenantId(),
+                release.getEnvironment(),
+                release.getReleaseKey(),
+                RagResourceTypes.DOMAIN_CATALOG,
+                expectedDocumentCount);
+        if (status != null && status.available() && status.reconciled()) {
+            log.debug(
+                    "Domain catalog RAG already reconciled for idempotent release {} ({}/{} documents)",
+                    release.getReleaseKey(),
+                    status.documentCount(),
+                    status.expectedChunkCount());
+            return;
+        }
+        log.info(
+                "Reconciling domain catalog RAG for idempotent release {} ({}/{} documents)",
+                release.getReleaseKey(),
+                status != null ? status.documentCount() : 0,
+                expectedDocumentCount);
+        publishRagDocumentsAfterPersistence(release, items);
     }
 
     private void publishRagDocumentsAfterPersistence(DomainCatalogRelease release, List<DomainCatalogItem> items) {

@@ -52,7 +52,12 @@ across process restarts and repeated publication attempts.
 The config store treats a release with the same `releaseKey`, `schemaVersion`,
 tenant, environment and `sourceHash` as already ingested. In that case,
 `/api/praxis/config/domain-catalog/ingest` returns the existing release and item
-count without deleting/reinserting items or republishing RAG documents.
+count without deleting or reinserting canonical items. Because RAG is a derived
+materialization, the idempotent path checks its release status: a reconciled
+corpus is left untouched, while a partial or unavailable status schedules
+republication from the persisted canonical items. This makes a repeated ingest
+the recovery operation after a transient embedding/vector-store failure without
+changing release identity.
 
 `releaseKey` is content identity inside one exact tenant/environment scope, not
 a globally unique database key. Identical catalog content may therefore be
