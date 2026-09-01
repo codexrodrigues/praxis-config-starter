@@ -118,6 +118,75 @@ class SpringAiOpenAiServiceTest {
     }
 
     @Test
+    void transcribeAudioUsesTheOfficialSdkMultipartEndpointExactlyOnce() throws Exception {
+        AtomicInteger transcriptionRequests = new AtomicInteger();
+        AtomicReference<String> capturedContentType = new AtomicReference<>();
+        AtomicReference<String> capturedAuthorization = new AtomicReference<>();
+        AtomicReference<String> capturedBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/audio/transcriptions", exchange -> {
+            transcriptionRequests.incrementAndGet();
+            capturedContentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            capturedAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            capturedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.ISO_8859_1));
+            writeJson(exchange, 200, "{\"text\":\"  Criar uma página de missões  \"}");
+        });
+        SpringAiOpenAiService service = service(server, "gpt-5.4-mini");
+        server.start();
+        try {
+            String result = service.transcribeAudio(
+                    new AiAudioTranscriptionRequest(
+                            new byte[] {1, 2, 3, 4},
+                            "voice.webm",
+                            "audio/webm",
+                            "pt-BR"),
+                    AiCallConfig.builder()
+                            .model("gpt-4o-mini-transcribe")
+                            .build());
+
+            assertEquals("Criar uma página de missões", result);
+            assertEquals(1, transcriptionRequests.get());
+            assertTrue(capturedContentType.get().startsWith("multipart/form-data; boundary="));
+            assertEquals("Bearer test-key", capturedAuthorization.get());
+            assertTrue(capturedBody.get().contains("voice.webm"));
+            assertTrue(capturedBody.get().contains("audio/webm"));
+            assertTrue(capturedBody.get().contains("name=\"model\""));
+            assertTrue(capturedBody.get().contains("\r\n\r\ngpt-4o-mini-transcribe\r\n"));
+            assertTrue(capturedBody.get().contains("name=\"language\""));
+            assertTrue(capturedBody.get().contains("\r\n\r\npt\r\n"));
+            assertFalse(capturedBody.get().contains("test-key"));
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void transcribeAudioRejectsAnEmptyPayloadBeforeCallingTheSdk() throws Exception {
+        AtomicInteger transcriptionRequests = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/audio/transcriptions", exchange -> {
+            transcriptionRequests.incrementAndGet();
+            writeJson(exchange, 500, "{\"error\":{\"message\":\"must not be called\"}}");
+        });
+        SpringAiOpenAiService service = service(server, "gpt-5.4-mini");
+        server.start();
+        try {
+            IllegalArgumentException error = assertThrows(
+                    IllegalArgumentException.class,
+                    () -> service.transcribeAudio(
+                            new AiAudioTranscriptionRequest(new byte[0], "voice.webm", "audio/webm", "pt-BR"),
+                            AiCallConfig.builder().model("gpt-4o-mini-transcribe").build()));
+
+            assertEquals("Audio payload is required.", error.getMessage());
+            assertEquals(0, transcriptionRequests.get());
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
     void economicalGpt56ModelsUseTheLightReasoningProfile() throws Exception {
         List<JsonNode> capturedRequests = new ArrayList<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

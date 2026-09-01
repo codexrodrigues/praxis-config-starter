@@ -1,13 +1,16 @@
 package org.praxisplatform.config.service;
 
 import org.junit.jupiter.api.Tag;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,6 +22,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.praxisplatform.config.domain.UiUserConfig;
+import org.praxisplatform.config.dto.AiAudioTranscriptionResponse;
 import org.praxisplatform.config.dto.AiProviderCatalogResponse;
 import org.praxisplatform.config.dto.AiProviderModel;
 import org.praxisplatform.config.dto.AiProviderModelsRequest;
@@ -31,8 +36,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 @Tag("unit")
 class AiProviderManagementServiceTest {
 
-    @Mock
-    private ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Mock
     private UserConfigService userConfigService;
@@ -64,7 +68,97 @@ class AiProviderManagementServiceTest {
         ReflectionTestUtils.setField(service, "openaiModel", "gpt-4o-mini");
         ReflectionTestUtils.setField(service, "geminiModel", "gemini-2.0-flash");
         ReflectionTestUtils.setField(service, "xaiModel", "grok-2-latest");
+        ReflectionTestUtils.setField(service, "transcriptionProvider", "openai");
+        ReflectionTestUtils.setField(service, "transcriptionModel", "gpt-4o-mini-transcribe");
         service.initProviderRegistry();
+    }
+
+    @Test
+    void transcribeAudioUsesConfiguredProviderModelAndScopedStoredCredentialExactlyOnce() {
+        UiUserConfig storedConfig = UiUserConfig.builder()
+                .payload("""
+                        {"ai":{"provider":"openai","model":"gpt-5.4-mini","apiKeyEncrypted":"encrypted-test-key"}}
+                        """)
+                .build();
+        when(userConfigService.getResolved(
+                "tenant-a",
+                "user-a",
+                "praxis-global-config-editor",
+                "praxis:global-config:tenant-a",
+                "prod"))
+                .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(
+                        storedConfig,
+                        UserConfigService.Scope.USER)));
+        when(apiKeyCryptoService.decrypt("encrypted-test-key")).thenReturn("resolved-test-key");
+        when(openai.supportsAudioTranscription(any())).thenReturn(true);
+        when(openai.transcribeAudio(any(), any())).thenReturn("  Criar uma página de missões  ");
+        AiAudioTranscriptionRequest request = new AiAudioTranscriptionRequest(
+                new byte[] {1, 2, 3},
+                "voice.webm",
+                "audio/webm",
+                "pt-BR");
+        ArgumentCaptor<AiAudioTranscriptionRequest> requestCaptor =
+                ArgumentCaptor.forClass(AiAudioTranscriptionRequest.class);
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+
+        AiAudioTranscriptionResponse response = service.transcribeAudio(
+                request,
+                "tenant-a",
+                "user-a",
+                "prod");
+
+        assertEquals("praxis-ai-audio-transcription.v1", response.schemaVersion());
+        assertEquals("  Criar uma página de missões  ", response.text());
+        assertEquals("openai", response.provider());
+        assertEquals("gpt-4o-mini-transcribe", response.model());
+        assertEquals("pt-BR", response.language());
+        assertFalse(response.toString().contains("resolved-test-key"));
+        verify(openai).supportsAudioTranscription(any());
+        verify(openai).transcribeAudio(requestCaptor.capture(), configCaptor.capture());
+        assertArrayEquals(request.audio(), requestCaptor.getValue().audio());
+        assertEquals("openai", configCaptor.getValue().getProvider());
+        assertEquals("gpt-4o-mini-transcribe", configCaptor.getValue().getModel());
+        assertEquals("resolved-test-key", configCaptor.getValue().getApiKey());
+        assertEquals("tenant-a", configCaptor.getValue().getTenantId());
+        assertEquals("prod", configCaptor.getValue().getEnvironment());
+        verify(userConfigService).getResolved(
+                "tenant-a",
+                "user-a",
+                "praxis-global-config-editor",
+                "praxis:global-config:tenant-a",
+                "prod");
+        verifyNoMoreInteractions(userConfigService);
+    }
+
+    @Test
+    void transcribeAudioRejectsAnUnavailableConfiguredProviderWithoutFallback() {
+        ReflectionTestUtils.setField(service, "transcriptionProvider", "missing-provider");
+        AiAudioTranscriptionRequest request = new AiAudioTranscriptionRequest(
+                new byte[] {1}, "voice.webm", "audio/webm", null);
+
+        IllegalStateException error = assertThrows(
+                IllegalStateException.class,
+                () -> service.transcribeAudio(request, null, null, null));
+
+        assertEquals("Provider not available: missing-provider", error.getMessage());
+        verify(openai, never()).supportsAudioTranscription(any());
+        verify(openai, never()).transcribeAudio(any(), any());
+    }
+
+    @Test
+    void transcribeAudioRejectsAProviderWithoutTheCapabilityBeforeInvokingItsAdapter() {
+        when(openai.supportsAudioTranscription(any())).thenReturn(false);
+        AiAudioTranscriptionRequest request = new AiAudioTranscriptionRequest(
+                new byte[] {1}, "voice.webm", "audio/webm", null);
+
+        UnsupportedOperationException error = assertThrows(
+                UnsupportedOperationException.class,
+                () -> service.transcribeAudio(request, null, null, null));
+
+        assertEquals(
+                "Configured provider does not support governed audio transcription: openai",
+                error.getMessage());
+        verify(openai, never()).transcribeAudio(any(), any());
     }
 
     @Test
