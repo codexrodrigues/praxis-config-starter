@@ -347,6 +347,20 @@ Before declaring the archetype certified, the Config-owned portable validator
 must accept the focal receipt. Five independent zero-retry runs and one hosted
 phase gate remain the promotion threshold for broad Ergo adoption.
 
+The first hosted phase attempt,
+[Actions #33513133262](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33513133262),
+passed immutable refs, evidence parsers, source cleanliness, Quickstart HTTP/SSE
+and Domain Catalog v2, but blocked before browser startup. The workflow
+intentionally repackaged the Config checkout under the Quickstart-consumed
+`0.1.0-rc.138`, while the E2E runner compared that nested JAR with the checkout
+POM version `0.1.0-rc.139`. This is
+`ja-suportado-mal-nomeado-ou-mal-materializado`: both versions were already
+explicit, but the runner ignored the workflow-owned effective version. The
+runner now accepts `ExpectedConfigVersion`, and the workflow passes its resolved
+`STARTER_VERSION`; source identity, local JAR hash and nested JAR hash remain
+independently attested. The failed run is not functional certification and is
+not eligible for a blind rerun.
+
 ### P0 — Shared golden corpus and attestation
 
 Issue: [#357](https://github.com/codexrodrigues/praxis-config-starter/issues/357).

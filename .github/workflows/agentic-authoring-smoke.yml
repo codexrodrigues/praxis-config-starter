@@ -374,6 +374,7 @@ jobs:
             -JavaHome "$env:JAVA_HOME" `
             -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
             -MetadataRoot "$env:GITHUB_WORKSPACE\praxis-metadata-starter" `
+            -ExpectedConfigVersion "$env:STARTER_VERSION" `
             -ExpectedMetadataVersion "$env:METADATA_STARTER_VERSION" `
             -UiRoot "$env:GITHUB_WORKSPACE\praxis-ui-angular" `
             -LocalStarterJarPath "$env:LOCAL_STARTER_JAR" `

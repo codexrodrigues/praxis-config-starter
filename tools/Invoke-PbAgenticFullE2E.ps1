@@ -9,6 +9,7 @@ param(
     [string] $EnvFile = ".env.openai.local.ps1",
     [string] $JavaHome = $env:JAVA_HOME,
     [string] $EmbeddingProvider = "",
+    [string] $ExpectedConfigVersion = "",
     [string] $ExpectedMetadataVersion = "",
     [int] $BackendPort = 8088,
     [int] $UiPort = 4003,
@@ -1181,13 +1182,17 @@ if ([string]::IsNullOrWhiteSpace($JarPath)) {
 }
 
 [xml] $starterPom = Get-Content -LiteralPath (Join-Path $starterRoot "pom.xml") -Raw
-$expectedStarterVersion = [string] $starterPom.project.version
+$expectedStarterVersion = if ([string]::IsNullOrWhiteSpace($ExpectedConfigVersion)) {
+    [string] $starterPom.project.version
+} else {
+    $ExpectedConfigVersion.Trim()
+}
 $jarStarterDependency = Get-QuickstartDependencyEvidence $JarPath "praxis-config-starter"
 $jarMetadataDependency = Get-QuickstartDependencyEvidence $JarPath "praxis-metadata-starter"
 $jarStarterVersion = [string] $jarStarterDependency.version
 $jarMetadataVersion = [string] $jarMetadataDependency.version
 if ($jarStarterVersion -ne $expectedStarterVersion) {
-    throw "Quickstart jar uses praxis-config-starter $jarStarterVersion, expected $expectedStarterVersion. Repackage it against the current starter."
+    throw "Quickstart jar uses praxis-config-starter $jarStarterVersion, expected $expectedStarterVersion. Repackage it against the declared Config version."
 }
 if (-not [string]::IsNullOrWhiteSpace($ExpectedMetadataVersion) -and $jarMetadataVersion -ne $ExpectedMetadataVersion) {
     throw "Quickstart jar uses praxis-metadata-starter $jarMetadataVersion, expected $ExpectedMetadataVersion. Repackage it against the declared Metadata version."
