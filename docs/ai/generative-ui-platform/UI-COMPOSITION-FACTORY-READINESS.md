@@ -1,8 +1,9 @@
 # Governed UI composition factory readiness
 
-Status: first operationally proved master-detail pilot; canonical single-table creation and semantic
-refinement stable in five consecutive local production-like runs; canonical CRUD-simple certified
-in five consecutive local production-like runs with zero retries; canonical Tabs/nested workspace
+Status: canonical master-detail certified in five consecutive hosted production-like runs against
+the published Config artifact; canonical single-table creation and semantic refinement stable in
+five consecutive local production-like runs; canonical CRUD-simple certified in five consecutive
+local production-like runs with zero retries; canonical Tabs/nested workspace and related-resource
 certified in five consecutive hosted production-like runs with zero retries, 2026-09-01.
 
 ## Decision
@@ -207,9 +208,44 @@ pilot operationally. The matrix now exposes the same scenario and its existing s
 the additive focal mode `master-detail`, scoped to `operations.missoes`, the operations API catalog
 and required Domain Catalog RAG. This is `ja-suportado-so-ux`: no runtime or authoring contract was
 added, and the same combined journey will count only once in the #372 portfolio. Certification still
-requires one published-artifact canary followed by five consecutive zero-retry runs accepted by the
-portable validator; until then, [#425](https://github.com/codexrodrigues/praxis-config-starter/issues/425)
-remains open. The complete production-like matrix and additional archetypes remain release work. See
+required one published-artifact canary followed by five consecutive zero-retry runs accepted by the
+portable validator. The canary,
+[Actions #33553435667](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33553435667),
+passed against Config `ade2a028975187099410ddbb2cdb8e71d2057de4`, Quickstart
+`b7d374a17cd4f5fc4aa31a9fd8511764772a6c75`, Metadata
+`8f7c52a38bef3937afd030126f0ed6b0bdd49f88` and Angular
+`06bc36bfddd3ca2b86d0b3eba158c346e46bc1ad`. It resolved Config Starter `0.1.0-rc.141` from Maven
+Central, proved that the SHA-512-verified reference JAR and the JAR nested in Quickstart were
+byte-identical, reconciled Domain Catalog RAG at `460/460` and passed the two-test profile with no
+retry and a first-pass receipt.
+
+The final stability series then passed five strictly sequential hosted OpenAI `gpt-5.6-terra`
+executions against that same immutable coordinate and published artifact:
+
+| Run | Artifact | Raw report SHA-256 | Browser duration | Receipt duration |
+| --- | ---: | --- | ---: | ---: |
+| [#33554515026](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33554515026) | `9819128576` | `c4543ae5d5c90b0bc5b1c84a456306132eb4b2762741bb0c9ef8bcb123de179f` | 55,795 ms | 46,593 ms |
+| [#33555645286](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33555645286) | `9819695172` | `9f2e5f4d811550e940bb0afb3b3ddb5e0399904dc6a8feda596b73d736b12c2a` | 51,123 ms | 36,316 ms |
+| [#33557084864](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33557084864) | `9820092060` | `84355a83eb390314b4e64ab6131d17f6622846c886f6a97dfe5ba38fd7be784f` | 63,069 ms | 52,959 ms |
+| [#33558107373](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33558107373) | `9820473295` | `df804cae191587d6d6a0add29523b9da54e2ed8ed560af28cc83b84a2a0c5b43` | 59,944 ms | 49,418 ms |
+| [#33559130405](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33559130405) | `9820881946` | `12eae1cc1b8c978337dcf203dfee38017ad0d8731029b34ec5840c6014843442` | 72,597 ms | 46,699 ms |
+
+The portable validator accepted `5/5` unique reports under coordinate
+`961afde51b518fe8de8f358c13bf36f1a7e60daaf3736ea1e33fdf102360ebe3`: `10/10` browser tests,
+zero retries and 302,528 ms total browser duration. Median browser duration was 59,944 ms; median
+end-to-end scenario receipt was 46,699 ms; median time to first useful status was 17,495 ms. Every
+receipt proves one initial prompt and one human turn, zero clarification, corrective prompt,
+governed revision or deterministic repair, the same apply/persisted/reload payload SHA-256
+`f7a28aff335904d4a5a706ed29fd7b586594b19874249ba8ca89e61fcc97dd17`, matching reload ETag and all
+nine matrix-owned functional assertions: master and detail visible, selection propagation, real
+actions/capabilities discovery, command `200`, duplicate command `409`, resource refresh and
+persisted reload. All publication source audits passed.
+
+This certifies the narrow `master-detail` slice for platform-internal factory use and closes
+[#425](https://github.com/codexrodrigues/praxis-config-starter/issues/425). The slice remains counted
+once as master-detail in #372 even though its combined operational journey also executes a business
+command; business-command retains its own portfolio slot and requires independent evidence. The
+complete production-like matrix and that remaining archetype remain release work. See
 [the delta audit](RESOURCE-BACKED-WORKSPACE-DELTA-AUDIT.md) for the reuse classification and residuals.
 
 The decision must describe semantic intent, archetype, resources, surfaces, actions, capabilities, components, slots, bindings and transactional lifecycle. It should materialize both compact authoring input and portable runtime output without leaking Angular implementation detail into Java.
