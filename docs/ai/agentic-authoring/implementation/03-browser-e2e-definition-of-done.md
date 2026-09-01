@@ -134,11 +134,15 @@ node tools/e2e/validate-page-builder-agentic-gate-evidence.mjs \
 ```
 
 O agregador rejeita hashes de relatorio repetidos, drift de provider/modelo,
-SHAs, versoes, contrato, snapshot do registry, escopo de Domain/API Catalog,
+SHAs de fonte/arvore, versoes, identidade estavel do artefato Config Starter,
+contrato, snapshot do registry, escopo de Domain/API Catalog,
 requisito de RAG ou matriz, alem de qualquer
 retry, flaky, skip, falha, receipt incompleto ou divergencia entre a atestacao e
-o resultado sanitizado. Nao substitua esse fechamento por cinco links verdes de
-Actions.
+o resultado sanitizado. O SHA do JAR recompilado pode variar entre runners; cada
+resultado continua obrigado a provar que o JAR local e o JAR aninhado no
+Quickstart sao byte a byte identicos, mas a serie compara entre runs a identidade
+estavel `artifactId + version + quickstartEntry` junto das fontes imutaveis. Nao
+substitua esse fechamento por cinco links verdes de Actions.
 
 ## Cenarios obrigatorios por fase
 

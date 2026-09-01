@@ -415,6 +415,30 @@ function stableJson(value) {
   return JSON.stringify(value);
 }
 
+function validateConfigStarterDependencyAttestation(result, resultPath) {
+  const dependency = result.dependencyAttestation?.configStarter;
+  assertObject(dependency, `Published result ${resultPath} Config Starter dependency attestation`);
+  assertObject(result.versions, `Published result ${resultPath} versions`);
+  assertCondition(dependency.artifactId === 'praxis-config-starter',
+    `Published result ${resultPath} Config Starter artifactId is invalid.`);
+  assertCondition(typeof dependency.version === 'string' && dependency.version.length > 0
+      && dependency.version === result.versions.configStarter
+      && dependency.version === result.versions.quickstartConfigDependency,
+  `Published result ${resultPath} Config Starter version diverges from the runtime coordinates.`);
+  assertCondition(/^[0-9a-f]{64}$/.test(dependency.localJarSha256)
+      && dependency.localJarSha256 === dependency.quickstartNestedJarSha256
+      && dependency.byteIdentical === true,
+  `Published result ${resultPath} Config Starter JAR attestation is not byte-identical.`);
+  const expectedEntry = `BOOT-INF/lib/${dependency.artifactId}-${dependency.version}.jar`;
+  assertCondition(dependency.quickstartEntry === expectedEntry,
+    `Published result ${resultPath} Config Starter nested JAR entry is invalid.`);
+  return {
+    artifactId: dependency.artifactId,
+    version: dependency.version,
+    quickstartEntry: dependency.quickstartEntry,
+  };
+}
+
 export function validatePublishedGateResult(result, resultPath, profile) {
   assertObject(result, `Published result ${resultPath}`);
   assertCondition(result.schemaVersion === 'praxis.page-builder-agentic-production-like-result/v1',
@@ -485,6 +509,8 @@ export function validatePublishedGateResult(result, resultPath, profile) {
   assertCondition(result.evidenceValidation.attestation.durationMs === playwright.durationMs,
     `Published result ${resultPath} attested duration diverges from Playwright.`);
 
+  const configStarterDependency = validateConfigStarterDependencyAttestation(result, resultPath);
+
   const coordinateProjection = {
     provider: result.provider,
     model: result.model,
@@ -492,7 +518,7 @@ export function validatePublishedGateResult(result, resultPath, profile) {
     contractHash: result.contractHash,
     git: result.git,
     versions: result.versions,
-    configStarterDependency: result.dependencyAttestation?.configStarter,
+    configStarterDependency,
     aiRegistrySnapshotHash: result.aiRegistry?.snapshotHash,
     matrix,
   };

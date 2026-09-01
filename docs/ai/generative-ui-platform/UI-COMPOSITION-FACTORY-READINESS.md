@@ -2,7 +2,8 @@
 
 Status: first operationally proved master-detail pilot; canonical single-table creation and semantic
 refinement stable in five consecutive local production-like runs; canonical CRUD-simple certified
-in five consecutive local production-like runs with zero retries, 2026-08-31.
+in five consecutive local production-like runs with zero retries; canonical Tabs/nested workspace
+certified in five consecutive hosted production-like runs with zero retries, 2026-09-01.
 
 ## Decision
 
@@ -375,8 +376,46 @@ Apply, persisted and reload payloads share SHA-256
 the portable report attestation SHA-256 is
 `452c4a88fcdc7c223cb2ee423b49e45b9164fabeacedf62675c2690f75b71614`.
 This closes the hosted functional gate for the current immutable cut. The
-five-run independent stability series remains required before broad Ergo
-promotion.
+five-run independent stability series remained the final focal promotion gate.
+
+That series then passed in five strictly sequential hosted executions against
+Config Starter `0.1.0-rc.140`, Angular `9.0.57`, Quickstart
+`c9da5ea220f4e052d754b7f33bb1394e240d8cb6`, Metadata
+`8f7c52a38bef3937afd030126f0ed6b0bdd49f88` and OpenAI
+`gpt-5.6-terra`:
+
+| Run | Raw report SHA-256 | Browser duration |
+| --- | --- | ---: |
+| [#33520078549](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33520078549) | `c849ba1e505ef33e559c3365e4569f1883b99139ff08d9f87564551b827b8ac6` | 36,766 ms |
+| [#33521398498](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33521398498) | `5264c1cef1daa9be5d0a5a0de79c4bc254b399d07e9792ca4bbb8c632b8ffb30` | 58,057 ms |
+| [#33522850057](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33522850057) | `77e30517ae38618cbe9b1db272233c2d59b48c8a2ef8ec3e53539588b1be367c` | 52,769 ms |
+| [#33524048891](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33524048891) | `4cc6f033df954fd936f2b71f5195b4b9673df99118ec45811596333695541c2c` | 52,348 ms |
+| [#33525233021](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33525233021) | `04a6081418fb2bbeca60994a043259c867798105a69354b4daa380c0fe4eb155` | 47,120 ms |
+
+The portable aggregate accepted `5/5` runs and `10/10` browser tests with zero
+retry, skip, flaky or failure and 247,060 ms total browser duration. All five
+receipts are `first-pass`: one initial/total human turn, no clarification,
+governed revision, corrective prompt or deterministic repair, all nine
+matrix-owned functional assertions and the same apply/persisted/reload payload
+SHA-256 `675dade7b3f19eb5750dfae1eba86a466abca91ffaccdfe827be37bc54643a81`.
+The stable coordinate attestation is
+`7d510a7460eee47d2cabbeb5a3765583087462fb0d749051747ce595c7d1191b`.
+
+The first aggregate attempt correctly exposed a validator classification defect:
+it treated each independently rebuilt Config Starter JAR SHA as a cross-run
+immutable coordinate. The JAR embedded in Quickstart was byte-identical to the
+local JAR in every individual run, while Maven rebuild metadata made those
+execution-scoped hashes differ across runners. This is
+`ja-suportado-mal-nomeado-ou-mal-materializado`, not a new evidence contract.
+The validator now proves local/nested byte identity per run and compares the
+stable artifact identity, version and nested entry together with immutable Git,
+model, registry, catalog, matrix and contract coordinates across runs. An
+adversarial test continues to reject a non-identical nested JAR.
+
+This certifies the narrow `tabs-nested` platform profile and makes its real
+receipt eligible for the Ergo measurement protocol. It does not certify the
+remaining archetypes or authorize broad Ergo promotion before the portfolio
+gate in #372 and consumer protocol in `Techne-ErgonX-migracao#305` are updated.
 
 ### P0 — Shared golden corpus and attestation
 
