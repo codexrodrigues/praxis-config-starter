@@ -51,6 +51,7 @@ on:
           - single-table
           - crud-simple
           - related-resource
+          - tabs-nested
           - full
       page_builder_e2e_timeout_minutes:
         description: 'Timeout for the Page Builder Playwright gate step.'
