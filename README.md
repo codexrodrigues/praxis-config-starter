@@ -408,6 +408,14 @@ when expected, legacy-indexed, published and searchable counts agree. `FAILED` i
 also be followed through the status endpoint. Provider or vector-store failures never roll back the
 canonical rows, and persisted unfinished work is resumed after restart.
 
+API Metadata vectors carry the same `serviceKey` as the canonical rows. Replacement and readiness are
+therefore isolated by `(tenant, environment, serviceKey, releaseId)`, while retrieval may still search
+across services when the caller does not request a service scope. Corpus replacement and the `READY`
+transition run under the persisted indexing-state row lock. A revision superseded after embedding but
+before publication cannot delete or publish vectors; this keeps concurrent hosts from interleaving two
+release replacements. The first scoped replacement also removes legacy API Metadata vectors without a
+`serviceKey`, because those derived rows cannot be attributed safely.
+
 The derived index is governed by its effective embedding profile (provider, model, dimensions and
 retrieval-format version). Changing any of those values deliberately makes prior vectors ineligible
 for retrieval and makes readiness report the corpus as unreconciled. Rebuild the affected release

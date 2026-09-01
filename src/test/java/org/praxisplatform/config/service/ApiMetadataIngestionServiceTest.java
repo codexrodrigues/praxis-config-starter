@@ -94,7 +94,7 @@ class ApiMetadataIngestionServiceTest {
         when(indexingStateService.snapshot(scope)).thenReturn(Optional.of(indexingState(ApiMetadataIndexingStatus.READY)));
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
         when(ragVectorStoreService.corpusReleaseStatus(
-                "tenant-a", "prod", "release-1", RagResourceTypes.API_METADATA, 1L))
+                "tenant-a", "prod", "default", "release-1", RagResourceTypes.API_METADATA, 1L))
                 .thenReturn(new RagVectorStoreService.RagCorpusReleaseStatus(
                         true, true, "tenant-a", "prod", "release-1",
                         1, 1, 1, java.util.Map.of(), java.util.Map.of(), List.of(), null, List.of()));
@@ -150,7 +150,7 @@ class ApiMetadataIngestionServiceTest {
         when(indexingStateService.snapshot(scope)).thenReturn(Optional.of(indexingState(ApiMetadataIndexingStatus.READY)));
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
         when(ragVectorStoreService.corpusReleaseStatus(
-                "tenant-a", "prod", "release-1", RagResourceTypes.API_METADATA, 1L))
+                "tenant-a", "prod", "default", "release-1", RagResourceTypes.API_METADATA, 1L))
                 .thenReturn(new RagVectorStoreService.RagCorpusReleaseStatus(
                         true, false, "tenant-a", "prod", "release-1",
                         0, 1, 0, java.util.Map.of(), java.util.Map.of(), List.of(), null, List.of()));
@@ -200,6 +200,7 @@ class ApiMetadataIngestionServiceTest {
         when(embeddingService.embed(anyString())).thenReturn(List.of(0.1f, 0.2f));
         when(indexingStateService.commitLegacyEmbeddings(any(), org.mockito.ArgumentMatchers.eq(7L), any()))
                 .thenReturn(true);
+        allowCurrentPublication(scope, 7L);
 
         service.processIndexingClaim(new ApiMetadataIndexingStateService.WorkClaim(scope, 7L, 1L));
 
@@ -207,12 +208,15 @@ class ApiMetadataIngestionServiceTest {
                 org.mockito.ArgumentMatchers.eq(scope),
                 org.mockito.ArgumentMatchers.eq(7L),
                 any());
-        verify(ragVectorStoreService).deleteDocumentsByRelease(
-                "tenant-a", "prod", "release-1", RagResourceTypes.API_METADATA);
+        verify(ragVectorStoreService).deleteDocumentsByReleaseScope(
+                "tenant-a", "prod", "default", "release-1", RagResourceTypes.API_METADATA);
         ArgumentCaptor<List<Document>> documents = ArgumentCaptor.forClass(List.class);
         verify(ragVectorStoreService).upsertDocuments(documents.capture());
         assertThat(documents.getValue()).hasSize(1);
-        verify(indexingStateService).complete(scope, 7L, 1L);
+        verify(indexingStateService).publishAndCompleteIfCurrent(
+                org.mockito.ArgumentMatchers.eq(scope),
+                org.mockito.ArgumentMatchers.eq(7L),
+                any());
     }
 
     @Test
@@ -233,6 +237,7 @@ class ApiMetadataIngestionServiceTest {
         when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
                 "tenant-a", "prod", "default", "release-2026-02")).thenReturn(List.of(row));
         when(indexingStateService.commitLegacyEmbeddings(scope, 7L, java.util.Map.of())).thenReturn(true);
+        allowCurrentPublication(scope, 7L);
 
         service.processIndexingClaim(new ApiMetadataIndexingStateService.WorkClaim(scope, 7L, 1L));
 
@@ -245,6 +250,7 @@ class ApiMetadataIngestionServiceTest {
         assertThat(document.getMetadata().values()).doesNotContainNull();
         assertThat(document.getMetadata())
                 .containsEntry(RagMetadataKeys.COMPONENT_ID, "GET:/v1/users")
+                .containsEntry(RagMetadataKeys.SERVICE_KEY, "default")
                 .containsEntry(RagMetadataKeys.RELEASE_ID, "release-2026-02")
                 .containsEntry(RagMetadataKeys.VERSION, "2026.02");
     }
@@ -298,10 +304,32 @@ class ApiMetadataIngestionServiceTest {
 
         service.processIndexingClaim(new ApiMetadataIndexingStateService.WorkClaim(scope, 7L, 1L));
 
-        verify(ragVectorStoreService, never()).deleteDocumentsByRelease(
-                anyString(), anyString(), anyString(), anyString());
+        verify(ragVectorStoreService, never()).deleteDocumentsByReleaseScope(
+                anyString(), anyString(), anyString(), anyString(), anyString());
         verify(ragVectorStoreService, never()).upsertDocuments(any());
-        verify(indexingStateService, never()).complete(any(), org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
+        verify(indexingStateService, never()).publishAndCompleteIfCurrent(
+                any(), org.mockito.ArgumentMatchers.anyLong(), any());
+    }
+
+    @Test
+    void shouldNotMutateTheVectorCorpusWhenRevisionIsSupersededAfterEmbeddingCommit() {
+        ApiMetadata row = metadata(41L, "/api/users", "GET", List.of(0.1f, 0.2f));
+        ApiMetadataIndexingScope scope = new ApiMetadataIndexingScope(
+                "tenant-a", "prod", "default", "release-1");
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant-a", "prod", "default", "release-1")).thenReturn(List.of(row));
+        when(indexingStateService.commitLegacyEmbeddings(scope, 7L, java.util.Map.of())).thenReturn(true);
+        when(indexingStateService.publishAndCompleteIfCurrent(
+                org.mockito.ArgumentMatchers.eq(scope),
+                org.mockito.ArgumentMatchers.eq(7L),
+                any())).thenReturn(false);
+
+        service.processIndexingClaim(new ApiMetadataIndexingStateService.WorkClaim(scope, 7L, 1L));
+
+        verify(ragVectorStoreService, never()).deleteDocumentsByReleaseScope(
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        verify(ragVectorStoreService, never()).upsertDocuments(any());
     }
 
     @Test
@@ -334,6 +362,7 @@ class ApiMetadataIngestionServiceTest {
         when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
                 "tenant-a", "prod", "default", "release-1")).thenReturn(List.of(row));
         when(indexingStateService.commitLegacyEmbeddings(scope, 7L, java.util.Map.of())).thenReturn(true);
+        allowCurrentPublication(scope, 7L);
         org.mockito.Mockito.doThrow(new IllegalStateException("vector provider secret"))
                 .when(ragVectorStoreService).upsertDocuments(any());
 
@@ -344,6 +373,17 @@ class ApiMetadataIngestionServiceTest {
                 7L,
                 "RAG_PUBLICATION_FAILED",
                 "API metadata derived indexing failed; canonical metadata remains persisted.");
+    }
+
+    private void allowCurrentPublication(ApiMetadataIndexingScope scope, long revision) {
+        when(indexingStateService.publishAndCompleteIfCurrent(
+                org.mockito.ArgumentMatchers.eq(scope),
+                org.mockito.ArgumentMatchers.eq(revision),
+                any())).thenAnswer(invocation -> {
+                    java.util.function.LongSupplier publisher = invocation.getArgument(2);
+                    publisher.getAsLong();
+                    return true;
+                });
     }
 
     @Test
@@ -357,7 +397,7 @@ class ApiMetadataIngestionServiceTest {
                 "tenant-a", "prod", "default", "release-1")).thenReturn(1L);
         when(ragVectorStoreService.isAvailable()).thenReturn(true);
         when(ragVectorStoreService.corpusReleaseStatus(
-                "tenant-a", "prod", "release-1", RagResourceTypes.API_METADATA, 1L))
+                "tenant-a", "prod", "default", "release-1", RagResourceTypes.API_METADATA, 1L))
                 .thenReturn(new RagVectorStoreService.RagCorpusReleaseStatus(
                         true, true, "tenant-a", "prod", "release-1",
                         1, 1, 1, java.util.Map.of(), java.util.Map.of(), List.of(), now.toString(), List.of()));

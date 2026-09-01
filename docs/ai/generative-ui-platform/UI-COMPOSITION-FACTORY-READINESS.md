@@ -299,6 +299,12 @@ the required order is one successful focal run followed by five independent zero
 zero-corrective-prompt runs accepted by the Config evidence validator. A run with
 `--no-domain-catalog-rag` is diagnostic only and cannot certify this profile.
 
+API Catalog readiness is scoped by the same canonical identity used by its persisted state:
+`tenant + environment + serviceKey + releaseId`. Vector replacement carries `serviceKey` and is
+serialized with the persisted revision lease, so concurrent hosts cannot make a superseded revision
+mutate the corpus or combine searchable counts from different services. A gate must remain fail-closed
+when `READY` is reported without reconciled counts; retrying or weakening the equality is not evidence.
+
 Classification remains `suportado-parcialmente` until that production-like evidence closes. No Ergo
 consumer migration should begin from this slice before certification.
 

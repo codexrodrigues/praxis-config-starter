@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -107,10 +108,47 @@ class ApiMetadataIndexingStateServiceTest {
         when(metadataRepository.countByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndEmbeddingIsNotNull(
                 "tenant-a", "prod", "default", "release-1")).thenReturn(1L);
 
-        assertThat(service().complete(SCOPE, 5L, 2L)).isTrue();
+        assertThat(service().publishAndCompleteIfCurrent(SCOPE, 5L, () -> 2L)).isTrue();
 
         assertThat(state.getStatus()).isEqualTo(ApiMetadataIndexingStatus.FAILED);
         assertThat(state.getFailureCode()).isEqualTo("INDEXING_COUNT_MISMATCH");
+    }
+
+    @Test
+    void shouldRejectPublicationFromSupersededGenerationWithoutInvokingPublisher() {
+        ApiMetadataIndexingState state = state(ApiMetadataIndexingStatus.PENDING, 6L);
+        when(stateRepository.findForUpdate("tenant-a", "prod", "default", "release-1"))
+                .thenReturn(Optional.of(state));
+        AtomicBoolean invoked = new AtomicBoolean();
+
+        boolean published = service().publishAndCompleteIfCurrent(SCOPE, 5L, () -> {
+            invoked.set(true);
+            return 1L;
+        });
+
+        assertThat(published).isFalse();
+        assertThat(invoked).isFalse();
+        verify(metadataRepository, never()).countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                any(), any(), any(), any());
+    }
+
+    @Test
+    void shouldPublishAndCompleteCurrentGenerationUnderTheStateLease() {
+        ApiMetadataIndexingState state = state(ApiMetadataIndexingStatus.PROCESSING, 5L);
+        state.setExpectedDocumentCount(1L);
+        state.setLegacyIndexedDocumentCount(1L);
+        when(stateRepository.findForUpdate("tenant-a", "prod", "default", "release-1"))
+                .thenReturn(Optional.of(state));
+        when(metadataRepository.countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant-a", "prod", "default", "release-1")).thenReturn(1L);
+        when(metadataRepository.countByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndEmbeddingIsNotNull(
+                "tenant-a", "prod", "default", "release-1")).thenReturn(1L);
+
+        assertThat(service().publishAndCompleteIfCurrent(SCOPE, 5L, () -> 1L)).isTrue();
+
+        assertThat(state.getStatus()).isEqualTo(ApiMetadataIndexingStatus.READY);
+        assertThat(state.getPublishedDocumentCount()).isEqualTo(1L);
+        assertThat(state.getCompletedAt()).isNotNull();
     }
 
     @Test

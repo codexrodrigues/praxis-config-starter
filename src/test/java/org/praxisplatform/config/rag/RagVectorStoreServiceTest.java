@@ -288,6 +288,23 @@ class RagVectorStoreServiceTest {
     }
 
     @Test
+    void shouldDeleteOnlyTheRequestedServiceAndLegacyUnscopedApiDocuments() {
+        when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
+        when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
+
+        service.deleteDocumentsByReleaseScope(
+                "tenant-x", "prod", "service-a", "v2", RagResourceTypes.API_METADATA);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jdbcTemplate).update(sqlCaptor.capture(), paramsCaptor.capture());
+        assertThat(sqlCaptor.getValue())
+                .contains("metadata ->> 'serviceKey'")
+                .contains("IN (:serviceKey, '')");
+        assertThat(paramsCaptor.getValue()).containsEntry("serviceKey", "service-a");
+    }
+
+    @Test
     void shouldPurgeSupersededReleasesForResourceType() {
         when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
         when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
@@ -420,6 +437,26 @@ class RagVectorStoreServiceTest {
         ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
         verify(jdbcTemplate).queryForList(anyString(), paramsCaptor.capture());
         assertThat(paramsCaptor.getValue()).containsEntry("resourceType", RagResourceTypes.DOMAIN_CATALOG);
+    }
+
+    @Test
+    void shouldScopeReleaseStatusByServiceWhenRequested() {
+        when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
+        when(jdbcTemplate.queryForList(anyString(), any(Map.class))).thenReturn(List.of());
+
+        service.corpusReleaseStatus(
+                "tenant-a",
+                "prod",
+                "service-a",
+                "release-1",
+                RagResourceTypes.API_METADATA,
+                0);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jdbcTemplate).queryForList(sqlCaptor.capture(), paramsCaptor.capture());
+        assertThat(sqlCaptor.getValue()).contains("metadata ->> 'serviceKey'");
+        assertThat(paramsCaptor.getValue()).containsEntry("serviceKey", "service-a");
     }
 
     @Test
