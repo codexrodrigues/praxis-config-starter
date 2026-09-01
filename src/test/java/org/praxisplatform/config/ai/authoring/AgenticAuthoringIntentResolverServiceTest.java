@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Tag;
@@ -14,6 +15,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.praxisplatform.config.dto.ApiSearchResult;
 import org.praxisplatform.config.domain.ApiMetadata;
+import org.praxisplatform.config.projection.ApiMetadataCandidateProjection;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.ContextRetrievalService;
@@ -622,7 +624,7 @@ class AgenticAuthoringIntentResolverServiceTest {
 
     private AgenticAuthoringApiMetadataCandidateCatalog quickstartCandidateCatalog() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 apiMetadata(
                         "/api/human-resources/funcionarios",
                         "POST",
@@ -716,6 +718,68 @@ class AgenticAuthoringIntentResolverServiceTest {
             String operationId,
             String requestSchema) {
         return new ApiMetadata(path, method, tags, summary, description, operationId, requestSchema, "{}", "[]", "{}", null);
+    }
+
+    private List<ApiMetadataCandidateProjection> projections(ApiMetadata... metadata) {
+        return Arrays.stream(metadata).map(this::projection).toList();
+    }
+
+    private List<ApiMetadataCandidateProjection> projections(List<ApiMetadata> metadata) {
+        return metadata.stream().map(this::projection).toList();
+    }
+
+    private ApiMetadataCandidateProjection projection(ApiMetadata metadata) {
+        return new ApiMetadataCandidateProjection() {
+            @Override
+            public String getPath() {
+                return metadata.getPath();
+            }
+
+            @Override
+            public String getMethod() {
+                return metadata.getMethod();
+            }
+
+            @Override
+            public String getTags() {
+                return metadata.getTags();
+            }
+
+            @Override
+            public String getSummary() {
+                return metadata.getSummary();
+            }
+
+            @Override
+            public String getDescription() {
+                return metadata.getDescription();
+            }
+
+            @Override
+            public String getOperationId() {
+                return metadata.getOperationId();
+            }
+
+            @Override
+            public String getRequestSchema() {
+                return null;
+            }
+
+            @Override
+            public String getResponseSchema() {
+                return null;
+            }
+
+            @Override
+            public String getParameters() {
+                return null;
+            }
+
+            @Override
+            public String getRawJson() {
+                return null;
+            }
+        };
     }
 
     private ObjectNode resourcePathContextHints(String resourcePath) {
@@ -1500,7 +1564,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void semanticDecisionCarriesHostNeutralEvidenceBundleWithRetrievalSource() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 apiMetadata(
                         "/api/risk-intelligence/vw-indicadores-incidentes",
                         "POST",
@@ -1555,7 +1619,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void explicitSingleChartWithStrongGovernedCandidateUsesLlmVisualizationDecision() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 apiMetadata(
                         "/api/risk-intelligence/vw-indicadores-incidentes",
                         "POST",
@@ -4624,7 +4688,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/funcionarios",
                         "POST",
@@ -4711,7 +4775,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/funcionarios",
                         "POST",
@@ -4799,7 +4863,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/folhas-pagamento",
                         "POST",
@@ -4959,7 +5023,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/funcionarios/filter",
                         "POST",
@@ -6657,7 +6721,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void metadataBackedPayrollDashboardIgnoresTechnicalSchemaEndpointsAndAsksForBreakdown() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/folhas-pagamento/schemas",
                         "GET",
@@ -6724,7 +6788,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void metadataBackedConsultativePayrollDashboardPromptSelectsAnalyticsCandidate() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/folhas-pagamento",
                         "GET",
@@ -7364,7 +7428,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "[{\"name\":\"competencia\",\"in\":\"query\",\"type\":\"string\"}]",
                         "{}",
                         null));
-        Mockito.when(repository.findAll()).thenReturn(metadata);
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(metadata));
         return new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 new AgenticAuthoringApiMetadataCandidateCatalog(repository));
@@ -7373,7 +7437,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void metadataBackedBarePayrollTermSuggestsOnlyCanonicalRenderableResources() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata("/api/human-resources/folhas-pagamento/{id}", "GET", "folha,pagamento", "Busca folha por id", null, "getFolha", null, null, "[]", "{}", null),
                 new ApiMetadata("/api/human-resources/folhas-pagamento/all", "GET", "folha,pagamento", "Lista todas as folhas", null, "allFolhas", null, null, "[]", "{}", null),
                 new ApiMetadata("/api/human-resources/folhas-pagamento/by-ids", "GET", "folha,pagamento", "Busca folhas por ids", null, "byIdsFolhas", null, null, "[]", "{}", null),
@@ -7419,7 +7483,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void metadataBackedGenericDashboardPromptOffersResourceCandidatesAsRichQuickReplies() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/vw-analytics-folha-pagamento",
                         "GET",
@@ -7684,7 +7748,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         List.of(repeatedResourceReply),
                         List.of(),
                         List.of())));
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/vw-ranking-reputacao/filter/cursor",
                         "POST",
@@ -7782,7 +7846,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         List.of(),
                         List.of(),
                         List.of())));
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/vw-analytics-folha-pagamento/stats/timeseries",
                         "POST",
@@ -7851,7 +7915,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void apiCatalogQuickRepliesPreserveSelectedResourceContextForDashboardCreation() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by",
                         "POST",
@@ -7936,7 +8000,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         List.of(),
                         List.of(),
                         List.of("llm-consultative-field-discovery"))));
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/funcionarios",
                         "POST",
@@ -8016,7 +8080,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/procurement/suppliers",
                         "POST",
@@ -8091,7 +8155,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/procurement/suppliers",
                         "POST",
@@ -8176,7 +8240,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/vw-analytics-folha-pagamento",
                         "POST",
@@ -8244,7 +8308,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void discoversCandidateFromApiMetadataWhenEndpointIsNotInKnownQuickstartFallback() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/beneficios/schemas",
                         "GET",
@@ -8325,7 +8389,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void metadataBackedHelpdeskLikePromptSuggestsQuickstartApproximateResourcesBeforePreview() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/operations/sinais-socorro",
                         "POST",
@@ -8383,7 +8447,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void metadataBackedIncidentFormPromptSelectsQuickstartCreateEndpoint() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/operations/incidentes/filter/cursor",
                         "POST",
@@ -8438,7 +8502,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void metadataBackedPromptFallsBackToBroadArtifactDiscoveryBeforeAskingForManualResource() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/beneficios",
                         "POST",
@@ -9815,7 +9879,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void businessRulePromptPrefersCanonicalMetadataMatchWhenRagReturnsUnrelatedStrongResource() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 apiMetadata(
                         "/api/human-resources/habilidades",
                         "POST",
@@ -9886,7 +9950,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void businessRulePromptPrefersOwnedEntityOverRelationalSemanticNeighbor() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 apiMetadata(
                         "/api/procurement/suppliers",
                         "POST",
@@ -9952,7 +10016,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void businessRulePromptKeepsBestSchemaEvidenceWhenCanonicalSchemaEvidenceFavorsRelationshipEndpoint() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 apiMetadataWithSchemas(
                         "/api/procurement/contracts",
                         "POST",
@@ -14555,7 +14619,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void metadataBackedResourceQuickReplyIdsRemainUniqueWhenResourcePathRepeats() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/funcionarios",
                         "POST",
