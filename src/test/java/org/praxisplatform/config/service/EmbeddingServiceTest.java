@@ -148,6 +148,54 @@ class EmbeddingServiceTest {
     }
 
     @Test
+    void embedRetriesOneTransientOpenAiFailureWithinTheCanonicalBudget() {
+        OpenAiEmbeddingModel client = Mockito.mock(OpenAiEmbeddingModel.class);
+        OpenAIServiceException providerFailure = Mockito.mock(OpenAIServiceException.class);
+        when(providerFailure.statusCode()).thenReturn(503);
+        when(providerFailure.code()).thenReturn(Optional.of("service_unavailable"));
+        when(providerFailure.type()).thenReturn(Optional.of("server_error"));
+        when(providerFailure.headers()).thenReturn(Headers.builder().build());
+        EmbeddingResponse response = new EmbeddingResponse(
+                List.of(new Embedding(new float[] {1.0f, 2.0f}, 0)));
+        when(client.call(any(EmbeddingRequest.class)))
+                .thenThrow(providerFailure)
+                .thenReturn(response);
+
+        EmbeddingService service = openAiService(client);
+        ReflectionTestUtils.setField(service, "retryMaxAttempts", 2);
+        ReflectionTestUtils.setField(service, "retryInitialDelayMs", 0L);
+        ReflectionTestUtils.setField(service, "retryMaxDelayMs", 0L);
+
+        List<Float> vector = service.embed("retryable document");
+
+        assertEquals(List.of(1.0f, 2.0f), vector);
+        verify(client, times(2)).call(any(EmbeddingRequest.class));
+    }
+
+    @Test
+    void embedDoesNotRetryWhenProviderDelayExceedsTheCanonicalBudget() {
+        OpenAiEmbeddingModel client = Mockito.mock(OpenAiEmbeddingModel.class);
+        OpenAIServiceException providerFailure = Mockito.mock(OpenAIServiceException.class);
+        when(providerFailure.statusCode()).thenReturn(429);
+        when(providerFailure.code()).thenReturn(Optional.of("rate_limit_exceeded"));
+        when(providerFailure.type()).thenReturn(Optional.of("requests"));
+        when(providerFailure.headers()).thenReturn(Headers.builder().put("retry-after-ms", "10000").build());
+        when(client.call(any(EmbeddingRequest.class))).thenThrow(providerFailure);
+
+        EmbeddingService service = openAiService(client);
+        ReflectionTestUtils.setField(service, "retryMaxAttempts", 2);
+        ReflectionTestUtils.setField(service, "retryInitialDelayMs", 100L);
+        ReflectionTestUtils.setField(service, "retryMaxDelayMs", 2_000L);
+
+        AiProviderCallException failure = assertThrows(
+                AiProviderCallException.class,
+                () -> service.embed("rate limited document"));
+
+        assertEquals(AiProviderCallException.Kind.RATE_LIMIT, failure.getKind());
+        verify(client, times(1)).call(any(EmbeddingRequest.class));
+    }
+
+    @Test
     void googleRestFailureUsesStructuredQuotaAndRetryInfoWithoutRetainingBody() {
         EmbeddingService service = new EmbeddingService(
                 emptyOpenAiProvider(), emptyGoogleGenAiProvider(), new ObjectMapper());
@@ -268,6 +316,57 @@ class EmbeddingServiceTest {
         assertEquals(125_000f, vectors.get(0).get(0));
         assertEquals(125_000f, vectors.get(1).get(0));
         assertEquals(5f, vectors.get(2).get(0));
+    }
+
+    @Test
+    void embedAllRetriesOnlyTheFailedOpenAiPartition() {
+        OpenAiEmbeddingModel client = Mockito.mock(OpenAiEmbeddingModel.class);
+        OpenAIServiceException providerFailure = Mockito.mock(OpenAIServiceException.class);
+        when(providerFailure.statusCode()).thenReturn(503);
+        when(providerFailure.code()).thenReturn(Optional.of("service_unavailable"));
+        when(providerFailure.type()).thenReturn(Optional.of("server_error"));
+        when(providerFailure.headers()).thenReturn(Headers.builder().build());
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        when(client.call(any(EmbeddingRequest.class))).thenAnswer(invocation -> {
+            if (calls.incrementAndGet() == 2) {
+                throw providerFailure;
+            }
+            EmbeddingRequest request = invocation.getArgument(0);
+            List<Embedding> results = new java.util.ArrayList<>();
+            for (int index = 0; index < request.getInstructions().size(); index++) {
+                results.add(new Embedding(
+                        new float[] {(float) request.getInstructions().get(index).length()},
+                        index));
+            }
+            return new EmbeddingResponse(results);
+        });
+
+        EmbeddingService service = openAiService(client);
+        ReflectionTestUtils.setField(service, "retryMaxAttempts", 2);
+        ReflectionTestUtils.setField(service, "retryInitialDelayMs", 0L);
+        ReflectionTestUtils.setField(service, "retryMaxDelayMs", 0L);
+        List<String> inputs = List.of(
+                "a".repeat(125_000),
+                "b".repeat(125_000),
+                "final");
+
+        List<List<Float>> vectors = service.embedAll(inputs);
+
+        verify(client, times(3)).call(any(EmbeddingRequest.class));
+        assertEquals(125_000f, vectors.get(0).get(0));
+        assertEquals(125_000f, vectors.get(1).get(0));
+        assertEquals(5f, vectors.get(2).get(0));
+    }
+
+    private EmbeddingService openAiService(OpenAiEmbeddingModel client) {
+        EmbeddingService service = new EmbeddingService(provider(client), emptyGoogleGenAiProvider(), new ObjectMapper());
+        ReflectionTestUtils.setField(service, "provider", "openai");
+        ReflectionTestUtils.setField(service, "openaiApiKey", "key");
+        ReflectionTestUtils.setField(service, "openaiBaseUrl", "https://api.openai.com");
+        ReflectionTestUtils.setField(service, "openaiModel", "text-embedding-3-large");
+        ReflectionTestUtils.setField(service, "openaiDimensions", 0);
+        ReflectionTestUtils.setField(service, "geminiDimensions", 0);
+        return service;
     }
 
     private static ObjectProvider<OpenAiEmbeddingModel> provider(OpenAiEmbeddingModel client) {
