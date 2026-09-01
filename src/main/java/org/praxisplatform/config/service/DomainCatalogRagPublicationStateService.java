@@ -77,6 +77,54 @@ public class DomainCatalogRagPublicationStateService {
         return true;
     }
 
+    /**
+     * Reconciles terminal publication evidence when the current physical corpus is already exact.
+     *
+     * <p>This path does not represent a provider attempt. It repairs an absent or stale terminal
+     * state after the vector corpus has independently proved exact expected/actual equality. Active
+     * pending or publishing revisions remain owned by their current worker.</p>
+     */
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+    public boolean reconcilePublished(
+            UUID releaseId,
+            long expectedDocumentCount,
+            long publishedDocumentCount) {
+        boolean inserted = repository.ensureState(releaseId) > 0;
+        DomainCatalogRagPublicationState state = repository.findForUpdate(releaseId).orElseThrow();
+        long normalizedExpected = Math.max(0L, expectedDocumentCount);
+        long normalizedPublished = Math.max(0L, publishedDocumentCount);
+        boolean initialState = inserted
+                && state.getRevision() == 0L
+                && state.getAttempt() == 0
+                && state.getStatus() == DomainCatalogRagPublicationStatus.PENDING;
+        if (!initialState && (state.getStatus() == DomainCatalogRagPublicationStatus.PENDING
+                || state.getStatus() == DomainCatalogRagPublicationStatus.PUBLISHING)) {
+            return false;
+        }
+        if (state.getStatus() == DomainCatalogRagPublicationStatus.PUBLISHED
+                && state.getExpectedDocumentCount() == normalizedExpected
+                && state.getPublishedDocumentCount() == normalizedPublished
+                && state.getFailureKind() == null
+                && state.getRetryable() == null
+                && state.getRetryAfter() == null) {
+            return false;
+        }
+        Instant now = Instant.now();
+        state.setRevision(state.getRevision() + 1L);
+        state.setStatus(DomainCatalogRagPublicationStatus.PUBLISHED);
+        state.setExpectedDocumentCount(normalizedExpected);
+        state.setPublishedDocumentCount(normalizedPublished);
+        state.setFailureKind(null);
+        state.setRetryable(null);
+        state.setRetryAfter(null);
+        state.setRequestedAt(now);
+        state.setStartedAt(null);
+        state.setCompletedAt(now);
+        state.setUpdatedAt(now);
+        repository.save(state);
+        return true;
+    }
+
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public boolean markFailed(
             UUID releaseId,

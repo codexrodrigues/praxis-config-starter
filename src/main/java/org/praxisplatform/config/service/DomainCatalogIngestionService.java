@@ -1038,11 +1038,15 @@ public class DomainCatalogIngestionService {
                 RagResourceTypes.DOMAIN_CATALOG,
                 expectedDocumentCount);
         if (status != null && status.available() && status.reconciled()) {
+            boolean stateReconciled = ragPublicationStateService != null
+                    && ragPublicationStateService.reconcilePublished(
+                            release.getId(), expectedDocumentCount, status.documentCount());
             log.debug(
-                    "Domain catalog RAG already reconciled for idempotent release {} ({}/{} documents)",
+                    "Domain catalog RAG already reconciled for idempotent release {} ({}/{} documents, publicationStateReconciled={})",
                     release.getReleaseKey(),
                     status.documentCount(),
-                    status.expectedChunkCount());
+                    status.expectedChunkCount(),
+                    stateReconciled);
             return;
         }
         log.info(

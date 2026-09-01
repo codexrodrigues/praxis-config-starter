@@ -329,6 +329,18 @@ unavailability and persistence failures separately from provider failures. Neith
 functional certification; the next paid run is allowed only after this repair passes locally and on
 main, and remains a single zero-retry OpenAI canary.
 
+After the physical replacement was merged, approved OpenAI run
+[`33534323846`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33534323846)
+proved that fix without reaching browser: the live database converged from the prior duplicated
+projection to exactly `460/460` OpenAI documents and identities for `operations.missoes`. The gate
+still failed immediately because the typed status endpoint preferred the persisted
+`FAILED/unknown` terminal evidence from the earlier attempt. Idempotent ingestion correctly avoided
+another embedding publication once the physical corpus was exact, but did not reconcile that stale
+terminal state. The state owner now promotes an absent or terminal stale record to `PUBLISHED` from
+exact corpus evidence without increasing `attempt` or calling the provider; active
+`PENDING/PUBLISHING` revisions are never superseded. This run is infrastructure evidence only, not
+functional certification, and zero automatic retries were executed.
+
 API Catalog readiness is scoped by the same canonical identity used by its persisted state:
 `tenant + environment + serviceKey + releaseId`. Vector replacement carries `serviceKey` and is
 serialized with the persisted revision lease, so concurrent hosts cannot make a superseded revision
