@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -358,46 +359,62 @@ public class RagVectorStoreService {
                 releases);
     }
 
-    public void deleteDocumentsByCanonicalScopeExceptRelease(
+    /**
+     * Removes every stale physical projection from a canonical resource scope.
+     *
+     * <p>The caller must invoke this only after all active documents were accepted. Release and
+     * embedding profile are intentionally not predicates: they are derived materialization
+     * coordinates, so old values must not remain as parallel active corpora.
+     */
+    public void deleteDocumentsByCanonicalScopeExceptIds(
             String tenantId,
             String environment,
             String serviceKey,
             String resourceKey,
-            String activeReleaseId,
-            String resourceType) {
+        String resourceType,
+        List<String> activeDocumentIds) {
         if (vectorStoreProvider.getIfAvailable() == null) {
-            return;
+            throw new DataAccessResourceFailureException(
+                    "Canonical vector projection replacement requires an available vector store");
         }
         NamedParameterJdbcTemplate jdbcTemplate = jdbcTemplateProvider.getIfAvailable();
         if (jdbcTemplate == null) {
-            log.warn("Skipping scoped superseded vector release purge because configNamedParameterJdbcTemplate is unavailable.");
-            return;
+            throw new DataAccessResourceFailureException(
+                    "Canonical vector projection replacement requires configNamedParameterJdbcTemplate");
         }
-        String sql = """
+        List<String> normalizedActiveDocumentIds = activeDocumentIds == null
+                ? List.of()
+                : activeDocumentIds.stream()
+                        .filter(id -> id != null && !id.isBlank())
+                        .distinct()
+                        .toList();
+        StringBuilder sql = new StringBuilder("""
             DELETE FROM %s
             WHERE COALESCE(metadata ->> 'tenantId', 'global') = :tenantId
               AND COALESCE(metadata ->> 'environment', 'global') = :environment
               AND COALESCE(metadata ->> 'serviceKey', '') = :serviceKey
               AND COALESCE(metadata ->> 'resourceKey', '') = :resourceKey
-              AND COALESCE(metadata ->> 'releaseId', metadata ->> 'version', 'v1') <> :activeReleaseId
               AND COALESCE(metadata ->> 'resourceType', metadata ->> 'docType', metadata ->> 'sourceKind') = :resourceType
-            """.formatted(tableName);
-        Map<String, Object> params = Map.of(
-                "tenantId", RagDocumentIdentity.normalizeToken(tenantId, "global"),
-                "environment", RagDocumentIdentity.normalizeToken(environment, "global"),
-                "serviceKey", normalizeNullableScopeValue(serviceKey),
-                "resourceKey", normalizeNullableScopeValue(resourceKey),
-                "activeReleaseId", RagDocumentIdentity.normalizeToken(activeReleaseId, "v1"),
-                "resourceType", RagDocumentIdentity.normalizeToken(resourceType, "unknown-kind"));
-        int deletedRows = jdbcTemplate.update(sql, params);
+            """.formatted(tableName));
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("tenantId", RagDocumentIdentity.normalizeToken(tenantId, "global"));
+        params.put("environment", RagDocumentIdentity.normalizeToken(environment, "global"));
+        params.put("serviceKey", normalizeNullableScopeValue(serviceKey));
+        params.put("resourceKey", normalizeNullableScopeValue(resourceKey));
+        params.put("resourceType", RagDocumentIdentity.normalizeToken(resourceType, "unknown-kind"));
+        if (!normalizedActiveDocumentIds.isEmpty()) {
+            sql.append("  AND id NOT IN (:activeDocumentIds)\n");
+            params.put("activeDocumentIds", normalizedActiveDocumentIds);
+        }
+        int deletedRows = jdbcTemplate.update(sql.toString(), params);
         log.info(
-                "Purged {} superseded scoped vector document(s) for tenant={}, env={}, service={}, resource={}, activeRelease={}",
+                "Replaced canonical vector projection by purging {} stale document(s) for tenant={}, env={}, service={}, resource={}, retainedDocuments={}",
                 deletedRows,
                 tenantId,
                 environment,
                 serviceKey,
                 resourceKey,
-                activeReleaseId);
+                normalizedActiveDocumentIds.size());
     }
 
     public boolean isAvailable() {

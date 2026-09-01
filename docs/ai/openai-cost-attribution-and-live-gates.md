@@ -44,6 +44,9 @@ review them after observing one normal release cycle.
 - `paid_gate_lane=llm-compliance` runs only the external compliance-policy shadow as the paid lane.
 - Export or publication failures after a successful paid journey must be diagnosed from sanitized
   artifacts. They do not justify repeating the provider call.
+- A failure in a paid prerequisite, including Domain Catalog embedding publication or reconciliation,
+  must be classified and repaired before another paid run. A run that never reached the authoring
+  journey is not functional evidence and does not justify a blind provider retry.
 - A newer run on the same ref cancels the older in-progress run, avoiding duplicated provider calls.
 - GitHub Actions is a release/final gate. Development validation remains local and focal.
 

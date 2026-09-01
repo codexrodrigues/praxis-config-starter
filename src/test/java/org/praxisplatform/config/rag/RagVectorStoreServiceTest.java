@@ -25,6 +25,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 @ExtendWith(MockitoExtension.class)
@@ -346,17 +347,17 @@ class RagVectorStoreServiceTest {
     }
 
     @Test
-    void shouldPurgeSupersededDomainCatalogReleasesWithinCanonicalScope() {
+    void shouldReplaceCanonicalDomainCatalogProjectionAndRetainOnlyActiveDocumentIds() {
         when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
         when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
 
-        service.deleteDocumentsByCanonicalScopeExceptRelease(
+        service.deleteDocumentsByCanonicalScopeExceptIds(
                 "tenant-x",
                 "prod",
                 "praxis-api-quickstart",
                 null,
-                "catalog-current",
-                RagResourceTypes.DOMAIN_CATALOG);
+                RagResourceTypes.DOMAIN_CATALOG,
+                List.of("document-a", "document-b", "document-a", " "));
 
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
@@ -364,11 +365,66 @@ class RagVectorStoreServiceTest {
         assertThat(sqlCaptor.getValue())
                 .contains("metadata ->> 'serviceKey'")
                 .contains("metadata ->> 'resourceKey'")
-                .contains("<> :activeReleaseId");
+                .contains("id NOT IN (:activeDocumentIds)")
+                .doesNotContain("activeReleaseId");
         assertThat(paramsCaptor.getValue())
                 .containsEntry("serviceKey", "praxis-api-quickstart")
                 .containsEntry("resourceKey", "")
-                .containsEntry("activeReleaseId", "catalog-current");
+                .containsEntry("activeDocumentIds", List.of("document-a", "document-b"));
+    }
+
+    @Test
+    void shouldDeleteTheWholeCanonicalProjectionWhenNoDocumentsRemainActive() {
+        when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
+        when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
+
+        service.deleteDocumentsByCanonicalScopeExceptIds(
+                "tenant-x",
+                "prod",
+                "praxis-api-quickstart",
+                "human-resources.missoes",
+                RagResourceTypes.DOMAIN_CATALOG,
+                List.of());
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jdbcTemplate).update(sqlCaptor.capture(), paramsCaptor.capture());
+        assertThat(sqlCaptor.getValue())
+                .contains("metadata ->> 'serviceKey'")
+                .contains("metadata ->> 'resourceKey'")
+                .doesNotContain("id NOT IN");
+        assertThat(paramsCaptor.getValue())
+                .containsEntry("serviceKey", "praxis-api-quickstart")
+                .containsEntry("resourceKey", "human-resources.missoes")
+                .doesNotContainKey("activeDocumentIds");
+    }
+
+    @Test
+    void shouldFailClosedWhenCanonicalProjectionCannotReachJdbcStorage() {
+        when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
+
+        assertThatThrownBy(() -> service.deleteDocumentsByCanonicalScopeExceptIds(
+                "tenant-x",
+                "prod",
+                "praxis-api-quickstart",
+                "human-resources.missoes",
+                RagResourceTypes.DOMAIN_CATALOG,
+                List.of("document-a")))
+                .isInstanceOf(DataAccessResourceFailureException.class)
+                .hasMessageContaining("configNamedParameterJdbcTemplate");
+    }
+
+    @Test
+    void shouldFailClosedWhenCanonicalProjectionCannotReachVectorStorage() {
+        assertThatThrownBy(() -> service.deleteDocumentsByCanonicalScopeExceptIds(
+                "tenant-x",
+                "prod",
+                "praxis-api-quickstart",
+                "human-resources.missoes",
+                RagResourceTypes.DOMAIN_CATALOG,
+                List.of("document-a")))
+                .isInstanceOf(DataAccessResourceFailureException.class)
+                .hasMessageContaining("available vector store");
     }
 
     @Test

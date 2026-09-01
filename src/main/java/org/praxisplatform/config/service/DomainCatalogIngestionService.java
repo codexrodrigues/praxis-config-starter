@@ -51,6 +51,10 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -824,15 +828,12 @@ public class DomainCatalogIngestionService {
 
     private int publishRagDocuments(DomainCatalogRelease release, List<DomainCatalogItem> items) {
         if (!ragVectorStoreService.isAvailable()) {
-            throw new IllegalStateException("Domain catalog RAG vector store is unavailable");
-        }
-        if (items == null || items.isEmpty()) {
-            return 0;
+            throw new DataAccessResourceFailureException("Domain catalog RAG vector store is unavailable");
         }
         long startedAt = System.nanoTime();
         List<Document> documents = new ArrayList<>();
         int index = 0;
-        for (DomainCatalogItem item : items) {
+        for (DomainCatalogItem item : items != null ? items : List.<DomainCatalogItem>of()) {
             if (!isRagIndexable(item)) {
                 continue;
             }
@@ -868,22 +869,19 @@ public class DomainCatalogIngestionService {
                     .metadata(metadata)
                     .build());
         }
-        if (documents.isEmpty()) {
-            return 0;
-        }
         int publishedDocuments = 0;
         for (int start = 0; start < documents.size(); start += ragPublicationBatchSize) {
             int end = Math.min(start + ragPublicationBatchSize, documents.size());
             upsertRagBatchWithRetry(release, documents.subList(start, end));
             publishedDocuments += end - start;
         }
-        ragVectorStoreService.deleteDocumentsByCanonicalScopeExceptRelease(
+        ragVectorStoreService.deleteDocumentsByCanonicalScopeExceptIds(
                 release.getTenantId(),
                 release.getEnvironment(),
                 release.getServiceKey(),
                 release.getResourceKey(),
-                ragReleaseId(release),
-                RagResourceTypes.DOMAIN_CATALOG);
+                RagResourceTypes.DOMAIN_CATALOG,
+                documents.stream().map(Document::getId).toList());
         log.info(
                 "Published {} domain catalog RAG document(s) for release {} in {} ms using batchSize={}",
                 publishedDocuments,
@@ -907,7 +905,7 @@ public class DomainCatalogIngestionService {
                     log.warn(
                             "Domain catalog RAG batch retry for release {} was deferred by provider guidance: {}",
                             release.getReleaseKey(),
-                            AiProviderFailureClassifier.classify(ex));
+                            ragPublicationFailureKind(ex));
                     throw ex;
                 }
                 log.warn(
@@ -916,7 +914,7 @@ public class DomainCatalogIngestionService {
                         attempt,
                         ragPublicationMaxAttempts,
                         retryDelayMs,
-                        AiProviderFailureClassifier.classify(ex));
+                        ragPublicationFailureKind(ex));
                 try {
                     TimeUnit.MILLISECONDS.sleep(retryDelayMs);
                 } catch (InterruptedException interrupted) {
@@ -931,14 +929,34 @@ public class DomainCatalogIngestionService {
 
     private boolean isRetryableRagPublicationFailure(RuntimeException failure) {
         AiProviderCallException providerFailure = findProviderFailure(failure);
-        if (providerFailure == null) {
-            // Preserve the existing conservative retry for untyped vector-store failures.
-            return true;
+        if (providerFailure != null) {
+            return switch (providerFailure.getKind()) {
+                case RATE_LIMIT, CAPACITY, SERVER_ERROR, TRANSPORT, TIMEOUT -> true;
+                case QUOTA_EXHAUSTED, AUTH, CLIENT_ERROR, UNKNOWN -> false;
+            };
         }
-        return switch (providerFailure.getKind()) {
-            case RATE_LIMIT, CAPACITY, SERVER_ERROR, TRANSPORT, TIMEOUT -> true;
-            case QUOTA_EXHAUSTED, AUTH, CLIENT_ERROR, UNKNOWN -> false;
-        };
+        if (findCause(failure, DataIntegrityViolationException.class) != null) {
+            return false;
+        }
+        return findCause(failure, TransientDataAccessException.class) != null
+                || findCause(failure, DataAccessResourceFailureException.class) != null;
+    }
+
+    private String ragPublicationFailureKind(RuntimeException failure) {
+        AiProviderCallException providerFailure = findProviderFailure(failure);
+        if (providerFailure != null) {
+            return AiProviderFailureClassifier.classify(providerFailure);
+        }
+        if (findCause(failure, DataIntegrityViolationException.class) != null) {
+            return "vector_store_conflict";
+        }
+        if (findCause(failure, DataAccessResourceFailureException.class) != null) {
+            return "vector_store_unavailable";
+        }
+        if (findCause(failure, DataAccessException.class) != null) {
+            return "vector_store_persistence";
+        }
+        return "vector_store_failure";
     }
 
     private AiProviderCallException findProviderFailure(Throwable failure) {
@@ -946,6 +964,20 @@ public class DomainCatalogIngestionService {
         while (current != null) {
             if (current instanceof AiProviderCallException providerFailure) {
                 return providerFailure;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private <T extends Throwable> T findCause(Throwable failure, Class<T> type) {
+        Throwable current = failure;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return type.cast(current);
             }
             if (current.getCause() == current) {
                 break;
@@ -1044,14 +1076,14 @@ public class DomainCatalogIngestionService {
                     ragPublicationStateService.markFailed(
                             release.getId(),
                             publicationRevision,
-                            AiProviderFailureClassifier.classify(ex),
+                            ragPublicationFailureKind(ex),
                             isRetryableRagPublicationFailure(ex),
                             providerRetryAfter(ex));
                 }
                 log.warn(
                         "Domain catalog release {} was persisted, but RAG publication failed: {}",
                         release.getReleaseKey(),
-                        AiProviderFailureClassifier.classify(ex)
+                        ragPublicationFailureKind(ex)
                 );
             }
         };
