@@ -203,7 +203,13 @@ transactional apply/ETag path have focused tests. The #357 shared corpus/attesta
 and the 2026-08-30 full-mode focal Fluxo 3 proved real LLM authoring, exact terminal-patch apply,
 item action/capability discovery, governed Dynamic Form submit, `200` execution, repeated-transition
 `409`, Table refresh and reload with identical payload SHA-256 and ETag. This proves the first
-pilot operationally; the complete production-like matrix and additional archetypes remain release work. See
+pilot operationally. The matrix now exposes the same scenario and its existing sanitized receipt as
+the additive focal mode `master-detail`, scoped to `operations.missoes`, the operations API catalog
+and required Domain Catalog RAG. This is `ja-suportado-so-ux`: no runtime or authoring contract was
+added, and the same combined journey will count only once in the #372 portfolio. Certification still
+requires one published-artifact canary followed by five consecutive zero-retry runs accepted by the
+portable validator; until then, [#425](https://github.com/codexrodrigues/praxis-config-starter/issues/425)
+remains open. The complete production-like matrix and additional archetypes remain release work. See
 [the delta audit](RESOURCE-BACKED-WORKSPACE-DELTA-AUDIT.md) for the reuse classification and residuals.
 
 The decision must describe semantic intent, archetype, resources, surfaces, actions, capabilities, components, slots, bindings and transactional lifecycle. It should materialize both compact authoring input and portable runtime output without leaking Angular implementation detail into Java.

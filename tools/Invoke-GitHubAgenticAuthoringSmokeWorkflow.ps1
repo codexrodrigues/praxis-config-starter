@@ -12,7 +12,7 @@ param(
     [int] $QuickstartStartupTimeoutSeconds = 180,
     [ValidateSet("none", "http-sse", "page-builder", "llm-compliance")]
     [string] $PaidGateLane = "none",
-    [ValidateSet("smoke", "single-table", "crud-simple", "related-resource", "tabs-nested", "full")]
+    [ValidateSet("smoke", "single-table", "crud-simple", "master-detail", "related-resource", "tabs-nested", "full")]
     [string] $PageBuilderE2EMode = "smoke",
     [int] $PageBuilderE2ETimeoutMinutes = 30,
     [string] $Token = "",

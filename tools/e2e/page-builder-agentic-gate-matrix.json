@@ -258,6 +258,27 @@
         "CRUD simples materializa host canônico e executa create read update delete no primeiro passe"
       ]
     },
+    "master-detail": {
+      "description": "Focal live LLM proof for a canonical master-detail page with governed selection, item-action discovery, command execution, refresh and reload, without Playwright retries.",
+      "retries": 0,
+      "domainCatalogRagRequired": true,
+      "domainCatalogResourceKey": "operations.missoes",
+      "apiCatalogGroup": "operations",
+      "apiCatalogPathPrefixes": [
+        "/api/operations/missoes"
+      ],
+      "scenarios": [
+        "critical-interception-guard",
+        "live-resource-workspace-command"
+      ],
+      "expectedDiscovered": 2,
+      "minimumExecuted": 2,
+      "expectedSkipped": 0,
+      "requiredPassedTests": [
+        "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload"
+      ]
+    },
     "related-resource": {
       "description": "Focal live LLM proof for a canonical parent-child page using a governed related-resource surface, without Playwright retries.",
       "retries": 0,

@@ -143,7 +143,7 @@ test('dispatch helper mirrors the canonical paid lanes and matrix modes', () => 
   );
   assert.match(
     dispatchRunnerSource,
-    /\[ValidateSet\("smoke", "single-table", "crud-simple", "related-resource", "tabs-nested", "full"\)\]/,
+    /\[ValidateSet\("smoke", "single-table", "crud-simple", "master-detail", "related-resource", "tabs-nested", "full"\)\]/,
   );
   assert.match(dispatchRunnerSource, /paid_gate_lane = \$PaidGateLane/);
   assert.doesNotMatch(dispatchRunnerSource, /RunPageBuilderFullE2E/);

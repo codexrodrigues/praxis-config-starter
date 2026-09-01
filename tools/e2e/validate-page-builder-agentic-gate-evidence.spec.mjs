@@ -14,6 +14,7 @@ import {
 
 const profile = resolveGateProfile(loadGateMatrix(), 'single-table');
 const crudProfile = resolveGateProfile(loadGateMatrix(), 'crud-simple');
+const masterDetailProfile = resolveGateProfile(loadGateMatrix(), 'master-detail');
 const relatedProfile = resolveGateProfile(loadGateMatrix(), 'related-resource');
 const hash = 'a'.repeat(64);
 
@@ -159,6 +160,25 @@ function relatedReceipt() {
   };
 }
 
+function masterDetailReceipt() {
+  return {
+    ...receipt(),
+    scenarioId: 'live-resource-workspace-command',
+    archetype: 'master-detail-command',
+    functionalAssertions: [
+      'composition.master-visible',
+      'composition.detail-visible',
+      'composition.selection-propagated',
+      'discovery.actions.http-200',
+      'discovery.capabilities.http-200',
+      'command.execute.http-200',
+      'command.duplicate.http-409',
+      'resource.refresh-observed',
+      'persistence.reload-rendered',
+    ],
+  };
+}
+
 function result(attachments = []) {
   return {
     status: 'passed',
@@ -256,6 +276,30 @@ function relatedReport() {
       line: 1,
       specs: relatedProfile.requiredPassedTests.map((title) => title.startsWith('Parent-child')
         ? spec(title, [jsonAttachment('related-resource-first-pass-receipt.json', relatedReceipt())])
+        : spec(title)),
+    }],
+    errors: [],
+    stats: {
+      startTime: '2026-08-31T00:00:00.000Z',
+      duration: 100,
+      expected: 2,
+      skipped: 0,
+      unexpected: 0,
+      flaky: 0,
+    },
+  };
+}
+
+function masterDetailReport() {
+  return {
+    config: {},
+    suites: [{
+      title: 'master-detail-focal',
+      file: 'master-detail-focal.spec.ts',
+      column: 1,
+      line: 1,
+      specs: masterDetailProfile.requiredPassedTests.map((title) => title.startsWith('Fluxo 3')
+        ? spec(title, [jsonAttachment('mission-workspace-first-pass-receipt.json', masterDetailReceipt())])
         : spec(title)),
     }],
     errors: [],
@@ -411,6 +455,18 @@ test('accepts a complete zero-retry CRUD report', () => {
   assert.equal(summary.receipts[0].firstPassFunctional, true);
 });
 
+test('accepts the existing master-detail operational receipt in its focal profile', () => {
+  const summary = validateGateReport(
+    masterDetailReport(),
+    '/tmp/master-detail-report.json',
+    masterDetailProfile,
+  );
+  assert.equal(summary.discovered, 2);
+  assert.equal(summary.retries, 0);
+  assert.equal(summary.receipts[0].scenarioId, 'live-resource-workspace-command');
+  assert.equal(summary.receipts[0].firstPassFunctional, true);
+});
+
 test('accepts a complete zero-retry related-resource report', () => {
   const summary = validateGateReport(
     relatedReport(),
@@ -432,6 +488,19 @@ test('rejects CRUD evidence that omits one functional operation', () => {
   });
   assert.throws(
     () => validateGateReport(value, '/tmp/crud-report.json', crudProfile),
+    /functional assertions diverge/,
+  );
+});
+
+test('rejects master-detail evidence without selection propagation', () => {
+  const value = masterDetailReport();
+  mutateAttachment(value, 'Fluxo 3', 'mission-workspace-first-pass-receipt.json', (body) => {
+    body.functionalAssertions = body.functionalAssertions.filter(
+      (assertion) => assertion !== 'composition.selection-propagated',
+    );
+  });
+  assert.throws(
+    () => validateGateReport(value, '/tmp/master-detail-report.json', masterDetailProfile),
     /functional assertions diverge/,
   );
 });
