@@ -2918,7 +2918,13 @@ public class AgenticAuthoringIntentResolverService {
 
     private boolean requiresAdditionalIntentResolution(
             AgenticAuthoringPreIntentToolPlan semanticOrientation) {
-        if (semanticOrientation == null || !semanticOrientation.requiresFullIntentResolution()) {
+        if (semanticOrientation == null) {
+            return false;
+        }
+        if (requiresGovernedRelatedResourceTargetSelection(semanticOrientation)) {
+            return true;
+        }
+        if (!semanticOrientation.requiresFullIntentResolution()) {
             return false;
         }
         if (hasCompleteCompactResourceComposition(semanticOrientation)) {
@@ -2933,6 +2939,14 @@ public class AgenticAuthoringIntentResolverService {
                 || !constraints.path("filters").isArray()
                 || constraints.path("filters").isEmpty()
                 || !List.of("page", "table").contains(semanticOrientation.artifactKind());
+    }
+
+    private boolean requiresGovernedRelatedResourceTargetSelection(
+            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
+        return "authoring_or_other".equals(semanticOrientation.semanticIntentClass())
+                && "page".equals(semanticOrientation.artifactKind())
+                && "parent-child-related-resource".equals(semanticOrientation.layoutKind())
+                && "praxis-related-resource-outlet".equals(semanticOrientation.primaryComponent());
     }
 
     private boolean hasCompleteCompactResourceComposition(
