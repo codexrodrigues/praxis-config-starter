@@ -12,6 +12,7 @@ param(
     [string] $TenantId = "agentic-authoring-e2e",
     [string] $UserId = "codex-local",
     [string] $Environment = "local",
+    [string] $ArtifactsDir = "",
     [int] $StartupTimeoutSec = 180,
     [int] $StreamProcessingTimeoutSeconds = 180,
     [switch] $DomainRuleLifecycleOnly,
@@ -51,6 +52,12 @@ function Wait-QuickstartHealth([string] $HealthUrl, [int] $TimeoutSec) {
     throw "Quickstart did not become healthy before timeout: $HealthUrl"
 }
 
+function Write-SmokeSummary($Summary, [string] $Directory) {
+    New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+    $json = $Summary | ConvertTo-Json -Depth 8
+    $json | Set-Content -LiteralPath (Join-Path $Directory "summary.json") -Encoding UTF8
+}
+
 $starterRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $starterRoot
 $starterAuthoringRoot = Join-Path $starterRoot "docs\ai\agentic-authoring"
@@ -62,6 +69,11 @@ $authoringRoot = if (Test-Path -LiteralPath (Join-Path $starterAuthoringRoot "co
 }
 if ([string]::IsNullOrWhiteSpace($QuickstartRoot)) {
     $QuickstartRoot = Join-Path $workspaceRoot "praxis-api-quickstart"
+}
+if ([string]::IsNullOrWhiteSpace($ArtifactsDir)) {
+    $ArtifactsDir = Join-Path $starterRoot ("artifacts\ai-sse-smoke\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+} else {
+    $ArtifactsDir = Resolve-RepoPath $ArtifactsDir $starterRoot
 }
 
 $envPath = Resolve-RepoPath $EnvFile $starterRoot
@@ -224,9 +236,12 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
     $domainRuleArgs.ExpectAuthorApprovalIamRejection = $expectAuthorApprovalIamRejection
     $domainRuleLifecycle = & (Join-Path $PSScriptRoot "Invoke-QuickstartDomainRuleLifecycleHttpE2E.ps1") @domainRuleArgs | ConvertFrom-Json
     if ($DomainRuleLifecycleOnly) {
-        [pscustomobject]@{
+        $result = [pscustomobject]@{
+            schemaVersion = "praxis.agentic-authoring-http-sse-summary/v1"
             health = $health.status
             provider = "not-used"
+            executionLane = "deterministic"
+            liveGateJourney = "domain-rule-lifecycle"
             baseUrl = $base
             quickstartRoot = $QuickstartRoot
             jarPath = $JarPath
@@ -242,7 +257,24 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
             domainRuleTerminalPublishBlocked = [bool] $domainRuleLifecycle.terminalPublishBlocked
             domainRuleSemanticSourceHashesDiffer = [bool] $domainRuleLifecycle.semanticSourceHashesDiffer
             domainRuleBackendValidationSemanticSourceHashesDiffer = [bool] $domainRuleLifecycle.backendValidationSemanticSourceHashesDiffer
-        } | ConvertTo-Json -Depth 8
+        }
+        $summary = [pscustomobject]@{
+            schemaVersion = $result.schemaVersion
+            health = $result.health
+            provider = $result.provider
+            executionLane = $result.executionLane
+            liveGateJourney = $result.liveGateJourney
+            domainRuleAppliedCreationBlocked = $result.domainRuleAppliedCreationBlocked
+            domainRuleSelfApprovalBlocked = $result.domainRuleSelfApprovalBlocked
+            domainRuleAppliedMaterializationHasAppliedAt = $result.domainRuleAppliedMaterializationHasAppliedAt
+            domainRuleTerminalDefinitionTransitionBlocked = $result.domainRuleTerminalDefinitionTransitionBlocked
+            domainRuleTerminalMaterializationTransitionBlocked = $result.domainRuleTerminalMaterializationTransitionBlocked
+            domainRuleTerminalPublishBlocked = $result.domainRuleTerminalPublishBlocked
+            domainRuleSemanticSourceHashesDiffer = $result.domainRuleSemanticSourceHashesDiffer
+            domainRuleBackendValidationSemanticSourceHashesDiffer = $result.domainRuleBackendValidationSemanticSourceHashesDiffer
+        }
+        Write-SmokeSummary $summary $ArtifactsDir
+        $result | ConvertTo-Json -Depth 8
         return
     }
 
@@ -250,9 +282,11 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
     $applyArgs.StreamProcessingTimeoutSeconds = $StreamProcessingTimeoutSeconds
     $apply = & (Join-Path $PSScriptRoot "Invoke-QuickstartAgenticAuthoringApplyHttpE2E.ps1") @applyArgs | ConvertFrom-Json
 
-    [pscustomobject]@{
+    $result = [pscustomobject]@{
+        schemaVersion = "praxis.agentic-authoring-http-sse-summary/v1"
         health = $health.status
         provider = $Provider
+        executionLane = "live"
         liveGateJourney = "governed-authoring-apply"
         isolatedLegacyProviderProbesRun = $false
         baseUrl = $base
@@ -289,7 +323,23 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) {
         applyReviewContinuationDecisionId = [string] $apply.reviewContinuationDecisionId
         authoringStreamId = [string] $apply.authoringStreamId
         authoringResultEventId = [string] $apply.authoringResultEventId
-    } | ConvertTo-Json -Depth 8
+    }
+    $summary = [pscustomobject]@{
+        schemaVersion = $result.schemaVersion
+        health = $result.health
+        provider = $result.provider
+        executionLane = $result.executionLane
+        liveGateJourney = $result.liveGateJourney
+        isolatedLegacyProviderProbesRun = $result.isolatedLegacyProviderProbesRun
+        previewValid = $result.previewValid
+        applyPersisted = $result.applyPersisted
+        applyCleanupDeleted = $result.applyCleanupDeleted
+        applyAuthoringTurnCount = $result.applyAuthoringTurnCount
+        authoringStreamId = $result.authoringStreamId
+        authoringResultEventId = $result.authoringResultEventId
+    }
+    Write-SmokeSummary $summary $ArtifactsDir
+    $result | ConvertTo-Json -Depth 8
 } finally {
     if ($startedQuickstart -and $null -ne $quickstartProcess) {
         Stop-Process -Id $quickstartProcess.Id -Force -ErrorAction SilentlyContinue

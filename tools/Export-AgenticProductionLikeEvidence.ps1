@@ -146,8 +146,12 @@ foreach ($identity in @($result.git)) {
     }
 }
 if ($includeHttpSse) {
-    Assert-True ($httpSummary.health -eq "UP" -and $httpSummary.terminalSeen -eq $true -and $httpSummary.replayChecked -eq $true) "HTTP/SSE evidence is incomplete."
+    Assert-True ($httpSummary.schemaVersion -eq "praxis.agentic-authoring-http-sse-summary/v1") "Unexpected HTTP/SSE evidence schema."
+    Assert-True ($httpSummary.health -eq "UP" -and $httpSummary.executionLane -eq "live") "HTTP/SSE evidence is incomplete."
     Assert-True ($httpSummary.provider -ne "mock" -and $httpSummary.provider -ne "not-used") "HTTP/SSE evidence did not use a real provider."
+    Assert-True ($httpSummary.liveGateJourney -eq "governed-authoring-apply") "HTTP/SSE evidence did not exercise the governed authoring journey."
+    Assert-True ($httpSummary.previewValid -eq $true -and $httpSummary.applyPersisted -eq $true -and $httpSummary.applyCleanupDeleted -eq $true) "Governed authoring preview, persistence or cleanup evidence is incomplete."
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string] $httpSummary.authoringStreamId) -and -not [string]::IsNullOrWhiteSpace([string] $httpSummary.authoringResultEventId)) "Governed authoring stream identity evidence is incomplete."
 }
 
 $resultJson = $result | ConvertTo-Json -Depth 20

@@ -158,7 +158,18 @@ try {
         diagnosticEvidence = @()
     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
     @{ passed = $true } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $e2eRoot "source-audit.json") -Encoding utf8
-    @{ health = "UP"; terminalSeen = $true; replayChecked = $true; provider = "openai" } |
+    @{
+        schemaVersion = "praxis.agentic-authoring-http-sse-summary/v1"
+        health = "UP"
+        executionLane = "live"
+        provider = "openai"
+        liveGateJourney = "governed-authoring-apply"
+        previewValid = $true
+        applyPersisted = $true
+        applyCleanupDeleted = $true
+        authoringStreamId = "stream-1"
+        authoringResultEventId = "event-1"
+    } |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $httpRunRoot "summary.json") -Encoding utf8
 
     & $scriptPath -StarterRoot $starterRoot -PublicationProfile "page-builder-http-sse" -HttpArtifactRoot $httpArtifactRoot -OutputRoot $outputRoot | Out-Null
@@ -166,6 +177,21 @@ try {
     if (($published -join ',') -ne 'http-sse-summary.json,production-like-result.json,source-audit.json') {
         throw "Exporter published an unexpected file set: $($published -join ',')"
     }
+
+    $httpSummaryPath = Join-Path $httpRunRoot "summary.json"
+    $httpSummaryFixture = Get-Content -LiteralPath $httpSummaryPath -Raw | ConvertFrom-Json
+    $httpSummaryFixture.schemaVersion = "legacy-sse-probe/v0"
+    $httpSummaryFixture | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $httpSummaryPath -Encoding utf8
+    $legacyHttpOutput = Join-Path $root "legacy-http-published"
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -PublicationProfile "page-builder-http-sse" -HttpArtifactRoot $httpArtifactRoot -OutputRoot $legacyHttpOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "Unexpected HTTP/SSE evidence schema"
+    }
+    if (-not $failedClosed) { throw "Exporter accepted the legacy SSE probe summary as governed authoring evidence." }
+    $httpSummaryFixture.schemaVersion = "praxis.agentic-authoring-http-sse-summary/v1"
+    $httpSummaryFixture | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $httpSummaryPath -Encoding utf8
 
     $pageBuilderOutput = Join-Path $root "page-builder-published"
     $pageBuilderPublication = & $scriptPath `

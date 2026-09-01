@@ -76,6 +76,23 @@ class QuickstartGovernanceLabSmokeContractTest {
     }
 
     @Test
+    void shouldMaterializeTheGovernedHttpSseSummaryForPublication() throws IOException {
+        String script = Files.readString(SMOKE_SCRIPT);
+
+        assertThat(script)
+                .contains("[string] $ArtifactsDir = \"\"")
+                .contains("artifacts\\ai-sse-smoke\\")
+                .contains("function Write-SmokeSummary")
+                .contains("praxis.agentic-authoring-http-sse-summary/v1")
+                .contains("Set-Content -LiteralPath (Join-Path $Directory \"summary.json\")")
+                .contains("previewValid = [bool] $apply.previewValid")
+                .contains("applyPersisted = [bool] $apply.applied")
+                .contains("applyCleanupDeleted = [bool] $apply.cleanupDeleted")
+                .contains("authoringStreamId = [string] $apply.authoringStreamId")
+                .contains("authoringResultEventId = [string] $apply.authoringResultEventId");
+    }
+
+    @Test
     void shouldPublishDomainRulesWithTheDedicatedPublisherIdentity() throws IOException {
         String script = Files.readString(LIFECYCLE_SCRIPT);
 
