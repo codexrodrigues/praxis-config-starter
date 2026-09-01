@@ -327,8 +327,25 @@ after the LLM authors the structured combination and the unique resource keeps i
 schema and capability evidence. Multiple approved surface bindings are collapsed only by canonical
 `resourcePath`; bindings from different resources remain ambiguous and fail closed. The normal resource,
 preview, compiler and apply gates remain mandatory.
-Certification still requires the Angular production-like OpenAI scenario to prove first-pass
-materialization, persisted nested paths, selection continuity and zero retry.
+The first local production-like scenario passed on 2026-09-01 with OpenAI
+`gpt-5.6-terra`, OpenAI `text-embedding-3-large`, Domain Catalog `460/460`, 34
+governed operations and 36 mission endpoints. It authored and persisted the
+Tabs/Table/Form composition in one human turn with zero Playwright retries, then
+proved real row selection, state-to-`resourceId` propagation, tab continuity,
+narrow viewport behavior and reload hash/ETag equivalence.
+
+That run exposed a runtime materialization defect after persistence: PostgreSQL
+`jsonb` reordered the properties inside `nestedPath` segments, while Dynamic Page
+compared paths through JSON text. The canonical Core runtime now compares path
+segments structurally, and Tabs auto-wires registered nested outputs and preserves
+the active semantic tab during nested input reprojection. The deterministic
+library route passes `3/3`. The final focal live run passes `2/2`: the
+matrix-owned critical-interception guard plus the OpenAI Tabs scenario, with zero
+Playwright retries and a fresh Table-to-detail interaction after reload.
+
+Before declaring the archetype certified, the Config-owned portable validator
+must accept the focal receipt. Five independent zero-retry runs and one hosted
+phase gate remain the promotion threshold for broad Ergo adoption.
 
 ### P0 — Shared golden corpus and attestation
 

@@ -3153,7 +3153,7 @@ public class AgenticAuthoringIntentResolverService {
                 .stream()
                 .filter(Objects::nonNull)
                 .filter(candidate -> selectedPath.equals(normalizePath(candidate.resourcePath())))
-                .findFirst()
+                .reduce(this::preferredCandidateForSameResource)
                 .orElse(null);
         if (!hasUnconfirmedAiAuthoredResourceFocus(request, selectedCandidate)) {
             return resolution;
@@ -3340,8 +3340,8 @@ public class AgenticAuthoringIntentResolverService {
             String artifactKind,
             List<AgenticAuthoringCandidate> candidates,
             AgenticAuthoringPreIntentToolPlan semanticOrientation) {
-        boolean compactResourcePage = isCompleteCompactResourcePage(semanticOrientation);
-        if (!(List.of("form", "table", "dashboard").contains(artifactKind) || compactResourcePage)
+        boolean resourcePage = "page".equals(artifactKind);
+        if (!(List.of("form", "table", "dashboard").contains(artifactKind) || resourcePage)
                 || request == null
                 || candidates == null
                 || candidates.isEmpty()
@@ -3356,11 +3356,11 @@ public class AgenticAuthoringIntentResolverService {
                         || hasVerifiedOperationalBindingEvidence(candidate))
                 .filter(candidate -> !isDerivedProjectionCandidate(candidate))
                 .filter(candidate -> isCanonicalArtifactEndpointCandidate(artifactKind, candidate)
-                        || compactResourcePage && isCanonicalCompactResourceCandidate(candidate))
+                        || resourcePage && isCanonicalCompactResourceCandidate(candidate))
                 .filter(this::hasTrustedSelectionEvidence)
                 .filter(candidate -> !isWeakLexicalCandidate(candidate))
                 .toList();
-        if (compactResourcePage) {
+        if (resourcePage) {
             Map<String, List<AgenticAuthoringCandidate>> candidatesByResource = eligible.stream()
                     .collect(Collectors.groupingBy(candidate -> normalizePath(candidate.resourcePath())));
             if (candidatesByResource.size() != 1) {

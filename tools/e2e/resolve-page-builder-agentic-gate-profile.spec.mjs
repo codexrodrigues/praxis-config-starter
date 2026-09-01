@@ -122,6 +122,7 @@ test('resolves the focal tabs-nested profile with its functional receipt', () =>
     'runtime.tab-switch-context-preserved',
     'runtime.second-selection-replaces-detail',
     'runtime.narrow-viewport-functional',
+    'runtime.post-reload-selection-details-loaded',
     'persistence.reload-equivalent',
   ]);
 });

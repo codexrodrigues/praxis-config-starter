@@ -734,9 +734,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Use artifactKind dashboard when the requested outcome depends on multiple coordinated analytical
                 regions such as filters, KPIs, multiple charts and a detail/list/table surface. Use artifactKind page
                 for general layout or content composition where analytics are not the dominant requested outcome.
-                Author layoutKind independently: single-table + artifactKind=table + praxis-table; resource-master-detail + praxis-table;
+                Choose layoutKind: single-table + table + praxis-table; resource-master-detail + praxis-table;
                 parent-child-related-resource + praxis-related-resource-outlet; resource-crud + praxis-crud;
-                tabs_layout + artifactKind=page + praxis-tabs.
+                tabs_layout + page + praxis-tabs covers Table -> state -> Form; no full pass.
                 Never keyword-route or substitute primaryComponent for layoutKind.
                 Canonical response locale: %s
                 Context JSON: %s
@@ -1214,7 +1214,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         layoutKindEnum.addNull();
         layoutKind.put(
                 "description",
-                "AI-authored semantic composition archetype: single-table, resource-master-detail, parent-child-related-resource, resource-crud, or tabs_layout. tabs_layout requires artifactKind=page and primaryComponent=praxis-tabs.");
+                "AI-authored semantic composition archetype: single-table, resource-master-detail, parent-child-related-resource, resource-crud, or tabs_layout. tabs_layout requires artifactKind=page and primaryComponent=praxis-tabs; it completely represents a governed collection Table and Dynamic Form detail synchronized through persisted state and nestedPath links, so those materialization details do not require another intent pass.");
         nullableString(properties, "retrievalQuery");
         nullableString(properties, "reason");
         ObjectNode focus = properties.putObject("resourceSearchFocus");

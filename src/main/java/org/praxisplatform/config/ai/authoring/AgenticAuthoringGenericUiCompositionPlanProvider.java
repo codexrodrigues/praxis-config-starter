@@ -1192,8 +1192,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         detail.putObject("transform")
                 .put("kind", "pick-path")
                 .put("id", "selected-item-resource-id")
-                .put("inputSource", "payload")
-                .put("path", "id");
+                .put("inputSource", "state")
+                .put("path", "selectedItem.id");
         detail.putObject("policy")
                 .put("distinct", true)
                 .put("missingValuePolicy", "skip");
