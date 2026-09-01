@@ -44,14 +44,16 @@ aplicacao de config e streaming SSE.
 Fluxo recomendado:
 1) Entrar em **Actions -> Agentic Authoring HTTP Smoke -> Run workflow**.
 2) Executar com `provider=openai` e confirmar os SHAs imutaveis sugeridos para Quickstart, Metadata e Angular. Branches como `main` nao sao aceitas pelo gate.
-3) Selecionar exatamente uma `paid_gate_lane` proporcional ao corte: `none` para validacao deterministica, `http-sse` para a jornada HTTP/SSE, `page-builder` para authoring browser ou `llm-compliance` para o shadow de compliance. Para Page Builder, manter `page_builder_e2e_mode=smoke`.
-4) Para uma lane paga, revisar o resumo do dispatch e aprovar explicitamente o Environment `ai-paid-gates`; sem essa aprovacao o job principal e seus secrets permanecem bloqueados.
-5) Confirmar que o job terminou com sucesso e publicou os artefatos da lane escolhida. Uma falha posterior de exportacao de evidencia deve ser reproduzida com os artefatos sanitizados, sem repetir automaticamente a chamada paga.
-6) Somente depois executar **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow** para criar a tag.
+3) Antes da publicacao, manter `config_artifact_source=source-checkout`. Depois que o Quickstart pinado consumir uma coordenada publicada, usar `config_artifact_source=maven-central` para a prova pos-release.
+4) Selecionar exatamente uma `paid_gate_lane` proporcional ao corte: `none` para validacao deterministica, `http-sse` para a jornada HTTP/SSE, `page-builder` para authoring browser ou `llm-compliance` para o shadow de compliance. Para Page Builder, manter `page_builder_e2e_mode=smoke`.
+5) Para uma lane paga, revisar o resumo do dispatch e aprovar explicitamente o Environment `ai-paid-gates`; sem essa aprovacao o job principal e seus secrets permanecem bloqueados.
+6) Confirmar que o job terminou com sucesso e publicou os artefatos da lane escolhida. Uma falha posterior de exportacao de evidencia deve ser reproduzida com os artefatos sanitizados, sem repetir automaticamente a chamada paga.
+7) Somente depois executar **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow** para criar a tag.
 
 O smoke manual:
-- instala o `praxis-config-starter` do checkout no Maven local do runner;
-- empacota o `praxis-api-quickstart` contra essa versao local, sem depender do Maven Central;
+- em `source-checkout`, instala o `praxis-config-starter` do checkout no Maven local do runner;
+- em `maven-central`, baixa JAR, POM e SHA-512 diretamente do Maven Central, valida o checksum publicado e instala exatamente esses bytes no Maven local do runner;
+- empacota o `praxis-api-quickstart` contra o artefato selecionado e exige que o JAR aninhado seja byte a byte identico ao artefato de referencia;
 - usa por padrao um ref pinado do `praxis-api-quickstart` para evitar que releases do starter fiquem bloqueados por dependencias ainda nao publicadas no consumidor;
 - sobe o quickstart empacotado;
 - executa uma unica jornada paga `governed-authoring-apply`, que resolve a intencao, planeja e compila a materializacao, transmite o turno por SSE, aplica o resultado terminal com linhagem, le a configuracao persistida e executa cleanup;
@@ -118,6 +120,14 @@ Quando a versao ja estiver publicada no Maven Central, valide tambem o consumido
 cd ..\praxis-api-quickstart
 mvn -B verify
 ```
+
+Depois que esse pin estiver em um SHA imutavel do Quickstart, execute novamente
+**Agentic Authoring HTTP Smoke** com `config_artifact_source=maven-central`. A
+evidencia sanitizada deve registrar `dependencyAttestation.configStarter.source`
+como `maven-central`, hashes SHA-256 identicos para o artefato de referencia e o
+JAR aninhado, e o resumo do job deve registrar a coordenada e os SHA-512
+verificados do JAR e do POM. Esse e o gate que comprova o artefato publicado; uma execucao em
+`source-checkout` nao substitui essa prova.
 
 ## Fluxo recomendado (mais simples)
 1) Executar o gate **Agentic Authoring HTTP Smoke**.

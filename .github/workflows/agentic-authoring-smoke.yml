@@ -26,6 +26,14 @@ on:
         required: true
         default: 39b75011f29b5eeb942b923b5af14df4fcf1af3a
         type: string
+      config_artifact_source:
+        description: 'Config artifact exercised by Quickstart: current source checkout or the exact Maven Central coordinate pinned by Quickstart.'
+        required: true
+        default: source-checkout
+        type: choice
+        options:
+          - source-checkout
+          - maven-central
       metadata_ref:
         description: 'Immutable praxis-metadata-starter commit SHA to install locally.'
         required: true
@@ -281,6 +289,7 @@ jobs:
           }
 
       - name: Install praxis-config-starter locally
+        if: inputs.config_artifact_source == 'source-checkout'
         shell: pwsh
         working-directory: praxis-config-starter
         run: |
@@ -301,7 +310,33 @@ jobs:
           }
           "LOCAL_STARTER_JAR=$localStarterJar" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Package praxis-api-quickstart against local starter
+      - name: Resolve published praxis-config-starter from Maven Central
+        if: inputs.config_artifact_source == 'maven-central'
+        shell: pwsh
+        working-directory: praxis-api-quickstart
+        run: |
+          $downloadRoot = Join-Path $env:RUNNER_TEMP 'praxis-config-maven-central'
+          $resolution = & "$env:GITHUB_WORKSPACE\praxis-config-starter\tools\e2e\Resolve-PublishedConfigStarterArtifact.ps1" `
+            -Version "$env:STARTER_VERSION" `
+            -OutputRoot $downloadRoot
+          $publishedJar = [string] $resolution.jarPath
+          $publishedPom = [string] $resolution.pomPath
+
+          $localCoordinate = Join-Path $HOME ".m2\repository\io\github\codexrodrigues\praxis-config-starter\$env:STARTER_VERSION"
+          if (Test-Path -LiteralPath $localCoordinate) {
+            Remove-Item -LiteralPath $localCoordinate -Recurse -Force
+          }
+          mvn -B install:install-file "-Dfile=$publishedJar" "-DpomFile=$publishedPom"
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not install the verified Maven Central artifact into the isolated runner workspace.'
+          }
+          "LOCAL_STARTER_JAR=$publishedJar" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "### Config artifact: Maven Central" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- Coordinate: io.github.codexrodrigues:praxis-config-starter:$env:STARTER_VERSION" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- Verified JAR SHA-512: $($resolution.jarSha512)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- Verified POM SHA-512: $($resolution.pomSha512)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Package praxis-api-quickstart against selected Config artifact
         shell: pwsh
         working-directory: praxis-api-quickstart
         run: mvn -B -DskipTests "-Dpraxis.core.version=$env:METADATA_STARTER_VERSION" "-Dpraxis.config.version=$env:STARTER_VERSION" package
@@ -397,7 +432,8 @@ jobs:
             -ExpectedConfigVersion "$env:STARTER_VERSION" `
             -ExpectedMetadataVersion "$env:METADATA_STARTER_VERSION" `
             -UiRoot "$env:GITHUB_WORKSPACE\praxis-ui-angular" `
-            -LocalStarterJarPath "$env:LOCAL_STARTER_JAR" `
+            -ReferenceStarterJarPath "$env:LOCAL_STARTER_JAR" `
+            -ConfigArtifactSource '${{ inputs.config_artifact_source }}' `
             -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
             -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}') `
             -UiStartupTimeoutSec ([int]'${{ inputs.page_builder_ui_startup_timeout_seconds }}') `

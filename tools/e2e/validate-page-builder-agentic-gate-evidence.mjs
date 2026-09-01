@@ -425,8 +425,10 @@ function validateConfigStarterDependencyAttestation(result, resultPath) {
       && dependency.version === result.versions.configStarter
       && dependency.version === result.versions.quickstartConfigDependency,
   `Published result ${resultPath} Config Starter version diverges from the runtime coordinates.`);
-  assertCondition(/^[0-9a-f]{64}$/.test(dependency.localJarSha256)
-      && dependency.localJarSha256 === dependency.quickstartNestedJarSha256
+  assertCondition(['source-checkout', 'maven-central'].includes(dependency.source),
+    `Published result ${resultPath} Config Starter artifact source is invalid.`);
+  assertCondition(/^[0-9a-f]{64}$/.test(dependency.referenceJarSha256)
+      && dependency.referenceJarSha256 === dependency.quickstartNestedJarSha256
       && dependency.byteIdentical === true,
   `Published result ${resultPath} Config Starter JAR attestation is not byte-identical.`);
   const expectedEntry = `BOOT-INF/lib/${dependency.artifactId}-${dependency.version}.jar`;
@@ -435,6 +437,7 @@ function validateConfigStarterDependencyAttestation(result, resultPath) {
   return {
     artifactId: dependency.artifactId,
     version: dependency.version,
+    source: dependency.source,
     quickstartEntry: dependency.quickstartEntry,
   };
 }

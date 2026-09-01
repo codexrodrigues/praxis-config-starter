@@ -5,7 +5,9 @@ param(
     [string] $MetadataRoot = "",
     [string] $UiRoot = "",
     [string] $JarPath = "",
-    [string] $LocalStarterJarPath = "",
+    [string] $ReferenceStarterJarPath = "",
+    [ValidateSet("source-checkout", "maven-central")]
+    [string] $ConfigArtifactSource = "source-checkout",
     [string] $EnvFile = ".env.openai.local.ps1",
     [string] $JavaHome = $env:JAVA_HOME,
     [string] $EmbeddingProvider = "",
@@ -1202,23 +1204,24 @@ if ($jarStarterVersion -ne $expectedStarterVersion) {
 if (-not [string]::IsNullOrWhiteSpace($ExpectedMetadataVersion) -and $jarMetadataVersion -ne $ExpectedMetadataVersion) {
     throw "Quickstart jar uses praxis-metadata-starter $jarMetadataVersion, expected $ExpectedMetadataVersion. Repackage it against the declared Metadata version."
 }
-$localStarterJar = if ([string]::IsNullOrWhiteSpace($LocalStarterJarPath)) {
+$referenceStarterJar = if ([string]::IsNullOrWhiteSpace($ReferenceStarterJarPath)) {
     Join-Path $starterRoot "target\praxis-config-starter-$expectedStarterVersion.jar"
 } else {
-    $LocalStarterJarPath
+    $ReferenceStarterJarPath
 }
-if (-not (Test-Path -LiteralPath $localStarterJar -PathType Leaf)) {
-    throw "Local praxis-config-starter jar not found at '$localStarterJar'. Build the starter artifact before packaging the Quickstart."
+if (-not (Test-Path -LiteralPath $referenceStarterJar -PathType Leaf)) {
+    throw "Reference praxis-config-starter jar not found at '$referenceStarterJar'. Resolve the selected artifact before packaging the Quickstart."
 }
-$localStarterJar = (Resolve-Path -LiteralPath $localStarterJar).Path
-$localStarterJarSha256 = (Get-FileHash -LiteralPath $localStarterJar -Algorithm SHA256).Hash.ToLowerInvariant()
+$referenceStarterJar = (Resolve-Path -LiteralPath $referenceStarterJar).Path
+$referenceStarterJarSha256 = (Get-FileHash -LiteralPath $referenceStarterJar -Algorithm SHA256).Hash.ToLowerInvariant()
 $configStarterArtifactEvidence = [ordered]@{
     artifactId = "praxis-config-starter"
     version = $expectedStarterVersion
-    localJarSha256 = $localStarterJarSha256
+    source = $ConfigArtifactSource
+    referenceJarSha256 = $referenceStarterJarSha256
     quickstartNestedJarSha256 = [string] $jarStarterDependency.sha256
     quickstartEntry = [string] $jarStarterDependency.entry
-    byteIdentical = ($localStarterJarSha256 -eq [string] $jarStarterDependency.sha256)
+    byteIdentical = ($referenceStarterJarSha256 -eq [string] $jarStarterDependency.sha256)
 }
 
 [xml] $quickstartPom = Get-Content -LiteralPath (Join-Path $QuickstartRoot "pom.xml") -Raw
@@ -1275,9 +1278,9 @@ $apiCatalogEvidence = $null
 try {
     Write-Phase "Starting Page Builder agentic E2E gate. provider=$Provider validationMode=$ValidationMode backend=$backendUrl ui=$uiUrl artifactRoot=$artifactRoot."
     if (-not $configStarterArtifactEvidence.byteIdentical) {
-        throw "Quickstart nested praxis-config-starter jar does not match the current local checkout artifact. localSha256=$($configStarterArtifactEvidence.localJarSha256) nestedSha256=$($configStarterArtifactEvidence.quickstartNestedJarSha256) Reinstall the starter and clean-package the Quickstart."
+        throw "Quickstart nested praxis-config-starter jar does not match the selected reference artifact. source=$ConfigArtifactSource referenceSha256=$($configStarterArtifactEvidence.referenceJarSha256) nestedSha256=$($configStarterArtifactEvidence.quickstartNestedJarSha256) Resolve the selected artifact and clean-package the Quickstart."
     }
-    Write-Phase "Verified byte-identical praxis-config-starter artifact. sha256=$($configStarterArtifactEvidence.localJarSha256)"
+    Write-Phase "Verified byte-identical praxis-config-starter artifact. source=$ConfigArtifactSource sha256=$($configStarterArtifactEvidence.referenceJarSha256)"
     if ($null -ne (Get-ListenPid $BackendPort)) { throw "Port $BackendPort is already in use." }
     if ($null -ne (Get-ListenPid $UiPort)) { throw "Port $UiPort is already in use." }
 

@@ -81,7 +81,8 @@ try {
             configStarter = [ordered]@{
                 artifactId = "praxis-config-starter"
                 version = "1.0.0"
-                localJarSha256 = $configStarterJarSha256
+                source = "source-checkout"
+                referenceJarSha256 = $configStarterJarSha256
                 quickstartNestedJarSha256 = $configStarterJarSha256
                 quickstartEntry = "BOOT-INF/lib/praxis-config-starter-1.0.0.jar"
                 byteIdentical = $true
@@ -335,6 +336,18 @@ try {
         $failedClosed = $_.Exception.Message -match "Config starter byte identity attestation must be true"
     }
     if (-not $failedClosed) { throw "Exporter did not fail closed for byteIdentical=false." }
+
+    $invalidArtifactSourceOutput = Join-Path $root "invalid-artifact-source-published"
+    $invalidResult.dependencyAttestation.configStarter.byteIdentical = $true
+    $invalidResult.dependencyAttestation.configStarter.source = "local-cache"
+    $invalidResult | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -HttpArtifactRoot $httpArtifactRoot -OutputRoot $invalidArtifactSourceOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "Config starter artifact source is invalid"
+    }
+    if (-not $failedClosed) { throw "Exporter did not fail closed for an invalid Config artifact source." }
 
     $missingDependencyOutput = Join-Path $root "missing-dependency-published"
     $invalidResult.PSObject.Properties.Remove("dependencyAttestation")
