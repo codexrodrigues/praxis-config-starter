@@ -73,6 +73,28 @@ Backend:
 - `RagVectorStoreService.corpusReleaseStatus(...)` retorna `available=true` e `reconciled=true` para release publicada;
 - warnings vazios para release pronta.
 
+### Substituicao canonica da projecao vetorial
+
+O Domain Catalog mantem uma unica projecao vetorial ativa por
+`tenantId + environment + serviceKey + resourceKey + resourceType`. `releaseId`,
+`embeddingProfile`, hash e ids dos documentos identificam a materializacao, mas
+nao criam corpora ativos paralelos dentro desse escopo.
+
+A republicacao deve primeiro aceitar todos os batches desejados e somente entao
+remover, no mesmo escopo canonico, todo id que nao pertence ao conjunto publicado.
+Esse fechamento substitui releases anteriores, conteudo obsoleto do mesmo release
+e projecoes parciais de perfis de embedding anteriores. Um corpus desejado vazio
+remove integralmente a projecao antiga. Falha de batch nao pode executar a limpeza;
+falha da limpeza nao pode produzir estado `PUBLISHED`.
+
+Falhas operacionais precisam continuar sanitizadas, mas nao podem ser confundidas
+com falha do provedor: conflito de identidade fisica usa
+`vector_store_conflict`, indisponibilidade de storage usa
+`vector_store_unavailable`, outras falhas JDBC usam
+`vector_store_persistence`, e somente falhas transientes de storage ou do provedor
+sao retryable. O gate continua exigindo igualdade exata entre contagem esperada e
+contagem pesquisavel no `embeddingProfile` corrente.
+
 ## Smoke funcional recomendado
 
 Cenarios minimos:
@@ -98,6 +120,10 @@ Bloquear o corte se:
 - provider projection contiver segredo, API key ou ID externo persistido;
 - snapshot classpath do starter divergir do corpus canonico Angular sem atualizar o teste de contrato com o novo hash e contagens;
 - reconciliation do backend retornar `corpus-chunk-count-mismatch`;
+- houver documentos fisicos obsoletos do mesmo escopo, release ou perfil de
+  embedding que mantenham a contagem pesquisavel diferente da esperada;
+- uma falha de persistencia RAG aparecer como `unknown`, impedindo distinguir
+  conflito, indisponibilidade e erro transiente;
 - retrieval semantico normalizar query natural como token tecnico;
 - authoring pular `validate-plan`, `compile-patch`, preview ou apply.
 

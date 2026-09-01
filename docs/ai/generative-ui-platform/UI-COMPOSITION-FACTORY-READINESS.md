@@ -315,6 +315,20 @@ followed by five independent zero-retry, zero-corrective-prompt runs accepted by
 validator. A run with
 `--no-domain-catalog-rag` is diagnostic only and cannot certify this profile.
 
+The first hosted OpenAI replay after that resolver correction,
+[`33530191643`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33530191643),
+verified all immutable source refs, packaged the corrected Config JAR and passed HTTP/SSE plus Domain
+Catalog v2, but stopped before browser and full intent at the typed Domain Catalog RAG publication.
+The same prerequisite had already failed under Gemini in run `33529249434`, so this was not an OpenAI
+chat-model defect. Database reconciliation found `920` searchable OpenAI documents for `460` expected
+semantic items and `460` duplicated item identities: the publisher removed only other releases and
+left stale documents from the same logical release or a prior embedding projection. The canonical
+replacement now retains exactly the newly published document ids only after every batch succeeds,
+deletes the whole old projection when the desired corpus is empty and records storage conflicts,
+unavailability and persistence failures separately from provider failures. Neither failed run is
+functional certification; the next paid run is allowed only after this repair passes locally and on
+main, and remains a single zero-retry OpenAI canary.
+
 API Catalog readiness is scoped by the same canonical identity used by its persisted state:
 `tenant + environment + serviceKey + releaseId`. Vector replacement carries `serviceKey` and is
 serialized with the persisted revision lease, so concurrent hosts cannot make a superseded revision
