@@ -88,6 +88,15 @@ public class EmbeddingService {
     @Value("${praxis.ai.timeout-seconds:30}")
     private int timeoutSeconds;
 
+    @Value("${praxis.ai.retry.max-attempts:2}")
+    private int retryMaxAttempts;
+
+    @Value("${praxis.ai.retry.initial-delay-ms:500}")
+    private long retryInitialDelayMs;
+
+    @Value("${praxis.ai.retry.max-delay-ms:2000}")
+    private long retryMaxDelayMs;
+
     @Value("${praxis.ai.rag.embedding.gemini-embedding-2.retrieval-instructions.enabled:true}")
     private boolean geminiEmbedding2RetrievalInstructionsEnabled;
 
@@ -155,14 +164,16 @@ public class EmbeddingService {
             try {
                 List<List<Float>> vectors = new ArrayList<>(texts.size());
                 for (List<String> batch : partitionEmbeddingInputs(texts)) {
-                    vectors.addAll(embedAllWithOpenAi(
-                            batch,
-                            override,
-                            effectiveApiKey,
-                            resolveModel(override, openaiModel),
-                            overrideDimensions != null
-                                    ? overrideDimensions
-                                    : resolveDefaultDimensions(selected)));
+                    vectors.addAll(callEmbeddingProvider(
+                            PROVIDER_OPENAI,
+                            () -> embedAllWithOpenAi(
+                                    batch,
+                                    override,
+                                    effectiveApiKey,
+                                    resolveModel(override, openaiModel),
+                                    overrideDimensions != null
+                                            ? overrideDimensions
+                                            : resolveDefaultDimensions(PROVIDER_OPENAI))));
                 }
                 return vectors;
             } catch (Exception ex) {
@@ -178,7 +189,9 @@ public class EmbeddingService {
             try {
                 List<List<Float>> vectors = new ArrayList<>(texts.size());
                 for (List<String> batch : partitionEmbeddingInputs(texts)) {
-                    vectors.addAll(embedAllWithGoogleGenAi(batch, override, effectiveApiKey));
+                    vectors.addAll(callEmbeddingProvider(
+                            PROVIDER_GEMINI,
+                            () -> embedAllWithGoogleGenAi(batch, override, effectiveApiKey)));
                 }
                 return vectors;
             } catch (Exception ex) {
@@ -308,7 +321,9 @@ public class EmbeddingService {
                         "spring.ai.google.genai.embedding.api-key is required when spring.ai.embedding.provider=gemini.");
             }
             try {
-                return embedWithGoogleGenAi(text, override, effectiveApiKey);
+                return callEmbeddingProvider(
+                        PROVIDER_GEMINI,
+                        () -> embedWithGoogleGenAi(text, override, effectiveApiKey));
             } catch (Exception e) {
                 throw classifyEmbeddingFailure(PROVIDER_GEMINI, e);
             }
@@ -322,13 +337,98 @@ public class EmbeddingService {
             try {
                 String effectiveModel = resolveModel(override, openaiModel);
                 Integer effectiveDimensions = overrideDimensions != null ? overrideDimensions : resolveDefaultDimensions(selected);
-                return embedWithOpenAi(text, override, effectiveApiKey, effectiveModel, effectiveDimensions);
+                return callEmbeddingProvider(
+                        PROVIDER_OPENAI,
+                        () -> embedWithOpenAi(
+                                text,
+                                override,
+                                effectiveApiKey,
+                                effectiveModel,
+                                effectiveDimensions));
             } catch (Exception e) {
                 throw classifyEmbeddingFailure(PROVIDER_OPENAI, e);
             }
         }
         throw new IllegalStateException(
                 "Unsupported spring.ai.embedding.provider '" + provider + "'. Supported values: gemini, openai, mock.");
+    }
+
+    private <T> T callEmbeddingProvider(String providerName, EmbeddingProviderCall<T> call) {
+        int maxAttempts = Math.max(1, retryMaxAttempts);
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return call.execute();
+            } catch (Exception failure) {
+                AiProviderCallException classified = classifyEmbeddingFailure(providerName, failure);
+                if (attempt >= maxAttempts || !isRetryableEmbeddingFailure(classified)) {
+                    throw classified;
+                }
+                long delayMs = retryDelayMs(attempt, classified);
+                if (delayMs < 0L) {
+                    throw classified;
+                }
+                log.warn(
+                        "Retrying embedding provider call after transient failure: provider={}, kind={}, status={}, attempt={}/{}, delayMs={}",
+                        providerName,
+                        classified.getKind(),
+                        classified.getStatusCode() == null ? "none" : classified.getStatusCode(),
+                        attempt,
+                        maxAttempts,
+                        delayMs);
+                if (!sleepBeforeEmbeddingRetry(delayMs)) {
+                    throw classified;
+                }
+            }
+        }
+        throw new IllegalStateException("Embedding provider retry loop terminated unexpectedly.");
+    }
+
+    private boolean isRetryableEmbeddingFailure(AiProviderCallException failure) {
+        return switch (failure.getKind()) {
+            case TRANSPORT, TIMEOUT, RATE_LIMIT, CAPACITY, SERVER_ERROR -> true;
+            case QUOTA_EXHAUSTED, AUTH, CLIENT_ERROR, UNKNOWN -> false;
+        };
+    }
+
+    private long retryDelayMs(int completedAttempt, AiProviderCallException failure) {
+        long initialDelayMs = Math.max(0L, retryInitialDelayMs);
+        long maxDelayMs = Math.max(0L, retryMaxDelayMs);
+        long exponent = Math.min(30L, Math.max(0L, completedAttempt - 1L));
+        long backoffMs;
+        try {
+            backoffMs = Math.multiplyExact(initialDelayMs, 1L << exponent);
+        } catch (ArithmeticException overflow) {
+            backoffMs = Long.MAX_VALUE;
+        }
+        long boundedBackoffMs = Math.min(maxDelayMs, backoffMs);
+        if (failure.getRetryAfter() == null) {
+            return boundedBackoffMs;
+        }
+        long providerDelayMs = Math.max(0L, Duration.between(Instant.now(), failure.getRetryAfter()).toMillis());
+        if (providerDelayMs > maxDelayMs) {
+            log.warn(
+                    "Embedding provider requested retry beyond the configured delay budget: provider={}, kind={}, status={}, retryAfterMs={}, maxDelayMs={}",
+                    failure.getProvider(),
+                    failure.getKind(),
+                    failure.getStatusCode() == null ? "none" : failure.getStatusCode(),
+                    providerDelayMs,
+                    maxDelayMs);
+            return -1L;
+        }
+        return Math.max(boundedBackoffMs, providerDelayMs);
+    }
+
+    private boolean sleepBeforeEmbeddingRetry(long delayMs) {
+        if (delayMs <= 0L) {
+            return true;
+        }
+        try {
+            Thread.sleep(delayMs);
+            return true;
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     private void logEmbeddingConfigIfNeeded() {
@@ -501,6 +601,11 @@ public class EmbeddingService {
             String apiKey,
             String model,
             Integer dimensions) {}
+
+    @FunctionalInterface
+    private interface EmbeddingProviderCall<T> {
+        T execute() throws Exception;
+    }
 
     private enum RagEmbeddingPurpose {
         DOCUMENT,

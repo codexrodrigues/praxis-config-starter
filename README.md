@@ -289,7 +289,7 @@ praxis.ai.stream.auth.token-secret=${PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET}
 
 Use a production-grade secret in deployed environments and rotate it through the host's normal secret process.
 
-## Authoring Cache Configuration
+## Authoring and Indexing Runtime Configuration
 
 Agentic authoring keeps bounded host-local caches only for performance. These caches must not be treated as a
 source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted turn events remain canonical.
@@ -304,6 +304,9 @@ source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted t
 | `praxis.ai.authoring.consultative.api-catalog.compact-cache-ttl-ms` | `60000` | TTL for compact API catalog projections used during consultative answers. Use `0` to force fresh projection per request. |
 | `praxis.ai.authoring.consultative.api-catalog.compact-cache-max-entries` | `256` | Maximum compact projection entries retained per starter instance. Older entries are evicted before expired entries can accumulate unbounded. |
 | `praxis.ai.authoring.consultative.api-catalog.api-metadata-cache-ttl-ms` | `60000` | TTL for `api_metadata` lookups used by the consultative catalog projection. Use `0` when validating metadata ingestion changes interactively. |
+| `praxis.ai.retry.max-attempts` | `2` | Maximum provider attempts for one canonical embedding call, including the initial call. Only transport, timeout, rate-limit, capacity and server failures are retried; quota, authentication, client and unknown failures remain fail-closed. |
+| `praxis.ai.retry.initial-delay-ms` | `500` | Initial bounded delay before retrying a transient embedding failure. Later attempts use exponential backoff. |
+| `praxis.ai.retry.max-delay-ms` | `2000` | Maximum retry delay budget for embeddings. A provider `Retry-After` beyond this budget is not ignored or shortened: the call fails and the persisted catalog can be recovered through the canonical reconcile operation. |
 | `praxis.api-metadata.rag-publication.enabled` | `true` | Enables publication of derived API metadata RAG documents by the managed indexing worker. Disable only when the structured `api_metadata` corpus must persist without vector indexing. |
 | `praxis.api-metadata.indexing.worker-count` | `1` | Number of managed API Catalog indexing workers. Work is isolated and coalesced by tenant, environment, service and release. |
 | `praxis.api-metadata.indexing.queue-capacity` | `32` | Bounded number of distinct release scopes waiting for indexing. Saturation is persisted as `FAILED` with `INDEXING_QUEUE_SATURATED`. |
