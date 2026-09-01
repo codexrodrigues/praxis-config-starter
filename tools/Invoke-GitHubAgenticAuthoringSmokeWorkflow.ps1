@@ -4,15 +4,15 @@ param(
     [string] $Ref = "main",
     [ValidateSet("openai", "gemini")]
     [string] $Provider = "openai",
-    [string] $QuickstartRef = "cdb9ef3ae29155ec676149fec21d1147979b8211",
-    [string] $MetadataRef = "83e32d40e8a6338953580616c762f4722fa3b4f6",
-    [string] $UiRef = "2882822b4b6202aa94665d2ba5769ee369fe559b",
+    [string] $QuickstartRef = "b7d374a17cd4f5fc4aa31a9fd8511764772a6c75",
+    [string] $MetadataRef = "8f7c52a38bef3937afd030126f0ed6b0bdd49f88",
+    [string] $UiRef = "6469c52f88fa1d42c3633d28b1232bbb2a8909c2",
     [ValidateSet("source-checkout", "maven-central")]
     [string] $ConfigArtifactSource = "source-checkout",
     [int] $QuickstartStartupTimeoutSeconds = 180,
     [ValidateSet("none", "http-sse", "page-builder", "llm-compliance")]
     [string] $PaidGateLane = "none",
-    [ValidateSet("smoke", "single-table", "crud-simple", "master-detail", "related-resource", "tabs-nested", "full")]
+    [ValidateSet("smoke", "single-table", "crud-simple", "master-detail", "related-resource", "tabs-nested", "business-command", "full")]
     [string] $PageBuilderE2EMode = "smoke",
     [int] $PageBuilderE2ETimeoutMinutes = 30,
     [string] $Token = "",

@@ -143,10 +143,38 @@ test('dispatch helper mirrors the canonical paid lanes and matrix modes', () => 
   );
   assert.match(
     dispatchRunnerSource,
-    /\[ValidateSet\("smoke", "single-table", "crud-simple", "master-detail", "related-resource", "tabs-nested", "full"\)\]/,
+    /\[ValidateSet\("smoke", "single-table", "crud-simple", "master-detail", "related-resource", "tabs-nested", "business-command", "full"\)\]/,
   );
   assert.match(dispatchRunnerSource, /paid_gate_lane = \$PaidGateLane/);
   assert.doesNotMatch(dispatchRunnerSource, /RunPageBuilderFullE2E/);
+});
+
+test('keeps immutable downstream defaults aligned between workflow and dispatch helper', () => {
+  const refs = [
+    ['quickstart_ref', 'QuickstartRef'],
+    ['metadata_ref', 'MetadataRef'],
+    ['ui_ref', 'UiRef'],
+  ];
+
+  for (const [workflowName, helperName] of refs) {
+    const workflowBlock = workflowSource.match(
+      new RegExp(`\\n      ${workflowName}:[\\s\\S]*?\\n        type: string`),
+    );
+    const helperDefault = dispatchRunnerSource.match(
+      new RegExp(`\\[string\\] \\$${helperName} = "([0-9a-f]{40})"`),
+    );
+
+    assert.ok(workflowBlock, `${workflowName} workflow input must exist`);
+    assert.ok(helperDefault, `${helperName} helper default must be an immutable SHA`);
+
+    const workflowDefault = workflowBlock[0].match(/\n        default: ([0-9a-f]{40})\n/);
+    assert.ok(workflowDefault, `${workflowName} workflow default must be an immutable SHA`);
+    assert.equal(
+      helperDefault[1],
+      workflowDefault[1],
+      `${helperName} must match the ${workflowName} workflow default`,
+    );
+  }
 });
 
 test('materializes focused catalog scope from the canonical gate profile', () => {

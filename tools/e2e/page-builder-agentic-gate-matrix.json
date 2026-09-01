@@ -80,6 +80,12 @@
       ]
     },
     {
+      "scenarioId": "business-command-control",
+      "testTitles": [
+        "Business command confirma, rejeita versão obsoleta e materializa lifecycle governado no primeiro passe"
+      ]
+    },
+    {
       "scenarioId": "single-table-control",
       "testTitles": [
         "single-table control persiste, recarrega e renderiza dados reais no primeiro passe"
@@ -122,6 +128,27 @@
           "command.duplicate.http-409",
           "resource.refresh-observed",
           "persistence.reload-rendered"
+        ]
+      },
+      {
+        "scenarioId": "business-command-control",
+        "archetype": "business-command",
+        "testTitle": "Business command confirma, rejeita versão obsoleta e materializa lifecycle governado no primeiro passe",
+        "attachmentName": "business-command-first-pass-receipt.json",
+        "requiredFunctionalAssertions": [
+          "discovery.actions-capabilities.http-200",
+          "command.contract-form-confirmation-version",
+          "command.confirmation-cancelled",
+          "command.cancelled-not-sent",
+          "command.stale-version.http-412",
+          "command.governed-error-visible",
+          "command.confirmation-accepted",
+          "command.governed-headers-observed",
+          "command.execute.http-200",
+          "resource.refresh-observed",
+          "resource.read-after-write-observed",
+          "resource.availability-transition-observed",
+          "persistence.reload-equivalent"
         ]
       },
       {
@@ -323,6 +350,28 @@
         "Tabs nested preserva a seleção entre abas e recarrega detalhes no primeiro passe"
       ]
     },
+    "business-command": {
+      "description": "Focal live LLM proof for a governed FORM business command with submit-time confirmation, optimistic concurrency error, canonical headers, refresh, read-after-write and availability transition, without Playwright retries.",
+      "retries": 0,
+      "humanTurnLimit": 1,
+      "domainCatalogRagRequired": true,
+      "domainCatalogResourceKey": "human-resources.funcionarios",
+      "apiCatalogGroup": "human-resources",
+      "apiCatalogPathPrefixes": [
+        "/api/human-resources/funcionarios"
+      ],
+      "scenarios": [
+        "critical-interception-guard",
+        "business-command-control"
+      ],
+      "expectedDiscovered": 2,
+      "minimumExecuted": 2,
+      "expectedSkipped": 0,
+      "requiredPassedTests": [
+        "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "Business command confirma, rejeita versão obsoleta e materializa lifecycle governado no primeiro passe"
+      ]
+    },
     "full": {
       "description": "Deliberate live LLM matrix with all non-mocked browser scenarios.",
       "scenarios": [
@@ -338,11 +387,12 @@
         "related-resource-control",
         "tabs-nested-workspace-control",
         "live-resource-workspace-command",
+        "business-command-control",
         "single-table-control",
         "table-human-refinement"
       ],
-      "expectedDiscovered": 15,
-      "minimumExecuted": 15,
+      "expectedDiscovered": 16,
+      "minimumExecuted": 16,
       "expectedSkipped": 0,
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
@@ -358,6 +408,7 @@
         "Parent-child materializa Related Resource Outlet e isola a equipe pela missão no primeiro passe",
         "Tabs nested preserva a seleção entre abas e recarrega detalhes no primeiro passe",
         "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
+        "Business command confirma, rejeita versão obsoleta e materializa lifecycle governado no primeiro passe",
         "single-table control persiste, recarrega e renderiza dados reais no primeiro passe",
         "table-human refinement preserva colunas entre decisões semânticas e DOM"
       ]

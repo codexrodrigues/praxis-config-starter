@@ -24,7 +24,7 @@ on:
       quickstart_ref:
         description: 'Immutable praxis-api-quickstart commit SHA to test against.'
         required: true
-        default: 39b75011f29b5eeb942b923b5af14df4fcf1af3a
+        default: b7d374a17cd4f5fc4aa31a9fd8511764772a6c75
         type: string
       config_artifact_source:
         description: 'Config artifact exercised by Quickstart: current source checkout or the exact Maven Central coordinate pinned by Quickstart.'
@@ -37,12 +37,12 @@ on:
       metadata_ref:
         description: 'Immutable praxis-metadata-starter commit SHA to install locally.'
         required: true
-        default: 800ccb62a4a9881a359d8d7dfa5724adfcc28035
+        default: 8f7c52a38bef3937afd030126f0ed6b0bdd49f88
         type: string
       ui_ref:
         description: 'Immutable praxis-ui-angular commit SHA used by the page-builder E2E gate.'
         required: true
-        default: 8439be8735b3e6f26a6b51a8babf96827059c2a8
+        default: 6469c52f88fa1d42c3633d28b1232bbb2a8909c2
         type: string
       paid_gate_lane:
         description: 'Exclusive paid-provider lane. Keep none for deterministic validation; select exactly one live gate deliberately.'
@@ -66,6 +66,7 @@ on:
           - master-detail
           - related-resource
           - tabs-nested
+          - business-command
           - full
       page_builder_e2e_timeout_minutes:
         description: 'Timeout for the Page Builder Playwright gate step.'

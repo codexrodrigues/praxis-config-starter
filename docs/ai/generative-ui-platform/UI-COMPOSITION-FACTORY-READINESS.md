@@ -5,6 +5,10 @@ the published Config artifact; canonical single-table creation and semantic refi
 five consecutive local production-like runs; canonical CRUD-simple certified in five consecutive
 local production-like runs with zero retries; canonical Tabs/nested workspace and related-resource
 certified in five consecutive hosted production-like runs with zero retries, 2026-09-01.
+The independent `business-command` runtime correction, browser receipt and focal gate profile are
+implemented under [praxis-ui-angular#482](https://github.com/codexrodrigues/praxis-ui-angular/issues/482)
+and [praxis-config-starter#428](https://github.com/codexrodrigues/praxis-config-starter/issues/428),
+but remain uncertified until the published canary and five-run stability series pass.
 
 ## Decision
 
@@ -247,6 +251,41 @@ once as master-detail in #372 even though its combined operational journey also 
 command; business-command retains its own portfolio slot and requires independent evidence. The
 complete production-like matrix and that remaining archetype remain release work. See
 [the delta audit](RESOURCE-BACKED-WORKSPACE-DELTA-AUDIT.md) for the reuse classification and residuals.
+
+### P1 — Independent business-command certification
+
+Issues: [#428](https://github.com/codexrodrigues/praxis-config-starter/issues/428) and
+[praxis-ui-angular#482](https://github.com/codexrodrigues/praxis-ui-angular/issues/482).
+
+The inventory classifies this gap as `ja-suportado-mal-nomeado-ou-mal-materializado`. Metadata and
+the Quickstart employee lifecycle already publish a complete command decision: item scope,
+`FORM`, high risk, mandatory confirmation, request schema, idempotency, correlation, optimistic
+version through `If-Match`, refresh and the post-transition action availability. Dynamic Form
+already owns submit confirmation, success feedback and normalized backend errors. No endpoint,
+DTO, registry, page DSL or public Angular contract is missing.
+
+The runtime correction projects the existing interaction decision through
+`ResourceActionOpenAdapterService` into `config.messages.confirmations.submit` and the existing
+`successMessage` into Dynamic Form feedback. Table no longer confirms a collection `FORM` before
+the form is opened; the single confirmation now occurs after data entry and immediately before
+HTTP execution. Non-form confirmation behavior remains unchanged.
+
+The additive focal profile `business-command` is scoped to
+`human-resources.funcionarios`, the `human-resources` API catalog group and the canonical employee
+path, with Domain Catalog RAG required and Playwright retries disabled. Its independent browser
+scenario creates a real active employee and proves, in one authoring turn:
+
+- actions/capabilities and request-schema discovery;
+- canceling confirmation without issuing the command;
+- a visible normalized `412` error after a controlled stale-version transition;
+- accepted confirmation with `Idempotency-Key`, `X-Correlation-ID` and `If-Match`;
+- command `200`, Table refresh, read-after-write and `deactivate deny` / `reactivate allow`;
+- equivalent persisted/reloaded composition and a sanitized receipt distinct from master-detail.
+
+The matrix and portable validator reject a receipt that omits any of those assertions. This closes
+the implementation path only. The archetype remains outside the certified portfolio count until a
+published-artifact canary and five consecutive hosted OpenAI runs pass with zero retry under one
+immutable coordinate.
 
 The decision must describe semantic intent, archetype, resources, surfaces, actions, capabilities, components, slots, bindings and transactional lifecycle. It should materialize both compact authoring input and portable runtime output without leaking Angular implementation detail into Java.
 

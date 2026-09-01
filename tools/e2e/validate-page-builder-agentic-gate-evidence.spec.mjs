@@ -16,6 +16,7 @@ const profile = resolveGateProfile(loadGateMatrix(), 'single-table');
 const crudProfile = resolveGateProfile(loadGateMatrix(), 'crud-simple');
 const masterDetailProfile = resolveGateProfile(loadGateMatrix(), 'master-detail');
 const relatedProfile = resolveGateProfile(loadGateMatrix(), 'related-resource');
+const businessCommandProfile = resolveGateProfile(loadGateMatrix(), 'business-command');
 const hash = 'a'.repeat(64);
 
 function jsonAttachment(name, value) {
@@ -179,6 +180,29 @@ function masterDetailReceipt() {
   };
 }
 
+function businessCommandReceipt() {
+  return {
+    ...receipt(),
+    scenarioId: 'business-command-control',
+    archetype: 'business-command',
+    functionalAssertions: [
+      'discovery.actions-capabilities.http-200',
+      'command.contract-form-confirmation-version',
+      'command.confirmation-cancelled',
+      'command.cancelled-not-sent',
+      'command.stale-version.http-412',
+      'command.governed-error-visible',
+      'command.confirmation-accepted',
+      'command.governed-headers-observed',
+      'command.execute.http-200',
+      'resource.refresh-observed',
+      'resource.read-after-write-observed',
+      'resource.availability-transition-observed',
+      'persistence.reload-equivalent',
+    ],
+  };
+}
+
 function result(attachments = []) {
   return {
     status: 'passed',
@@ -305,6 +329,34 @@ function masterDetailReport() {
     errors: [],
     stats: {
       startTime: '2026-08-31T00:00:00.000Z',
+      duration: 100,
+      expected: 2,
+      skipped: 0,
+      unexpected: 0,
+      flaky: 0,
+    },
+  };
+}
+
+function businessCommandReport() {
+  return {
+    config: {},
+    suites: [{
+      title: 'business-command-focal',
+      file: 'business-command-focal.spec.ts',
+      column: 1,
+      line: 1,
+      specs: businessCommandProfile.requiredPassedTests.map((title) =>
+        title.startsWith('Business command')
+          ? spec(title, [jsonAttachment(
+            'business-command-first-pass-receipt.json',
+            businessCommandReceipt(),
+          )])
+          : spec(title)),
+    }],
+    errors: [],
+    stats: {
+      startTime: '2026-09-01T00:00:00.000Z',
       duration: 100,
       expected: 2,
       skipped: 0,
@@ -479,6 +531,18 @@ test('accepts a complete zero-retry related-resource report', () => {
   assert.equal(summary.receipts[0].firstPassFunctional, true);
 });
 
+test('accepts an independent zero-retry business-command report', () => {
+  const summary = validateGateReport(
+    businessCommandReport(),
+    '/tmp/business-command-report.json',
+    businessCommandProfile,
+  );
+  assert.equal(summary.discovered, 2);
+  assert.equal(summary.retries, 0);
+  assert.equal(summary.receipts[0].scenarioId, 'business-command-control');
+  assert.equal(summary.receipts[0].firstPassFunctional, true);
+});
+
 test('rejects CRUD evidence that omits one functional operation', () => {
   const value = crudReport();
   mutateAttachment(value, 'CRUD simples', 'crud-simple-first-pass-receipt.json', (body) => {
@@ -514,6 +578,28 @@ test('rejects related-resource evidence that only exposes child actions without 
   });
   assert.throws(
     () => validateGateReport(value, '/tmp/related-resource-report.json', relatedProfile),
+    /functional assertions diverge/,
+  );
+});
+
+test('rejects business-command evidence that does not prove cancellation without HTTP execution', () => {
+  const value = businessCommandReport();
+  mutateAttachment(
+    value,
+    'Business command',
+    'business-command-first-pass-receipt.json',
+    (body) => {
+      body.functionalAssertions = body.functionalAssertions.filter(
+        (assertion) => assertion !== 'command.cancelled-not-sent',
+      );
+    },
+  );
+  assert.throws(
+    () => validateGateReport(
+      value,
+      '/tmp/business-command-report.json',
+      businessCommandProfile,
+    ),
     /functional assertions diverge/,
   );
 });
