@@ -77,6 +77,118 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void collapsesVerifiedSurfaceBindingsByCanonicalResourceDuringFullPageResolution() {
+        AgenticAuthoringCandidate missionList = governedPageCandidate(
+                "/api/operations/missoes/filter/cursor",
+                "post",
+                1.0d);
+        AgenticAuthoringCandidate missionDetail = governedPageCandidate(
+                "/api/operations/missoes/{id}",
+                "get",
+                0.99d);
+        List<AgenticAuthoringCandidate> surfaceBindings = List.of(missionList, missionDetail);
+        AgenticAuthoringIntentResolutionRequest request = requestWithContextHints(
+                "Crie uma página operacional governada para missões.",
+                resourceDiscoveryContext(
+                        "page",
+                        surfaceBindings,
+                        new AgenticAuthoringResourceSearchFocus(
+                                "operations.missoes",
+                                List.of("seleção", "detalhes"),
+                                "workspace operacional",
+                                "",
+                                "foco semântico authorado pela LLM")));
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "A full semantic pass is still required for the requested page.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                true,
+                objectMapper.createObjectNode()
+                        .put("appliesToDataSelection", false)
+                        .set("filters", objectMapper.createArrayNode()),
+                "page",
+                "",
+                "");
+
+        AgenticAuthoringCandidate selected = ReflectionTestUtils.invokeMethod(
+                service,
+                "singleGovernedArtifactCandidate",
+                request,
+                "page",
+                surfaceBindings,
+                orientation);
+
+        assertThat(selected).isEqualTo(missionList);
+        assertThat(selected.resourcePath()).isEqualTo("/api/operations/missoes");
+    }
+
+    @Test
+    void confirmsFullPassResourceFocusAgainstTheStrongestSameResourceEvidence() {
+        AgenticAuthoringCandidate pendingProjection = candidateWithEvidence(
+                "/api/operations/missoes",
+                0.91d,
+                List.of("operations", "missoes"));
+        AgenticAuthoringCandidate governedBinding = governedPageCandidate(
+                "/api/operations/missoes/filter/cursor",
+                "post",
+                1.0d);
+        List<AgenticAuthoringCandidate> candidates = List.of(pendingProjection, governedBinding);
+        AgenticAuthoringIntentResolutionRequest request = requestWithContextHints(
+                "Crie uma página operacional governada para missões.",
+                resourceDiscoveryContext(
+                        "page",
+                        candidates,
+                        new AgenticAuthoringResourceSearchFocus(
+                                "operations.missoes",
+                                List.of("seleção", "detalhes"),
+                                "workspace em abas",
+                                "",
+                                "foco semântico authorado pela LLM")));
+        AgenticAuthoringLlmIntentResolution resolution = new AgenticAuthoringLlmIntentResolution(
+                true,
+                "create",
+                "page",
+                "create_artifact",
+                "/api/operations/missoes",
+                null,
+                "none",
+                "Vou preparar a composição para revisão.",
+                List.of(),
+                List.of(),
+                List.of(),
+                null,
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "mission tabs workspace",
+                        "tabs_layout",
+                        "praxis-tabs",
+                        List.of(),
+                        false,
+                        true,
+                        "llm-full-intent"),
+                false,
+                "component_authoring",
+                objectMapper.createObjectNode()
+                        .put("appliesToDataSelection", false)
+                        .set("filters", objectMapper.createArrayNode()),
+                List.of());
+
+        AgenticAuthoringLlmIntentResolution reconciled = ReflectionTestUtils.invokeMethod(
+                service,
+                "failClosedForUnconfirmedAiAuthoredResourceSelection",
+                request,
+                null,
+                candidates,
+                resolution);
+
+        assertThat(reconciled).isSameAs(resolution);
+        assertThat(reconciled.warnings())
+                .doesNotContain("llm-resource-selection-unconfirmed-by-ai-authored-focus");
+    }
+
+    @Test
     void constrainedCompactPageDecisionPreservesTheExistingNoSecondPassPolicy() {
         ObjectNode constraints = objectMapper.createObjectNode();
         constraints.put("appliesToDataSelection", true);
@@ -11382,6 +11494,113 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void canonicalTabsPageUsesVerifiedGovernedResourceWithoutFullProviderPass() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate missionCandidate = new AgenticAuthoringCandidate(
+                "/api/operations/missoes",
+                "post",
+                "/schemas/filtered?path=/api/operations/missoes/filter/cursor&operation=post&schemaType=response",
+                "/api/operations/missoes/filter/cursor",
+                "POST",
+                1.0d,
+                "Canonical mission binding verified against schema and resource capabilities.",
+                List.of(
+                        "tool-search-api-resources",
+                        "domain-binding",
+                        "schema-grounding-verified",
+                        "resource-capabilities-verified",
+                        "semantic-role:operational-resource"));
+        AgenticAuthoringCandidate missionDetailBinding = new AgenticAuthoringCandidate(
+                "/api/operations/missoes",
+                "get",
+                "/schemas/filtered?path=/api/operations/missoes/{id}&operation=get&schemaType=response",
+                "/api/operations/missoes/{id}",
+                "GET",
+                1.0d,
+                "Canonical mission detail binding verified against schema and resource capabilities.",
+                List.of(
+                        "tool-search-api-resources",
+                        "domain-binding",
+                        "schema-grounding-verified",
+                        "resource-capabilities-verified",
+                        "semantic-role:operational-resource"));
+        AgenticAuthoringCandidate missionListBinding = new AgenticAuthoringCandidate(
+                "/api/operations/missoes",
+                "get",
+                "/schemas/filtered?path=/api/operations/missoes&operation=get&schemaType=response",
+                "/api/operations/missoes",
+                "GET",
+                1.0d,
+                "Canonical mission list binding verified against schema and resource capabilities.",
+                List.of(
+                        "tool-search-api-resources",
+                        "domain-binding",
+                        "schema-grounding-verified",
+                        "resource-capabilities-verified",
+                        "semantic-role:operational-resource"));
+        List<AgenticAuthoringCandidate> missionSurfaceBindings =
+                List.of(missionCandidate, missionDetailBinding, missionListBinding);
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(missionSurfaceBindings);
+        AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", false);
+        constraints.putArray("filters");
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "Tabs already preserve the requested governed collection and detail composition.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                true,
+                constraints,
+                "page",
+                "praxis-tabs",
+                "tabs_layout");
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(
+                requestWithContextHints(
+                        "Crie uma página operacional de missões com tabela e detalhes em abas.",
+                        "deterministic-smoke-disabled",
+                        resourceDiscoveryContext(
+                                "page",
+                                missionSurfaceBindings,
+                                new AgenticAuthoringResourceSearchFocus(
+                                        "operations.missoes",
+                                        List.of("seleção", "detalhes"),
+                                        "tabs com coleção e detalhe sincronizados",
+                                        "",
+                                        "foco semântico authorado pela LLM"))),
+                "tenant",
+                "user",
+                "local",
+                orientation);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.selectedCandidate()).isEqualTo(missionCandidate);
+        assertThat(result.visualizationDecision().layoutKind()).isEqualTo("tabs_layout");
+        assertThat(result.visualizationDecision().primaryComponent()).isEqualTo("praxis-tabs");
+        assertThat(result.warnings()).contains(
+                "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                "llm-pre-intent-resource-discovery-used");
+        Mockito.verifyNoInteractions(llmIntentResolver);
+    }
+
+    @Test
     void canonicalSingleTableIgnoresRedundantFullPassFlagWhenSemanticCompositionIsComplete() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
@@ -14791,7 +15010,29 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 matchedTerms,
                                 "tenant",
                                 "local",
-	                                "release"))));
+                                "release"))));
+    }
+
+    private AgenticAuthoringCandidate governedPageCandidate(
+            String submitUrl,
+            String operation,
+            double score) {
+        String resourcePath = "/api/operations/missoes";
+        return new AgenticAuthoringCandidate(
+                resourcePath,
+                operation,
+                "/schemas/filtered?path=" + submitUrl + "&operation=" + operation + "&schemaType=response",
+                submitUrl,
+                operation,
+                score,
+                "Canonical mission surface binding.",
+                List.of(
+                        "tool-search-api-resources",
+                        "domain-binding",
+                        "schema-grounding-verified",
+                        "resource-capabilities-verified",
+                        "semantic-role:operational-resource"),
+                AgenticAuthoringEvidenceBundle.of("domain_binding", List.of()));
     }
 
     private AgenticAuthoringCandidate richCandidate(

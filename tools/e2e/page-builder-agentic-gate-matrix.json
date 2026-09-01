@@ -190,6 +190,7 @@
           "runtime.tab-switch-context-preserved",
           "runtime.second-selection-replaces-detail",
           "runtime.narrow-viewport-functional",
+          "runtime.post-reload-selection-details-loaded",
           "persistence.reload-equivalent"
         ]
       }

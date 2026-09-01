@@ -47,6 +47,18 @@ test('runs the portable evidence validator and publishes semantic requirements',
   assert.doesNotMatch(runnerSource, /diagnosticEvidence = if \(/);
 });
 
+test('compares the packaged Quickstart with the workflow-declared Config version', () => {
+  assert.match(runnerSource, /\[string\]\s+\$ExpectedConfigVersion\s*=\s*""/);
+  assert.match(
+    runnerSource,
+    /\$expectedStarterVersion\s*=\s*if \(\[string\]::IsNullOrWhiteSpace\(\$ExpectedConfigVersion\)\)/,
+  );
+  assert.match(
+    workflowSource,
+    /-ExpectedConfigVersion "\$env:STARTER_VERSION"/,
+  );
+});
+
 test('exposes every canonical matrix mode through workflow dispatch', () => {
   const inputBlock = workflowSource.match(
     /page_builder_e2e_mode:[\s\S]*?page_builder_e2e_timeout_minutes:/,

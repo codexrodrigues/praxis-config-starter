@@ -2958,6 +2958,8 @@ public class AgenticAuthoringIntentResolverService {
                     && "praxis-table".equals(semanticOrientation.primaryComponent());
             case "resource-crud" -> "page".equals(semanticOrientation.artifactKind())
                     && "praxis-crud".equals(semanticOrientation.primaryComponent());
+            case "tabs_layout" -> "page".equals(semanticOrientation.artifactKind())
+                    && "praxis-tabs".equals(semanticOrientation.primaryComponent());
             default -> false;
         };
     }
@@ -3151,7 +3153,7 @@ public class AgenticAuthoringIntentResolverService {
                 .stream()
                 .filter(Objects::nonNull)
                 .filter(candidate -> selectedPath.equals(normalizePath(candidate.resourcePath())))
-                .findFirst()
+                .reduce(this::preferredCandidateForSameResource)
                 .orElse(null);
         if (!hasUnconfirmedAiAuthoredResourceFocus(request, selectedCandidate)) {
             return resolution;
@@ -3338,8 +3340,8 @@ public class AgenticAuthoringIntentResolverService {
             String artifactKind,
             List<AgenticAuthoringCandidate> candidates,
             AgenticAuthoringPreIntentToolPlan semanticOrientation) {
-        boolean compactCrudPage = isCompleteCompactCrudPage(semanticOrientation);
-        if (!(List.of("form", "table", "dashboard").contains(artifactKind) || compactCrudPage)
+        boolean resourcePage = "page".equals(artifactKind);
+        if (!(List.of("form", "table", "dashboard").contains(artifactKind) || resourcePage)
                 || request == null
                 || candidates == null
                 || candidates.isEmpty()
@@ -3354,11 +3356,27 @@ public class AgenticAuthoringIntentResolverService {
                         || hasVerifiedOperationalBindingEvidence(candidate))
                 .filter(candidate -> !isDerivedProjectionCandidate(candidate))
                 .filter(candidate -> isCanonicalArtifactEndpointCandidate(artifactKind, candidate)
-                        || compactCrudPage && isCanonicalCompactCrudResourceCandidate(candidate))
+                        || resourcePage && isCanonicalCompactResourceCandidate(candidate))
                 .filter(this::hasTrustedSelectionEvidence)
                 .filter(candidate -> !isWeakLexicalCandidate(candidate))
                 .toList();
+        if (resourcePage) {
+            Map<String, List<AgenticAuthoringCandidate>> candidatesByResource = eligible.stream()
+                    .collect(Collectors.groupingBy(candidate -> normalizePath(candidate.resourcePath())));
+            if (candidatesByResource.size() != 1) {
+                return null;
+            }
+            return candidatesByResource.values().iterator().next().stream()
+                    .sorted(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed())
+                    .findFirst()
+                    .orElse(null);
+        }
         return eligible.size() == 1 ? eligible.get(0) : null;
+    }
+
+    private boolean isCompleteCompactResourcePage(AgenticAuthoringPreIntentToolPlan semanticOrientation) {
+        return hasCompleteCompactResourceComposition(semanticOrientation)
+                && "page".equals(semanticOrientation.artifactKind());
     }
 
     private boolean isCompleteCompactCrudPage(AgenticAuthoringPreIntentToolPlan semanticOrientation) {
@@ -3368,7 +3386,7 @@ public class AgenticAuthoringIntentResolverService {
                 && "resource-crud".equals(semanticOrientation.layoutKind());
     }
 
-    private boolean isCanonicalCompactCrudResourceCandidate(AgenticAuthoringCandidate candidate) {
+    private boolean isCanonicalCompactResourceCandidate(AgenticAuthoringCandidate candidate) {
         if (candidate == null || !hasVerifiedOperationalBindingEvidence(candidate)) {
             return false;
         }

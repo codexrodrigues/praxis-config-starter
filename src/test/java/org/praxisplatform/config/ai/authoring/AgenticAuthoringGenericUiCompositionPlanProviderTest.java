@@ -2193,7 +2193,8 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(detailBinding.at("/to/port").asText()).isEqualTo("resourceId");
         assertThat(detailBinding.at("/to/nestedPath/0/id").asText()).isEqualTo("details");
         assertThat(detailBinding.at("/to/nestedPath/1/key").asText()).isEqualTo("orders-tabs-detail");
-        assertThat(detailBinding.at("/transform/path").asText()).isEqualTo("id");
+        assertThat(detailBinding.at("/transform/inputSource").asText()).isEqualTo("state");
+        assertThat(detailBinding.at("/transform/path").asText()).isEqualTo("selectedItem.id");
         assertThat(plan.path("canvas").path("items").path("orders-tabs").path("colSpan").asInt()).isEqualTo(12);
 
         ObjectNode basePatch = objectMapper.createObjectNode();
@@ -2205,6 +2206,8 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(links).hasSize(2);
         assertThat(links.at("/0/from/ref/nestedPath/1/key").asText()).isEqualTo("orders-tabs-list");
         assertThat(links.at("/1/to/ref/nestedPath/1/key").asText()).isEqualTo("orders-tabs-detail");
+        assertThat(links.at("/1/transform/steps/0/input/source").asText()).isEqualTo("state");
+        assertThat(links.at("/1/transform/steps/0/config/path").asText()).isEqualTo("selectedItem.id");
     }
 
     @Test

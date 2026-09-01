@@ -308,6 +308,76 @@ when `READY` is reported without reconciled counts; retrying or weakening the eq
 Classification remains `suportado-parcialmente` until that production-like evidence closes. No Ergo
 consumer migration should begin from this slice before certification.
 
+### P1 — Canonical tabs/nested-workspace certification
+
+Issues: [#414](https://github.com/codexrodrigues/praxis-config-starter/issues/414) and
+[praxis-ui-angular#479](https://github.com/codexrodrigues/praxis-ui-angular/issues/479).
+
+The runtime, authoring catalog, generic `UiCompositionPlan` provider and nested compiler already support
+`praxis-tabs` with a collection widget and a synchronized detail/form widget. The first Config gap was in
+the compact semantic orientation: `praxis-tabs` was an allowed primary component, while `tabs_layout` was
+not an allowed complete composition archetype. The first production-like OpenAI proof then exposed a
+second part of the same gap: approved `create`, `detail`, `edit` and `list` bindings for one canonical
+resource were counted as competing resources. Both conditions forced a redundant full intent pass and
+could turn an explicit, fully grounded creation request into clarification.
+
+The canonical path treats `artifactKind=page + primaryComponent=praxis-tabs + layoutKind=tabs_layout`
+as one complete AI-authored composition decision. The path is semantic, not lexical: it is accepted only
+after the LLM authors the structured combination and the unique resource keeps its governed binding,
+schema and capability evidence. Multiple approved surface bindings are collapsed only by canonical
+`resourcePath`; bindings from different resources remain ambiguous and fail closed. The normal resource,
+preview, compiler and apply gates remain mandatory.
+The first local production-like scenario passed on 2026-09-01 with OpenAI
+`gpt-5.6-terra`, OpenAI `text-embedding-3-large`, Domain Catalog `460/460`, 34
+governed operations and 36 mission endpoints. It authored and persisted the
+Tabs/Table/Form composition in one human turn with zero Playwright retries, then
+proved real row selection, state-to-`resourceId` propagation, tab continuity,
+narrow viewport behavior and reload hash/ETag equivalence.
+
+That run exposed a runtime materialization defect after persistence: PostgreSQL
+`jsonb` reordered the properties inside `nestedPath` segments, while Dynamic Page
+compared paths through JSON text. The canonical Core runtime now compares path
+segments structurally, and Tabs auto-wires registered nested outputs and preserves
+the active semantic tab during nested input reprojection. The deterministic
+library route passes `3/3`. The final focal live run passes `2/2`: the
+matrix-owned critical-interception guard plus the OpenAI Tabs scenario, with zero
+Playwright retries and a fresh Table-to-detail interaction after reload.
+
+Before declaring the archetype certified, the Config-owned portable validator
+must accept the focal receipt. Five independent zero-retry runs and one hosted
+phase gate remain the promotion threshold for broad Ergo adoption.
+
+The first hosted phase attempt,
+[Actions #33513133262](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33513133262),
+passed immutable refs, evidence parsers, source cleanliness, Quickstart HTTP/SSE
+and Domain Catalog v2, but blocked before browser startup. The workflow
+intentionally repackaged the Config checkout under the Quickstart-consumed
+`0.1.0-rc.138`, while the E2E runner compared that nested JAR with the checkout
+POM version `0.1.0-rc.139`. This is
+`ja-suportado-mal-nomeado-ou-mal-materializado`: both versions were already
+explicit, but the runner ignored the workflow-owned effective version. The
+runner now accepts `ExpectedConfigVersion`, and the workflow passes its resolved
+`STARTER_VERSION`; source identity, local JAR hash and nested JAR hash remain
+independently attested. The failed run is not functional certification and is
+not eligible for a blind rerun.
+
+After focused review and `30/30` local runner/evidence contract tests, the
+corrected hosted replay,
+[Actions #33514163373](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33514163373),
+passed in 11m34s. HTTP/SSE, Domain Catalog v2, the production-like Page Builder
+gate, portable evidence validation and sanitized publication all completed. The
+browser profile discovered and passed `2/2` tests in 40,496 ms with zero retries.
+Its receipt is `first-pass`: one initial/total human turn, zero clarifications,
+corrective prompts, governed revisions or deterministic repairs, and all nine
+matrix-owned functional assertions, including a fresh detail load after reload.
+Apply, persisted and reload payloads share SHA-256
+`675dade7b3f19eb5750dfae1eba86a466abca91ffaccdfe827be37bc54643a81`;
+the portable report attestation SHA-256 is
+`452c4a88fcdc7c223cb2ee423b49e45b9164fabeacedf62675c2690f75b71614`.
+This closes the hosted functional gate for the current immutable cut. The
+five-run independent stability series remains required before broad Ergo
+promotion.
+
 ### P0 — Shared golden corpus and attestation
 
 Issue: [#357](https://github.com/codexrodrigues/praxis-config-starter/issues/357).
