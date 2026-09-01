@@ -143,8 +143,10 @@ retry, flaky, skip, falha, receipt incompleto ou divergencia entre a atestacao e
 o resultado sanitizado. O SHA do JAR recompilado pode variar entre runners; cada
 resultado continua obrigado a provar que o JAR local e o JAR aninhado no
 Quickstart sao byte a byte identicos, mas a serie compara entre runs a identidade
-estavel `artifactId + version + quickstartEntry` junto das fontes imutaveis. Nao
-substitua esse fechamento por cinco links verdes de Actions.
+estavel `artifactId + version + source + quickstartEntry` junto das fontes imutaveis.
+Uma serie pos-release deve declarar `source=maven-central`; `source-checkout` nao e
+evidencia de consumo do artefato publicado. Nao substitua esse fechamento por
+cinco links verdes de Actions.
 
 ## Cenarios obrigatorios por fase
 
