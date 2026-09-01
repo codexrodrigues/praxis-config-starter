@@ -24,7 +24,7 @@ on:
       quickstart_ref:
         description: 'Immutable praxis-api-quickstart commit SHA to test against.'
         required: true
-        default: b7d374a17cd4f5fc4aa31a9fd8511764772a6c75
+        default: 25954df626e8173fb1170593d7cbe3e7b370410c
         type: string
       config_artifact_source:
         description: 'Config artifact exercised by Quickstart: current source checkout or the exact Maven Central coordinate pinned by Quickstart.'
