@@ -263,7 +263,29 @@ class RagVectorStoreServiceTest {
                 .containsEntry("componentId", "project.preference")
                 .containsEntry("docType", RagResourceTypes.PROJECT_KNOWLEDGE)
                 .containsEntry("contentHash", "content-hash")
-                .containsEntry("chunkIndex", 0);
+                .containsEntry("chunkIndex", 0)
+                .containsEntry("documentId", "new-evidence-physical-id");
+        assertThat(sqlCaptor.getValue()).contains("id <> :documentId");
+    }
+
+    @Test
+    void shouldDeleteEveryCanonicalContentIdentityInAReplacementBatch() {
+        when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
+        when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
+        List<Document> documents = List.of(
+                canonicalDocument("new-id-a", "component-a", "hash-a"),
+                canonicalDocument("new-id-b", "component-b", "hash-b"));
+
+        service.deleteDocumentsByCanonicalContentIdentity(documents);
+
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jdbcTemplate, times(2)).update(anyString(), paramsCaptor.capture());
+        assertThat(paramsCaptor.getAllValues())
+                .extracting(params -> params.get("componentId"))
+                .containsExactly("component-a", "component-b");
+        assertThat(paramsCaptor.getAllValues())
+                .extracting(params -> params.get("contentHash"))
+                .containsExactly("hash-a", "hash-b");
     }
 
     @Test
@@ -403,6 +425,21 @@ class RagVectorStoreServiceTest {
         assertThat(paramsCaptor.getValue()).containsEntry("resourceType", RagResourceTypes.COMPONENT_DEFINITION);
         assertThat(paramsCaptor.getValue())
                 .containsEntry("embeddingProfile", "rag-v1__gemini__gemini-embedding-2__768");
+    }
+
+    private Document canonicalDocument(String id, String componentId, String contentHash) {
+        return Document.builder()
+                .id(id)
+                .text("governed content")
+                .metadata(Map.of(
+                        RagMetadataKeys.TENANT_ID, "tenant-a",
+                        RagMetadataKeys.ENVIRONMENT, "prod",
+                        RagMetadataKeys.RELEASE_ID, "release-1",
+                        RagMetadataKeys.COMPONENT_ID, componentId,
+                        RagMetadataKeys.DOC_TYPE, RagResourceTypes.DOMAIN_CATALOG,
+                        RagMetadataKeys.CONTENT_HASH, contentHash,
+                        RagMetadataKeys.CHUNK_INDEX, 0))
+                .build();
     }
 
     @Test

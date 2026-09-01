@@ -37,6 +37,7 @@ class DomainCatalogScopePostgresMigrationTest {
             connection.setAutoCommit(false);
             assertMigrationApplied(connection);
             assertScopedIndexInstalled(connection);
+            assertCanonicalVectorIdentityIndexInstalled(connection);
 
             String releaseKey = "praxis-service:human-resources.folhas-pagamento:migration-proof-"
                     + UUID.randomUUID();
@@ -78,6 +79,26 @@ class DomainCatalogScopePostgresMigrationTest {
                         .contains("COALESCE(tenant_id, ''::character varying)")
                         .contains("COALESCE(environment, ''::character varying)")
                         .contains("release_key");
+            }
+        }
+    }
+
+    private void assertCanonicalVectorIdentityIndexInstalled(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                select indexdef
+                from pg_indexes
+                where schemaname = current_schema()
+                  and indexname = 'idx_vector_store_scope_release_hash_chunk_unique'
+                """)) {
+            try (ResultSet result = statement.executeQuery()) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getString(1))
+                        .contains("UNIQUE INDEX")
+                        .contains("metadata ->> 'tenantId'::text")
+                        .contains("metadata ->> 'releaseId'::text")
+                        .contains("metadata ->> 'componentId'::text")
+                        .contains("metadata ->> 'contentHash'::text")
+                        .contains("metadata ->> 'chunkIndex'::text");
             }
         }
     }

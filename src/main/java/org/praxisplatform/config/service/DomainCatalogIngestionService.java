@@ -831,7 +831,6 @@ public class DomainCatalogIngestionService {
         }
         long startedAt = System.nanoTime();
         List<Document> documents = new ArrayList<>();
-        int index = 0;
         for (DomainCatalogItem item : items) {
             if (!isRagIndexable(item)) {
                 continue;
@@ -860,10 +859,10 @@ public class DomainCatalogIngestionService {
                             release.getTenantId(),
                             release.getEnvironment(),
                             item.getItemKey(),
-                            release.getReleaseKey(),
+                            ragReleaseId(release),
                             RagResourceTypes.DOMAIN_CATALOG,
                             contentHash,
-                            index++))
+                            0))
                     .text(content)
                     .metadata(metadata)
                     .build());
@@ -896,10 +895,13 @@ public class DomainCatalogIngestionService {
     private void upsertRagBatchWithRetry(DomainCatalogRelease release, List<Document> documents) {
         for (int attempt = 1; attempt <= ragPublicationMaxAttempts; attempt++) {
             try {
+                ragVectorStoreService.deleteDocumentsByCanonicalContentIdentity(documents);
                 ragVectorStoreService.upsertDocuments(documents);
                 return;
             } catch (RuntimeException ex) {
-                if (!isRetryableRagPublicationFailure(ex) || attempt >= ragPublicationMaxAttempts) {
+                RagPublicationFailureClassifier.FailureEvidence failure =
+                        RagPublicationFailureClassifier.classify(ex);
+                if (!failure.retryable() || attempt >= ragPublicationMaxAttempts) {
                     throw ex;
                 }
                 long retryDelayMs = retryDelayMillis(attempt, ex, Instant.now());
@@ -907,7 +909,7 @@ public class DomainCatalogIngestionService {
                     log.warn(
                             "Domain catalog RAG batch retry for release {} was deferred by provider guidance: {}",
                             release.getReleaseKey(),
-                            AiProviderFailureClassifier.classify(ex));
+                            failure.kind());
                     throw ex;
                 }
                 log.warn(
@@ -916,7 +918,7 @@ public class DomainCatalogIngestionService {
                         attempt,
                         ragPublicationMaxAttempts,
                         retryDelayMs,
-                        AiProviderFailureClassifier.classify(ex));
+                        failure.kind());
                 try {
                     TimeUnit.MILLISECONDS.sleep(retryDelayMs);
                 } catch (InterruptedException interrupted) {
@@ -927,32 +929,6 @@ public class DomainCatalogIngestionService {
                 }
             }
         }
-    }
-
-    private boolean isRetryableRagPublicationFailure(RuntimeException failure) {
-        AiProviderCallException providerFailure = findProviderFailure(failure);
-        if (providerFailure == null) {
-            // Preserve the existing conservative retry for untyped vector-store failures.
-            return true;
-        }
-        return switch (providerFailure.getKind()) {
-            case RATE_LIMIT, CAPACITY, SERVER_ERROR, TRANSPORT, TIMEOUT -> true;
-            case QUOTA_EXHAUSTED, AUTH, CLIENT_ERROR, UNKNOWN -> false;
-        };
-    }
-
-    private AiProviderCallException findProviderFailure(Throwable failure) {
-        Throwable current = failure;
-        while (current != null) {
-            if (current instanceof AiProviderCallException providerFailure) {
-                return providerFailure;
-            }
-            if (current.getCause() == current) {
-                break;
-            }
-            current = current.getCause();
-        }
-        return null;
     }
 
     long retryDelayMillis(int failedAttempt, RuntimeException failure, Instant now) {
@@ -966,7 +942,7 @@ public class DomainCatalogIngestionService {
                             ragPublicationRetryBackoffMs * multiplier,
                             MAX_INLINE_RAG_PUBLICATION_RETRY_DELAY_MS);
         }
-        Instant retryAfter = providerRetryAfter(failure);
+        Instant retryAfter = RagPublicationFailureClassifier.classify(failure).retryAfter();
         if (retryAfter == null || !retryAfter.isAfter(now)) {
             return localDelayMs;
         }
@@ -980,11 +956,6 @@ public class DomainCatalogIngestionService {
             return -1L;
         }
         return Math.max(localDelayMs, Math.max(1L, providerDelayMs));
-    }
-
-    private Instant providerRetryAfter(Throwable failure) {
-        AiProviderCallException providerFailure = findProviderFailure(failure);
-        return providerFailure != null ? providerFailure.getRetryAfter() : null;
     }
 
     private void reconcileRagPublicationAfterPersistence(
@@ -1040,18 +1011,20 @@ public class DomainCatalogIngestionService {
                             release.getId(), publicationRevision, publishedDocumentCount);
                 }
             } catch (RuntimeException ex) {
+                RagPublicationFailureClassifier.FailureEvidence failure =
+                        RagPublicationFailureClassifier.classify(ex);
                 if (ragPublicationStateService != null) {
                     ragPublicationStateService.markFailed(
                             release.getId(),
                             publicationRevision,
-                            AiProviderFailureClassifier.classify(ex),
-                            isRetryableRagPublicationFailure(ex),
-                            providerRetryAfter(ex));
+                            failure.kind(),
+                            failure.retryable(),
+                            failure.retryAfter());
                 }
                 log.warn(
                         "Domain catalog release {} was persisted, but RAG publication failed: {}",
                         release.getReleaseKey(),
-                        AiProviderFailureClassifier.classify(ex)
+                        failure.kind()
                 );
             }
         };

@@ -69,7 +69,10 @@ must carry the same `X-Tenant-ID` and `X-Env` scope used for ingestion.
 The `Domain Catalog PostgreSQL Migration` workflow applies the complete Flyway
 chain to an ephemeral PostgreSQL/pgvector database. It proves that V31 accepts
 the same release key in different scopes while rejecting a duplicate inside one
-exact tenant/environment scope.
+exact tenant/environment scope. The same gate verifies that the V16 canonical
+vector identity index is installed and reproduces the legacy physical-id
+collision before proving that reconciliation removes only the divergent row,
+preserves other scopes and keeps the current physical id idempotent.
 
 RAG publication is a derived materialization, not the source of truth for the
 catalog. By default the starter schedules RAG publication after the catalog
@@ -127,16 +130,27 @@ persisted materialization lifecycle for that immutable release:
 
 The block also carries `revision`, `attempt`, expected/published counts and
 lifecycle timestamps. `failureKind` is derived from the shared AI provider
-failure taxonomy; it never contains the raw provider response. Pending or
-publishing work is recovered as pending after application restart. Consumers
-must treat `FAILED` as terminal for that publication revision instead of
-polling for an implicit transition or inferring provider state from text.
+taxonomy or from the sanitized RAG materialization taxonomy
+(`vector_store_integrity`, `vector_store_transient`, `vector_store_failure`,
+`rag_publication_contract` or `rag_publication_internal`); it never contains a
+raw provider response, SQL detail or document content. Pending or publishing
+work is recovered as pending after application restart. Consumers must treat
+`FAILED` as terminal for that publication revision instead of polling for an
+implicit transition or inferring provider/database state from text.
 `retryable=true` means a later explicit publication request may be attempted;
 it does not promise that a failed revision will schedule itself again.
 `retryAfter`, when present, is the earliest provider-governed instant for that
 later attempt. The publisher honors provider guidance during its bounded
 internal retries and persists longer windows instead of sleeping for less than
 the provider requested.
+
+Domain Catalog document ids are derived from the same canonical chunk identity
+stored in metadata. Before each bounded upsert batch, the publisher removes only
+a legacy physical row that occupies the same canonical content identity under a
+different id. This keeps reingestion order-independent while preserving an
+existing same-id document until the vector-store upsert succeeds. Only
+explicitly classified provider or vector-store transient failures are retried;
+untyped, contract and integrity failures stop on the first attempt.
 
 The expected count is computed from persisted
 catalog items that are eligible for RAG publication: items must have searchable

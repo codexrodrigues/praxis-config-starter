@@ -11,6 +11,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.praxisplatform.config.domain.DomainCatalogItem;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
 import org.praxisplatform.config.domain.DomainCatalogReleaseChangedEvent;
@@ -26,6 +27,7 @@ import org.praxisplatform.config.repository.projection.DomainCatalogItemSummary;
 import org.praxisplatform.config.repository.projection.DomainCatalogReleaseSummary;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.filter.Filter;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -739,11 +741,16 @@ class DomainCatalogIngestionServiceTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Document>> documentsCaptor = ArgumentCaptor.forClass(List.class);
-        verify(ragVectorStoreService, times(4)).upsertDocuments(documentsCaptor.capture());
+        InOrder publicationOrder = org.mockito.Mockito.inOrder(ragVectorStoreService);
+        for (int batch = 0; batch < 4; batch++) {
+            publicationOrder.verify(ragVectorStoreService).deleteDocumentsByCanonicalContentIdentity(any());
+            publicationOrder.verify(ragVectorStoreService).upsertDocuments(documentsCaptor.capture());
+        }
         assertThat(documentsCaptor.getAllValues())
                 .extracting(List::size)
                 .containsExactly(4, 4, 4, 1);
-        assertThat(documentsCaptor.getAllValues().stream().flatMap(List::stream).toList())
+        List<Document> publishedDocuments = documentsCaptor.getAllValues().stream().flatMap(List::stream).toList();
+        assertThat(publishedDocuments)
                 .anySatisfy(document -> assertThat(document.getMetadata())
                         .containsEntry(RagMetadataKeys.RESOURCE_ID, "human-resources.folhas-pagamento.field.valor-liquido")
                         .containsEntry(RagMetadataKeys.RESOURCE_KEY, "human-resources.folhas-pagamento")
@@ -751,6 +758,11 @@ class DomainCatalogIngestionServiceTest {
                         .containsEntry(RagMetadataKeys.RELEASE_ID, "praxis-api-quickstart_test")
                         .containsEntry(RagMetadataKeys.CONTEXT_KEY, "human-resources")
                         .containsEntry(RagMetadataKeys.NODE_TYPE, "field"));
+        assertThat(publishedDocuments)
+                .allSatisfy(document -> {
+                    assertThat(document.getMetadata()).containsEntry(RagMetadataKeys.CHUNK_INDEX, 0);
+                    assertThat(document.getId()).endsWith("/0");
+                });
     }
 
     @Test
@@ -1749,6 +1761,52 @@ class DomainCatalogIngestionServiceTest {
         verify(ragVectorStoreService, times(1)).upsertDocuments(any());
         verify(publicationStateService).markFailed(
                 releaseId, 7L, "quota_exhausted", false, retryAfter);
+        verify(publicationStateService, never()).markPublished(any(), anyLong(), anyLong());
+    }
+
+    @Test
+    void persistsCanonicalVectorIntegrityFailureWithoutRetryingOrLeakingSql() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogRagPublicationStateService publicationStateService =
+                mock(DomainCatalogRagPublicationStateService.class);
+        UUID releaseId = UUID.fromString("d070c524-b67a-4cc0-b754-d652d7424e14");
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                null,
+                publicationStateService,
+                true,
+                false,
+                100,
+                3,
+                0L,
+                event -> { });
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.empty());
+        when(releaseRepository.save(any(DomainCatalogRelease.class))).thenAnswer(invocation -> {
+            DomainCatalogRelease release = invocation.getArgument(0);
+            release.setId(releaseId);
+            return release;
+        });
+        when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(publicationStateService.request(releaseId, 13L)).thenReturn(9L);
+        when(publicationStateService.markPublishing(releaseId, 9L)).thenReturn(true);
+        doThrow(new DataIntegrityViolationException("duplicate key details must stay private"))
+                .when(ragVectorStoreService).upsertDocuments(any());
+
+        DomainCatalogIngestionResponse response = service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        assertThat(response.releaseId()).isEqualTo(releaseId);
+        verify(ragVectorStoreService, times(1)).deleteDocumentsByCanonicalContentIdentity(any());
+        verify(ragVectorStoreService, times(1)).upsertDocuments(any());
+        verify(publicationStateService).markFailed(
+                releaseId, 9L, "vector_store_integrity", false, null);
         verify(publicationStateService, never()).markPublished(any(), anyLong(), anyLong());
     }
 

@@ -3,9 +3,13 @@ name: Domain Catalog PostgreSQL Migration
 on:
   pull_request:
     paths:
+      - '.github/workflows/domain-catalog-postgres-migration.yml'
+      - 'src/main/java/org/praxisplatform/config/rag/RagVectorStoreService.java'
+      - 'src/main/java/org/praxisplatform/config/service/DomainCatalogIngestionService.java'
       - 'src/main/java/org/praxisplatform/config/domain/DomainCatalogRelease.java'
       - 'src/main/java/org/praxisplatform/config/repository/DomainCatalogReleaseRepository.java'
       - 'src/main/resources/db/migration/**'
+      - 'src/test/java/org/praxisplatform/config/repository/DomainCatalogRagPublicationPostgresMigrationTest.java'
       - 'src/test/java/org/praxisplatform/config/repository/DomainCatalogScopePostgresMigrationTest.java'
   workflow_dispatch:
     inputs:
@@ -20,7 +24,7 @@ permissions:
 
 jobs:
   migrate_and_verify_scope:
-    name: Flyway migrations and scoped release identity
+    name: Flyway, scoped release and RAG identity
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -54,10 +58,10 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Run PostgreSQL migration proof
+      - name: Run PostgreSQL migration and RAG identity proofs
         env:
           POSTGRES_TEST_EPHEMERAL: 'true'
           POSTGRES_TEST_URL: jdbc:postgresql://localhost:5432/praxis_config_migration_test
           POSTGRES_TEST_USER: praxis
           POSTGRES_TEST_PASSWORD: praxis
-        run: mvn -B "-Dtest=DomainCatalogScopePostgresMigrationTest" test
+        run: mvn -B "-Dtest=DomainCatalogScopePostgresMigrationTest,DomainCatalogRagPublicationPostgresMigrationTest" test

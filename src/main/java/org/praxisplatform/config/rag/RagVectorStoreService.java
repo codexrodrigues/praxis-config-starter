@@ -489,6 +489,7 @@ public class RagVectorStoreService {
                   ELSE 0
                   END
               ) = :chunkIndex
+              AND id <> :documentId
             """.formatted(tableName);
         Map<String, Object> params = Map.of(
                 "tenantId", normalizeMetadataToken(metadata.get(RagMetadataKeys.TENANT_ID), "global"),
@@ -505,8 +506,23 @@ public class RagVectorStoreService {
                 "contentHash", normalizeMetadataToken(
                         metadata.get(RagMetadataKeys.CONTENT_HASH),
                         RagDocumentIdentity.sha256(document.getText() != null ? document.getText() : document.getId())),
-                "chunkIndex", toChunkIndex(metadata.get(RagMetadataKeys.CHUNK_INDEX)));
+                "chunkIndex", toChunkIndex(metadata.get(RagMetadataKeys.CHUNK_INDEX)),
+                "documentId", document.getId());
         jdbcTemplate.update(sql, params);
+    }
+
+    /**
+     * Reconciles physical document ids with the database-owned canonical content identity before
+     * an upsert. This is required when a producer previously derived ids from incidental ordering
+     * while the unique index remained content-addressed.
+     */
+    public void deleteDocumentsByCanonicalContentIdentity(List<Document> documents) {
+        if (documents == null || documents.isEmpty()) {
+            return;
+        }
+        documents.stream()
+                .filter(document -> document != null && document.getId() != null && !document.getId().isBlank())
+                .forEach(this::deleteDocumentByCanonicalContentIdentity);
     }
 
     public List<Document> search(String query, int limit, Filter.Expression filterExpression) {
