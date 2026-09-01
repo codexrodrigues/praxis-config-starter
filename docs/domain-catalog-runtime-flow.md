@@ -150,7 +150,17 @@ immediately instead of repeatedly polling or matching provider messages. When `r
 `retryAfter` identifies the earliest safe instant for a later explicit ingestion/publication
 attempt; it does not imply an automatic `FAILED -> PUBLISHED` transition. Provider-guided delays
 that fit the bounded internal retry window are honored by the Config publisher before it records
-the terminal state.
+the terminal state. Provider failures retain the shared provider taxonomy; vector-store and
+publication failures use sanitized kinds such as `vector_store_integrity`,
+`vector_store_transient`, `vector_store_failure`, `rag_publication_contract` and
+`rag_publication_internal`, without exposing SQL, provider bodies or document content. Only known
+transient classes are retried.
+
+Publication is order-independent: the physical document id uses the same canonical chunk index
+stored in metadata. During transition from older order-derived ids, each batch removes a row only
+when it occupies the same canonical content identity under a different physical id, then performs
+the vector-store upsert. This avoids unique-index collisions without deleting an existing same-id
+document before provider execution.
 
 ## 5. Query Persisted Items
 
