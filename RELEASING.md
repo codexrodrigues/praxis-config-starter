@@ -45,8 +45,9 @@ Fluxo recomendado:
 1) Entrar em **Actions -> Agentic Authoring HTTP Smoke -> Run workflow**.
 2) Executar com `provider=openai` e confirmar os SHAs imutaveis sugeridos para Quickstart, Metadata e Angular. Branches como `main` nao sao aceitas pelo gate.
 3) Selecionar exatamente uma `paid_gate_lane` proporcional ao corte: `none` para validacao deterministica, `http-sse` para a jornada HTTP/SSE, `page-builder` para authoring browser ou `llm-compliance` para o shadow de compliance. Para Page Builder, manter `page_builder_e2e_mode=smoke`.
-4) Confirmar que o job terminou com sucesso e publicou os artefatos da lane escolhida. Uma falha posterior de exportacao de evidencia deve ser reproduzida com os artefatos sanitizados, sem repetir automaticamente a chamada paga.
-5) Somente depois executar **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow** para criar a tag.
+4) Para uma lane paga, revisar o resumo do dispatch e aprovar explicitamente o Environment `ai-paid-gates`; sem essa aprovacao o job principal e seus secrets permanecem bloqueados.
+5) Confirmar que o job terminou com sucesso e publicou os artefatos da lane escolhida. Uma falha posterior de exportacao de evidencia deve ser reproduzida com os artefatos sanitizados, sem repetir automaticamente a chamada paga.
+6) Somente depois executar **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow** para criar a tag.
 
 O smoke manual:
 - instala o `praxis-config-starter` do checkout no Maven local do runner;

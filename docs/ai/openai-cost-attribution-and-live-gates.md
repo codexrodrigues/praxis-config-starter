@@ -23,6 +23,9 @@ review them after observing one normal release cycle.
 - `paid_gate_lane` is the single canonical paid-provider selector. Its default is `none`; the other
   mutually exclusive values are `http-sse`, `page-builder` and `llm-compliance`. Independent paid
   toggles are intentionally not supported.
+- Every non-`none` lane must pass the protected GitHub Environment `ai-paid-gates`. Dispatching a
+  workflow selects a candidate lane but does not authorize provider use; the configured reviewer must
+  approve the deployment before the main job starts or any repository secret becomes available.
 - A paid HTTP/SSE smoke requires `paid_gate_lane=http-sse`. Local execution additionally requires
   `-ConfirmPaidProviderRun`; deterministic local validation uses `-DomainRuleLifecycleOnly`.
 - The paid gate runs one canonical `governed-authoring-apply` journey. That journey already resolves
