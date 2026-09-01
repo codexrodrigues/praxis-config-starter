@@ -94,8 +94,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  authorize-paid-gate:
+    name: Approve paid provider gate
+    if: inputs.paid_gate_lane != 'none'
+    runs-on: ubuntu-latest
+    environment: ai-paid-gates
+    permissions:
+      contents: read
+    steps:
+      - name: Record approved paid lane
+        shell: bash
+        run: 'echo "Approved exclusive paid gate lane: ${{ inputs.paid_gate_lane }}"'
+
   quickstart-http-smoke:
     name: Quickstart HTTP/SSE smoke and optional page-builder E2E
+    needs: authorize-paid-gate
+    if: ${{ always() && (inputs.paid_gate_lane == 'none' || needs.authorize-paid-gate.result == 'success') }}
     runs-on: windows-latest
     timeout-minutes: 75
     permissions:

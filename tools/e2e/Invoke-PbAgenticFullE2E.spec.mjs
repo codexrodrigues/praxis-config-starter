@@ -108,6 +108,17 @@ test('exposes one exclusive paid lane and removes combinable paid toggles', () =
   assert.doesNotMatch(workflowSource, /page-builder-http-sse/);
 });
 
+test('blocks every paid lane behind the protected GitHub environment', () => {
+  assert.match(
+    workflowSource,
+    /authorize-paid-gate:[\s\S]*?if: inputs\.paid_gate_lane != 'none'[\s\S]*?environment: ai-paid-gates/,
+  );
+  assert.match(
+    workflowSource,
+    /quickstart-http-smoke:[\s\S]*?needs: authorize-paid-gate[\s\S]*?inputs\.paid_gate_lane == 'none' \|\| needs\.authorize-paid-gate\.result == 'success'/,
+  );
+});
+
 test('requires explicit paid-run confirmation and disables automatic retries', () => {
   assert.equal(matrix.defaults.retries, 0);
   assert.deepEqual(matrix.modes.smoke.scenarios, [

@@ -73,6 +73,7 @@ Release e Gate de Authoring
 - O workflow instala o starter do checkout no Maven local do runner, empacota `praxis-api-quickstart` contra essa versao local e roda o smoke HTTP/SSE completo.
 - `quickstart_ref`, `metadata_ref` e `ui_ref` devem ser SHAs imutaveis de 40 caracteres. Branches moveis, inclusive `main`, falham antes dos checkouts downstream.
 - O input `paid_gate_lane` e exclusivo: use `none` para validacao deterministica, `http-sse` para a jornada HTTP paga, `page-builder` para o gate browser ou `llm-compliance` para o shadow de compliance. Nunca combine lanes pagas no mesmo corte.
+- Toda lane diferente de `none` deve aguardar aprovacao no GitHub Environment protegido `ai-paid-gates`; o dispatch sozinho nao autoriza custo nem libera secrets ao job principal.
 - Para mudancas que toquem fluxo agentic do page-builder, SSE browser, patch/apply ou contrato ponta a ponta com Angular, selecione `paid_gate_lane=page-builder` e nao execute outra lane paga por reflexo.
 - Para release, manter `page_builder_e2e_mode=smoke`. Usar `page_builder_e2e_mode=full` apenas quando a investigacao exigir deliberadamente a matriz browser/LLM completa.
 - O gate opcional faz checkout de `praxis-ui-angular`, sobe o quickstart em loopback na porta `8088`, Angular em loopback na porta `4003` e executa `praxis-page-builder-agentic-production-like.playwright.config.ts` contra PostgreSQL/pgvector, LLM e embeddings reais, com stream em modo `signed-url-token` e segredo efemero.
