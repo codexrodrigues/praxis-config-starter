@@ -6178,7 +6178,8 @@ public class AgenticAuthoringTurnEngine {
                     resourceKey,
                     scopedProjectKnowledgeKinds(),
                     null,
-                    PROJECT_KNOWLEDGE_PER_RESOURCE_LIMIT);
+                    PROJECT_KNOWLEDGE_PER_RESOURCE_LIMIT,
+                    null);
             for (AgenticAuthoringProjectKnowledgeProjection projection : projectKnowledgeService.retrieve(query)) {
                 if (projection == null) {
                     continue;
@@ -6408,16 +6409,19 @@ public class AgenticAuthoringTurnEngine {
         String resourceKey = firstText(
                 domainCatalogHint(request, "resourceKey"), resourceKeyFromCandidate(intentResolution));
         boolean macroPack = !StringUtils.hasText(contextKey) && !StringUtils.hasText(resourceKey);
+        String semanticQuery = intentResolution == null ? safeText(request.userPrompt()) : null;
+        boolean semanticPreIntent = macroPack && StringUtils.hasText(semanticQuery);
         return new AgenticAuthoringProjectKnowledgeQuery(
                 principalContext.tenantId(),
                 principalContext.environment(),
                 contextKey,
                 resourceKey,
-                macroPack
+                macroPack && !semanticPreIntent
                         ? List.of("context")
                         : scopedProjectKnowledgeKinds(),
-                macroPack ? "context" : null,
-                macroPack ? 4 : 8);
+                macroPack && !semanticPreIntent ? "context" : null,
+                macroPack && !semanticPreIntent ? 4 : 8,
+                semanticPreIntent ? semanticQuery : null);
     }
 
     private List<String> scopedProjectKnowledgeKinds() {
@@ -6442,7 +6446,8 @@ public class AgenticAuthoringTurnEngine {
         return query != null
                 && (StringUtils.hasText(query.contextKey())
                         || StringUtils.hasText(query.resourceKey())
-                        || "context".equals(query.nodeType()));
+                        || "context".equals(query.nodeType())
+                        || StringUtils.hasText(query.semanticQuery()));
     }
 
     private ObjectNode projectKnowledgeContext(List<AgenticAuthoringProjectKnowledgeProjection> projections) {

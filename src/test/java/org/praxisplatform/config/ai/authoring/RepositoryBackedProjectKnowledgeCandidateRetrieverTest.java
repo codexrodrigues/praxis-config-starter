@@ -3,6 +3,7 @@ package org.praxisplatform.config.ai.authoring;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.util.List;
@@ -40,5 +41,30 @@ class RepositoryBackedProjectKnowledgeCandidateRetrieverTest {
                 eq(null),
                 pageable.capture());
         assertThat(pageable.getValue().getPageSize()).isEqualTo(12);
+    }
+
+    @Test
+    void doesNotTurnAnUnscopedSemanticQueryIntoCanonicalEnumeration() {
+        DomainKnowledgeConceptRepository repository = mock(DomainKnowledgeConceptRepository.class);
+        RepositoryBackedProjectKnowledgeCandidateRetriever retriever =
+                new RepositoryBackedProjectKnowledgeCandidateRetriever(repository);
+        AgenticAuthoringProjectKnowledgeQuery query = new AgenticAuthoringProjectKnowledgeQuery(
+                "tenant-a",
+                "dev",
+                null,
+                null,
+                List.of("project_preference"),
+                null,
+                8,
+                "employee identity card");
+
+        assertThat(retriever.retrieve(query)).isEmpty();
+        verify(repository, never()).findGovernedProjectKnowledgeCandidates(
+                eq("tenant-a"),
+                eq("dev"),
+                eq(null),
+                eq(null),
+                eq(null),
+                org.mockito.ArgumentMatchers.any(Pageable.class));
     }
 }

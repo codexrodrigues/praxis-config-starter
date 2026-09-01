@@ -10135,9 +10135,11 @@ class AgenticAuthoringTurnEngineTest {
                 ArgumentCaptor.forClass(AgenticAuthoringProjectKnowledgeQuery.class);
         verify(projectKnowledgeService, times(2)).retrieve(knowledgeQuery.capture());
         org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getAllValues().get(0).nodeType())
-                .isEqualTo("context");
+                .isNull();
         org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getAllValues().get(0).kinds())
-                .containsExactly("context");
+                .contains("context", "project_preference", "governance_constraint");
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getAllValues().get(0).semanticQuery())
+                .isEqualTo("Crie um painel");
         org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().tenantId()).isEqualTo("tenant");
         org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().environment()).isEqualTo("local");
         org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().contextKey()).isEqualTo("human-resources");
@@ -10654,7 +10656,7 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
-    void retrievesOnlyTheMacroContextPackWhenIntentHasNoSemanticScope() throws Exception {
+    void retrievesSemanticProjectKnowledgeBeforeIntentWhenNoCanonicalScopeExists() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringProjectKnowledgeService projectKnowledgeService = Mockito.mock(
@@ -10679,10 +10681,18 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
         ArgumentCaptor<AgenticAuthoringProjectKnowledgeQuery> knowledgeQuery =
                 ArgumentCaptor.forClass(AgenticAuthoringProjectKnowledgeQuery.class);
-        verify(projectKnowledgeService).retrieve(knowledgeQuery.capture());
-        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().nodeType()).isEqualTo("context");
-        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().kinds()).containsExactly("context");
-        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().limit()).isEqualTo(4);
+        verify(projectKnowledgeService, times(2)).retrieve(knowledgeQuery.capture());
+        AgenticAuthoringProjectKnowledgeQuery semanticQuery = knowledgeQuery.getAllValues().get(0);
+        org.assertj.core.api.Assertions.assertThat(semanticQuery.nodeType()).isNull();
+        org.assertj.core.api.Assertions.assertThat(semanticQuery.kinds())
+                .contains("context", "project_preference", "governance_constraint");
+        org.assertj.core.api.Assertions.assertThat(semanticQuery.limit()).isEqualTo(8);
+        org.assertj.core.api.Assertions.assertThat(semanticQuery.semanticQuery())
+                .isEqualTo("Crie uma pagina com abas e componentes");
+        AgenticAuthoringProjectKnowledgeQuery macroContextQuery = knowledgeQuery.getAllValues().get(1);
+        org.assertj.core.api.Assertions.assertThat(macroContextQuery.nodeType()).isEqualTo("context");
+        org.assertj.core.api.Assertions.assertThat(macroContextQuery.kinds()).containsExactly("context");
+        org.assertj.core.api.Assertions.assertThat(macroContextQuery.semanticQuery()).isNull();
         org.assertj.core.api.Assertions.assertThat(sink.payloads)
                 .anySatisfy(payload -> {
                     com.fasterxml.jackson.databind.JsonNode node = objectMapper.valueToTree(payload);
@@ -10767,7 +10777,9 @@ class AgenticAuthoringTurnEngineTest {
                 ArgumentCaptor.forClass(AgenticAuthoringProjectKnowledgeQuery.class);
         verify(projectKnowledgeService, times(2)).retrieve(knowledgeQuery.capture());
         org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getAllValues().get(0).nodeType())
-                .isEqualTo("context");
+                .isNull();
+        org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getAllValues().get(0).semanticQuery())
+                .isEqualTo("Crie um painel");
         org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().contextKey())
                 .isEqualTo("human-resources");
         org.assertj.core.api.Assertions.assertThat(knowledgeQuery.getValue().resourceKey())
