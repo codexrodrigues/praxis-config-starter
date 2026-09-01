@@ -314,15 +314,19 @@ Issues: [#414](https://github.com/codexrodrigues/praxis-config-starter/issues/41
 [praxis-ui-angular#479](https://github.com/codexrodrigues/praxis-ui-angular/issues/479).
 
 The runtime, authoring catalog, generic `UiCompositionPlan` provider and nested compiler already support
-`praxis-tabs` with a collection widget and a synchronized detail/form widget. The remaining Config gap was
-in the compact semantic orientation: `praxis-tabs` was an allowed primary component, while `tabs_layout`
-was not an allowed complete composition archetype. That forced a redundant full intent pass and could turn
-an explicit, fully grounded creation request into clarification.
+`praxis-tabs` with a collection widget and a synchronized detail/form widget. The first Config gap was in
+the compact semantic orientation: `praxis-tabs` was an allowed primary component, while `tabs_layout` was
+not an allowed complete composition archetype. The first production-like OpenAI proof then exposed a
+second part of the same gap: approved `create`, `detail`, `edit` and `list` bindings for one canonical
+resource were counted as competing resources. Both conditions forced a redundant full intent pass and
+could turn an explicit, fully grounded creation request into clarification.
 
 The canonical path treats `artifactKind=page + primaryComponent=praxis-tabs + layoutKind=tabs_layout`
 as one complete AI-authored composition decision. The path is semantic, not lexical: it is accepted only
 after the LLM authors the structured combination and the unique resource keeps its governed binding,
-schema and capability evidence. The normal resource, preview, compiler and apply gates remain mandatory.
+schema and capability evidence. Multiple approved surface bindings are collapsed only by canonical
+`resourcePath`; bindings from different resources remain ambiguous and fail closed. The normal resource,
+preview, compiler and apply gates remain mandatory.
 Certification still requires the Angular production-like OpenAI scenario to prove first-pass
 materialization, persisted nested paths, selection continuity and zero retry.
 

@@ -11401,13 +11401,43 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "schema-grounding-verified",
                         "resource-capabilities-verified",
                         "semantic-role:operational-resource"));
+        AgenticAuthoringCandidate missionDetailBinding = new AgenticAuthoringCandidate(
+                "/api/operations/missoes",
+                "get",
+                "/schemas/filtered?path=/api/operations/missoes/{id}&operation=get&schemaType=response",
+                "/api/operations/missoes/{id}",
+                "GET",
+                1.0d,
+                "Canonical mission detail binding verified against schema and resource capabilities.",
+                List.of(
+                        "tool-search-api-resources",
+                        "domain-binding",
+                        "schema-grounding-verified",
+                        "resource-capabilities-verified",
+                        "semantic-role:operational-resource"));
+        AgenticAuthoringCandidate missionListBinding = new AgenticAuthoringCandidate(
+                "/api/operations/missoes",
+                "get",
+                "/schemas/filtered?path=/api/operations/missoes&operation=get&schemaType=response",
+                "/api/operations/missoes",
+                "GET",
+                1.0d,
+                "Canonical mission list binding verified against schema and resource capabilities.",
+                List.of(
+                        "tool-search-api-resources",
+                        "domain-binding",
+                        "schema-grounding-verified",
+                        "resource-capabilities-verified",
+                        "semantic-role:operational-resource"));
+        List<AgenticAuthoringCandidate> missionSurfaceBindings =
+                List.of(missionCandidate, missionDetailBinding, missionListBinding);
         Mockito.when(candidateCatalog.discover(
                         Mockito.anyString(),
                         Mockito.anyString(),
                         Mockito.any(),
                         Mockito.any(),
                         Mockito.any()))
-                .thenReturn(List.of(missionCandidate));
+                .thenReturn(missionSurfaceBindings);
         AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
@@ -11434,7 +11464,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "deterministic-smoke-disabled",
                         resourceDiscoveryContext(
                                 "page",
-                                List.of(missionCandidate),
+                                missionSurfaceBindings,
                                 new AgenticAuthoringResourceSearchFocus(
                                         "operations.missoes",
                                         List.of("seleção", "detalhes"),
