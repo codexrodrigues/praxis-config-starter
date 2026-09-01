@@ -395,6 +395,52 @@ class DomainCatalogIngestionServiceTest {
     }
 
     @Test
+    void reconcilesStalePublicationStateWithoutRepublishingAnExactCorpus() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogRagPublicationStateService publicationStateService =
+                mock(DomainCatalogRagPublicationStateService.class);
+        UUID releaseId = UUID.fromString("d070c524-b67a-4cc0-b754-d652d7424e14");
+        DomainCatalogRelease existingRelease = existingRelease();
+        existingRelease.setId(releaseId);
+        DomainCatalogItem existingItem = existingIndexableItem(existingRelease);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                null,
+                publicationStateService,
+                true,
+                false,
+                100,
+                3,
+                0L,
+                event -> { });
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.of(existingRelease));
+        when(itemRepository.countByRelease(existingRelease)).thenReturn(1L);
+        when(itemRepository.findByRelease(existingRelease)).thenReturn(List.of(existingItem));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.corpusReleaseStatus(
+                "tenant-a",
+                "dev",
+                "praxis-api-quickstart:test",
+                RagResourceTypes.DOMAIN_CATALOG,
+                1L))
+                .thenReturn(ragStatus(true, 1L, 1L));
+        when(publicationStateService.reconcilePublished(releaseId, 1L, 1L)).thenReturn(true);
+
+        service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        verify(publicationStateService).reconcilePublished(releaseId, 1L, 1L);
+        verify(publicationStateService, never()).request(any(), anyLong());
+        verify(ragVectorStoreService, never()).upsertDocuments(any());
+    }
+
+    @Test
     void retriesRagBatchAfterTransientFailureWithoutWaitingForReingestion() throws Exception {
         DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);

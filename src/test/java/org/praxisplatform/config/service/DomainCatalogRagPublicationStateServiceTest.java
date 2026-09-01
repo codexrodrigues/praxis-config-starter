@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -74,6 +75,112 @@ class DomainCatalogRagPublicationStateServiceTest {
         assertThat(state.getFailureKind()).isEqualTo("quota_exhausted_secret");
         assertThat(state.getRetryable()).isFalse();
         assertThat(state.getCompletedAt()).isNotNull();
+    }
+
+    @Test
+    void shouldReconcileStaleFailedStateWhenPhysicalCorpusIsAlreadyExact() {
+        DomainCatalogRagPublicationState state = state(DomainCatalogRagPublicationStatus.FAILED, 2L);
+        state.setAttempt(2);
+        state.setExpectedDocumentCount(460L);
+        state.setPublishedDocumentCount(0L);
+        state.setFailureKind("unknown");
+        state.setRetryable(true);
+        state.setStartedAt(Instant.now().minusSeconds(2));
+        state.setCompletedAt(Instant.now().minusSeconds(1));
+        when(repository.ensureState(RELEASE_ID)).thenReturn(0);
+        when(repository.findForUpdate(RELEASE_ID)).thenReturn(Optional.of(state));
+
+        assertThat(service().reconcilePublished(RELEASE_ID, 460L, 460L)).isTrue();
+
+        assertThat(state.getRevision()).isEqualTo(3L);
+        assertThat(state.getAttempt()).isEqualTo(2);
+        assertThat(state.getStatus()).isEqualTo(DomainCatalogRagPublicationStatus.PUBLISHED);
+        assertThat(state.getExpectedDocumentCount()).isEqualTo(460L);
+        assertThat(state.getPublishedDocumentCount()).isEqualTo(460L);
+        assertThat(state.getFailureKind()).isNull();
+        assertThat(state.getRetryable()).isNull();
+        assertThat(state.getRetryAfter()).isNull();
+        assertThat(state.getStartedAt()).isNull();
+        assertThat(state.getCompletedAt()).isNotNull();
+        verify(repository).save(state);
+    }
+
+    @Test
+    void shouldCreatePublishedEvidenceForAnExactLegacyCorpusWithoutState() {
+        DomainCatalogRagPublicationState state = state(DomainCatalogRagPublicationStatus.PENDING, 0L);
+        when(repository.ensureState(RELEASE_ID)).thenReturn(1);
+        when(repository.findForUpdate(RELEASE_ID)).thenReturn(Optional.of(state));
+
+        assertThat(service().reconcilePublished(RELEASE_ID, 460L, 460L)).isTrue();
+
+        assertThat(state.getRevision()).isEqualTo(1L);
+        assertThat(state.getAttempt()).isZero();
+        assertThat(state.getStatus()).isEqualTo(DomainCatalogRagPublicationStatus.PUBLISHED);
+        assertThat(state.getExpectedDocumentCount()).isEqualTo(460L);
+        assertThat(state.getPublishedDocumentCount()).isEqualTo(460L);
+        verify(repository).save(state);
+    }
+
+    @Test
+    void shouldNotCreateAnotherRevisionWhenPublishedEvidenceIsAlreadyExact() {
+        DomainCatalogRagPublicationState state = state(DomainCatalogRagPublicationStatus.PUBLISHED, 4L);
+        state.setExpectedDocumentCount(460L);
+        state.setPublishedDocumentCount(460L);
+        when(repository.ensureState(RELEASE_ID)).thenReturn(0);
+        when(repository.findForUpdate(RELEASE_ID)).thenReturn(Optional.of(state));
+
+        assertThat(service().reconcilePublished(RELEASE_ID, 460L, 460L)).isFalse();
+
+        assertThat(state.getRevision()).isEqualTo(4L);
+        verify(repository, never()).save(state);
+    }
+
+    @Test
+    void shouldReconcilePublishedStateWithStaleCounts() {
+        DomainCatalogRagPublicationState state = state(DomainCatalogRagPublicationStatus.PUBLISHED, 4L);
+        state.setAttempt(2);
+        state.setExpectedDocumentCount(460L);
+        state.setPublishedDocumentCount(920L);
+        when(repository.ensureState(RELEASE_ID)).thenReturn(0);
+        when(repository.findForUpdate(RELEASE_ID)).thenReturn(Optional.of(state));
+
+        assertThat(service().reconcilePublished(RELEASE_ID, 460L, 460L)).isTrue();
+
+        assertThat(state.getRevision()).isEqualTo(5L);
+        assertThat(state.getAttempt()).isEqualTo(2);
+        assertThat(state.getStatus()).isEqualTo(DomainCatalogRagPublicationStatus.PUBLISHED);
+        assertThat(state.getExpectedDocumentCount()).isEqualTo(460L);
+        assertThat(state.getPublishedDocumentCount()).isEqualTo(460L);
+        verify(repository).save(state);
+    }
+
+    @Test
+    void shouldNotSupersedeAnActivePendingRevision() {
+        DomainCatalogRagPublicationState state = state(DomainCatalogRagPublicationStatus.PENDING, 5L);
+        state.setAttempt(2);
+        when(repository.ensureState(RELEASE_ID)).thenReturn(0);
+        when(repository.findForUpdate(RELEASE_ID)).thenReturn(Optional.of(state));
+
+        assertThat(service().reconcilePublished(RELEASE_ID, 460L, 460L)).isFalse();
+
+        assertThat(state.getStatus()).isEqualTo(DomainCatalogRagPublicationStatus.PENDING);
+        assertThat(state.getRevision()).isEqualTo(5L);
+        assertThat(state.getAttempt()).isEqualTo(2);
+        verify(repository, never()).save(state);
+    }
+
+    @Test
+    void shouldNotSupersedeAnActivePublicationRevision() {
+        DomainCatalogRagPublicationState state = state(DomainCatalogRagPublicationStatus.PUBLISHING, 5L);
+        state.setAttempt(3);
+        when(repository.ensureState(RELEASE_ID)).thenReturn(0);
+        when(repository.findForUpdate(RELEASE_ID)).thenReturn(Optional.of(state));
+
+        assertThat(service().reconcilePublished(RELEASE_ID, 460L, 460L)).isFalse();
+
+        assertThat(state.getStatus()).isEqualTo(DomainCatalogRagPublicationStatus.PUBLISHING);
+        assertThat(state.getRevision()).isEqualTo(5L);
+        verify(repository, never()).save(state);
     }
 
     @Test

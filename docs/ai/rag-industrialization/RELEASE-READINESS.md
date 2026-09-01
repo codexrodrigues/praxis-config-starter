@@ -95,6 +95,15 @@ com falha do provedor: conflito de identidade fisica usa
 sao retryable. O gate continua exigindo igualdade exata entre contagem esperada e
 contagem pesquisavel no `embeddingProfile` corrente.
 
+O estado operacional persistido tambem precisa convergir com a evidencia fisica.
+Quando uma reingestao idempotente prova `available=true`, `reconciled=true` e
+igualdade exata entre esperado e publicado, o backend promove um estado terminal
+ausente ou obsoleto para `PUBLISHED` sem executar embeddings novamente. Essa
+reconciliacao incrementa a revisao, preserva `attempt` para deixar explicito que
+nao houve nova chamada ao provedor e nao pode substituir uma revisao
+`PENDING`/`PUBLISHING` ativa. Um estado `FAILED` antigo nunca deve prevalecer
+sobre um corpus corrente comprovadamente exato.
+
 ## Smoke funcional recomendado
 
 Cenarios minimos:
@@ -124,6 +133,8 @@ Bloquear o corte se:
   embedding que mantenham a contagem pesquisavel diferente da esperada;
 - uma falha de persistencia RAG aparecer como `unknown`, impedindo distinguir
   conflito, indisponibilidade e erro transiente;
+- o corpus estiver reconciliado, mas o estado operacional terminal ainda expuser
+  `FAILED` ou contagens obsoletas;
 - retrieval semantico normalizar query natural como token tecnico;
 - authoring pular `validate-plan`, `compile-patch`, preview ou apply.
 
