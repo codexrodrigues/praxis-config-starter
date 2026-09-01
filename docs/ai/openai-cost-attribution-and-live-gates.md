@@ -20,7 +20,11 @@ review them after observing one normal release cycle.
 ## Gate policy
 
 - The `Agentic Authoring HTTP Smoke` workflow is deterministic by default.
-- A paid HTTP/SSE smoke requires `domain_rule_lifecycle_only=false`.
+- `paid_gate_lane` is the single canonical paid-provider selector. Its default is `none`; the other
+  mutually exclusive values are `http-sse`, `page-builder` and `llm-compliance`. Independent paid
+  toggles are intentionally not supported.
+- A paid HTTP/SSE smoke requires `paid_gate_lane=http-sse`. Local execution additionally requires
+  `-ConfirmPaidProviderRun`; deterministic local validation uses `-DomainRuleLifecycleOnly`.
 - The paid gate runs one canonical `governed-authoring-apply` journey. That journey already resolves
   intent, plans and compiles the materialization, streams the result, persists it with lineage,
   reads it back and cleans it up. The older isolated intent/plan/compile/preview/provider probes remain
@@ -31,12 +35,17 @@ review them after observing one normal release cycle.
   `governed-review-revise` quick reply whose structured semantic decision matches the expected
   canonical resource. Labels and prompts never authorize the continuation. A missing, ambiguous or
   still-blocked continuation fails closed after at most two turns.
-- Enabling the Page Builder full E2E or the LLM compliance shadow is also an explicit paid-provider
-  choice.
+- `paid_gate_lane=page-builder` runs the canonical `smoke` profile with one live authoring journey
+  and zero automatic retries. Focused and full profiles also inherit zero retries; rerunning after a
+  failure is a separate, deliberate cost decision.
+- `paid_gate_lane=llm-compliance` runs only the external compliance-policy shadow as the paid lane.
+- Export or publication failures after a successful paid journey must be diagnosed from sanitized
+  artifacts. They do not justify repeating the provider call.
 - A newer run on the same ref cancels the older in-progress run, avoiding duplicated provider calls.
 - GitHub Actions is a release/final gate. Development validation remains local and focal.
 
-The workflow summary records whether the execution is `deterministic` or `external-provider`. The
+The workflow summary records whether the execution is `deterministic` or `external-provider`, the
+exclusive lane and its bounded journey budget. The
 HTTP smoke receipt also records the apply turn count and whether the governed review continuation was
 used, including the backend-issued reply and decision identifiers.
 

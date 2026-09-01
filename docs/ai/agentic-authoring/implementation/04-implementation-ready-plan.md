@@ -724,7 +724,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -Provider openai \
   -QuickstartRoot ../praxis-api-quickstart \
   -UiRoot ../praxis-ui-angular \
-  -StreamProcessingTimeoutSeconds 180
+  -StreamProcessingTimeoutSeconds 180 \
+  -ConfirmPaidProviderRun
 ```
 
 Explicit macOS/Linux command for the full Page Builder stream gate:

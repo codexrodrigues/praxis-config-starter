@@ -8,8 +8,9 @@ param(
     [string] $MetadataRef = "83e32d40e8a6338953580616c762f4722fa3b4f6",
     [string] $UiRef = "2882822b4b6202aa94665d2ba5769ee369fe559b",
     [int] $QuickstartStartupTimeoutSeconds = 180,
-    [switch] $RunPageBuilderFullE2E,
-    [ValidateSet("smoke", "single-table", "full")]
+    [ValidateSet("none", "http-sse", "page-builder", "llm-compliance")]
+    [string] $PaidGateLane = "none",
+    [ValidateSet("smoke", "single-table", "crud-simple", "related-resource", "tabs-nested", "full")]
     [string] $PageBuilderE2EMode = "smoke",
     [int] $PageBuilderE2ETimeoutMinutes = 30,
     [string] $Token = "",
@@ -61,7 +62,7 @@ $dispatchBody = @{
         quickstart_ref = $QuickstartRef
         metadata_ref = $MetadataRef
         ui_ref = $UiRef
-        run_page_builder_full_e2e = [bool] $RunPageBuilderFullE2E.IsPresent
+        paid_gate_lane = $PaidGateLane
         page_builder_e2e_mode = $PageBuilderE2EMode
         page_builder_e2e_timeout_minutes = [string] $PageBuilderE2ETimeoutMinutes
         quickstart_startup_timeout_seconds = [string] $QuickstartStartupTimeoutSeconds
@@ -84,7 +85,7 @@ if ($NoWait.IsPresent) {
         quickstartRef = $QuickstartRef
         metadataRef = $MetadataRef
         uiRef = $UiRef
-        runPageBuilderFullE2E = [bool] $RunPageBuilderFullE2E.IsPresent
+        paidGateLane = $PaidGateLane
         pageBuilderE2EMode = $PageBuilderE2EMode
         pageBuilderE2ETimeoutMinutes = $PageBuilderE2ETimeoutMinutes
         quickstartStartupTimeoutSeconds = $QuickstartStartupTimeoutSeconds
@@ -135,7 +136,7 @@ $result = [pscustomobject]@{
     quickstartRef = $QuickstartRef
     metadataRef = $MetadataRef
     uiRef = $UiRef
-    runPageBuilderFullE2E = [bool] $RunPageBuilderFullE2E.IsPresent
+    paidGateLane = $PaidGateLane
     pageBuilderE2EMode = $PageBuilderE2EMode
     pageBuilderE2ETimeoutMinutes = $PageBuilderE2ETimeoutMinutes
     quickstartStartupTimeoutSeconds = $QuickstartStartupTimeoutSeconds

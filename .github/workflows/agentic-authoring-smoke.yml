@@ -36,11 +36,16 @@ on:
         required: true
         default: 8439be8735b3e6f26a6b51a8babf96827059c2a8
         type: string
-      run_page_builder_full_e2e:
-        description: 'Run the page-builder agentic Playwright gate after the HTTP/SSE smoke.'
-        required: false
-        default: false
-        type: boolean
+      paid_gate_lane:
+        description: 'Exclusive paid-provider lane. Keep none for deterministic validation; select exactly one live gate deliberately.'
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - http-sse
+          - page-builder
+          - llm-compliance
       page_builder_e2e_mode:
         description: 'Canonical Page Builder gate profile. Use smoke for release, focused modes for archetype certification, and full for deliberate matrix investigation.'
         required: false
@@ -63,20 +68,10 @@ on:
         required: false
         default: true
         type: boolean
-      domain_rule_lifecycle_only:
-        description: 'Run only the deterministic domain-rule HTTP lifecycle. Keep true by default; set false only for an intentional paid provider gate.'
-        required: false
-        default: true
-        type: boolean
       run_domain_catalog_v2_smoke:
         description: 'Run the quickstart Domain Catalog v2 HTTP smoke.'
         required: false
         default: true
-        type: boolean
-      run_llm_compliance_policy_shadow:
-        description: 'Run the external LLM compliance-policy shadow test against the selected provider.'
-        required: false
-        default: false
         type: boolean
       fail_llm_compliance_on_provider_unavailable:
         description: 'Fail the compliance-policy shadow when the selected provider is unavailable or quota-limited.'
@@ -165,7 +160,7 @@ jobs:
           token: ${{ secrets.RELEASE_PAT || github.token }}
 
       - name: Checkout praxis-ui-angular
-        if: inputs.run_page_builder_full_e2e == true
+        if: inputs.paid_gate_lane == 'page-builder'
         uses: actions/checkout@v5
         with:
           repository: codexrodrigues/praxis-ui-angular
@@ -181,7 +176,7 @@ jobs:
           cache: maven
 
       - name: Set up Node.js 20
-        if: inputs.run_page_builder_full_e2e == true
+        if: inputs.paid_gate_lane == 'page-builder'
         uses: actions/setup-node@v5
         with:
           node-version: '20.x'
@@ -208,14 +203,23 @@ jobs:
             return $Value.Replace("'", "''")
           }
           $provider = '${{ inputs.provider }}'
-          $domainRuleLifecycleOnly = '${{ inputs.domain_rule_lifecycle_only }}' -eq 'true'
-          $runPageBuilder = '${{ inputs.run_page_builder_full_e2e }}' -eq 'true'
-          $runComplianceShadow = '${{ inputs.run_llm_compliance_policy_shadow }}' -eq 'true'
-          $requiresExternalProvider = -not $domainRuleLifecycleOnly -or $runPageBuilder -or $runComplianceShadow
+          $paidGateLane = '${{ inputs.paid_gate_lane }}'
+          $runQuickstartHttpSmoke = '${{ inputs.run_quickstart_http_smoke }}' -eq 'true'
+          if ($paidGateLane -eq 'http-sse' -and -not $runQuickstartHttpSmoke) {
+            throw 'paid_gate_lane=http-sse requires run_quickstart_http_smoke=true.'
+          }
+          $requiresExternalProvider = $paidGateLane -ne 'none'
           $costMode = if ($requiresExternalProvider) { 'external-provider' } else { 'deterministic' }
           "### AI cost mode: $costMode" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-          if (-not $domainRuleLifecycleOnly) {
-            "- Paid HTTP journey: governed-authoring-apply (single end-to-end journey)" |
+          "- Exclusive paid gate lane: $paidGateLane" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if ($paidGateLane -eq 'http-sse') {
+            "- Paid journey budget: one governed-authoring-apply journey, with at most one governed continuation" |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          } elseif ($paidGateLane -eq 'page-builder') {
+            "- Paid journey budget: one canonical Page Builder scenario, with zero automatic retries" |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          } elseif ($paidGateLane -eq 'llm-compliance') {
+            "- Paid journey budget: one compliance-policy shadow" |
               Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           }
           if ($requiresExternalProvider -and $provider -eq 'openai' -and [string]::IsNullOrWhiteSpace($env:PRAXIS_AI_OPENAI_API_KEY)) {
@@ -289,19 +293,19 @@ jobs:
         run: mvn -B -DskipTests "-Dpraxis.core.version=$env:METADATA_STARTER_VERSION" "-Dpraxis.config.version=$env:STARTER_VERSION" package
 
       - name: Install praxis-ui-angular dependencies
-        if: inputs.run_page_builder_full_e2e == true
+        if: inputs.paid_gate_lane == 'page-builder'
         shell: pwsh
         working-directory: praxis-ui-angular
         run: npm ci --no-audit --fund=false
 
       - name: Install Playwright Chromium
-        if: inputs.run_page_builder_full_e2e == true
+        if: inputs.paid_gate_lane == 'page-builder'
         shell: pwsh
         working-directory: praxis-ui-angular
         run: npx playwright install chromium
 
       - name: Verify immutable source checkouts remain clean
-        if: inputs.run_page_builder_full_e2e == true
+        if: inputs.paid_gate_lane == 'page-builder'
         shell: pwsh
         run: |
           $roots = @(
@@ -337,7 +341,9 @@ jobs:
             StartupTimeoutSec = [int]'${{ inputs.quickstart_startup_timeout_seconds }}'
             StreamProcessingTimeoutSeconds = [int]$env:PB_STREAM_PROCESSING_TIMEOUT_SECONDS
           }
-          if ('${{ inputs.domain_rule_lifecycle_only }}' -eq 'true') {
+          if ('${{ inputs.paid_gate_lane }}' -eq 'http-sse') {
+            $smokeArgs.ConfirmPaidProviderRun = $true
+          } else {
             $smokeArgs.DomainRuleLifecycleOnly = $true
           }
           .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 @smokeArgs
@@ -353,7 +359,7 @@ jobs:
             -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}')
 
       - name: Run LLM compliance-policy shadow
-        if: inputs.run_llm_compliance_policy_shadow == true
+        if: inputs.paid_gate_lane == 'llm-compliance'
         shell: pwsh
         working-directory: praxis-config-starter
         env:
@@ -364,7 +370,7 @@ jobs:
         run: mvn -B "-Dtest=AgenticAuthoringLlmCompliancePolicyIntegrationTest" test
 
       - name: Run page-builder agentic E2E gate
-        if: inputs.run_page_builder_full_e2e == true
+        if: inputs.paid_gate_lane == 'page-builder'
         shell: pwsh
         working-directory: praxis-config-starter
         timeout-minutes: ${{ fromJSON(inputs.page_builder_e2e_timeout_minutes) }}
@@ -381,22 +387,18 @@ jobs:
             -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
             -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}') `
             -UiStartupTimeoutSec ([int]'${{ inputs.page_builder_ui_startup_timeout_seconds }}') `
-            -ValidationMode '${{ inputs.page_builder_e2e_mode }}'
+            -ValidationMode '${{ inputs.page_builder_e2e_mode }}' `
+            -ConfirmPaidProviderRun
 
       - name: Build sanitized production-like evidence
-        if: inputs.run_page_builder_full_e2e == true
+        if: inputs.paid_gate_lane == 'page-builder'
         shell: pwsh
         working-directory: praxis-config-starter
         run: |
-          $includeLiveHttpSse = '${{ inputs.run_quickstart_http_smoke }}' -eq 'true' -and
-            '${{ inputs.domain_rule_lifecycle_only }}' -ne 'true'
           $publicationArgs = @{
             StarterRoot = "$env:GITHUB_WORKSPACE\praxis-config-starter"
             OutputRoot = "$env:GITHUB_WORKSPACE\praxis-config-starter\artifacts\agentic-authoring-publication"
-            PublicationProfile = if ($includeLiveHttpSse) { 'page-builder-http-sse' } else { 'page-builder' }
-          }
-          if ($includeLiveHttpSse) {
-            $publicationArgs.HttpArtifactRoot = "$env:GITHUB_WORKSPACE\praxis-config-starter\artifacts\ai-sse-smoke"
+            PublicationProfile = 'page-builder'
           }
           .\tools\Export-AgenticProductionLikeEvidence.ps1 @publicationArgs
 

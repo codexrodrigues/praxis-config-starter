@@ -16,10 +16,18 @@ param(
     [int] $StartupTimeoutSec = 180,
     [int] $StreamProcessingTimeoutSeconds = 180,
     [switch] $DomainRuleLifecycleOnly,
+    [switch] $ConfirmPaidProviderRun,
     [switch] $UseExistingQuickstart
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $DomainRuleLifecycleOnly.IsPresent -and -not $ConfirmPaidProviderRun.IsPresent) {
+    throw "The live HTTP/SSE smoke calls a paid provider. Re-run with -ConfirmPaidProviderRun, or use -DomainRuleLifecycleOnly for deterministic validation."
+}
+if ($DomainRuleLifecycleOnly.IsPresent -and $ConfirmPaidProviderRun.IsPresent) {
+    throw "Choose one execution mode: -DomainRuleLifecycleOnly or -ConfirmPaidProviderRun."
+}
 
 function Resolve-RepoPath([string] $Path, [string] $Root) {
     if ([System.IO.Path]::IsPathRooted($Path)) {

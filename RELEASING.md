@@ -44,8 +44,8 @@ aplicacao de config e streaming SSE.
 Fluxo recomendado:
 1) Entrar em **Actions -> Agentic Authoring HTTP Smoke -> Run workflow**.
 2) Executar com `provider=openai` e confirmar os SHAs imutaveis sugeridos para Quickstart, Metadata e Angular. Branches como `main` nao sao aceitas pelo gate.
-3) Para releases que alterem authoring, page-builder, manifestos executaveis, SSE ou compilacao de patches, marcar `run_page_builder_full_e2e=true` e manter `page_builder_e2e_mode=smoke`.
-4) Confirmar que o job `Quickstart HTTP/SSE smoke` terminou com sucesso. Quando `run_page_builder_full_e2e=true`, confirmar tambem que o gate Playwright do page-builder terminou com sucesso e publicou artefatos de diagnostico.
+3) Selecionar exatamente uma `paid_gate_lane` proporcional ao corte: `none` para validacao deterministica, `http-sse` para a jornada HTTP/SSE, `page-builder` para authoring browser ou `llm-compliance` para o shadow de compliance. Para Page Builder, manter `page_builder_e2e_mode=smoke`.
+4) Confirmar que o job terminou com sucesso e publicou os artefatos da lane escolhida. Uma falha posterior de exportacao de evidencia deve ser reproduzida com os artefatos sanitizados, sem repetir automaticamente a chamada paga.
 5) Somente depois executar **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow** para criar a tag.
 
 O smoke manual:
@@ -57,7 +57,7 @@ O smoke manual:
 - preserva no mesmo thread a decisao semantica emitida pelo backend e permite no maximo uma continuacao `governed-review-revise`; label e prompt sao apenas apresentacao, e ausencia, duplicidade ou novo bloqueio terminam fail-closed;
 - mantem os scripts isolados de `intent-resolution`, `minimal-form-plan`, `compiled-form-patch`, `page-preview` e patch stream como diagnosticos focais, sem repeti-los no gate pago de release;
 - valida o recurso canonico `/api/operations/incidentes`, os campos obrigatorios do formulario, `page-apply`, readback, linhagem SSE e cleanup.
-- quando `run_page_builder_full_e2e=true`, valida tambem o fluxo agentic do page-builder com browser real; use `page_builder_e2e_mode=smoke` como gate de release e `page_builder_e2e_mode=full` apenas para investigacoes deliberadas da matriz completa;
+- quando `paid_gate_lane=page-builder`, valida o fluxo agentic do page-builder com browser real; o perfil `smoke` executa uma unica jornada canonica sem retries automaticos, e `full` fica reservado a investigacoes deliberadas da matriz completa;
 - usa os defaults de `tools/e2e/page-builder-agentic-gate-matrix.json`, atualmente com `praxis.ai.stream.processing-timeout-seconds=360`, para acomodar turnos reais com discovery, RAG, multiplas chamadas LLM e materializacao;
 - instala Metadata e Config a partir de copias temporarias exatas de `git archive HEAD`, sem diretorio `.git`; Config/Quickstart/Angular falham antes de usar o provider se seus working trees estiverem dirty, enquanto Metadata registra commit + tree SHA e declara `materialization=git-archive`, pois seu checkout historico normaliza line endings que nao participam do build;
 - executa apenas a config Playwright `production-like`, que bloqueia mocks de endpoints criticos, exige capabilities provenientes do registry e produz JSON com discovered/executed/skipped/failed, tentativas/retries reais, SHAs de checkouts limpos, versoes efetivas de Config/Metadata/Quickstart/Angular, provider/model sanitizado e cleanup;
@@ -69,13 +69,13 @@ O smoke manual:
 Para reproduzir localmente, primeiro empacote o quickstart e depois rode:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart -ConfirmPaidProviderRun
 ```
 
 Para alterar o timeout do stream no smoke local:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart -StreamProcessingTimeoutSeconds 360
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart -StreamProcessingTimeoutSeconds 360 -ConfirmPaidProviderRun
 ```
 
 Para depurar localmente apenas a observabilidade do planejamento pre-intent do
