@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Optional;
 
 import org.praxisplatform.config.domain.ApiMetadata;
+import org.praxisplatform.config.projection.ApiMetadataCandidateProjection;
 import org.praxisplatform.config.projection.ApiMetadataProjection;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -32,6 +33,38 @@ public interface ApiMetadataRepository extends JpaRepository<ApiMetadata, Long> 
             String environment,
             String serviceKey,
             String releaseId);
+
+    @Query(value = """
+        SELECT
+            e.path,
+            e.method,
+            e.tags,
+            e.summary,
+            e.description,
+            e.operation_id AS operationId
+        FROM api_metadata e
+        WHERE e.tenant_id = :tenantId
+          AND e.environment = :environment
+          AND e.service_key = :serviceKey
+          AND e.release_id = :releaseId
+        """, nativeQuery = true)
+    List<ApiMetadataCandidateProjection> findCandidateProjectionsByScope(
+            @Param("tenantId") String tenantId,
+            @Param("environment") String environment,
+            @Param("serviceKey") String serviceKey,
+            @Param("releaseId") String releaseId);
+
+    @Query(value = """
+        SELECT
+            e.path,
+            e.method,
+            e.tags,
+            e.summary,
+            e.description,
+            e.operation_id AS operationId
+        FROM api_metadata e
+        """, nativeQuery = true)
+    List<ApiMetadataCandidateProjection> findAllCandidateProjections();
 
     @Query("""
         SELECT e

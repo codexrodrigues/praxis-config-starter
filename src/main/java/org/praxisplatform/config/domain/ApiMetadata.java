@@ -9,6 +9,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import org.hibernate.annotations.ColumnTransformer;
+import org.praxisplatform.config.projection.ApiMetadataCandidateEvidence;
 
 import java.util.List;
 
@@ -23,7 +24,7 @@ import java.util.List;
 @Table(name = "api_metadata", uniqueConstraints = {
         @UniqueConstraint(columnNames = {"tenant_id", "environment", "service_key", "release_id", "path", "method"})
 })
-public class ApiMetadata {
+public class ApiMetadata implements ApiMetadataCandidateEvidence {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

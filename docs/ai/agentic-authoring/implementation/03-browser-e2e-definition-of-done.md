@@ -34,13 +34,17 @@ Esse runner:
 - sobe o quickstart exclusivamente em `http://127.0.0.1:8088`;
 - sobe o Angular em `http://localhost:4003`;
 - executa `npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-production-like.playwright.config.ts`;
-- usa `-ValidationMode smoke` como gate de release e reserva `-ValidationMode full` para investigacao deliberada da matriz completa.
+- usa `-ValidationMode smoke` como gate de release, os modos focais `single-table`,
+  `crud-simple` e `related-resource` para certificacao dos respectivos arquetipos,
+  e reserva `-ValidationMode full` para investigacao deliberada da matriz completa;
 - le timeouts, retries e contagens esperadas de `tools/e2e/page-builder-agentic-gate-matrix.json`;
 - rejeita provider/embeddings mock, datasource nao PostgreSQL, JAR divergente, contrato Config/Angular divergente, capabilities degradadas e interceptacao de endpoint critico;
 - exige AI Registry `ready` com o hash do snapshot Config versionado, Domain Catalog ingerido e API Catalog com indexacao canonica `READY`;
 - exige que o teste negativo de interceptacao critica passe e deriva dele `criticalEndpointMocks=0`; o artifact registra tentativas e retries realmente observados;
 - desabilita trace, video e screenshot na lane live para que a evidencia publicavel permaneça estruturada e sanitizada;
-- valida e copia para `agentic-authoring-publication` apenas o resultado production-like, a auditoria de source e o resumo HTTP/SSE; nenhum log, payload, relatorio HTML ou JSON bruto do Playwright entra no artifact remoto;
+- valida e copia para `agentic-authoring-publication` apenas o resultado production-like e a auditoria de source no perfil explicito `page-builder`; o perfil `page-builder-http-sse` acrescenta o resumo HTTP/SSE somente quando a jornada live correspondente tambem foi executada;
+- nao mistura o lifecycle HTTP deterministico (`domain_rule_lifecycle_only=true`) com evidencia SSE de provider real: esse lifecycle usa `provider=not-used` e permanece uma prova separada, enquanto a publicacao Page Builder continua autocontida;
+- nenhum log, payload, relatorio HTML ou JSON bruto do Playwright entra no artifact remoto;
 - gera segredo de stream efemero, exige working trees limpos para fontes exercitadas diretamente, materializa Metadata da arvore exata de `git archive`, registra commit/tree SHAs e versoes efetivamente empacotadas sem segredos e comprova o teardown dos listeners.
 
 Testes deterministas com interceptacao ficam na config
@@ -102,7 +106,39 @@ Input:
 
 - `run_page_builder_full_e2e=true`
 - `page_builder_e2e_mode=smoke` para release
+- `page_builder_e2e_mode=single-table`, `crud-simple` ou `related-resource` para
+  certificacao focal; escopo de catalogo, RAG, cenarios e retries continuam
+  definidos somente em `tools/e2e/page-builder-agentic-gate-matrix.json`
 - `page_builder_e2e_mode=full` somente para matriz completa deliberada
+
+Para certificar uma serie hospedada, execute os cinco workflows de forma
+estritamente sequencial e baixe o artifact de cada run em um diretorio distinto.
+O relatorio Playwright bruto continua fora do artifact remoto; cada
+`production-like-result.json` publica apenas a atestacao sanitizada produzida
+pelo validador dentro do runner, incluindo hash do relatorio, contagens,
+zero-retry e receipts resumidos. Valide a serie pelos resultados publicados:
+
+```bash
+gh run download RUN_ID_1 --repo codexrodrigues/praxis-config-starter \
+  --name agentic-authoring-smoke-artifacts --dir /tmp/praxis-related/run-1
+# Repita para RUN_ID_2 ate RUN_ID_5, sempre em diretorios distintos.
+
+node tools/e2e/validate-page-builder-agentic-gate-evidence.mjs \
+  --mode related-resource \
+  --expected-runs 5 \
+  --publication-result /tmp/praxis-related/run-1/praxis-config-starter/artifacts/agentic-authoring-publication/production-like-result.json \
+  --publication-result /tmp/praxis-related/run-2/praxis-config-starter/artifacts/agentic-authoring-publication/production-like-result.json \
+  --publication-result /tmp/praxis-related/run-3/praxis-config-starter/artifacts/agentic-authoring-publication/production-like-result.json \
+  --publication-result /tmp/praxis-related/run-4/praxis-config-starter/artifacts/agentic-authoring-publication/production-like-result.json \
+  --publication-result /tmp/praxis-related/run-5/praxis-config-starter/artifacts/agentic-authoring-publication/production-like-result.json
+```
+
+O agregador rejeita hashes de relatorio repetidos, drift de provider/modelo,
+SHAs, versoes, contrato, snapshot do registry, escopo de Domain/API Catalog,
+requisito de RAG ou matriz, alem de qualquer
+retry, flaky, skip, falha, receipt incompleto ou divergencia entre a atestacao e
+o resultado sanitizado. Nao substitua esse fechamento por cinco links verdes de
+Actions.
 
 ## Cenarios obrigatorios por fase
 

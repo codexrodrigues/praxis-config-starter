@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -171,6 +172,7 @@ class Domain360CatalogServiceTest {
                 eq("funcionarios"),
                 eq(100),
                 eq(new DomainFederationRetrievalPolicyOptions("authoring", null, null, null)));
+        verifyNoMoreInteractions(queryService);
     }
 
     @Test

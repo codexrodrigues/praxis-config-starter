@@ -21,6 +21,7 @@ import org.praxisplatform.config.rag.RagDocumentIdentity;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.registry.AiRegistryComponentDefinitionsChangedEvent;
 import org.praxisplatform.config.repository.AiRegistryRepository;
+import org.praxisplatform.config.repository.projection.AiRegistryMaterialSummary;
 import org.praxisplatform.config.service.EmbeddingService;
 import org.praxisplatform.config.service.RegistryIngestionService;
 import org.springframework.context.ApplicationEventPublisher;
@@ -331,12 +332,12 @@ class RegistryIngestionServiceTest {
                 .findFirst()
                 .orElseThrow();
         clearInvocations(repository, embeddingService, ragVectorStoreService, eventPublisher);
-        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+        when(repository.findMaterialSummaries(
                 "component_definition",
                 "component-definition",
                 Scope.SYSTEM,
                 "GLOBAL"))
-                .thenReturn(List.of(persistedComponentA));
+                .thenReturn(List.of(materialSummary(persistedComponentA)));
 
         RegistryIngestionService.RegistryReindexResult result =
                 registryIngestionService.reconcileRegistry(request, null, null, "release-v1");
@@ -394,12 +395,19 @@ class RegistryIngestionServiceTest {
                 .version("release-v1")
                 .components(Map.of("component-a", changedPayloadEntry))
                 .build();
-        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+        when(repository.findMaterialSummaries(
                 "component_definition",
                 "component-definition",
                 Scope.SYSTEM,
                 "GLOBAL"))
-                .thenReturn(List.of(initialDefinition.getValue()));
+                .thenReturn(List.of(materialSummary(initialDefinition.getValue())));
+        when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                "component_definition",
+                "component-a",
+                "component-definition",
+                Scope.SYSTEM,
+                "GLOBAL"))
+                .thenReturn(Optional.of(initialDefinition.getValue()));
         String contentHash = RagDocumentIdentity.sha256("Stable semantic content");
         String documentId = RagDocumentIdentity.buildDocumentId(
                 null,
@@ -464,5 +472,12 @@ class RegistryIngestionServiceTest {
                 .path("componentDefinition")
                 .path("jsonSchema")
                 .path("authoringManifest");
+    }
+
+    private AiRegistryMaterialSummary materialSummary(AiRegistry registry) {
+        return new AiRegistryMaterialSummary(
+                registry.getId(),
+                registry.getRegistryKey(),
+                registry.getPayload());
     }
 }

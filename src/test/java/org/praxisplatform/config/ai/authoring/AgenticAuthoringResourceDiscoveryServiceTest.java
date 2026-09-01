@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.IntStream;
@@ -18,6 +19,7 @@ import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.dto.ApiSearchResult;
+import org.praxisplatform.config.projection.ApiMetadataCandidateProjection;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.ContextRetrievalService;
@@ -173,7 +175,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void searchReturnsCandidatesFromApiMetadataCatalog() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/vw-analytics-folha-pagamento",
                         "GET",
@@ -253,7 +255,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void apiCatalogSearchUsesGovernedConsultativeProjection() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/folhas-pagamento",
                         "GET",
@@ -384,7 +386,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void apiCatalogProjectionCanAnswerFromDomainCatalogWithoutInitialApiMetadataCandidate() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of());
+        when(repository.findAllCandidateProjections()).thenReturn(projections());
         DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
         when(domainCatalog.contextLatest(
                 Mockito.eq("praxis-service"),
@@ -452,7 +454,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void openTableQuestionListsGovernedSourcesInsteadOfTreatingTableAsMissingDomain() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of());
+        when(repository.findAllCandidateProjections()).thenReturn(projections());
         DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
         String prompt = "quais dados existem aqui para eu montar uma tabela?";
         when(domainCatalog.contextLatest(
@@ -582,7 +584,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void openArtifactDataQuestionDerivesGovernedSourcesFromCatalogAliasesAndEdges() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of());
+        when(repository.findAllCandidateProjections()).thenReturn(projections());
         DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
         String prompt = "posso criar tabelas com quais dados?";
         when(domainCatalog.contextLatest(
@@ -676,7 +678,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void chartAvailabilityQuestionUsesChartNarrativeAndDoesNotOverpromiseWithoutAnalyticalSource() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of());
+        when(repository.findAllCandidateProjections()).thenReturn(projections());
         DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
         String prompt = "Entre os dados que existem, quais eu posso usar para gerar graficos?";
         when(domainCatalog.contextLatest(
@@ -744,7 +746,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void chartAvailabilityQuestionUsesAnalyticalSourceWhenConfirmed() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of());
+        when(repository.findAllCandidateProjections()).thenReturn(projections());
         DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
         String prompt = "Quais dados posso usar para criar graficos?";
         when(domainCatalog.contextLatest(
@@ -793,7 +795,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void apiCatalogProjectionSaysRequestedDomainIsNotConfirmedBeforeSuggestingAlternatives() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of());
+        when(repository.findAllCandidateProjections()).thenReturn(projections());
         DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
         when(domainCatalog.contextLatest(
                 Mockito.eq("praxis-service"),
@@ -857,7 +859,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void compactConsultativeProjectionRanksRequestedConceptsAndDropsUnrelatedResources() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of());
+        when(repository.findAllCandidateProjections()).thenReturn(projections());
         DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
         when(domainCatalog.contextLatest(
                 Mockito.eq("praxis-service"),
@@ -907,7 +909,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void compactConsultativeProjectionDoesNotExposeLowQualityCatalogDescriptions() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of());
+        when(repository.findAllCandidateProjections()).thenReturn(projections());
         DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
         when(domainCatalog.contextLatest(
                 Mockito.eq("praxis-service"),
@@ -1196,7 +1198,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void compactConsultativeProjectionReusesRecentProjectionAndApiMetadata() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(new ApiMetadata(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(new ApiMetadata(
                 "/api/human-resources/folhas-pagamento/filter/cursor",
                 "POST",
                 "folha,pagamento",
@@ -1277,7 +1279,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void compactConsultativeProjectionCacheIsBoundedForUniqueOpenPrompts() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of());
+        when(repository.findAllCandidateProjections()).thenReturn(projections());
         DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
         when(domainCatalog.contextLatest(
                 Mockito.eq("praxis-service"),
@@ -1325,7 +1327,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void apiMetadataCacheCanBeDisabledForConsultativeProjection() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of());
+        when(repository.findAllCandidateProjections()).thenReturn(projections());
         DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
         when(domainCatalog.contextLatest(
                 Mockito.eq("praxis-service"),
@@ -1371,7 +1373,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void apiCatalogProjectionFiltersWeakResourcesForFocusedCompoundDomainQuestion() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of());
+        when(repository.findAllCandidateProjections()).thenReturn(projections());
         DomainCatalogIngestionService domainCatalog = Mockito.mock(DomainCatalogIngestionService.class);
         String prompt = "Quais APIs e dados estao relacionados a folha de pagamento?";
         when(domainCatalog.contextLatest(
@@ -1471,7 +1473,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void consultativeProjectionStopsFederatedCatalogDiscoveryAfterEnoughResources() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(new ApiMetadata(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(new ApiMetadata(
                 "/api/human-resources/folhas-pagamento",
                 "GET",
                 "folha,pagamento",
@@ -1572,7 +1574,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void consultativeProjectionContinuesCatalogDiscoveryAfterPartialServiceScopedHits() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(new ApiMetadata(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(new ApiMetadata(
                 "/api/human-resources/folhas-pagamento",
                 "GET",
                 "folha,pagamento",
@@ -1705,7 +1707,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void metadataCatalogDoesNotEmitDomainAnchorCandidatesInDefaultDiscoveryPath() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/procurement/suppliers",
                         "POST",
@@ -1735,7 +1737,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void metadataCatalogDoesNotExpandHostDomainSynonymsByDefault() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/funcionarios",
                         "POST",
@@ -1760,7 +1762,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void enterprisePeoplePromptPrefersEmployeeResourceOverGenericDashboardIndicators() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/risk-intelligence/vw-indicadores-incidentes",
                         "POST",
@@ -1913,7 +1915,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                                 .summary("Analiticos de folha.")
                                 .similarityScore(0.45d)
                                 .build()));
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/funcionarios",
                         "POST",
@@ -2030,7 +2032,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                         .summary("Folhas de pagamento")
                         .similarityScore(0.91d)
                         .build()));
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/cargos",
                         "GET",
@@ -2097,7 +2099,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                         .summary("Resumo de missoes")
                         .similarityScore(0.49d)
                         .build()));
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/vw-resumo-missoes",
                         "POST",
@@ -2330,9 +2332,9 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void evidenceBundleSupportsHostNeutralApiMetadataFixture() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+        when(repository.findCandidateProjectionsByScope(
                 "tenant-a", "staging", "default", "release-2026.05"))
-                .thenReturn(List.of(
+                .thenReturn(projections(
                 new ApiMetadata(
                         "/api/risk-intelligence/vw-indicadores-incidentes",
                         "POST",
@@ -2394,7 +2396,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                 Mockito.isNull(),
                 Mockito.isNull()))
                 .thenReturn(List.of(foreignSemanticResult));
-        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+        when(repository.findCandidateProjectionsByScope(
                 "tenant-a", "prod", "default", "v1"))
                 .thenReturn(List.of());
         AgenticAuthoringResourceDiscoveryService service =
@@ -2446,7 +2448,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                         .summary("Cadastrar funcionario")
                         .similarityScore(0.62d)
                         .build()));
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/funcionarios",
                         "POST",
@@ -2512,7 +2514,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                         .summary("Incidentes operacionais")
                         .similarityScore(0.86d)
                         .build()));
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/operations/incidentes",
                         "POST",
@@ -2564,7 +2566,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void analyticalComparisonPrefersGroupByAndExcludesExportEndpoints() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/vw-analytics-folha-pagamento/stats/timeseries",
                         "POST",
@@ -2692,7 +2694,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
     @Test
     void searchDoesNotExposeAllEndpointsAsGovernedAuthoringChoices() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/funcionarios/all",
                         "GET",
@@ -2924,5 +2926,63 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
                         null,
                         null,
                         node)));
+    }
+
+    private List<ApiMetadataCandidateProjection> projections(ApiMetadata... metadata) {
+        return Arrays.stream(metadata).map(this::projection).toList();
+    }
+
+    private ApiMetadataCandidateProjection projection(ApiMetadata metadata) {
+        return new ApiMetadataCandidateProjection() {
+            @Override
+            public String getPath() {
+                return metadata.getPath();
+            }
+
+            @Override
+            public String getMethod() {
+                return metadata.getMethod();
+            }
+
+            @Override
+            public String getTags() {
+                return metadata.getTags();
+            }
+
+            @Override
+            public String getSummary() {
+                return metadata.getSummary();
+            }
+
+            @Override
+            public String getDescription() {
+                return metadata.getDescription();
+            }
+
+            @Override
+            public String getOperationId() {
+                return metadata.getOperationId();
+            }
+
+            @Override
+            public String getRequestSchema() {
+                return metadata.getRequestSchema();
+            }
+
+            @Override
+            public String getResponseSchema() {
+                return metadata.getResponseSchema();
+            }
+
+            @Override
+            public String getParameters() {
+                return metadata.getParameters();
+            }
+
+            @Override
+            public String getRawJson() {
+                return metadata.getRawJson();
+            }
+        };
     }
 }

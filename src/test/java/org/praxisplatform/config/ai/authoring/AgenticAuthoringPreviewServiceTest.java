@@ -4772,6 +4772,87 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewProjectsCanonicalSemanticSurfaceKeyToThePublishedRuntimeSurfaceId() throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma página de missões com a equipe relacionada.",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                null,
+                relatedResourceIntent("operations.missoes.surface.team"));
+        when(resourceSurfaceCatalogRetrievalService.fetchCatalogResult(
+                eq("operations.missoes"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceSurfaceCatalogFetchResult.success(
+                        missionSurfaceCatalog("team"),
+                        "http://localhost/schemas/surfaces?resource=operations.missoes"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                null,
+                null,
+                resourceSurfaceCatalogRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid())
+                .withFailMessage("Preview failure codes: %s", result.failureCodes())
+                .isTrue();
+        assertThat(result.uiCompositionPlan().at("/widgets/1/inputs/surfaceId").asText())
+                .isEqualTo("team");
+        assertThat(result.uiCompositionPlan().at("/diagnostics/relatedResourceGrounding/surfaceId").asText())
+                .isEqualTo("team");
+        assertThat(result.compiledFormPatch().at("/patch/page/widgets/1/definition/inputs/surfaceId").asText())
+                .isEqualTo("team");
+    }
+
+    @Test
+    void previewSelectsTheOnlyPublishedRelatedResourceSurfaceWhenTheSemanticDecisionOmitsItsRuntimeId()
+            throws Exception {
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma página de missões com a equipe relacionada.",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                null,
+                relatedResourceIntent(""));
+        when(resourceSurfaceCatalogRetrievalService.fetchCatalogResult(
+                eq("operations.missoes"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceSurfaceCatalogFetchResult.success(
+                        missionSurfaceCatalog("team"),
+                        "http://localhost/schemas/surfaces?resource=operations.missoes"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                null,
+                null,
+                resourceSurfaceCatalogRetrievalService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid())
+                .withFailMessage("Preview failure codes: %s", result.failureCodes())
+                .isTrue();
+        assertThat(result.uiCompositionPlan().at("/widgets/1/inputs/surfaceId").asText())
+                .isEqualTo("team");
+        assertThat(result.compiledFormPatch().at("/patch/page/widgets/1/definition/inputs/surfaceId").asText())
+                .isEqualTo("team");
+    }
+
+    @Test
     void previewFailsClosedWhenRelatedResourceSurfaceIsNotPublished() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Crie uma página de missões com a equipe relacionada.",

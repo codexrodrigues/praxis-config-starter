@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -18,6 +20,8 @@ import org.praxisplatform.config.service.ResourceActionCatalogFetchResult;
 import org.praxisplatform.config.service.ResourceActionCatalogRetrievalService;
 import org.praxisplatform.config.service.ResourceCapabilitiesFetchResult;
 import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
+import org.praxisplatform.config.service.ResourceSurfaceCatalogFetchResult;
+import org.praxisplatform.config.service.ResourceSurfaceCatalogRetrievalService;
 import org.praxisplatform.config.service.SchemaFetchResult;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 
@@ -32,9 +36,11 @@ class AgenticAuthoringOperationalBindingVerificationServiceTest {
             mock(ResourceCapabilitiesRetrievalService.class);
     private final ResourceActionCatalogRetrievalService actionCatalogService =
             mock(ResourceActionCatalogRetrievalService.class);
+    private final ResourceSurfaceCatalogRetrievalService surfaceCatalogService =
+            mock(ResourceSurfaceCatalogRetrievalService.class);
     private final AgenticAuthoringOperationalBindingVerificationService service =
             new AgenticAuthoringOperationalBindingVerificationService(
-                    bindingService, schemaService, capabilitiesService, actionCatalogService);
+                    bindingService, schemaService, capabilitiesService, actionCatalogService, surfaceCatalogService);
 
     @BeforeEach
     void publishesAnEmptyCanonicalActionCatalogByDefault() {
@@ -107,6 +113,28 @@ class AgenticAuthoringOperationalBindingVerificationServiceTest {
                                 }
                                 """),
                         "http://localhost/api/funcionarios/capabilities"));
+        var surfaceCatalog = objectMapper.createObjectNode();
+        surfaceCatalog.put("resourceKey", "human-resources.funcionarios");
+        surfaceCatalog.put("resourcePath", "/api/funcionarios");
+        var teamSurface = surfaceCatalog.putArray("surfaces").addObject();
+        teamSurface.put("id", "team");
+        teamSurface.put("resourceKey", "human-resources.funcionarios");
+        teamSurface.put("scope", "ITEM");
+        teamSurface.put("kind", "READ_PROJECTION");
+        teamSurface.put("title", "Equipe");
+        teamSurface.put("description", "Equipe relacionada.");
+        teamSurface.put("intent", "employee-team");
+        teamSurface.putArray("tags").add("team").add("related-resource");
+        teamSurface.put("path", "/api/funcionarios/{id}/team");
+        teamSurface.putObject("availability").put("allowed", false).put("reason", "resource-context-required");
+        teamSurface.putObject("relatedResource")
+                .put("parentResourceKey", "human-resources.funcionarios")
+                .put("childResourceKey", "human-resources.equipe");
+        when(surfaceCatalogService.fetchCatalogResult(
+                        "human-resources.funcionarios", "http://localhost", "tenant", "user", "dev"))
+                .thenReturn(ResourceSurfaceCatalogFetchResult.success(
+                        surfaceCatalog,
+                        "http://localhost/schemas/surfaces?resource=human-resources.funcionarios"));
 
         AgenticAuthoringOperationalBindingVerificationService.VerificationResult result = service.verify(
                 "human-resources.funcionarios",
@@ -119,6 +147,11 @@ class AgenticAuthoringOperationalBindingVerificationServiceTest {
             assertThat(operation.schemaType()).isEqualTo("response");
             assertThat(operation.operationId()).isEqualTo("list");
             assertThat(operation.verificationMode()).isEqualTo("principal_capability");
+        });
+        assertThat(result.relatedResourceSurfaces()).singleElement().satisfies(surface -> {
+            assertThat(surface.surfaceId()).isEqualTo("team");
+            assertThat(surface.relatedResource().path("childResourceKey").asText())
+                    .isEqualTo("human-resources.equipe");
         });
     }
 
@@ -214,6 +247,12 @@ class AgenticAuthoringOperationalBindingVerificationServiceTest {
                 .singleElement()
                 .extracting(AiSchemaContext::getSchemaType)
                 .isEqualTo("response");
+        verify(capabilitiesService, times(1)).fetchCapabilitiesResult(
+                "/api/human-resources/funcionarios",
+                "http://localhost",
+                "tenant",
+                "user",
+                "dev");
     }
 
     @Test

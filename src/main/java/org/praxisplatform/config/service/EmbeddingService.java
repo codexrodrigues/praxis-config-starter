@@ -3,13 +3,22 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.genai.errors.ApiException;
+import com.google.genai.errors.GenAiIOException;
+import com.openai.errors.OpenAIServiceException;
+import java.net.ConnectException;
 import java.net.URI;
 import java.net.URLEncoder;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
+import java.net.http.HttpTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -157,7 +166,7 @@ public class EmbeddingService {
                 }
                 return vectors;
             } catch (Exception ex) {
-                throw new IllegalStateException("OpenAI embedding batch failed: " + rootCauseMessage(ex), ex);
+                throw classifyEmbeddingFailure(PROVIDER_OPENAI, ex);
             }
         }
         if (PROVIDER_GEMINI.equals(selected)) {
@@ -173,7 +182,7 @@ public class EmbeddingService {
                 }
                 return vectors;
             } catch (Exception ex) {
-                throw new IllegalStateException("Gemini embedding batch failed.", ex);
+                throw classifyEmbeddingFailure(PROVIDER_GEMINI, ex);
             }
         }
         throw new IllegalStateException(
@@ -201,6 +210,67 @@ public class EmbeddingService {
             batches.add(List.copyOf(current));
         }
         return batches;
+    }
+
+    private AiProviderCallException classifyEmbeddingFailure(String providerName, Throwable failure) {
+        AiProviderCallException normalized = findCause(failure, AiProviderCallException.class);
+        if (normalized != null) {
+            return normalized;
+        }
+        ApiException geminiFailure = findCause(failure, ApiException.class);
+        if (geminiFailure != null) {
+            return AiProviderCallException.fromHttpStatusSanitized(
+                    providerName,
+                    geminiFailure.code(),
+                    geminiFailure.message(),
+                    null,
+                    geminiFailure);
+        }
+        OpenAIServiceException openAiFailure = findCause(failure, OpenAIServiceException.class);
+        if (openAiFailure != null) {
+            return AiProviderCallException.fromHttpStatusSanitized(
+                    providerName,
+                    openAiFailure.statusCode(),
+                    openAiFailure.code().orElseGet(() -> openAiFailure.type().orElse("unknown")),
+                    openAiRetryAfter(openAiFailure, Instant.now()),
+                    openAiFailure);
+        }
+        Throwable root = rootCause(failure);
+        if (root instanceof HttpTimeoutException
+                || root instanceof SocketTimeoutException
+                || root instanceof java.util.concurrent.TimeoutException) {
+            return AiProviderCallException.timeout(providerName, root);
+        }
+        if (root instanceof GenAiIOException
+                || root instanceof ConnectException
+                || root instanceof SocketException
+                || root instanceof UnknownHostException
+                || root instanceof java.io.IOException) {
+            return AiProviderCallException.transport(providerName, root);
+        }
+        return AiProviderCallException.unknown(providerName, root);
+    }
+
+    private <T extends Throwable> T findCause(Throwable failure, Class<T> type) {
+        Throwable current = failure;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return type.cast(current);
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private Throwable rootCause(Throwable failure) {
+        Throwable current = failure;
+        while (current != null && current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current != null ? current : failure;
     }
 
     private String formatRagInput(String text, RagEmbeddingPurpose purpose, EmbeddingCallConfig override) {
@@ -240,7 +310,7 @@ public class EmbeddingService {
             try {
                 return embedWithGoogleGenAi(text, override, effectiveApiKey);
             } catch (Exception e) {
-                throw new IllegalStateException("Gemini embedding failed.", e);
+                throw classifyEmbeddingFailure(PROVIDER_GEMINI, e);
             }
         }
         if (PROVIDER_OPENAI.equals(selected)) {
@@ -254,7 +324,7 @@ public class EmbeddingService {
                 Integer effectiveDimensions = overrideDimensions != null ? overrideDimensions : resolveDefaultDimensions(selected);
                 return embedWithOpenAi(text, override, effectiveApiKey, effectiveModel, effectiveDimensions);
             } catch (Exception e) {
-                throw new IllegalStateException("OpenAI embedding failed: " + rootCauseMessage(e), e);
+                throw classifyEmbeddingFailure(PROVIDER_OPENAI, e);
             }
         }
         throw new IllegalStateException(
@@ -503,7 +573,8 @@ public class EmbeddingService {
                 .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() >= 400) {
-            throw new IllegalStateException("Gemini embedding HTTP " + response.statusCode() + ": " + response.body());
+            throw classifyGoogleGenAiRestFailure(
+                    response.statusCode(), response.body(), response.headers(), Instant.now());
         }
         JsonNode root = objectMapper.readTree(response.body());
         JsonNode values = root.path("embedding").path("values");
@@ -580,15 +651,42 @@ public class EmbeddingService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private String rootCauseMessage(Throwable throwable) {
-        Throwable current = throwable;
-        while (current.getCause() != null) {
-            current = current.getCause();
+    AiProviderCallException classifyGoogleGenAiRestFailure(
+            int statusCode,
+            String responseBody,
+            java.net.http.HttpHeaders headers,
+            Instant now) {
+        AiProviderRetryAfter.GoogleFailureMetadata metadata =
+                AiProviderRetryAfter.fromGoogleErrorBody(objectMapper, responseBody, now);
+        Instant headerRetryAfter = headers != null
+                ? AiProviderRetryAfter.fromHeaders(
+                        headers.allValues("retry-after-ms"), headers.allValues("retry-after"), now)
+                : null;
+        return AiProviderCallException.fromHttpStatusSanitized(
+                PROVIDER_GEMINI,
+                statusCode,
+                metadata.reason(),
+                later(metadata.retryAfter(), headerRetryAfter),
+                null);
+    }
+
+    private Instant openAiRetryAfter(OpenAIServiceException failure, Instant now) {
+        if (failure.headers() == null) {
+            return null;
         }
-        String message = current.getMessage();
-        if (message == null || message.isBlank()) {
-            return current.getClass().getSimpleName();
+        return AiProviderRetryAfter.fromHeaders(
+                failure.headers().values("retry-after-ms"),
+                failure.headers().values("retry-after"),
+                now);
+    }
+
+    private Instant later(Instant first, Instant second) {
+        if (first == null) {
+            return second;
         }
-        return message.replaceAll("sk-[A-Za-z0-9_-]+", "sk-***");
+        if (second == null) {
+            return first;
+        }
+        return first.isAfter(second) ? first : second;
     }
 }

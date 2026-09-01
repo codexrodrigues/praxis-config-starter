@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.praxisplatform.config.repository.projection.DomainCatalogItemSummary;
 
 public interface DomainCatalogItemRepository extends JpaRepository<DomainCatalogItem, UUID> {
 
@@ -55,6 +56,30 @@ public interface DomainCatalogItemRepository extends JpaRepository<DomainCatalog
     """)
     List<DomainCatalogItem> searchAcrossReleases(
             @Param("releases") List<DomainCatalogRelease> releases,
+            @Param("itemType") String itemType,
+            @Param("contextKey") String contextKey,
+            @Param("nodeType") String nodeType,
+            @Param("query") String query,
+            Pageable pageable);
+
+    /**
+     * Runtime discovery projection. It joins only the release key needed by the public item
+     * response and therefore never initializes {@code DomainCatalogRelease.rawPayload}.
+     */
+    @Query("""
+        select new org.praxisplatform.config.repository.projection.DomainCatalogItemSummary(
+          i.id, i.release.releaseKey, i.itemType, i.itemKey, i.contextKey, i.nodeType,
+          i.bindingType, i.edgeType, i.payload)
+        from DomainCatalogItem i
+        where i.release.id in :releaseIds
+          and (:itemType is null or :itemType = '' or i.itemType = :itemType)
+          and (:contextKey is null or :contextKey = '' or i.contextKey = :contextKey)
+          and (:nodeType is null or :nodeType = '' or i.nodeType = :nodeType)
+          and (:query is null or :query = '' or lower(i.searchableText) like lower(concat('%', :query, '%')))
+        order by i.itemType asc, i.itemKey asc
+    """)
+    List<DomainCatalogItemSummary> searchSummariesAcrossReleaseIds(
+            @Param("releaseIds") List<UUID> releaseIds,
             @Param("itemType") String itemType,
             @Param("contextKey") String contextKey,
             @Param("nodeType") String nodeType,

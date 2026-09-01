@@ -8,6 +8,8 @@ import { loadGateMatrix, resolveGateProfile } from './resolve-page-builder-agent
 import {
   validateGateEvidenceSet,
   validateGateReport,
+  validatePublishedGateEvidenceSet,
+  validatePublishedGateResult,
 } from './validate-page-builder-agentic-gate-evidence.mjs';
 
 const profile = resolveGateProfile(loadGateMatrix(), 'single-table');
@@ -268,6 +270,112 @@ function relatedReport() {
   };
 }
 
+function publishedRelatedResult(run) {
+  const publishedReceipt = {
+    ...relatedReceipt(),
+    outcome: 'first-pass',
+    firstPassFunctional: true,
+    playwrightRetryAttempts: 0,
+  };
+  const reportSha256 = String(run).repeat(64);
+  return {
+    schemaVersion: 'praxis.page-builder-agentic-production-like-result/v1',
+    productionLike: true,
+    criticalEndpointMocks: 0,
+    criticalInterceptionGuard: {
+      testTitle: relatedProfile.requiredPassedTests[0],
+      passed: true,
+    },
+    executionLane: 'live',
+    validationMode: 'related-resource',
+    e2ePassed: true,
+    provider: 'gemini',
+    model: 'gemini-test',
+    embeddingProvider: 'gemini',
+    dependencyAttestation: {
+      configStarter: {
+        localJarSha256: hash,
+        quickstartNestedJarSha256: hash,
+        byteIdentical: true,
+      },
+    },
+    aiRegistry: { snapshotHash: hash },
+    versions: {
+      configStarter: '1.0.0',
+      quickstartConfigDependency: '1.0.0',
+      metadataStarterDependency: '1.0.0',
+      quickstart: '1.0.0',
+      angularWorkspace: '1.0.0',
+      java: 21,
+      node: 'v20',
+      playwright: '1.55',
+      chromium: '140',
+    },
+    contractHash: hash,
+    git: ['config', 'metadata', 'quickstart', 'angular'].map((name) => ({
+      name,
+      sha: 'b'.repeat(40),
+      treeSha: 'c'.repeat(40),
+      materialization: 'working-tree',
+      dirty: false,
+    })),
+    matrix: {
+      schemaVersion: relatedProfile.matrixSchemaVersion,
+      scenarios: [...relatedProfile.scenarios],
+      expectedDiscovered: relatedProfile.expectedDiscovered,
+      minimumExecuted: relatedProfile.minimumExecuted,
+      expectedSkipped: relatedProfile.expectedSkipped,
+      requiredPassedTests: [...relatedProfile.requiredPassedTests],
+      retries: relatedProfile.retries,
+      domainCatalogRagRequired: relatedProfile.domainCatalogRagRequired,
+      domainCatalogResourceKey: relatedProfile.domainCatalogResourceKey,
+      apiCatalogGroup: relatedProfile.apiCatalogGroup,
+      apiCatalogPathPrefixes: [...relatedProfile.apiCatalogPathPrefixes],
+      receiptRequirements: relatedProfile.receiptRequirements,
+      semanticRefinementRequirements: relatedProfile.semanticRefinementRequirements,
+    },
+    playwright: {
+      discovered: 2,
+      executed: 2,
+      passed: 2,
+      skipped: 0,
+      failed: 0,
+      flaky: 0,
+      attempts: 2,
+      retryAttempts: 0,
+      durationMs: 100 + run,
+      tests: relatedProfile.requiredPassedTests.map((title) => ({
+        title,
+        status: 'expected',
+        attempts: 1,
+        retryAttempts: 0,
+      })),
+    },
+    evidenceValidation: {
+      passed: true,
+      artifact: 'evidence-validation-summary.json',
+      attestation: {
+        schemaVersion: 'praxis.page-builder-agentic-gate-run-attestation/v1',
+        reportSha256,
+        durationMs: 100 + run,
+        discovered: 2,
+        passed: 2,
+        retries: 0,
+        receipts: [{
+          scenarioId: 'related-resource-control',
+          firstPassFunctional: true,
+          totalMs: publishedReceipt.timingMs.total,
+          persistedPayloadSha256: publishedReceipt.persistence.persistedPayloadSha256,
+        }],
+        semanticRefinements: [],
+      },
+    },
+    scenarioEvidence: [publishedReceipt],
+    diagnosticEvidence: [],
+    failureType: null,
+  };
+}
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -365,7 +473,9 @@ test('aggregates only the declared number of unique run reports', () => {
     const first = join(directory, 'run-1.json');
     const second = join(directory, 'run-2.json');
     writeFileSync(first, JSON.stringify(report()));
-    writeFileSync(second, JSON.stringify(report()));
+    const secondReport = report();
+    secondReport.stats.startTime = '2026-08-31T00:01:00.000Z';
+    writeFileSync(second, JSON.stringify(secondReport));
     const summary = validateGateEvidenceSet({ reportPaths: [first, second], expectedRuns: 2, profile });
     assert.equal(summary.passedRuns, 2);
     assert.equal(summary.totals.passed, 6);
@@ -373,6 +483,82 @@ test('aggregates only the declared number of unique run reports', () => {
     assert.throws(
       () => validateGateEvidenceSet({ reportPaths: [first, first], expectedRuns: 2, profile }),
       /Report paths must be unique/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('accepts a sanitized published related-resource result', () => {
+  const summary = validatePublishedGateResult(
+    publishedRelatedResult(1),
+    '/tmp/production-like-result.json',
+    relatedProfile,
+  );
+  assert.equal(summary.passed, 2);
+  assert.equal(summary.retries, 0);
+  assert.equal(summary.receipts[0].scenarioId, 'related-resource-control');
+});
+
+test('aggregates five unique published results on identical immutable coordinates', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'praxis-published-gate-evidence-'));
+  try {
+    const paths = Array.from({ length: 5 }, (_, index) => {
+      const path = join(directory, `run-${index + 1}.json`);
+      writeFileSync(path, JSON.stringify(publishedRelatedResult(index + 1)));
+      return path;
+    });
+    const summary = validatePublishedGateEvidenceSet({
+      resultPaths: paths,
+      expectedRuns: 5,
+      profile: relatedProfile,
+    });
+    assert.equal(summary.passedRuns, 5);
+    assert.equal(summary.totals.passed, 10);
+    assert.equal(summary.totals.retries, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects duplicate report attestations across published runs', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'praxis-published-gate-duplicate-'));
+  try {
+    const first = join(directory, 'run-1.json');
+    const second = join(directory, 'run-2.json');
+    writeFileSync(first, JSON.stringify(publishedRelatedResult(1)));
+    const duplicate = publishedRelatedResult(2);
+    duplicate.evidenceValidation.attestation.reportSha256 = '1'.repeat(64);
+    writeFileSync(second, JSON.stringify(duplicate));
+    assert.throws(
+      () => validatePublishedGateEvidenceSet({
+        resultPaths: [first, second],
+        expectedRuns: 2,
+        profile: relatedProfile,
+      }),
+      /unique raw report hashes/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects immutable coordinate drift across published runs', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'praxis-published-gate-drift-'));
+  try {
+    const first = join(directory, 'run-1.json');
+    const second = join(directory, 'run-2.json');
+    writeFileSync(first, JSON.stringify(publishedRelatedResult(1)));
+    const drifted = publishedRelatedResult(2);
+    drifted.model = 'gemini-drifted';
+    writeFileSync(second, JSON.stringify(drifted));
+    assert.throws(
+      () => validatePublishedGateEvidenceSet({
+        resultPaths: [first, second],
+        expectedRuns: 2,
+        profile: relatedProfile,
+      }),
+      /identical immutable coordinates/,
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });

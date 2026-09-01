@@ -216,7 +216,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             if (fullResolution.isPresent() && incompleteResolvedVisualization(fullResolution.get())) {
                 JsonNode repairedResult = invokeJson(
                         "intent_full_visualization_repair",
-                        fullVisualizationRepairPrompt(promptInput.prompt()),
+                        fullVisualizationRepairPrompt(promptInput.prompt(), fullResolution.get()),
                         AiJsonSchema.ofSchema(schema()),
                         AiCallConfig.builder()
                                 .provider(request.provider())
@@ -246,18 +246,43 @@ public class AgenticAuthoringLlmIntentResolverService {
     private boolean incompleteResolvedVisualization(AgenticAuthoringLlmIntentResolution resolution) {
         if (resolution == null
                 || !resolution.resolved()
-                || !"create".equals(valueOrDefault(resolution.operationKind(), ""))
-                || !List.of("chart", "dashboard").contains(valueOrDefault(resolution.artifactKind(), ""))) {
+                || !"create".equals(valueOrDefault(resolution.operationKind(), ""))) {
             return false;
         }
+        String artifactKind = valueOrDefault(resolution.artifactKind(), "");
         AgenticAuthoringVisualizationDecision decision = resolution.visualizationDecision();
-        return decision == null
-                || !StringUtils.hasText(decision.primaryComponent())
-                || decision.axes() == null
-                || decision.axes().isEmpty();
+        if (List.of("chart", "dashboard").contains(artifactKind)) {
+            return decision == null
+                    || !StringUtils.hasText(decision.primaryComponent())
+                    || decision.axes() == null
+                    || decision.axes().isEmpty();
+        }
+        return "page".equals(artifactKind)
+                && decision != null
+                && "parent-child-related-resource".equals(valueOrDefault(decision.layoutKind(), ""))
+                && !StringUtils.hasText(decision.targetSurfaceId());
     }
 
-    private String fullVisualizationRepairPrompt(String originalPrompt) {
+    private String fullVisualizationRepairPrompt(
+            String originalPrompt,
+            AgenticAuthoringLlmIntentResolution resolution) {
+        AgenticAuthoringVisualizationDecision decision = resolution == null
+                ? null
+                : resolution.visualizationDecision();
+        if (decision != null
+                && "page".equals(valueOrDefault(resolution.artifactKind(), ""))
+                && "parent-child-related-resource".equals(valueOrDefault(decision.layoutKind(), ""))) {
+            return originalPrompt + """
+
+                    The previous full resolution selected a parent-child related-resource composition but omitted
+                    visualizationDecision.targetSurfaceId. Repair only that semantic omission. Return a complete intent
+                    object, not a patch. Preserve the selected governed resource, layout and primary component. Select
+                    targetSurfaceId only when the user and governed evidence identify an exact runtime surface id; copy
+                    that id exactly and never substitute a nodeKey, canonicalKey, endpoint segment or child field. If the
+                    exact governed surface cannot be selected semantically, set resolved=false and ask one focused
+                    clarification instead of returning a resolved composition with an empty targetSurfaceId.
+                    """;
+        }
         return originalPrompt + """
 
                 The previous full resolution declared a chart or dashboard but omitted a complete visualizationDecision.
@@ -1704,8 +1729,14 @@ public class AgenticAuthoringLlmIntentResolverService {
         if (!StringUtils.hasText(resolution.selectedResourcePath())) {
             return false;
         }
+        AgenticAuthoringVisualizationDecision decision = resolution.visualizationDecision();
+        if ("page".equals(artifactKind)
+                && decision != null
+                && "parent-child-related-resource".equals(valueOrDefault(decision.layoutKind(), ""))) {
+            return StringUtils.hasText(decision.primaryComponent())
+                    && StringUtils.hasText(decision.targetSurfaceId());
+        }
         if (List.of("chart", "dashboard").contains(artifactKind)) {
-            AgenticAuthoringVisualizationDecision decision = resolution.visualizationDecision();
             return decision != null
                     && StringUtils.hasText(decision.primaryComponent())
                     && decision.axes() != null
@@ -1837,19 +1868,22 @@ public class AgenticAuthoringLlmIntentResolverService {
         context.put("userPrompt", valueOrDefault(effectivePrompt, request.userPrompt()));
         context.put("route", valueOrDefault(request.currentRoute(), ""));
         context.set("currentPageSummary", currentPageSummary == null ? objectMapper.createObjectNode() : currentPageSummary);
-        context.set(
-                "governedDomainContext",
-                AgenticAuthoringContextBundle.create(
-                                objectMapper,
-                                request,
-                                effectivePrompt,
-                                currentPageSummary,
-                                target,
-                                candidateOptions,
-                                componentCapabilities,
-                                governedDomainContext)
-                        .path("governedDomainContext")
-                        .deepCopy());
+        ObjectNode contextBundle = AgenticAuthoringContextBundle.create(
+                objectMapper,
+                request,
+                effectivePrompt,
+                currentPageSummary,
+                target,
+                candidateOptions,
+                componentCapabilities,
+                governedDomainContext);
+        context.set("governedDomainContext", contextBundle.path("governedDomainContext").deepCopy());
+        JsonNode relatedResourceSurfaces = contextBundle
+                .path("retrievalContext")
+                .path("verifiedRelatedResourceSurfaces");
+        if (relatedResourceSurfaces.isObject()) {
+            context.set("verifiedRelatedResourceSurfaces", relatedResourceSurfaces.deepCopy());
+        }
         JsonNode authoringScopePolicy = AgenticAuthoringContextBundle.authoringScopePolicy(request);
         if (authoringScopePolicy != null) {
             context.set("authoringScopePolicy", authoringScopePolicy);
@@ -2050,7 +2084,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                 For a requested parent-child page that coordinates a parent collection and one item-level related-resource
                 surface, use artifactKind "page", operationKind "create", layoutKind
                 "parent-child-related-resource", primaryComponent "praxis-related-resource-outlet", and copy the exact
-                governed surface id requested by the user into targetSurfaceId. Leave targetSurfaceId null when no exact
+                governed runtime surface id from verifiedRelatedResourceSurfaces.entries[].surfaceId,
+                metadata.surfaceId, or the ui_surface binding target.id into
+                targetSurfaceId; never copy the surface nodeKey/canonicalKey into this runtime field. Leave
+                targetSurfaceId null when no exact
                 surface is semantically selected; never invent a related surface from a child field or endpoint name.
                 For an existing governed resource action or writable record operation, such as approving, rejecting,
                 deactivating, reactivating, paying, scheduling or editing a concrete record, use component_authoring,

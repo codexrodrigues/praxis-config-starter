@@ -84,6 +84,53 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
     }
 
     @Test
+    void reusesDomainCatalogContextForCandidatesFromTheSameResourceWithinOneEnhancement() {
+        DomainCatalogIngestionService domainCatalogIngestionService = Mockito.mock(DomainCatalogIngestionService.class);
+        Mockito.when(domainCatalogIngestionService.contextLatest(
+                        Mockito.eq("praxis-service"),
+                        Mockito.eq("operations.missoes"),
+                        Mockito.eq("default"),
+                        Mockito.eq("dev"),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.eq("missoes"),
+                        Mockito.eq(8)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "missoes",
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of(item("node", "operations.missoes", "Missoes"))));
+        AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
+                new AgenticAuthoringDomainCatalogCandidateEnhancer(domainCatalogIngestionService, "praxis-service");
+        AgenticAuthoringCandidate listCandidate = candidate("/api/operations/missoes", "get");
+        AgenticAuthoringCandidate createCandidate = candidate("/api/operations/missoes", "post");
+
+        List<AgenticAuthoringCandidate> enhanced = enhancer.enhance(
+                "missoes",
+                List.of(listCandidate, createCandidate),
+                "default",
+                "dev");
+
+        assertThat(enhanced).hasSize(2).allSatisfy(candidate -> assertThat(candidate.evidence())
+                .contains(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING));
+        Mockito.verify(domainCatalogIngestionService, Mockito.times(1)).contextLatest(
+                Mockito.eq("praxis-service"),
+                Mockito.eq("operations.missoes"),
+                Mockito.eq("default"),
+                Mockito.eq("dev"),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.eq("missoes"),
+                Mockito.eq(8));
+    }
+
+    @Test
     void keepsLexicalCandidateWhenDomainCatalogHasNoMatchingContext() {
         DomainCatalogIngestionService domainCatalogIngestionService = Mockito.mock(DomainCatalogIngestionService.class);
         Mockito.when(domainCatalogIngestionService.contextLatest(
@@ -614,6 +661,18 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                 null,
                 null,
                 objectMapper.createObjectNode().put("label", label));
+    }
+
+    private AgenticAuthoringCandidate candidate(String resourcePath, String operation) {
+        return new AgenticAuthoringCandidate(
+                resourcePath,
+                operation,
+                "/schemas/filtered?path=" + resourcePath + "&operation=" + operation,
+                resourcePath,
+                operation,
+                0.72d,
+                "api_metadata semantic retrieval",
+                List.of("api-metadata", "semantic-retrieval"));
     }
 
     private DomainCatalogItemResponse itemWithTargetField(

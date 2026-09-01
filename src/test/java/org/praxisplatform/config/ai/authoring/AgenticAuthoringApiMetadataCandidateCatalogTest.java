@@ -2,11 +2,13 @@ package org.praxisplatform.config.ai.authoring;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.praxisplatform.config.domain.ApiMetadata;
+import org.praxisplatform.config.projection.ApiMetadataCandidateProjection;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.dto.ApiSearchResult;
@@ -17,7 +19,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
     @Test
     void discoversCandidateFromGovernedMultilingualCatalogText() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 apiMetadata(
                         "/api/human-resources/habilidades",
                         "POST",
@@ -106,7 +108,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                         "GET",
                         "Funcionarios com cargo, departamento e email.",
                         0.91d)));
-        Mockito.when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+        Mockito.when(repository.findCandidateProjectionsByScope(
                         "tenant-local",
                         "local",
                         "default",
@@ -146,7 +148,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
     @Test
     void keepsExplicitSourceMatchAlongsideSemanticRetrievalWhenUserNamesTheSource() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 apiMetadata(
                         "/api/procurement/suppliers",
                         "POST",
@@ -191,7 +193,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
     @Test
     void ranksSemanticEvidenceAheadOfWeakLexicalComplementsWhenScoresAreInflated() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 apiMetadata(
                         "/api/operations/vw-resumo-missoes",
                         "POST",
@@ -538,7 +540,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 "human resources funcionarios empregados colaboradores",
                 "Funcionarios",
                 "Funcionarios com nome, email, cargo e departamento.");
-        Mockito.when(repository.findAll()).thenReturn(List.of(funcionarios));
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(funcionarios));
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
         AgenticAuthoringApiMetadataCandidateCatalog catalog =
                 new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
@@ -557,7 +559,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 .contains("semantic-retrieval", "llm-resource-focus", "semantic-role:operational-resource");
         assertThat(candidates.get(0).evidenceBundle().retrievalSource())
                 .isEqualTo("semantic_retrieval");
-        Mockito.verify(repository).findAll();
+        Mockito.verify(repository).findAllCandidateProjections();
         Mockito.verifyNoInteractions(retrievalService);
     }
 
@@ -570,7 +572,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 "human resources funcionarios empregados colaboradores",
                 "Funcionarios",
                 "Funcionarios com nome, email, cargo e departamento.");
-        Mockito.when(repository.findAll()).thenReturn(List.of(funcionarios));
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(funcionarios));
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
         AgenticAuthoringApiMetadataCandidateCatalog catalog =
                 new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
@@ -588,14 +590,14 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
             assertThat(candidate.evidence())
                     .contains("llm-resource-focus", "semantic-role:operational-resource");
         });
-        Mockito.verify(repository).findAll();
+        Mockito.verify(repository).findAllCandidateProjections();
         Mockito.verifyNoInteractions(retrievalService);
     }
 
     @Test
     void llmAuthoredCanonicalResourceFocusFallsBackToCatalogScanWhenExactMetadataIsMissing() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of(
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
                 apiMetadata(
                         "/api/human-resources/funcionarios/filter/cursor",
                         "POST",
@@ -624,14 +626,14 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 .isEqualTo("/api/human-resources/funcionarios");
         assertThat(candidates.get(0).evidence())
                 .contains("semantic-retrieval", "llm-resource-focus", "semantic-role:operational-resource");
-        Mockito.verify(repository).findAll();
+        Mockito.verify(repository).findAllCandidateProjections();
         Mockito.verifyNoInteractions(retrievalService);
     }
 
     @Test
     void llmAuthoredCanonicalResourceFocusCreatesSchemaPendingCandidateWhenScopedCatalogIsEmpty() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+        Mockito.when(repository.findCandidateProjectionsByScope(
                         "tenant", "local", "default", "v1"))
                 .thenReturn(List.of());
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
@@ -662,7 +664,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                     .doesNotContain("schema-available", "semantic-retrieval");
             assertThat(candidate.evidenceBundle().retrievalSource()).isEqualTo("context_hint");
         });
-        Mockito.verify(repository).findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+        Mockito.verify(repository).findCandidateProjectionsByScope(
                 "tenant", "local", "default", "v1");
         Mockito.verifyNoInteractions(retrievalService);
     }
@@ -898,7 +900,7 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
     @Test
     void keepsEmployeeSubjectAheadOfUnrelatedAnalyticsRoleForMetricPrompt() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        Mockito.when(repository.findAll()).thenReturn(List.of());
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(List.of());
         ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
         Mockito.when(retrievalService.searchApiMetadata(
                         Mockito.anyString(),
@@ -941,6 +943,64 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
             String summary,
             String description) {
         return new ApiMetadata(path, method, tags, summary, description, null, null, null, "[]", "{}", null);
+    }
+
+    private List<ApiMetadataCandidateProjection> projections(ApiMetadata... metadata) {
+        return Arrays.stream(metadata).map(this::projection).toList();
+    }
+
+    private ApiMetadataCandidateProjection projection(ApiMetadata metadata) {
+        return new ApiMetadataCandidateProjection() {
+            @Override
+            public String getPath() {
+                return metadata.getPath();
+            }
+
+            @Override
+            public String getMethod() {
+                return metadata.getMethod();
+            }
+
+            @Override
+            public String getTags() {
+                return metadata.getTags();
+            }
+
+            @Override
+            public String getSummary() {
+                return metadata.getSummary();
+            }
+
+            @Override
+            public String getDescription() {
+                return metadata.getDescription();
+            }
+
+            @Override
+            public String getOperationId() {
+                return metadata.getOperationId();
+            }
+
+            @Override
+            public String getRequestSchema() {
+                return metadata.getRequestSchema();
+            }
+
+            @Override
+            public String getResponseSchema() {
+                return metadata.getResponseSchema();
+            }
+
+            @Override
+            public String getParameters() {
+                return metadata.getParameters();
+            }
+
+            @Override
+            public String getRawJson() {
+                return metadata.getRawJson();
+            }
+        };
     }
 
     private ApiSearchResult searchResult(String path, String method, String summary, double score) {

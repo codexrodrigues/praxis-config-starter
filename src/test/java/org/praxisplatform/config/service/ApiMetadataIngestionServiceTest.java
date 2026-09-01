@@ -92,6 +92,12 @@ class ApiMetadataIngestionServiceTest {
                 .thenReturn(Optional.of(existing));
         when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(indexingStateService.snapshot(scope)).thenReturn(Optional.of(indexingState(ApiMetadataIndexingStatus.READY)));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.corpusReleaseStatus(
+                "tenant-a", "prod", "release-1", RagResourceTypes.API_METADATA, 1L))
+                .thenReturn(new RagVectorStoreService.RagCorpusReleaseStatus(
+                        true, true, "tenant-a", "prod", "release-1",
+                        1, 1, 1, java.util.Map.of(), java.util.Map.of(), List.of(), null, List.of()));
 
         service.ingestCatalog(request, "tenant-a", "prod");
 
@@ -127,6 +133,35 @@ class ApiMetadataIngestionServiceTest {
 
         assertThat(existing.getEmbedding()).containsExactly(0.1f, 0.2f);
         verify(indexingStateService).updateExpectedCount(scope, 9L, 1L);
+        verify(indexingCoordinator).scheduleAfterCommit(scope);
+    }
+
+    @Test
+    void shouldScheduleRecoveryForIdenticalEndpointWhenReadyCorpusDrifted() throws Exception {
+        ApiCatalogRequest request = request("release-1", "/api/users", "GET");
+        ApiMetadata existing = metadata(41L, "/api/users", "GET", List.of(0.1f, 0.2f));
+        existing.setRawJson(new ObjectMapper().writeValueAsString(request.getEndpoints().get(0)));
+        ApiMetadataIndexingScope scope = new ApiMetadataIndexingScope(
+                "tenant-a", "prod", "default", "release-1");
+        when(repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                "tenant-a", "prod", "default", "release-1", "/api/users", "GET"))
+                .thenReturn(Optional.of(existing));
+        when(repository.save(any(ApiMetadata.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(indexingStateService.snapshot(scope)).thenReturn(Optional.of(indexingState(ApiMetadataIndexingStatus.READY)));
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.corpusReleaseStatus(
+                "tenant-a", "prod", "release-1", RagResourceTypes.API_METADATA, 1L))
+                .thenReturn(new RagVectorStoreService.RagCorpusReleaseStatus(
+                        true, false, "tenant-a", "prod", "release-1",
+                        0, 1, 0, java.util.Map.of(), java.util.Map.of(), List.of(), null, List.of()));
+        when(indexingStateService.request(scope)).thenReturn(10L);
+        when(repository.countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant-a", "prod", "default", "release-1")).thenReturn(1L);
+
+        service.ingestCatalog(request, "tenant-a", "prod");
+
+        assertThat(existing.getEmbedding()).containsExactly(0.1f, 0.2f);
+        verify(indexingStateService).updateExpectedCount(scope, 10L, 1L);
         verify(indexingCoordinator).scheduleAfterCommit(scope);
     }
 

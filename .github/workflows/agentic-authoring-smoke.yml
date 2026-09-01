@@ -42,13 +42,15 @@ on:
         default: false
         type: boolean
       page_builder_e2e_mode:
-        description: 'Page Builder browser gate depth. Use smoke for release gate, full for deliberate matrix investigation.'
+        description: 'Canonical Page Builder gate profile. Use smoke for release, focused modes for archetype certification, and full for deliberate matrix investigation.'
         required: false
         default: smoke
         type: choice
         options:
           - smoke
           - single-table
+          - crud-simple
+          - related-resource
           - full
       page_builder_e2e_timeout_minutes:
         description: 'Timeout for the Page Builder Playwright gate step.'
@@ -384,10 +386,17 @@ jobs:
         shell: pwsh
         working-directory: praxis-config-starter
         run: |
-          .\tools\Export-AgenticProductionLikeEvidence.ps1 `
-            -StarterRoot "$env:GITHUB_WORKSPACE\praxis-config-starter" `
-            -HttpArtifactRoot "$env:GITHUB_WORKSPACE\artifacts\ai-sse-smoke" `
-            -OutputRoot "$env:GITHUB_WORKSPACE\praxis-config-starter\artifacts\agentic-authoring-publication"
+          $includeLiveHttpSse = '${{ inputs.run_quickstart_http_smoke }}' -eq 'true' -and
+            '${{ inputs.domain_rule_lifecycle_only }}' -ne 'true'
+          $publicationArgs = @{
+            StarterRoot = "$env:GITHUB_WORKSPACE\praxis-config-starter"
+            OutputRoot = "$env:GITHUB_WORKSPACE\praxis-config-starter\artifacts\agentic-authoring-publication"
+            PublicationProfile = if ($includeLiveHttpSse) { 'page-builder-http-sse' } else { 'page-builder' }
+          }
+          if ($includeLiveHttpSse) {
+            $publicationArgs.HttpArtifactRoot = "$env:GITHUB_WORKSPACE\artifacts\ai-sse-smoke"
+          }
+          .\tools\Export-AgenticProductionLikeEvidence.ps1 @publicationArgs
 
       - name: Upload smoke artifacts
         if: always()

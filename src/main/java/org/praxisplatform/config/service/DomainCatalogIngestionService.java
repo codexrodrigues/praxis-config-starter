@@ -3,6 +3,7 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -12,6 +13,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.StringJoiner;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
@@ -36,6 +38,8 @@ import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.DomainCatalogItemRepository;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
+import org.praxisplatform.config.repository.projection.DomainCatalogItemSummary;
+import org.praxisplatform.config.repository.projection.DomainCatalogReleaseSummary;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.filter.Filter;
@@ -44,7 +48,9 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -59,6 +65,7 @@ public class DomainCatalogIngestionService {
 
     private static final int DEFAULT_RAG_PUBLICATION_MAX_ATTEMPTS = 3;
     private static final long DEFAULT_RAG_PUBLICATION_RETRY_BACKOFF_MS = 1_000L;
+    private static final long MAX_INLINE_RAG_PUBLICATION_RETRY_DELAY_MS = 60_000L;
 
     private static final List<String> ITEM_ARRAYS = List.of(
             "contexts",
@@ -76,6 +83,7 @@ public class DomainCatalogIngestionService {
     private final RagVectorStoreService ragVectorStoreService;
     private final DomainCatalogSchemaValidationService schemaValidationService;
     private final DomainKnowledgeProjectionService domainKnowledgeProjectionService;
+    private final DomainCatalogRagPublicationStateService ragPublicationStateService;
     private final boolean domainCatalogRagPublicationEnabled;
     private final boolean asyncRagPublicationEnabled;
     private final int ragPublicationBatchSize;
@@ -153,6 +161,7 @@ public class DomainCatalogIngestionService {
             RagVectorStoreService ragVectorStoreService,
             DomainCatalogSchemaValidationService schemaValidationService,
             ObjectProvider<DomainKnowledgeProjectionService> domainKnowledgeProjectionService,
+            ObjectProvider<DomainCatalogRagPublicationStateService> ragPublicationStateService,
             @Value("${praxis.domain-catalog.rag-publication.enabled:true}")
             boolean domainCatalogRagPublicationEnabled,
             @Value("${praxis.domain-catalog.rag-publication.async-enabled:true}")
@@ -171,12 +180,14 @@ public class DomainCatalogIngestionService {
                 ragVectorStoreService,
                 schemaValidationService,
                 domainKnowledgeProjectionService.getIfAvailable(),
+                ragPublicationStateService.getIfAvailable(),
                 domainCatalogRagPublicationEnabled,
                 asyncRagPublicationEnabled,
                 ragPublicationBatchSize,
                 ragPublicationMaxAttempts,
                 ragPublicationRetryBackoffMs,
-                applicationEventPublisher);
+                applicationEventPublisher,
+                true);
     }
 
     DomainCatalogIngestionService(
@@ -191,9 +202,9 @@ public class DomainCatalogIngestionService {
             int ragPublicationBatchSize,
             ApplicationEventPublisher applicationEventPublisher) {
         this(releaseRepository, itemRepository, objectMapper, ragVectorStoreService, schemaValidationService,
-                domainKnowledgeProjectionService, domainCatalogRagPublicationEnabled, asyncRagPublicationEnabled,
+                domainKnowledgeProjectionService, null, domainCatalogRagPublicationEnabled, asyncRagPublicationEnabled,
                 ragPublicationBatchSize, DEFAULT_RAG_PUBLICATION_MAX_ATTEMPTS,
-                DEFAULT_RAG_PUBLICATION_RETRY_BACKOFF_MS, applicationEventPublisher);
+                DEFAULT_RAG_PUBLICATION_RETRY_BACKOFF_MS, applicationEventPublisher, true);
     }
 
     DomainCatalogIngestionService(
@@ -210,9 +221,29 @@ public class DomainCatalogIngestionService {
             long ragPublicationRetryBackoffMs,
             ApplicationEventPublisher applicationEventPublisher) {
         this(releaseRepository, itemRepository, objectMapper, ragVectorStoreService, schemaValidationService,
-                domainKnowledgeProjectionService, domainCatalogRagPublicationEnabled, asyncRagPublicationEnabled,
+                domainKnowledgeProjectionService, null, domainCatalogRagPublicationEnabled, asyncRagPublicationEnabled,
                 ragPublicationBatchSize, ragPublicationMaxAttempts, ragPublicationRetryBackoffMs,
                 applicationEventPublisher, true);
+    }
+
+    DomainCatalogIngestionService(
+            DomainCatalogReleaseRepository releaseRepository,
+            DomainCatalogItemRepository itemRepository,
+            ObjectMapper objectMapper,
+            RagVectorStoreService ragVectorStoreService,
+            DomainCatalogSchemaValidationService schemaValidationService,
+            DomainKnowledgeProjectionService domainKnowledgeProjectionService,
+            DomainCatalogRagPublicationStateService ragPublicationStateService,
+            boolean domainCatalogRagPublicationEnabled,
+            boolean asyncRagPublicationEnabled,
+            int ragPublicationBatchSize,
+            int ragPublicationMaxAttempts,
+            long ragPublicationRetryBackoffMs,
+            ApplicationEventPublisher applicationEventPublisher) {
+        this(releaseRepository, itemRepository, objectMapper, ragVectorStoreService, schemaValidationService,
+                domainKnowledgeProjectionService, ragPublicationStateService, domainCatalogRagPublicationEnabled,
+                asyncRagPublicationEnabled, ragPublicationBatchSize, ragPublicationMaxAttempts,
+                ragPublicationRetryBackoffMs, applicationEventPublisher, true);
     }
 
     private DomainCatalogIngestionService(
@@ -222,6 +253,7 @@ public class DomainCatalogIngestionService {
             RagVectorStoreService ragVectorStoreService,
             DomainCatalogSchemaValidationService schemaValidationService,
             DomainKnowledgeProjectionService domainKnowledgeProjectionService,
+            DomainCatalogRagPublicationStateService ragPublicationStateService,
             boolean domainCatalogRagPublicationEnabled,
             boolean asyncRagPublicationEnabled,
             int ragPublicationBatchSize,
@@ -235,6 +267,7 @@ public class DomainCatalogIngestionService {
         this.ragVectorStoreService = ragVectorStoreService;
         this.schemaValidationService = schemaValidationService;
         this.domainKnowledgeProjectionService = domainKnowledgeProjectionService;
+        this.ragPublicationStateService = ragPublicationStateService;
         this.domainCatalogRagPublicationEnabled = domainCatalogRagPublicationEnabled;
         this.asyncRagPublicationEnabled = asyncRagPublicationEnabled;
         this.ragPublicationBatchSize = Math.max(1, ragPublicationBatchSize);
@@ -242,6 +275,17 @@ public class DomainCatalogIngestionService {
         this.ragPublicationRetryBackoffMs = Math.max(0L, ragPublicationRetryBackoffMs);
         this.ragPublicationExecutor = asyncRagPublicationEnabled ? createRagPublicationExecutor() : null;
         this.applicationEventPublisher = applicationEventPublisher;
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    void recoverInterruptedRagPublications() {
+        if (!domainCatalogRagPublicationEnabled || ragPublicationStateService == null) {
+            return;
+        }
+        for (UUID releaseId : ragPublicationStateService.recoverInterrupted()) {
+            releaseRepository.findById(releaseId).ifPresent(release ->
+                    publishRagDocumentsAfterPersistence(release, itemRepository.findByRelease(release)));
+        }
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
@@ -326,6 +370,9 @@ public class DomainCatalogIngestionService {
             domainKnowledgeProjectionService.project(release, items);
         }
         if (domainCatalogRagPublicationEnabled) {
+            if (ragPublicationStateService != null) {
+                releaseRepository.flush();
+            }
             publishRagDocumentsAfterPersistence(release, items);
         } else {
             log.debug("Domain catalog RAG publication disabled for release {}", release.getReleaseKey());
@@ -439,6 +486,40 @@ public class DomainCatalogIngestionService {
                 .toList();
     }
 
+    /**
+     * Runtime discovery reads only the item and release fields projected into the response. It
+     * must not hydrate the immutable release payload, which can be several megabytes per release.
+     */
+    private List<DomainCatalogItemResponse> searchSummaries(
+            List<DomainCatalogReleaseSummary> releases,
+            String itemType,
+            String contextKey,
+            String nodeType,
+            String query,
+            int limit) {
+        if (releases == null || releases.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> releaseIds = releases.stream()
+                .map(DomainCatalogReleaseSummary::id)
+                .filter(Objects::nonNull)
+                .toList();
+        if (releaseIds.isEmpty()) {
+            return List.of();
+        }
+        int resolvedLimit = Math.min(Math.max(limit, 1), 200);
+        return itemRepository.searchSummariesAcrossReleaseIds(
+                        releaseIds,
+                        normalize(itemType),
+                        normalize(contextKey),
+                        normalize(nodeType),
+                        normalize(query),
+                        PageRequest.of(0, resolvedLimit))
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<DomainCatalogReleaseResponse> releases(
             String serviceKey,
@@ -447,7 +528,7 @@ public class DomainCatalogIngestionService {
             String environment,
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 100);
-        return releaseRepository.findLatest(
+        return releaseRepository.findLatestSummaries(
                         normalize(serviceKey),
                         normalize(resourceKey),
                         normalize(tenantId),
@@ -479,7 +560,51 @@ public class DomainCatalogIngestionService {
                 RagResourceTypes.DOMAIN_CATALOG,
                 domainCatalogRagPublicationEnabled,
                 ragVectorStoreService.isAvailable(),
-                status);
+                status,
+                publicationStatus(release, status));
+    }
+
+    private DomainCatalogRagStatusResponse.PublicationStatus publicationStatus(
+            DomainCatalogRelease release,
+            RagVectorStoreService.RagCorpusReleaseStatus corpusStatus) {
+        if (ragPublicationStateService != null) {
+            Optional<DomainCatalogRagPublicationStateService.StateSnapshot> snapshot =
+                    ragPublicationStateService.snapshot(release.getId());
+            if (snapshot.isPresent()) {
+                DomainCatalogRagPublicationStateService.StateSnapshot state = snapshot.get();
+                return new DomainCatalogRagStatusResponse.PublicationStatus(
+                        state.status().name(),
+                        state.revision(),
+                        state.attempt(),
+                        state.expectedDocumentCount(),
+                        state.publishedDocumentCount(),
+                        state.failureKind(),
+                        state.retryable(),
+                        instantText(state.retryAfter()),
+                        instantText(state.requestedAt()),
+                        instantText(state.startedAt()),
+                        instantText(state.completedAt()),
+                        instantText(state.updatedAt()));
+            }
+        }
+        boolean published = corpusStatus != null && corpusStatus.available() && corpusStatus.reconciled();
+        return new DomainCatalogRagStatusResponse.PublicationStatus(
+                published ? "PUBLISHED" : "PENDING",
+                0L,
+                0,
+                corpusStatus != null ? corpusStatus.expectedChunkCount() : 0L,
+                corpusStatus != null ? corpusStatus.documentCount() : 0L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    private String instantText(Instant instant) {
+        return instant != null ? instant.toString() : null;
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -507,8 +632,8 @@ public class DomainCatalogIngestionService {
             String query,
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
-        return search(
-                latestReleasesForScope(serviceKey, tenantId, environment, resourceKey),
+        return searchSummaries(
+                latestReleaseSummariesForScope(serviceKey, tenantId, environment, resourceKey),
                 itemType,
                 contextKey,
                 nodeType,
@@ -541,8 +666,9 @@ public class DomainCatalogIngestionService {
             String query,
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
-        List<DomainCatalogRelease> releases = latestReleasesForScope(serviceKey, tenantId, environment, resourceKey);
-        List<DomainCatalogItemResponse> items = search(
+        List<DomainCatalogReleaseSummary> releases = latestReleaseSummariesForScope(
+                serviceKey, tenantId, environment, resourceKey);
+        List<DomainCatalogItemResponse> items = searchSummaries(
                 releases,
                 itemType,
                 contextKey,
@@ -573,7 +699,7 @@ public class DomainCatalogIngestionService {
             String query,
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
-        List<DomainCatalogRelease> releases = latestReleasesForScope(
+        List<DomainCatalogReleaseSummary> releases = latestReleaseSummariesForScope(
                 serviceKey,
                 tenantId,
                 environment,
@@ -624,8 +750,8 @@ public class DomainCatalogIngestionService {
             String query,
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
-        return search(
-                        latestReleasesForScope(serviceKey, tenantId, environment, resourceKey),
+        return searchSummaries(
+                        latestReleaseSummariesForScope(serviceKey, tenantId, environment, resourceKey),
                         "edge",
                         null,
                         null,
@@ -694,9 +820,12 @@ public class DomainCatalogIngestionService {
         return new ArrayList<>(itemsByCanonicalKey.values());
     }
 
-    private void publishRagDocuments(DomainCatalogRelease release, List<DomainCatalogItem> items) {
-        if (!ragVectorStoreService.isAvailable() || items == null || items.isEmpty()) {
-            return;
+    private int publishRagDocuments(DomainCatalogRelease release, List<DomainCatalogItem> items) {
+        if (!ragVectorStoreService.isAvailable()) {
+            throw new IllegalStateException("Domain catalog RAG vector store is unavailable");
+        }
+        if (items == null || items.isEmpty()) {
+            return 0;
         }
         long startedAt = System.nanoTime();
         List<Document> documents = new ArrayList<>();
@@ -738,7 +867,7 @@ public class DomainCatalogIngestionService {
                     .build());
         }
         if (documents.isEmpty()) {
-            return;
+            return 0;
         }
         int publishedDocuments = 0;
         for (int start = 0; start < documents.size(); start += ragPublicationBatchSize) {
@@ -759,6 +888,7 @@ public class DomainCatalogIngestionService {
                 release.getReleaseKey(),
                 TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt),
                 ragPublicationBatchSize);
+        return publishedDocuments;
     }
 
     private void upsertRagBatchWithRetry(DomainCatalogRelease release, List<Document> documents) {
@@ -767,17 +897,24 @@ public class DomainCatalogIngestionService {
                 ragVectorStoreService.upsertDocuments(documents);
                 return;
             } catch (RuntimeException ex) {
-                if (attempt >= ragPublicationMaxAttempts) {
+                if (!isRetryableRagPublicationFailure(ex) || attempt >= ragPublicationMaxAttempts) {
                     throw ex;
                 }
-                long retryDelayMs = retryDelayMillis(attempt);
+                long retryDelayMs = retryDelayMillis(attempt, ex, Instant.now());
+                if (retryDelayMs < 0L) {
+                    log.warn(
+                            "Domain catalog RAG batch retry for release {} was deferred by provider guidance: {}",
+                            release.getReleaseKey(),
+                            AiProviderFailureClassifier.classify(ex));
+                    throw ex;
+                }
                 log.warn(
                         "Domain catalog RAG batch failed for release {} on attempt {}/{}; retrying in {} ms: {}",
                         release.getReleaseKey(),
                         attempt,
                         ragPublicationMaxAttempts,
                         retryDelayMs,
-                        ex.getMessage());
+                        AiProviderFailureClassifier.classify(ex));
                 try {
                     TimeUnit.MILLISECONDS.sleep(retryDelayMs);
                 } catch (InterruptedException interrupted) {
@@ -790,16 +927,62 @@ public class DomainCatalogIngestionService {
         }
     }
 
-    private long retryDelayMillis(int failedAttempt) {
-        if (ragPublicationRetryBackoffMs == 0L) {
-            return 0L;
+    private boolean isRetryableRagPublicationFailure(RuntimeException failure) {
+        AiProviderCallException providerFailure = findProviderFailure(failure);
+        if (providerFailure == null) {
+            // Preserve the existing conservative retry for untyped vector-store failures.
+            return true;
         }
-        int exponent = Math.min(Math.max(failedAttempt - 1, 0), 10);
-        long multiplier = 1L << exponent;
-        if (ragPublicationRetryBackoffMs > Long.MAX_VALUE / multiplier) {
-            return 60_000L;
+        return switch (providerFailure.getKind()) {
+            case RATE_LIMIT, CAPACITY, SERVER_ERROR, TRANSPORT, TIMEOUT -> true;
+            case QUOTA_EXHAUSTED, AUTH, CLIENT_ERROR, UNKNOWN -> false;
+        };
+    }
+
+    private AiProviderCallException findProviderFailure(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof AiProviderCallException providerFailure) {
+                return providerFailure;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+            current = current.getCause();
         }
-        return Math.min(ragPublicationRetryBackoffMs * multiplier, 60_000L);
+        return null;
+    }
+
+    long retryDelayMillis(int failedAttempt, RuntimeException failure, Instant now) {
+        long localDelayMs = 0L;
+        if (ragPublicationRetryBackoffMs > 0L) {
+            int exponent = Math.min(Math.max(failedAttempt - 1, 0), 10);
+            long multiplier = 1L << exponent;
+            localDelayMs = ragPublicationRetryBackoffMs > Long.MAX_VALUE / multiplier
+                    ? MAX_INLINE_RAG_PUBLICATION_RETRY_DELAY_MS
+                    : Math.min(
+                            ragPublicationRetryBackoffMs * multiplier,
+                            MAX_INLINE_RAG_PUBLICATION_RETRY_DELAY_MS);
+        }
+        Instant retryAfter = providerRetryAfter(failure);
+        if (retryAfter == null || !retryAfter.isAfter(now)) {
+            return localDelayMs;
+        }
+        Duration providerDelay = Duration.between(now, retryAfter);
+        if (providerDelay.getSeconds() > MAX_INLINE_RAG_PUBLICATION_RETRY_DELAY_MS / 1_000L) {
+            return -1L;
+        }
+        long providerDelayMs = providerDelay.getSeconds() * 1_000L
+                + (providerDelay.getNano() + 999_999L) / 1_000_000L;
+        if (providerDelayMs > MAX_INLINE_RAG_PUBLICATION_RETRY_DELAY_MS) {
+            return -1L;
+        }
+        return Math.max(localDelayMs, Math.max(1L, providerDelayMs));
+    }
+
+    private Instant providerRetryAfter(Throwable failure) {
+        AiProviderCallException providerFailure = findProviderFailure(failure);
+        return providerFailure != null ? providerFailure.getRetryAfter() : null;
     }
 
     private void reconcileRagPublicationAfterPersistence(
@@ -837,14 +1020,36 @@ public class DomainCatalogIngestionService {
     }
 
     private void publishRagDocumentsAfterPersistence(DomainCatalogRelease release, List<DomainCatalogItem> items) {
+        long expectedDocumentCount = items != null
+                ? items.stream().filter(this::isRagIndexable).count()
+                : 0L;
+        long publicationRevision = ragPublicationStateService != null
+                ? ragPublicationStateService.request(release.getId(), expectedDocumentCount)
+                : 0L;
         Runnable task = () -> {
+            if (ragPublicationStateService != null
+                    && !ragPublicationStateService.markPublishing(release.getId(), publicationRevision)) {
+                return;
+            }
             try {
-                publishRagDocuments(release, items);
+                int publishedDocumentCount = publishRagDocuments(release, items);
+                if (ragPublicationStateService != null) {
+                    ragPublicationStateService.markPublished(
+                            release.getId(), publicationRevision, publishedDocumentCount);
+                }
             } catch (RuntimeException ex) {
+                if (ragPublicationStateService != null) {
+                    ragPublicationStateService.markFailed(
+                            release.getId(),
+                            publicationRevision,
+                            AiProviderFailureClassifier.classify(ex),
+                            isRetryableRagPublicationFailure(ex),
+                            providerRetryAfter(ex));
+                }
                 log.warn(
                         "Domain catalog release {} was persisted, but RAG publication failed: {}",
                         release.getReleaseKey(),
-                        ex.getMessage()
+                        AiProviderFailureClassifier.classify(ex)
                 );
             }
         };
@@ -856,10 +1061,14 @@ public class DomainCatalogIngestionService {
             try {
                 ragPublicationExecutor.execute(task);
             } catch (RuntimeException ex) {
+                if (ragPublicationStateService != null) {
+                    ragPublicationStateService.markFailed(
+                            release.getId(), publicationRevision, "scheduling_failure", true, null);
+                }
                 log.warn(
-                        "Domain catalog release {} was persisted, but RAG publication could not be scheduled: {}",
+                        "Domain catalog release {} was persisted, but RAG publication could not be scheduled ({})",
                         release.getReleaseKey(),
-                        ex.getMessage()
+                        AiProviderFailureClassifier.classify(ex)
                 );
             }
         };
@@ -877,7 +1086,7 @@ public class DomainCatalogIngestionService {
     }
 
     private List<DomainCatalogItemResponse> semanticContextItems(
-            List<DomainCatalogRelease> releases,
+            List<DomainCatalogReleaseSummary> releases,
             String tenantId,
             String environment,
             String itemType,
@@ -905,17 +1114,22 @@ public class DomainCatalogIngestionService {
                 return List.of();
             }
             Map<String, DomainCatalogItemResponse> itemsByDocumentIdentity = new LinkedHashMap<>();
-            for (DomainCatalogRelease release : releases) {
-                for (DomainCatalogItem item : itemRepository.findByRelease(release)) {
-                    if (matchesSemanticContextItem(item, itemType, contextKey, nodeType)) {
-                        DomainCatalogItemResponse response = toResponse(item);
-                        itemsByDocumentIdentity.put(
-                                semanticDocumentIdentity(
-                                        ragReleaseId(release),
-                                        item.getItemType(),
-                                        item.getItemKey()),
-                                response);
-                    }
+            List<DomainCatalogItemSummary> persistedItems = itemRepository.searchSummariesAcrossReleaseIds(
+                    releases.stream().map(DomainCatalogReleaseSummary::id).toList(),
+                    normalize(itemType),
+                    normalize(contextKey),
+                    normalize(nodeType),
+                    null,
+                    PageRequest.of(0, 10_000));
+            for (DomainCatalogItemSummary item : persistedItems) {
+                if (matchesSemanticContextItem(item)) {
+                    DomainCatalogItemResponse response = toResponse(item);
+                    itemsByDocumentIdentity.put(
+                            semanticDocumentIdentity(
+                                    RagDocumentIdentity.resolveReleaseId(item.releaseKey(), null, null),
+                                    item.itemType(),
+                                    item.itemKey()),
+                            response);
                 }
             }
             List<DomainCatalogItemResponse> rankedItems = new ArrayList<>();
@@ -940,7 +1154,7 @@ public class DomainCatalogIngestionService {
     }
 
     private Filter.Expression semanticContextFilter(
-            List<DomainCatalogRelease> releases,
+            List<DomainCatalogReleaseSummary> releases,
             String tenantId,
             String environment,
             String itemType,
@@ -958,7 +1172,7 @@ public class DomainCatalogIngestionService {
             filter = builder.and(filter, scope);
         }
         FilterExpressionBuilder.Op releaseFilter = null;
-        for (DomainCatalogRelease release : releases) {
+        for (DomainCatalogReleaseSummary release : releases) {
             FilterExpressionBuilder.Op candidate = builder.eq(
                     RagMetadataKeys.RELEASE_ID,
                     ragReleaseId(release));
@@ -979,22 +1193,9 @@ public class DomainCatalogIngestionService {
         return filter.build();
     }
 
-    private boolean matchesSemanticContextItem(
-            DomainCatalogItem item,
-            String itemType,
-            String contextKey,
-            String nodeType) {
+    private boolean matchesSemanticContextItem(DomainCatalogItemSummary item) {
         return item != null
-                && isRagIndexable(item)
-                && matchesOptionalValue(item.getItemType(), itemType)
-                && matchesOptionalValue(item.getContextKey(), contextKey)
-                && matchesOptionalValue(item.getNodeType(), nodeType);
-    }
-
-    private boolean matchesOptionalValue(String value, String expected) {
-        String normalizedExpected = normalize(expected);
-        return !StringUtils.hasText(normalizedExpected)
-                || Objects.equals(normalize(value), normalizedExpected);
+                && !deniesAiVisibility(read(item.payload()));
     }
 
     private String semanticDocumentIdentity(String releaseKey, String itemType, String itemKey) {
@@ -1019,6 +1220,15 @@ public class DomainCatalogIngestionService {
                 release == null || release.getGeneratedAt() == null
                         ? null
                         : release.getGeneratedAt().toString());
+    }
+
+    private String ragReleaseId(DomainCatalogReleaseSummary release) {
+        return RagDocumentIdentity.resolveReleaseId(
+                release == null ? null : release.releaseKey(),
+                release == null ? null : release.schemaVersion(),
+                release == null || release.generatedAt() == null
+                        ? null
+                        : release.generatedAt().toString());
     }
 
     private ExecutorService createRagPublicationExecutor() {
@@ -1150,6 +1360,20 @@ public class DomainCatalogIngestionService {
         );
     }
 
+    private DomainCatalogItemResponse toResponse(DomainCatalogItemSummary item) {
+        return new DomainCatalogItemResponse(
+                item.id(),
+                item.releaseKey(),
+                item.itemType(),
+                item.itemKey(),
+                item.contextKey(),
+                item.nodeType(),
+                item.bindingType(),
+                item.edgeType(),
+                read(item.payload())
+        );
+    }
+
     private DomainCatalogReleaseResponse toReleaseResponse(DomainCatalogRelease release) {
         return new DomainCatalogReleaseResponse(
                 release.getId(),
@@ -1163,6 +1387,22 @@ public class DomainCatalogIngestionService {
                 release.getTenantId(),
                 release.getEnvironment(),
                 release.getCreatedAt()
+        );
+    }
+
+    private DomainCatalogReleaseResponse toReleaseResponse(DomainCatalogReleaseSummary release) {
+        return new DomainCatalogReleaseResponse(
+                release.id(),
+                release.releaseKey(),
+                release.schemaVersion(),
+                release.serviceKey(),
+                release.serviceName(),
+                release.serviceVersion(),
+                release.generatedAt(),
+                release.sourceHash(),
+                release.tenantId(),
+                release.environment(),
+                release.createdAt()
         );
     }
 
@@ -1183,38 +1423,45 @@ public class DomainCatalogIngestionService {
                 .orElseThrow(() -> new IllegalArgumentException("No domain catalog release found for the requested scope"));
     }
 
-    private List<DomainCatalogRelease> latestReleasesForScope(String serviceKey, String tenantId, String environment) {
-        return latestReleasesForScope(serviceKey, tenantId, environment, null);
-    }
-
-    private List<DomainCatalogRelease> latestReleasesForScope(
+    private List<DomainCatalogReleaseSummary> latestReleaseSummariesForScope(
             String serviceKey,
             String tenantId,
             String environment,
             String resourceKey) {
         String normalizedServiceKey = normalize(serviceKey);
+        String normalizedResourceKey = normalize(resourceKey);
         if (StringUtils.hasText(normalizedServiceKey)) {
-            if (StringUtils.hasText(normalize(resourceKey))) {
-                return List.of(latestRelease(normalizedServiceKey, tenantId, environment, resourceKey));
+            if (StringUtils.hasText(normalizedResourceKey)) {
+                return releaseRepository.findLatestSummaries(
+                                normalizedServiceKey,
+                                normalizedResourceKey,
+                                normalize(tenantId),
+                                normalize(environment),
+                                PageRequest.of(0, 1))
+                        .stream()
+                        .findFirst()
+                        .map(List::of)
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "No domain catalog release found for the requested scope"));
             }
-            return latestReleasesForServiceScope(normalizedServiceKey, tenantId, environment);
+            return latestReleaseSummariesForServiceScope(normalizedServiceKey, tenantId, environment);
         }
-        return latestReleasesByService(tenantId, environment, resourceKey);
+        return latestReleaseSummariesByService(tenantId, environment, normalizedResourceKey);
     }
 
-    private List<DomainCatalogRelease> latestReleasesForServiceScope(
+    private List<DomainCatalogReleaseSummary> latestReleaseSummariesForServiceScope(
             String serviceKey,
             String tenantId,
             String environment) {
-        List<DomainCatalogRelease> releases = releaseRepository.findLatest(
+        List<DomainCatalogReleaseSummary> releases = releaseRepository.findLatestSummaries(
                 normalize(serviceKey),
                 null,
                 normalize(tenantId),
                 normalize(environment),
                 PageRequest.of(0, 100));
-        Map<String, DomainCatalogRelease> latestByResource = new LinkedHashMap<>();
-        for (DomainCatalogRelease release : releases) {
-            String key = latestByServiceKey(serviceKey, release, null);
+        Map<String, DomainCatalogReleaseSummary> latestByResource = new LinkedHashMap<>();
+        for (DomainCatalogReleaseSummary release : releases) {
+            String key = latestByServiceKey(serviceKey, release.releaseKey(), null);
             latestByResource.putIfAbsent(key, release);
         }
         if (latestByResource.isEmpty()) {
@@ -1223,24 +1470,22 @@ public class DomainCatalogIngestionService {
         return List.copyOf(latestByResource.values());
     }
 
-    private List<DomainCatalogRelease> latestReleasesByService(String tenantId, String environment) {
-        return latestReleasesByService(tenantId, environment, null);
-    }
-
-    private List<DomainCatalogRelease> latestReleasesByService(String tenantId, String environment, String resourceKey) {
-        String normalizedResourceKey = normalize(resourceKey);
-        List<DomainCatalogRelease> releases = releaseRepository.findLatest(
+    private List<DomainCatalogReleaseSummary> latestReleaseSummariesByService(
+            String tenantId,
+            String environment,
+            String resourceKey) {
+        List<DomainCatalogReleaseSummary> releases = releaseRepository.findLatestSummaries(
                 null,
-                normalizedResourceKey,
+                normalize(resourceKey),
                 normalize(tenantId),
                 normalize(environment),
                 PageRequest.of(0, 100));
-        Map<String, DomainCatalogRelease> latestByService = new LinkedHashMap<>();
-        for (DomainCatalogRelease release : releases) {
-            String serviceKey = normalize(release.getServiceKey());
+        Map<String, DomainCatalogReleaseSummary> latestByService = new LinkedHashMap<>();
+        for (DomainCatalogReleaseSummary release : releases) {
+            String serviceKey = normalize(release.serviceKey());
             String key = StringUtils.hasText(serviceKey)
-                    ? latestByServiceKey(serviceKey, release, normalizedResourceKey)
-                    : release.getReleaseKey();
+                    ? latestByServiceKey(serviceKey, release.releaseKey(), normalize(resourceKey))
+                    : release.releaseKey();
             latestByService.putIfAbsent(key, release);
         }
         if (latestByService.isEmpty()) {
@@ -1250,11 +1495,15 @@ public class DomainCatalogIngestionService {
     }
 
     private String latestByServiceKey(String serviceKey, DomainCatalogRelease release, String resourceKey) {
+        return latestByServiceKey(serviceKey, release.getReleaseKey(), resourceKey);
+    }
+
+    private String latestByServiceKey(String serviceKey, String releaseKey, String resourceKey) {
         if (StringUtils.hasText(resourceKey)) {
-            return serviceKey + ":" + resourceKeyFromReleaseKey(release.getReleaseKey());
+            return serviceKey + ":" + resourceKeyFromReleaseKey(releaseKey);
         }
-        if (hasStructuredResourceReleaseKey(release.getReleaseKey())) {
-            return serviceKey + ":" + resourceKeyFromReleaseKey(release.getReleaseKey());
+        if (hasStructuredResourceReleaseKey(releaseKey)) {
+            return serviceKey + ":" + resourceKeyFromReleaseKey(releaseKey);
         }
         return serviceKey;
     }

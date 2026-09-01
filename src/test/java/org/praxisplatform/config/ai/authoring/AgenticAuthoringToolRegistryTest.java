@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.praxisplatform.config.domain.ApiMetadata;
+import org.praxisplatform.config.projection.ApiMetadataCandidateProjection;
 import org.praxisplatform.config.dto.DomainCatalogContextResponse;
 import org.praxisplatform.config.dto.DomainCatalogItemResponse;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
@@ -223,10 +224,9 @@ class AgenticAuthoringToolRegistryTest {
                 "[]",
                 "{}",
                 null);
-        when(repository.findAll()).thenReturn(List.of(employeeMetadata));
-        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
-                "tenant", "local", "default", "v1"))
-                .thenReturn(List.of(employeeMetadata));
+        ApiMetadataCandidateProjection employeeProjection = candidateProjection(employeeMetadata);
+        when(repository.findCandidateProjectionsByScope("tenant", "local", "default", "v1"))
+                .thenReturn(List.of(employeeProjection));
         AgenticAuthoringDomainBindingService bindingService =
                 Mockito.mock(AgenticAuthoringDomainBindingService.class);
         when(bindingService.resolve("tenant", "local", "human-resources.funcionarios", 6))
@@ -275,10 +275,9 @@ class AgenticAuthoringToolRegistryTest {
                 "[]",
                 "{}",
                 null);
-        when(repository.findAll()).thenReturn(List.of(employeeMetadata));
-        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
-                "tenant", "local", "default", "v1"))
-                .thenReturn(List.of(employeeMetadata));
+        ApiMetadataCandidateProjection employeeProjection = candidateProjection(employeeMetadata);
+        when(repository.findCandidateProjectionsByScope("tenant", "local", "default", "v1"))
+                .thenReturn(List.of(employeeProjection));
         AgenticAuthoringDomainBindingService bindingService =
                 Mockito.mock(AgenticAuthoringDomainBindingService.class);
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
@@ -395,6 +394,15 @@ class AgenticAuthoringToolRegistryTest {
                         .containsEntry("operationalGroundingSource", "unique-domain-catalog-resource"));
         AgenticAuthoringResourceCandidatesResult payload =
                 (AgenticAuthoringResourceCandidatesResult) result.payload();
+        assertThat(payload.verifiedOperations()).isNotEmpty();
+        assertThat(payload.verifiedRelatedResourceSurfaces())
+                .singleElement()
+                .extracting(AgenticAuthoringOperationalBindingVerificationService.RelatedResourceSurfaceProjection::surfaceId)
+                .isEqualTo("team");
+        assertThat(result.safeDiagnostics().toString())
+                .doesNotContain(
+                        AgenticAuthoringResourceCandidatesResult.VERIFIED_OPERATIONS_CONTEXT_KEY,
+                        AgenticAuthoringResourceCandidatesResult.VERIFIED_RELATED_RESOURCE_SURFACES_CONTEXT_KEY);
         assertThat(payload.resourceSearchFocus())
                 .satisfies(focus -> {
                     assertThat(focus.primaryBusinessEntity()).isEqualTo("human-resources.funcionarios");
@@ -640,6 +648,9 @@ class AgenticAuthoringToolRegistryTest {
                         .containsEntry("bindingVerification", "schemas.filtered+resource.capabilities+schemas.actions"));
         AgenticAuthoringResourceCandidatesResult payload =
                 (AgenticAuthoringResourceCandidatesResult) result.payload();
+        assertThat(payload.verifiedOperations()).hasSize(4);
+        assertThat(result.safeDiagnostics().toString())
+                .doesNotContain(AgenticAuthoringResourceCandidatesResult.VERIFIED_OPERATIONS_CONTEXT_KEY);
         assertThat(payload.candidates())
                 .extracting(
                         AgenticAuthoringCandidate::resourcePath,
@@ -690,6 +701,22 @@ class AgenticAuthoringToolRegistryTest {
                                 true, "", "resource_capabilities"),
                         "hr-v1",
                         List.of("domain-knowledge:evidence-status:active"))),
+                List.of(new AgenticAuthoringOperationalBindingVerificationService.RelatedResourceSurfaceProjection(
+                        "team",
+                        "human-resources.funcionarios",
+                        "/api/human-resources/funcionarios",
+                        "ITEM",
+                        "READ_PROJECTION",
+                        "Equipe",
+                        "Equipe relacionada.",
+                        "employee-team",
+                        objectMapper.createArrayNode().add("team").add("related-resource"),
+                        "/api/human-resources/funcionarios/{id}/team",
+                        objectMapper.createObjectNode().put("allowed", false).put("reason", "resource-context-required"),
+                        objectMapper.createObjectNode()
+                                .put("parentResourceKey", "human-resources.funcionarios")
+                                .put("childResourceKey", "human-resources.equipe"),
+                        "/schemas/surfaces?resource=human-resources.funcionarios")),
                 List.of());
     }
 
@@ -1296,8 +1323,7 @@ class AgenticAuthoringToolRegistryTest {
     @Test
     void executesSearchApiResourcesThroughRegistry() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(
-                new ApiMetadata(
+        ApiMetadata metadata = new ApiMetadata(
                         "/api/human-resources/vw-analytics-folha-pagamento",
                         "GET",
                         "analytics,folha,pagamento",
@@ -1308,7 +1334,9 @@ class AgenticAuthoringToolRegistryTest {
                         "{\"type\":\"object\"}",
                         "[]",
                         "{}",
-                        null)));
+                        null);
+        ApiMetadataCandidateProjection metadataProjection = candidateProjection(metadata);
+        when(repository.findAllCandidateProjections()).thenReturn(List.of(metadataProjection));
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
                 new AgenticAuthoringResourceDiscoveryService(
                         new AgenticAuthoringApiMetadataCandidateCatalog(repository),
@@ -2419,5 +2447,16 @@ class AgenticAuthoringToolRegistryTest {
 
         assertThat(result.valid()).isFalse();
         assertThat(result.errorCode()).isEqualTo("tool-not-found");
+    }
+
+    private ApiMetadataCandidateProjection candidateProjection(ApiMetadata metadata) {
+        ApiMetadataCandidateProjection projection = Mockito.mock(ApiMetadataCandidateProjection.class);
+        when(projection.getPath()).thenReturn(metadata.getPath());
+        when(projection.getMethod()).thenReturn(metadata.getMethod());
+        when(projection.getTags()).thenReturn(metadata.getTags());
+        when(projection.getSummary()).thenReturn(metadata.getSummary());
+        when(projection.getDescription()).thenReturn(metadata.getDescription());
+        when(projection.getOperationId()).thenReturn(metadata.getOperationId());
+        return projection;
     }
 }

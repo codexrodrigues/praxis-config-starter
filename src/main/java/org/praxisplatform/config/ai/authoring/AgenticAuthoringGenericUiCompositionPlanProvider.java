@@ -109,14 +109,6 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         }
         boolean chartOnly = isChartOnlyRequest(request, visualizationDecision);
         boolean dashboardMaterialization = shouldMaterializeDashboard(request, artifactKind, visualizationDecision);
-        if (relatedResourceRequested && safe(visualizationDecision.targetSurfaceId()).isBlank()) {
-            return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
-                    false,
-                    List.of("related-resource-target-surface-required"),
-                    List.of("ui-composition-plan-provider:related-resource-fail-closed"),
-                    objectMapper.createObjectNode(),
-                    emptyCompiledFormPatch()));
-        }
         ObjectNode plan = relatedResourceRequested ? relatedResourcePagePlan(request, candidate, visualizationDecision)
                 : masterDetailRequested ? pagePlan(request, candidate, visualizationDecision) : crudRequested ? crudPlan(request, candidate) : expansionRequested ? expansionPlan(candidate) : tabsRequested ? tabsPlan(request, candidate, visualizationDecision) : chartOnly ? singleChartPlan(request, candidate, visualizationDecision) : switch (artifactKind) {
             case "dashboard" -> dashboardPlan(request, candidate, visualizationDecision);

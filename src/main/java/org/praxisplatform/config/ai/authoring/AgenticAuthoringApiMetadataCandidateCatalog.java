@@ -12,7 +12,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.praxisplatform.config.dto.ApiSearchResult;
-import org.praxisplatform.config.domain.ApiMetadata;
+import org.praxisplatform.config.projection.ApiMetadataCandidateEvidence;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.ContextRetrievalService;
 
@@ -295,7 +295,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (resourceFocus.isBlank()) {
             return List.of();
         }
-        List<ApiMetadata> focusedMetadata = findLlmFocusedMetadata(resourceFocus, context);
+        List<ApiMetadataCandidateEvidence> focusedMetadata = findLlmFocusedMetadata(resourceFocus, context);
         if (focusedMetadata.isEmpty()) {
             return List.of(toSchemaPendingCanonicalResourceFocusCandidate(context, resourceFocus));
         }
@@ -349,12 +349,14 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                         false));
     }
 
-    private List<ApiMetadata> findLlmFocusedMetadata(String resourceFocus, RetrievalContext context) {
+    private List<ApiMetadataCandidateEvidence> findLlmFocusedMetadata(
+            String resourceFocus,
+            RetrievalContext context) {
         String basePath = resourceFocusToApiBasePath(resourceFocus);
         if (basePath.isBlank()) {
             return List.of();
         }
-        List<ApiMetadata> exactMatches = exactLlmFocusedMetadataMatches(basePath, context);
+        List<ApiMetadataCandidateEvidence> exactMatches = exactLlmFocusedMetadataMatches(basePath, context);
         if (!exactMatches.isEmpty()) {
             return exactMatches;
         }
@@ -364,7 +366,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 .toList();
     }
 
-    private List<ApiMetadata> exactLlmFocusedMetadataMatches(String basePath, RetrievalContext context) {
+    private List<ApiMetadataCandidateEvidence> exactLlmFocusedMetadataMatches(
+            String basePath,
+            RetrievalContext context) {
         List<String> methods = context.expectedMethod() == null || context.expectedMethod().isBlank()
                 ? List.of("POST", "GET")
                 : List.of(context.expectedMethod().toUpperCase(Locale.ROOT));
@@ -372,9 +376,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         paths.add(basePath + "/filter/cursor");
         paths.add(basePath + "/filter");
         paths.add(basePath);
-        List<ApiMetadata> matches = new ArrayList<>();
+        List<ApiMetadataCandidateEvidence> matches = new ArrayList<>();
         if (!hasScope(context.tenantId(), context.environment())) {
-            List<ApiMetadata> metadata = structuredMetadata(context);
+            List<ApiMetadataCandidateEvidence> metadata = structuredMetadata(context);
             for (String method : methods) {
                 for (String path : paths) {
                     metadata.stream()
@@ -388,7 +392,8 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         }
         for (String method : methods) {
             for (String path : paths) {
-                Optional<ApiMetadata> metadata = findStructuredMetadataByPathAndMethod(context, path, method);
+                Optional<ApiMetadataCandidateEvidence> metadata =
+                        findStructuredMetadataByPathAndMethod(context, path, method);
                 metadata.ifPresent(matches::add);
             }
         }
@@ -732,18 +737,18 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         }
     }
 
-    private List<ApiMetadata> structuredMetadata(RetrievalContext context) {
+    private List<ApiMetadataCandidateEvidence> structuredMetadata(RetrievalContext context) {
         if (context != null && hasScope(context.tenantId(), context.environment())) {
-            return repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+            return new ArrayList<>(repository.findCandidateProjectionsByScope(
                     normalizeOrDefault(context.tenantId(), "GLOBAL"),
                     normalizeOrDefault(context.environment(), "default"),
                     "default",
-                    normalizeOrDefault(context.releaseId(), "v1"));
+                    normalizeOrDefault(context.releaseId(), "v1")));
         }
-        return repository.findAll();
+        return new ArrayList<>(repository.findAllCandidateProjections());
     }
 
-    private Optional<ApiMetadata> findStructuredMetadataByPathAndMethod(
+    private Optional<ApiMetadataCandidateEvidence> findStructuredMetadataByPathAndMethod(
             RetrievalContext context,
             String path,
             String method) {
@@ -754,11 +759,13 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                     "default",
                     normalizeOrDefault(context.releaseId(), "v1"),
                     path,
-                    method);
+                    method)
+                    .map(metadata -> (ApiMetadataCandidateEvidence) metadata);
         }
-        return repository.findAll().stream()
+        return repository.findAllCandidateProjections().stream()
                 .filter(metadata -> path.equals(metadata.getPath()))
                 .filter(metadata -> method.equalsIgnoreCase(metadata.getMethod()))
+                .map(metadata -> (ApiMetadataCandidateEvidence) metadata)
                 .findFirst();
     }
 
@@ -899,7 +906,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     }
 
     private ScoredCandidate toScoredCandidate(
-            ApiMetadata metadata,
+            ApiMetadataCandidateEvidence metadata,
             String expectedMethod,
             String artifactKind,
             String normalizedPrompt,
@@ -987,7 +994,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     }
 
     private ScoredCandidate toBroadScoredCandidate(
-            ApiMetadata metadata,
+            ApiMetadataCandidateEvidence metadata,
             String expectedMethod,
             String artifactKind,
             String normalizedPrompt,
@@ -1043,7 +1050,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     }
 
     private ScoredCandidate toLlmFocusedCandidate(
-            ApiMetadata metadata,
+            ApiMetadataCandidateEvidence metadata,
             RetrievalContext context,
             String resourceFocus) {
         String endpointText = searchableText(metadata);
@@ -1096,7 +1103,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 score);
     }
 
-    private String broadDiscoveryReason(ApiMetadata metadata) {
+    private String broadDiscoveryReason(ApiMetadataCandidateEvidence metadata) {
         String businessContext = compactReasonText(String.join(" ",
                 valueOrEmpty(metadata.getTags()),
                 valueOrEmpty(metadata.getSummary()),
@@ -1266,7 +1273,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 "distribuicao", "faixa", "faixas", "histograma", "dispersao"));
     }
 
-    private String searchableText(ApiMetadata metadata) {
+    private String searchableText(ApiMetadataCandidateEvidence metadata) {
         if (metadata == null) {
             return "";
         }
@@ -1281,7 +1288,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 valueOrEmpty(metadata.getParameters())));
     }
 
-    private String sourceIdentityText(ApiMetadata metadata) {
+    private String sourceIdentityText(ApiMetadataCandidateEvidence metadata) {
         if (metadata == null) {
             return "";
         }

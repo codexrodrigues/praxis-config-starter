@@ -158,9 +158,23 @@ public class ApiMetadataIngestionService {
     }
 
     private boolean requiresIndexingRecovery(ApiMetadataIndexingScope scope) {
-        return indexingStateService.snapshot(scope)
-                .map(snapshot -> snapshot.status() == ApiMetadataIndexingStatus.FAILED)
-                .orElse(true);
+        Optional<ApiMetadataIndexingStateService.StateSnapshot> current = indexingStateService.snapshot(scope);
+        if (current.isEmpty() || current.get().status() == ApiMetadataIndexingStatus.FAILED) {
+            return true;
+        }
+        ApiMetadataIndexingStateService.StateSnapshot snapshot = current.get();
+        if (snapshot.status() != ApiMetadataIndexingStatus.READY
+                || !apiMetadataRagPublicationEnabled
+                || !ragVectorStoreService.isAvailable()) {
+            return false;
+        }
+        RagVectorStoreService.RagCorpusReleaseStatus corpus = ragVectorStoreService.corpusReleaseStatus(
+                scope.tenantId(),
+                scope.environment(),
+                scope.releaseId(),
+                RagResourceTypes.API_METADATA,
+                snapshot.expectedDocumentCount());
+        return !corpus.reconciled();
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)

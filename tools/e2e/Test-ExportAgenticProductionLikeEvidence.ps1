@@ -71,6 +71,7 @@ try {
         criticalEndpointMocks = 0
         criticalInterceptionGuard = [ordered]@{ passed = $true }
         executionLane = "live"
+        validationMode = "smoke"
         e2ePassed = $true
         provider = "openai"
         model = "gpt-test"
@@ -101,17 +102,58 @@ try {
         sourceAudit = [ordered]@{ passed = $true }
         git = $identities
         matrix = [ordered]@{
+            schemaVersion = "praxis.page-builder-agentic-gate-matrix/v1"
             scenarios = @("critical-interception-guard", "live-resource-workspace-command")
+            retries = 0
+            domainCatalogRagRequired = $false
+            domainCatalogResourceKey = $null
+            apiCatalogGroup = "human-resources"
+            apiCatalogPathPrefixes = @()
+            requiredPassedTests = @("critical guard", "live mission")
             receiptRequirements = @([ordered]@{
                 scenarioId = "live-resource-workspace-command"
                 archetype = "master-detail-command"
                 requiredFunctionalAssertions = @('composition.master-visible', 'composition.detail-visible')
             })
+            semanticRefinementRequirements = @()
             expectedDiscovered = 2
             minimumExecuted = 2
             expectedSkipped = 0
         }
-        playwright = [ordered]@{ discovered = 2; executed = 2; passed = 2; skipped = 0; failed = 0 }
+        playwright = [ordered]@{
+            discovered = 2
+            executed = 2
+            passed = 2
+            skipped = 0
+            failed = 0
+            flaky = 0
+            attempts = 2
+            retryAttempts = 0
+            durationMs = 100
+            tests = @(
+                [ordered]@{ title = "critical guard"; status = "expected"; attempts = 1; retryAttempts = 0 },
+                [ordered]@{ title = "live mission"; status = "expected"; attempts = 1; retryAttempts = 0 }
+            )
+        }
+        evidenceValidation = [ordered]@{
+            passed = $true
+            artifact = "evidence-validation-summary.json"
+            attestation = [ordered]@{
+                schemaVersion = "praxis.page-builder-agentic-gate-run-attestation/v1"
+                reportSha256 = ("9" * 64)
+                durationMs = 100
+                discovered = 2
+                passed = 2
+                retries = 0
+                receipts = @([ordered]@{
+                    scenarioId = "live-resource-workspace-command"
+                    firstPassFunctional = $true
+                    totalMs = 50
+                    persistedPayloadSha256 = ("f" * 64)
+                })
+                semanticRefinements = @()
+            }
+        }
         scenarioEvidence = @($scenarioEvidence)
         diagnosticEvidence = @()
     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Encoding utf8
@@ -119,11 +161,42 @@ try {
     @{ health = "UP"; terminalSeen = $true; replayChecked = $true; provider = "openai" } |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $httpRunRoot "summary.json") -Encoding utf8
 
-    & $scriptPath -StarterRoot $starterRoot -HttpArtifactRoot $httpArtifactRoot -OutputRoot $outputRoot | Out-Null
+    & $scriptPath -StarterRoot $starterRoot -PublicationProfile "page-builder-http-sse" -HttpArtifactRoot $httpArtifactRoot -OutputRoot $outputRoot | Out-Null
     $published = @(Get-ChildItem -LiteralPath $outputRoot -File | Select-Object -ExpandProperty Name | Sort-Object)
     if (($published -join ',') -ne 'http-sse-summary.json,production-like-result.json,source-audit.json') {
         throw "Exporter published an unexpected file set: $($published -join ',')"
     }
+
+    $pageBuilderOutput = Join-Path $root "page-builder-published"
+    $pageBuilderPublication = & $scriptPath `
+        -StarterRoot $starterRoot `
+        -PublicationProfile "page-builder" `
+        -OutputRoot $pageBuilderOutput | ConvertFrom-Json
+    if ($pageBuilderPublication.publicationProfile -ne "page-builder") {
+        throw "Exporter did not report the selected page-builder publication profile."
+    }
+    $pageBuilderPublished = @(Get-ChildItem -LiteralPath $pageBuilderOutput -File | Select-Object -ExpandProperty Name | Sort-Object)
+    if (($pageBuilderPublished -join ',') -ne 'production-like-result.json,source-audit.json') {
+        throw "Page Builder profile published an unexpected file set: $($pageBuilderPublished -join ',')"
+    }
+
+    $missingHttpOutput = Join-Path $root "missing-http-published"
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -PublicationProfile "page-builder-http-sse" -OutputRoot $missingHttpOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "HttpArtifactRoot is required"
+    }
+    if (-not $failedClosed) { throw "Exporter did not require HTTP/SSE evidence for the combined publication profile." }
+
+    $unexpectedHttpOutput = Join-Path $root "unexpected-http-published"
+    $failedClosed = $false
+    try {
+        & $scriptPath -StarterRoot $starterRoot -PublicationProfile "page-builder" -HttpArtifactRoot $httpArtifactRoot -OutputRoot $unexpectedHttpOutput | Out-Null
+    } catch {
+        $failedClosed = $_.Exception.Message -match "HttpArtifactRoot is not valid"
+    }
+    if (-not $failedClosed) { throw "Exporter silently mixed HTTP/SSE evidence into the Page Builder profile." }
 
     $diagnosticOutput = Join-Path $root "diagnostic-published"
     $diagnosticResult = Get-Content -LiteralPath (Join-Path $e2eRoot "result.json") -Raw | ConvertFrom-Json

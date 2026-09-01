@@ -137,10 +137,20 @@ The response includes:
   and content checks;
 - `actualDocumentCount`, `sourceCount`, `chunkKindCounts`, `visibilityCounts`, `sources` and
   `latestPublishedAt`: observed vector-store materialization for the release;
+- `publication`: persisted lifecycle of the current materialization revision, including
+  `status` (`PENDING`, `PUBLISHING`, `PUBLISHED` or `FAILED`), `attempt`, expected/published
+  counts, timestamps and sanitized typed failure evidence (`failureKind`, `retryable`,
+  `retryAfter`);
 - `reconciled` and `warnings`: operational readiness signals.
 
 `reconciled=false` or warnings such as `corpus-chunk-count-mismatch` mean the LLM should continue
 to prefer deterministic `/context` retrieval until the derived vector corpus catches up.
+`publication.status=FAILED` is terminal for the current revision and automation should stop
+immediately instead of repeatedly polling or matching provider messages. When `retryable=true`,
+`retryAfter` identifies the earliest safe instant for a later explicit ingestion/publication
+attempt; it does not imply an automatic `FAILED -> PUBLISHED` transition. Provider-guided delays
+that fit the bounded internal retry window are honored by the Config publisher before it records
+the terminal state.
 
 ## 5. Query Persisted Items
 

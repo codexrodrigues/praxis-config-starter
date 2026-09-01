@@ -76,7 +76,13 @@ catalog. By default the starter schedules RAG publication after the catalog
 transaction commits (`praxis.domain-catalog.rag-publication.async-enabled=true`)
 and publishes documents in bounded batches
 (`praxis.domain-catalog.rag-publication.batch-size=100`). A failed batch is
-retried in place without reprocessing successful earlier batches; the bounded
+retried in place without reprocessing successful earlier batches only when the
+canonical provider failure is recoverable (`rate_limit`, `capacity`,
+`server_error`, `transport` or `timeout`). Exhausted quota, authentication,
+client and unknown provider failures stop the current publication attempt
+immediately; the structural release remains persisted and a later idempotent
+ingest can resume from the missing documents. Logs expose only the normalized
+failure kind, never the provider body or embedding input. The bounded retry
 policy is configured by
 `praxis.domain-catalog.rag-publication.max-attempts=3` and exponential backoff
 starting at
@@ -110,7 +116,29 @@ list. Tenant and environment headers remain part of the release scope.
 It resolves the latest release for the requested tenant, environment, service
 and optional resource, then reports `domain_catalog` vector-store document
 counts, source breakdowns, visibility breakdowns, latest publication timestamp
-and reconciliation warnings. The expected count is computed from persisted
+and reconciliation warnings. The additive `publication` block exposes the
+persisted materialization lifecycle for that immutable release:
+
+- `PENDING`: a publication revision was requested but has not started;
+- `PUBLISHING`: the current revision was claimed by the publisher;
+- `PUBLISHED`: publication completed, with its published document count;
+- `FAILED`: publication stopped, with a sanitized canonical `failureKind`,
+  `retryable` decision and optional `retryAfter` timestamp.
+
+The block also carries `revision`, `attempt`, expected/published counts and
+lifecycle timestamps. `failureKind` is derived from the shared AI provider
+failure taxonomy; it never contains the raw provider response. Pending or
+publishing work is recovered as pending after application restart. Consumers
+must treat `FAILED` as terminal for that publication revision instead of
+polling for an implicit transition or inferring provider state from text.
+`retryable=true` means a later explicit publication request may be attempted;
+it does not promise that a failed revision will schedule itself again.
+`retryAfter`, when present, is the earliest provider-governed instant for that
+later attempt. The publisher honors provider guidance during its bounded
+internal retries and persists longer windows instead of sleeping for less than
+the provider requested.
+
+The expected count is computed from persisted
 catalog items that are eligible for RAG publication: items must have searchable
 content and must not declare `aiUsage.visibility=deny`. This endpoint is an
 operational readiness check for the derived vector corpus; it does not replace

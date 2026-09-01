@@ -86,6 +86,12 @@ export function validateGateMatrix(matrix) {
     if (mode.humanTurnLimit !== undefined) {
       assertPositiveInteger(mode.humanTurnLimit, `modes.${modeName}.humanTurnLimit`);
     }
+    if (mode.domainCatalogRagRequired !== undefined) {
+      assertCondition(
+        typeof mode.domainCatalogRagRequired === 'boolean',
+        `modes.${modeName}.domainCatalogRagRequired must be a boolean.`,
+      );
+    }
     if (mode.domainCatalogResourceKey !== undefined) {
       assertCondition(
         typeof mode.domainCatalogResourceKey === 'string'
@@ -168,6 +174,7 @@ export function resolveGateProfile(matrix, modeName) {
     playwrightTestTimeoutMs: matrix.defaults.playwrightTestTimeoutMs,
     streamProcessingTimeoutSeconds: matrix.defaults.streamProcessingTimeoutSeconds,
     humanTurnLimit: mode.humanTurnLimit ?? null,
+    domainCatalogRagRequired: mode.domainCatalogRagRequired ?? false,
     domainCatalogResourceKey: mode.domainCatalogResourceKey ?? null,
     apiCatalogGroup: mode.apiCatalogGroup ?? null,
     apiCatalogPathPrefixes: [...(mode.apiCatalogPathPrefixes ?? [])],

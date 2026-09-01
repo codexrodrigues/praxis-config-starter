@@ -19,6 +19,7 @@ public record DomainCatalogRagStatusResponse(
         Map<String, Long> visibilityCounts,
         List<SourceStatus> sources,
         String latestPublishedAt,
+        PublicationStatus publication,
         List<String> warnings
 ) {
 
@@ -27,7 +28,8 @@ public record DomainCatalogRagStatusResponse(
             String resourceType,
             boolean ragPublicationEnabled,
             boolean vectorStoreAvailable,
-            RagVectorStoreService.RagCorpusReleaseStatus status) {
+            RagVectorStoreService.RagCorpusReleaseStatus status,
+            PublicationStatus publication) {
         return new DomainCatalogRagStatusResponse(
                 "praxis.domain-catalog-rag-status/v0.1",
                 release,
@@ -43,8 +45,24 @@ public record DomainCatalogRagStatusResponse(
                 status.visibilityCounts(),
                 status.sources().stream().map(SourceStatus::from).toList(),
                 status.latestPublishedAt(),
+                publication,
                 status.warnings());
     }
+
+    public record PublicationStatus(
+            String status,
+            long revision,
+            int attempt,
+            long expectedDocumentCount,
+            long publishedDocumentCount,
+            String failureKind,
+            Boolean retryable,
+            String retryAfter,
+            String requestedAt,
+            String startedAt,
+            String completedAt,
+            String updatedAt
+    ) { }
 
     public record SourceStatus(
             String sourceId,
