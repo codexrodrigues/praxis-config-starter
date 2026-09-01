@@ -524,12 +524,14 @@ public class AgenticAuthoringAutoConfiguration {
                     org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainBindingService bindingService,
                     SchemaRetrievalService schemaRetrievalService,
                     ResourceCapabilitiesRetrievalService resourceCapabilitiesRetrievalService,
-                    ResourceActionCatalogRetrievalService resourceActionCatalogRetrievalService) {
+                    ResourceActionCatalogRetrievalService resourceActionCatalogRetrievalService,
+                    ObjectProvider<ResourceSurfaceCatalogRetrievalService> resourceSurfaceCatalogRetrievalService) {
         return new org.praxisplatform.config.ai.authoring.AgenticAuthoringOperationalBindingVerificationService(
                 bindingService,
                 schemaRetrievalService,
                 resourceCapabilitiesRetrievalService,
-                resourceActionCatalogRetrievalService);
+                resourceActionCatalogRetrievalService,
+                resourceSurfaceCatalogRetrievalService.getIfAvailable());
     }
 
     @Bean

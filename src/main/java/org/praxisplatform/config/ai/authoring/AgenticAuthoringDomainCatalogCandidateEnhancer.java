@@ -4,9 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -57,10 +59,17 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
             return candidates;
         }
         List<AgenticAuthoringCandidate> enhanced = new ArrayList<>(candidates.size());
+        Map<String, DomainCatalogContextResponse> contextByResourceKey = new HashMap<>();
         int groundingAttempts = 0;
         for (AgenticAuthoringCandidate candidate : candidates) {
             if (shouldAttemptGrounding(candidate) && groundingAttempts < MAX_CANDIDATES_TO_GROUND) {
-                enhanced.add(enhanceCandidate(service, query, candidate, tenantId, environment));
+                enhanced.add(enhanceCandidate(
+                        service,
+                        query,
+                        candidate,
+                        tenantId,
+                        environment,
+                        contextByResourceKey));
                 groundingAttempts++;
             } else {
                 enhanced.add(candidate);
@@ -104,7 +113,8 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
             String query,
             AgenticAuthoringCandidate candidate,
             String tenantId,
-            String environment) {
+            String environment,
+            Map<String, DomainCatalogContextResponse> contextByResourceKey) {
         if (candidate == null || hasEvidence(candidate, DOMAIN_CATALOG_GROUNDING)) {
             return candidate;
         }
@@ -112,7 +122,13 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
         if (resourceKey.isBlank()) {
             return candidate;
         }
-        DomainCatalogContextResponse context = context(service, resourceKey, query, tenantId, environment);
+        DomainCatalogContextResponse context;
+        if (contextByResourceKey.containsKey(resourceKey)) {
+            context = contextByResourceKey.get(resourceKey);
+        } else {
+            context = context(service, resourceKey, query, tenantId, environment);
+            contextByResourceKey.put(resourceKey, context);
+        }
         List<DomainCatalogItemResponse> items = context == null || context.items() == null
                 ? List.of()
                 : context.items();

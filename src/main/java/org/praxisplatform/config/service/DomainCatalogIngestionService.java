@@ -38,6 +38,8 @@ import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.DomainCatalogItemRepository;
 import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
+import org.praxisplatform.config.repository.projection.DomainCatalogItemSummary;
+import org.praxisplatform.config.repository.projection.DomainCatalogReleaseSummary;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.filter.Filter;
@@ -484,6 +486,40 @@ public class DomainCatalogIngestionService {
                 .toList();
     }
 
+    /**
+     * Runtime discovery reads only the item and release fields projected into the response. It
+     * must not hydrate the immutable release payload, which can be several megabytes per release.
+     */
+    private List<DomainCatalogItemResponse> searchSummaries(
+            List<DomainCatalogReleaseSummary> releases,
+            String itemType,
+            String contextKey,
+            String nodeType,
+            String query,
+            int limit) {
+        if (releases == null || releases.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> releaseIds = releases.stream()
+                .map(DomainCatalogReleaseSummary::id)
+                .filter(Objects::nonNull)
+                .toList();
+        if (releaseIds.isEmpty()) {
+            return List.of();
+        }
+        int resolvedLimit = Math.min(Math.max(limit, 1), 200);
+        return itemRepository.searchSummariesAcrossReleaseIds(
+                        releaseIds,
+                        normalize(itemType),
+                        normalize(contextKey),
+                        normalize(nodeType),
+                        normalize(query),
+                        PageRequest.of(0, resolvedLimit))
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public List<DomainCatalogReleaseResponse> releases(
             String serviceKey,
@@ -492,7 +528,7 @@ public class DomainCatalogIngestionService {
             String environment,
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 100);
-        return releaseRepository.findLatest(
+        return releaseRepository.findLatestSummaries(
                         normalize(serviceKey),
                         normalize(resourceKey),
                         normalize(tenantId),
@@ -596,8 +632,8 @@ public class DomainCatalogIngestionService {
             String query,
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
-        return search(
-                latestReleasesForScope(serviceKey, tenantId, environment, resourceKey),
+        return searchSummaries(
+                latestReleaseSummariesForScope(serviceKey, tenantId, environment, resourceKey),
                 itemType,
                 contextKey,
                 nodeType,
@@ -630,8 +666,9 @@ public class DomainCatalogIngestionService {
             String query,
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
-        List<DomainCatalogRelease> releases = latestReleasesForScope(serviceKey, tenantId, environment, resourceKey);
-        List<DomainCatalogItemResponse> items = search(
+        List<DomainCatalogReleaseSummary> releases = latestReleaseSummariesForScope(
+                serviceKey, tenantId, environment, resourceKey);
+        List<DomainCatalogItemResponse> items = searchSummaries(
                 releases,
                 itemType,
                 contextKey,
@@ -662,7 +699,7 @@ public class DomainCatalogIngestionService {
             String query,
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
-        List<DomainCatalogRelease> releases = latestReleasesForScope(
+        List<DomainCatalogReleaseSummary> releases = latestReleaseSummariesForScope(
                 serviceKey,
                 tenantId,
                 environment,
@@ -713,8 +750,8 @@ public class DomainCatalogIngestionService {
             String query,
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
-        return search(
-                        latestReleasesForScope(serviceKey, tenantId, environment, resourceKey),
+        return searchSummaries(
+                        latestReleaseSummariesForScope(serviceKey, tenantId, environment, resourceKey),
                         "edge",
                         null,
                         null,
@@ -1049,7 +1086,7 @@ public class DomainCatalogIngestionService {
     }
 
     private List<DomainCatalogItemResponse> semanticContextItems(
-            List<DomainCatalogRelease> releases,
+            List<DomainCatalogReleaseSummary> releases,
             String tenantId,
             String environment,
             String itemType,
@@ -1077,17 +1114,22 @@ public class DomainCatalogIngestionService {
                 return List.of();
             }
             Map<String, DomainCatalogItemResponse> itemsByDocumentIdentity = new LinkedHashMap<>();
-            for (DomainCatalogRelease release : releases) {
-                for (DomainCatalogItem item : itemRepository.findByRelease(release)) {
-                    if (matchesSemanticContextItem(item, itemType, contextKey, nodeType)) {
-                        DomainCatalogItemResponse response = toResponse(item);
-                        itemsByDocumentIdentity.put(
-                                semanticDocumentIdentity(
-                                        ragReleaseId(release),
-                                        item.getItemType(),
-                                        item.getItemKey()),
-                                response);
-                    }
+            List<DomainCatalogItemSummary> persistedItems = itemRepository.searchSummariesAcrossReleaseIds(
+                    releases.stream().map(DomainCatalogReleaseSummary::id).toList(),
+                    normalize(itemType),
+                    normalize(contextKey),
+                    normalize(nodeType),
+                    null,
+                    PageRequest.of(0, 10_000));
+            for (DomainCatalogItemSummary item : persistedItems) {
+                if (matchesSemanticContextItem(item)) {
+                    DomainCatalogItemResponse response = toResponse(item);
+                    itemsByDocumentIdentity.put(
+                            semanticDocumentIdentity(
+                                    RagDocumentIdentity.resolveReleaseId(item.releaseKey(), null, null),
+                                    item.itemType(),
+                                    item.itemKey()),
+                            response);
                 }
             }
             List<DomainCatalogItemResponse> rankedItems = new ArrayList<>();
@@ -1112,7 +1154,7 @@ public class DomainCatalogIngestionService {
     }
 
     private Filter.Expression semanticContextFilter(
-            List<DomainCatalogRelease> releases,
+            List<DomainCatalogReleaseSummary> releases,
             String tenantId,
             String environment,
             String itemType,
@@ -1130,7 +1172,7 @@ public class DomainCatalogIngestionService {
             filter = builder.and(filter, scope);
         }
         FilterExpressionBuilder.Op releaseFilter = null;
-        for (DomainCatalogRelease release : releases) {
+        for (DomainCatalogReleaseSummary release : releases) {
             FilterExpressionBuilder.Op candidate = builder.eq(
                     RagMetadataKeys.RELEASE_ID,
                     ragReleaseId(release));
@@ -1151,22 +1193,9 @@ public class DomainCatalogIngestionService {
         return filter.build();
     }
 
-    private boolean matchesSemanticContextItem(
-            DomainCatalogItem item,
-            String itemType,
-            String contextKey,
-            String nodeType) {
+    private boolean matchesSemanticContextItem(DomainCatalogItemSummary item) {
         return item != null
-                && isRagIndexable(item)
-                && matchesOptionalValue(item.getItemType(), itemType)
-                && matchesOptionalValue(item.getContextKey(), contextKey)
-                && matchesOptionalValue(item.getNodeType(), nodeType);
-    }
-
-    private boolean matchesOptionalValue(String value, String expected) {
-        String normalizedExpected = normalize(expected);
-        return !StringUtils.hasText(normalizedExpected)
-                || Objects.equals(normalize(value), normalizedExpected);
+                && !deniesAiVisibility(read(item.payload()));
     }
 
     private String semanticDocumentIdentity(String releaseKey, String itemType, String itemKey) {
@@ -1191,6 +1220,15 @@ public class DomainCatalogIngestionService {
                 release == null || release.getGeneratedAt() == null
                         ? null
                         : release.getGeneratedAt().toString());
+    }
+
+    private String ragReleaseId(DomainCatalogReleaseSummary release) {
+        return RagDocumentIdentity.resolveReleaseId(
+                release == null ? null : release.releaseKey(),
+                release == null ? null : release.schemaVersion(),
+                release == null || release.generatedAt() == null
+                        ? null
+                        : release.generatedAt().toString());
     }
 
     private ExecutorService createRagPublicationExecutor() {
@@ -1322,6 +1360,20 @@ public class DomainCatalogIngestionService {
         );
     }
 
+    private DomainCatalogItemResponse toResponse(DomainCatalogItemSummary item) {
+        return new DomainCatalogItemResponse(
+                item.id(),
+                item.releaseKey(),
+                item.itemType(),
+                item.itemKey(),
+                item.contextKey(),
+                item.nodeType(),
+                item.bindingType(),
+                item.edgeType(),
+                read(item.payload())
+        );
+    }
+
     private DomainCatalogReleaseResponse toReleaseResponse(DomainCatalogRelease release) {
         return new DomainCatalogReleaseResponse(
                 release.getId(),
@@ -1335,6 +1387,22 @@ public class DomainCatalogIngestionService {
                 release.getTenantId(),
                 release.getEnvironment(),
                 release.getCreatedAt()
+        );
+    }
+
+    private DomainCatalogReleaseResponse toReleaseResponse(DomainCatalogReleaseSummary release) {
+        return new DomainCatalogReleaseResponse(
+                release.id(),
+                release.releaseKey(),
+                release.schemaVersion(),
+                release.serviceKey(),
+                release.serviceName(),
+                release.serviceVersion(),
+                release.generatedAt(),
+                release.sourceHash(),
+                release.tenantId(),
+                release.environment(),
+                release.createdAt()
         );
     }
 
@@ -1355,38 +1423,45 @@ public class DomainCatalogIngestionService {
                 .orElseThrow(() -> new IllegalArgumentException("No domain catalog release found for the requested scope"));
     }
 
-    private List<DomainCatalogRelease> latestReleasesForScope(String serviceKey, String tenantId, String environment) {
-        return latestReleasesForScope(serviceKey, tenantId, environment, null);
-    }
-
-    private List<DomainCatalogRelease> latestReleasesForScope(
+    private List<DomainCatalogReleaseSummary> latestReleaseSummariesForScope(
             String serviceKey,
             String tenantId,
             String environment,
             String resourceKey) {
         String normalizedServiceKey = normalize(serviceKey);
+        String normalizedResourceKey = normalize(resourceKey);
         if (StringUtils.hasText(normalizedServiceKey)) {
-            if (StringUtils.hasText(normalize(resourceKey))) {
-                return List.of(latestRelease(normalizedServiceKey, tenantId, environment, resourceKey));
+            if (StringUtils.hasText(normalizedResourceKey)) {
+                return releaseRepository.findLatestSummaries(
+                                normalizedServiceKey,
+                                normalizedResourceKey,
+                                normalize(tenantId),
+                                normalize(environment),
+                                PageRequest.of(0, 1))
+                        .stream()
+                        .findFirst()
+                        .map(List::of)
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "No domain catalog release found for the requested scope"));
             }
-            return latestReleasesForServiceScope(normalizedServiceKey, tenantId, environment);
+            return latestReleaseSummariesForServiceScope(normalizedServiceKey, tenantId, environment);
         }
-        return latestReleasesByService(tenantId, environment, resourceKey);
+        return latestReleaseSummariesByService(tenantId, environment, normalizedResourceKey);
     }
 
-    private List<DomainCatalogRelease> latestReleasesForServiceScope(
+    private List<DomainCatalogReleaseSummary> latestReleaseSummariesForServiceScope(
             String serviceKey,
             String tenantId,
             String environment) {
-        List<DomainCatalogRelease> releases = releaseRepository.findLatest(
+        List<DomainCatalogReleaseSummary> releases = releaseRepository.findLatestSummaries(
                 normalize(serviceKey),
                 null,
                 normalize(tenantId),
                 normalize(environment),
                 PageRequest.of(0, 100));
-        Map<String, DomainCatalogRelease> latestByResource = new LinkedHashMap<>();
-        for (DomainCatalogRelease release : releases) {
-            String key = latestByServiceKey(serviceKey, release, null);
+        Map<String, DomainCatalogReleaseSummary> latestByResource = new LinkedHashMap<>();
+        for (DomainCatalogReleaseSummary release : releases) {
+            String key = latestByServiceKey(serviceKey, release.releaseKey(), null);
             latestByResource.putIfAbsent(key, release);
         }
         if (latestByResource.isEmpty()) {
@@ -1395,24 +1470,22 @@ public class DomainCatalogIngestionService {
         return List.copyOf(latestByResource.values());
     }
 
-    private List<DomainCatalogRelease> latestReleasesByService(String tenantId, String environment) {
-        return latestReleasesByService(tenantId, environment, null);
-    }
-
-    private List<DomainCatalogRelease> latestReleasesByService(String tenantId, String environment, String resourceKey) {
-        String normalizedResourceKey = normalize(resourceKey);
-        List<DomainCatalogRelease> releases = releaseRepository.findLatest(
+    private List<DomainCatalogReleaseSummary> latestReleaseSummariesByService(
+            String tenantId,
+            String environment,
+            String resourceKey) {
+        List<DomainCatalogReleaseSummary> releases = releaseRepository.findLatestSummaries(
                 null,
-                normalizedResourceKey,
+                normalize(resourceKey),
                 normalize(tenantId),
                 normalize(environment),
                 PageRequest.of(0, 100));
-        Map<String, DomainCatalogRelease> latestByService = new LinkedHashMap<>();
-        for (DomainCatalogRelease release : releases) {
-            String serviceKey = normalize(release.getServiceKey());
+        Map<String, DomainCatalogReleaseSummary> latestByService = new LinkedHashMap<>();
+        for (DomainCatalogReleaseSummary release : releases) {
+            String serviceKey = normalize(release.serviceKey());
             String key = StringUtils.hasText(serviceKey)
-                    ? latestByServiceKey(serviceKey, release, normalizedResourceKey)
-                    : release.getReleaseKey();
+                    ? latestByServiceKey(serviceKey, release.releaseKey(), normalize(resourceKey))
+                    : release.releaseKey();
             latestByService.putIfAbsent(key, release);
         }
         if (latestByService.isEmpty()) {
@@ -1422,11 +1495,15 @@ public class DomainCatalogIngestionService {
     }
 
     private String latestByServiceKey(String serviceKey, DomainCatalogRelease release, String resourceKey) {
+        return latestByServiceKey(serviceKey, release.getReleaseKey(), resourceKey);
+    }
+
+    private String latestByServiceKey(String serviceKey, String releaseKey, String resourceKey) {
         if (StringUtils.hasText(resourceKey)) {
-            return serviceKey + ":" + resourceKeyFromReleaseKey(release.getReleaseKey());
+            return serviceKey + ":" + resourceKeyFromReleaseKey(releaseKey);
         }
-        if (hasStructuredResourceReleaseKey(release.getReleaseKey())) {
-            return serviceKey + ":" + resourceKeyFromReleaseKey(release.getReleaseKey());
+        if (hasStructuredResourceReleaseKey(releaseKey)) {
+            return serviceKey + ":" + resourceKeyFromReleaseKey(releaseKey);
         }
         return serviceKey;
     }

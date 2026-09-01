@@ -243,6 +243,66 @@ class DomainCatalogPromptContextServiceTest {
     }
 
     @Test
+    void exposesCanonicalSurfaceRuntimeIdentityInTheLlmGroundingProjection() throws Exception {
+        DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
+        DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);
+        when(ingestionService.contextLatestSemantic(
+                eq("praxis-service"), eq("operations.missoes"), eq("tenant-a"), eq("dev"),
+                eq("node"), eq(null), eq("surface"), eq("equipe"), eq(8)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "equipe",
+                        "node",
+                        null,
+                        "surface",
+                        List.of(),
+                        List.of(new DomainCatalogItemResponse(
+                                UUID.randomUUID(),
+                                "praxis-service:operations.missoes:latest",
+                                "node",
+                                "operations.missoes.surface.team",
+                                "operations",
+                                "surface",
+                                null,
+                                null,
+                                objectMapper.readTree("""
+                                    {
+                                      "nodeKey": "operations.missoes.surface.team",
+                                      "label": "Equipe da missão",
+                                      "metadata": {
+                                        "surfaceId": "team",
+                                        "resourceKey": "operations.missoes",
+                                        "kind": "READ_PROJECTION",
+                                        "scope": "ITEM"
+                                      }
+                                    }
+                                    """)))));
+
+        String promptContext = service.buildPromptContext(
+                "equipe",
+                objectMapper.readTree("""
+                    {
+                      "domainCatalog": {
+                        "resourceKey": "operations.missoes",
+                        "nodeType": "surface",
+                        "query": "equipe",
+                        "limit": 8
+                      }
+                    }
+                    """),
+                "tenant-a",
+                "dev");
+
+        assertThat(promptContext)
+                .contains("operations.missoes.surface.team")
+                .contains("surfaceId=team")
+                .contains("resourceKey=operations.missoes")
+                .contains("surfaceKind=READ_PROJECTION")
+                .contains("surfaceScope=ITEM");
+    }
+
+    @Test
     void usesDefaultServiceKeyWhenResourceHintOmitsTechnicalServiceKey() throws Exception {
         DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
         DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);

@@ -190,45 +190,22 @@ public class Domain360CatalogService {
             String contextKey,
             String query,
             int effectiveLimit) {
-        List<String> queries = new ArrayList<>();
-        queries.add(normalize(query));
-        queries.addAll(List.of("surface", "option", "stats", "kpi", "action", "workflow"));
-        List<DomainFederationContextQueryResponse> responses = new ArrayList<>();
-        List<String> distinctQueries = new ArrayList<>();
-        for (String candidateQuery : queries) {
-            if (!distinctQueries.contains(candidateQuery)) {
-                distinctQueries.add(candidateQuery);
-            }
-        }
-        for (String candidateQuery : distinctQueries) {
-            responses.add(domainFederationQueryService.context(
-                    normalize(serviceKey),
-                    normalize(resourceKey),
-                    normalize(tenantId),
-                    normalize(environment),
-                    null,
-                    normalize(contextKey),
-                    null,
-                    null,
-                    candidateQuery,
-                    effectiveLimit,
-                    new DomainFederationRetrievalPolicyOptions("authoring", null, null, null)));
-        }
-        if (responses.isEmpty()) {
-            responses.add(domainFederationQueryService.context(
-                    normalize(serviceKey),
-                    normalize(resourceKey),
-                    normalize(tenantId),
-                    normalize(environment),
-                    null,
-                    normalize(contextKey),
-                    null,
-                    null,
-                    null,
-                    effectiveLimit,
-                    new DomainFederationRetrievalPolicyOptions("authoring", null, null, null)));
-        }
-        return List.copyOf(responses);
+        // Domain 360 materializes the already resolved canonical scope. It must not issue
+        // synthetic keyword queries to decide which semantic categories exist. The single
+        // governed federation response carries structured item/node/contract types that the
+        // presentation classifier can project after retrieval.
+        return List.of(domainFederationQueryService.context(
+                normalize(serviceKey),
+                normalize(resourceKey),
+                normalize(tenantId),
+                normalize(environment),
+                null,
+                normalize(contextKey),
+                null,
+                null,
+                normalize(query),
+                effectiveLimit,
+                new DomainFederationRetrievalPolicyOptions("authoring", null, null, null)));
     }
 
     private List<Domain360Diagnostic> diagnostics(

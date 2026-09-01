@@ -2,14 +2,18 @@ package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.ResourceActionCatalogFetchResult;
 import org.praxisplatform.config.service.ResourceActionCatalogRetrievalService;
 import org.praxisplatform.config.service.ResourceCapabilitiesFetchResult;
 import org.praxisplatform.config.service.ResourceCapabilitiesRetrievalService;
+import org.praxisplatform.config.service.ResourceSurfaceCatalogFetchResult;
+import org.praxisplatform.config.service.ResourceSurfaceCatalogRetrievalService;
 import org.praxisplatform.config.service.SchemaFetchResult;
 import org.praxisplatform.config.service.SchemaRetrievalService;
 import org.springframework.util.StringUtils;
@@ -21,16 +25,32 @@ public class AgenticAuthoringOperationalBindingVerificationService {
     private final SchemaRetrievalService schemaRetrievalService;
     private final ResourceCapabilitiesRetrievalService capabilitiesRetrievalService;
     private final ResourceActionCatalogRetrievalService actionCatalogRetrievalService;
+    private final ResourceSurfaceCatalogRetrievalService surfaceCatalogRetrievalService;
 
     public AgenticAuthoringOperationalBindingVerificationService(
             AgenticAuthoringDomainBindingService bindingService,
             SchemaRetrievalService schemaRetrievalService,
             ResourceCapabilitiesRetrievalService capabilitiesRetrievalService,
             ResourceActionCatalogRetrievalService actionCatalogRetrievalService) {
+        this(
+                bindingService,
+                schemaRetrievalService,
+                capabilitiesRetrievalService,
+                actionCatalogRetrievalService,
+                null);
+    }
+
+    public AgenticAuthoringOperationalBindingVerificationService(
+            AgenticAuthoringDomainBindingService bindingService,
+            SchemaRetrievalService schemaRetrievalService,
+            ResourceCapabilitiesRetrievalService capabilitiesRetrievalService,
+            ResourceActionCatalogRetrievalService actionCatalogRetrievalService,
+            ResourceSurfaceCatalogRetrievalService surfaceCatalogRetrievalService) {
         this.bindingService = bindingService;
         this.schemaRetrievalService = schemaRetrievalService;
         this.capabilitiesRetrievalService = capabilitiesRetrievalService;
         this.actionCatalogRetrievalService = actionCatalogRetrievalService;
+        this.surfaceCatalogRetrievalService = surfaceCatalogRetrievalService;
     }
 
     VerificationResult verify(
@@ -50,6 +70,7 @@ public class AgenticAuthoringOperationalBindingVerificationService {
         }
         List<OperationProjection> verified = new ArrayList<>();
         List<String> failures = new ArrayList<>();
+        Map<String, ResourceCapabilitiesFetchResult> capabilitiesByResource = new LinkedHashMap<>();
         String capabilitiesResourcePath = bindings.stream()
                 .filter(binding -> "api_resource".equals(binding.bindingType()))
                 .map(AgenticAuthoringDomainBindingService.BindingProjection::apiPath)
@@ -90,12 +111,14 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                 failures.add("operational-binding-capabilities-resource-binding-required");
                 continue;
             }
-            ResourceCapabilitiesFetchResult capabilities = capabilitiesRetrievalService.fetchCapabilitiesResult(
-                    capabilityPath,
-                    requestBaseUrl,
-                    principalContext.tenantId(),
-                    principalContext.userId(),
-                    principalContext.environment());
+            ResourceCapabilitiesFetchResult capabilities = capabilitiesByResource.computeIfAbsent(
+                    canonicalPath(capabilityPath),
+                    ignored -> capabilitiesRetrievalService.fetchCapabilitiesResult(
+                            capabilityPath,
+                            requestBaseUrl,
+                            principalContext.tenantId(),
+                            principalContext.userId(),
+                            principalContext.environment()));
             if (capabilities == null || !capabilities.isSuccess()) {
                 failures.add("operational-binding-capabilities-" + capabilitiesStatus(capabilities));
                 continue;
@@ -135,9 +158,68 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                 verified,
                 failures);
         boolean actionCatalogVerified = failures.size() == failuresBeforeActionCatalog;
+        List<RelatedResourceSurfaceProjection> relatedResourceSurfaces = verifyRelatedResourceSurfaces(
+                resourceKey,
+                capabilitiesResourcePath,
+                requestBaseUrl,
+                principalContext);
         return verified.isEmpty() || !actionCatalogVerified
-                ? new VerificationResult(false, resourceKey, List.of(), List.copyOf(failures))
-                : new VerificationResult(true, resourceKey, List.copyOf(verified), List.copyOf(failures));
+                ? new VerificationResult(false, resourceKey, List.of(), List.of(), List.copyOf(failures))
+                : new VerificationResult(
+                        true,
+                        resourceKey,
+                        List.copyOf(verified),
+                        relatedResourceSurfaces,
+                        List.copyOf(failures));
+    }
+
+    private List<RelatedResourceSurfaceProjection> verifyRelatedResourceSurfaces(
+            String resourceKey,
+            String resourcePath,
+            String requestBaseUrl,
+            AiPrincipalContext principalContext) {
+        if (surfaceCatalogRetrievalService == null || !StringUtils.hasText(resourcePath)) {
+            return List.of();
+        }
+        ResourceSurfaceCatalogFetchResult result = surfaceCatalogRetrievalService.fetchCatalogResult(
+                resourceKey,
+                requestBaseUrl,
+                principalContext.tenantId(),
+                principalContext.userId(),
+                principalContext.environment());
+        if (result == null || !result.isSuccess()) {
+            return List.of();
+        }
+        JsonNode catalog = result.getCatalog();
+        if (catalog == null
+                || !resourceKey.equals(catalog.path("resourceKey").asText(""))
+                || !canonicalPath(resourcePath).equals(canonicalPath(catalog.path("resourcePath").asText("")))) {
+            return List.of();
+        }
+        List<RelatedResourceSurfaceProjection> surfaces = new ArrayList<>();
+        for (JsonNode surface : catalog.path("surfaces")) {
+            JsonNode relatedResource = surface.path("relatedResource");
+            if (!surface.isObject()
+                    || !relatedResource.isObject()
+                    || !resourceKey.equals(surface.path("resourceKey").asText(""))) {
+                continue;
+            }
+            surfaces.add(new RelatedResourceSurfaceProjection(
+                    surface.path("id").asText(""),
+                    resourceKey,
+                    catalog.path("resourcePath").asText(""),
+                    surface.path("scope").asText(""),
+                    surface.path("kind").asText(""),
+                    surface.path("title").asText(""),
+                    surface.path("description").asText(""),
+                    surface.path("intent").asText(""),
+                    surface.path("tags").deepCopy(),
+                    surface.path("path").asText(""),
+                    surface.path("availability").deepCopy(),
+                    relatedResource.deepCopy(),
+                    result.getEndpointUrl()));
+        }
+        return List.copyOf(surfaces);
     }
 
     private void verifyPublishedActions(
@@ -456,10 +538,35 @@ public class AgenticAuthoringOperationalBindingVerificationService {
             boolean verified,
             String resourceKey,
             List<OperationProjection> operations,
+            List<RelatedResourceSurfaceProjection> relatedResourceSurfaces,
             List<String> failureCodes) {
-        static VerificationResult blocked(String resourceKey, String failureCode) {
-            return new VerificationResult(false, resourceKey, List.of(), List.of(failureCode));
+        VerificationResult(
+                boolean verified,
+                String resourceKey,
+                List<OperationProjection> operations,
+                List<String> failureCodes) {
+            this(verified, resourceKey, operations, List.of(), failureCodes);
         }
+
+        static VerificationResult blocked(String resourceKey, String failureCode) {
+            return new VerificationResult(false, resourceKey, List.of(), List.of(), List.of(failureCode));
+        }
+    }
+
+    record RelatedResourceSurfaceProjection(
+            String surfaceId,
+            String resourceKey,
+            String resourcePath,
+            String scope,
+            String kind,
+            String title,
+            String description,
+            String intent,
+            JsonNode tags,
+            String path,
+            JsonNode availability,
+            JsonNode relatedResource,
+            String catalogUrl) {
     }
 
     record OperationProjection(

@@ -516,6 +516,12 @@ public class DomainCatalogPromptContextService {
         }
         appendInline(builder, "field", text(payload.path("metadata"), "fieldName"));
         appendInline(builder, "type", text(payload.path("metadata"), "type"));
+        appendInline(builder, "surfaceId", text(payload.path("metadata"), "surfaceId"));
+        appendInline(builder, "resourceKey", text(payload.path("metadata"), "resourceKey"));
+        appendInline(builder, "surfaceKind", text(payload.path("metadata"), "kind"));
+        appendInline(builder, "surfaceScope", text(payload.path("metadata"), "scope"));
+        appendInline(builder, "targetId", text(payload.path("target"), "id"));
+        appendInline(builder, "targetResourceKey", text(payload.path("target"), "resourceKey"));
         appendInline(builder, "binding", text(payload, "bindingType"));
         appendInline(builder, "edge", text(payload, "edgeType"));
         appendInline(builder, "sourceNodeKey", text(payload, "sourceNodeKey"));

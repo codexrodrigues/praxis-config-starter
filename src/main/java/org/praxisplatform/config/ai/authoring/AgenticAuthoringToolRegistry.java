@@ -1105,8 +1105,8 @@ public class AgenticAuthoringToolRegistry {
             diagnostics.put("artifactKind", result.artifactKind() != null ? result.artifactKind() : "");
             diagnostics.put("retrievalQuery", result.retrievalQuery() != null ? result.retrievalQuery() : "");
             diagnostics.put("retrievalSource", AgenticAuthoringCandidateProvenancePolicy.retrievalSource(result.candidates()));
-            if (result.diagnostics() != null && !result.diagnostics().isEmpty()) {
-                diagnostics.put("resourceDiscoveryDiagnostics", result.diagnostics());
+            if (!result.safeDiagnostics().isEmpty()) {
+                diagnostics.put("resourceDiscoveryDiagnostics", result.safeDiagnostics());
             }
             return AgenticAuthoringToolResult.success(
                     call.name(),
@@ -1156,7 +1156,11 @@ public class AgenticAuthoringToolRegistry {
                             "bindingResourceKey", verification.resourceKey(),
                             "bindingVerification", "schemas.filtered+resource.capabilities+schemas.actions",
                             "vectorRetrievalSkipped", vectorRetrievalSkipped,
-                            "operationalGroundingSource", operationalGroundingSource));
+                            "operationalGroundingSource", operationalGroundingSource,
+                            AgenticAuthoringResourceCandidatesResult.VERIFIED_OPERATIONS_CONTEXT_KEY,
+                            List.copyOf(verification.operations()),
+                            AgenticAuthoringResourceCandidatesResult.VERIFIED_RELATED_RESOURCE_SURFACES_CONTEXT_KEY,
+                            List.copyOf(verification.relatedResourceSurfaces())));
         }
 
         private List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection>

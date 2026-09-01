@@ -27,6 +27,7 @@ import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.registry.AiRegistryComponentDefinitionsChangedEvent;
 import org.praxisplatform.config.repository.AiRegistryRepository;
+import org.praxisplatform.config.repository.projection.AiRegistryMaterialSummary;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.ai.document.Document;
 import org.springframework.context.ApplicationEventPublisher;
@@ -100,14 +101,14 @@ public class RegistryIngestionService {
             return reindexRegistry(request, tenantId, environment);
         }
 
-        Map<String, AiRegistry> persistedDefinitions = new LinkedHashMap<>();
-        for (AiRegistry definition : repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+        Map<String, AiRegistryMaterialSummary> persistedSummaries = new LinkedHashMap<>();
+        for (AiRegistryMaterialSummary definition : repository.findMaterialSummaries(
                 REGISTRY_TYPE_COMPONENT_DEF,
                 COMPONENT_DEF_COMPONENT_TYPE,
                 Scope.SYSTEM,
                 "GLOBAL")) {
-            if (definition != null && definition.getRegistryKey() != null) {
-                persistedDefinitions.put(definition.getRegistryKey(), definition);
+            if (definition != null && definition.registryKey() != null) {
+                persistedSummaries.put(definition.registryKey(), definition);
             }
         }
 
@@ -119,8 +120,8 @@ public class RegistryIngestionService {
                 description = "Component " + componentId;
             }
             String expectedPayload = buildPayload(componentId, description, entry);
-            AiRegistry persisted = persistedDefinitions.get(componentId);
-            if (persisted == null || !materialPayloadEquals(persisted.getPayload(), expectedPayload)) {
+            AiRegistryMaterialSummary persisted = persistedSummaries.get(componentId);
+            if (persisted == null || !materialPayloadEquals(persisted.payload(), expectedPayload)) {
                 changedComponents.put(componentId, entry);
             }
         });
@@ -160,6 +161,17 @@ public class RegistryIngestionService {
                 .version(request.getVersion())
                 .generatedAt(request.getGeneratedAt())
                 .build();
+        Map<String, AiRegistry> persistedDefinitions = new LinkedHashMap<>();
+        changedComponents.keySet().stream()
+                .filter(persistedSummaries::containsKey)
+                .forEach(componentId -> repository
+                        .findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+                                REGISTRY_TYPE_COMPONENT_DEF,
+                                componentId,
+                                COMPONENT_DEF_COMPONENT_TYPE,
+                                Scope.SYSTEM,
+                                "GLOBAL")
+                        .ifPresent(definition -> persistedDefinitions.put(componentId, definition)));
         RegistryReindexResult deltaResult = reindexRegistry(
                 delta,
                 tenantId,

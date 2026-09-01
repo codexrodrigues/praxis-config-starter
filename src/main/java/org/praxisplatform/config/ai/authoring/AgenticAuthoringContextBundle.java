@@ -92,6 +92,12 @@ final class AgenticAuthoringContextBundle {
         if (liveOptionValueGrounding != null && liveOptionValueGrounding.isObject()) {
             retrieval.set("liveOptionValueGrounding", liveOptionValueGrounding.deepCopy());
         }
+        JsonNode relatedResourceSurfaces = request == null || request.contextHints() == null
+                ? null
+                : request.contextHints().path("verifiedRelatedResourceSurfaces");
+        if (relatedResourceSurfaces != null && relatedResourceSurfaces.isObject()) {
+            retrieval.set("verifiedRelatedResourceSurfaces", relatedResourceSurfaces.deepCopy());
+        }
         retrieval.put("selectionRule", "Select or suggest only resourcePath values present in candidateResources.");
         retrieval.put("emptyStateRule", "When candidateResources is empty or insufficient, use toolCatalog.searchApiResources before asking the user to type endpoints manually.");
         return retrieval;

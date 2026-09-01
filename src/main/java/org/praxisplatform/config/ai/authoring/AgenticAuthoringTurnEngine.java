@@ -322,6 +322,11 @@ public class AgenticAuthoringTurnEngine {
             if (!preIntentExecution.verifiedOperations().isEmpty()) {
                 request = withVerifiedOperationContext(request, preIntentExecution.verifiedOperations());
             }
+            if (!preIntentExecution.verifiedRelatedResourceSurfaces().isEmpty()) {
+                request = withVerifiedRelatedResourceSurfaceContext(
+                        request,
+                        preIntentExecution.verifiedRelatedResourceSurfaces());
+            }
             if (plannedResourceDiscovery != null
                     && plannedResourceDiscovery.candidates() != null
                     && !plannedResourceDiscovery.candidates().isEmpty()) {
@@ -3009,6 +3014,7 @@ public class AgenticAuthoringTurnEngine {
                     List.of(),
                     List.of(),
                     List.of(),
+                    List.of(),
                     null,
                     planningResult == null ? List.of() : planningResult.providerInvocations());
         }
@@ -3016,7 +3022,7 @@ public class AgenticAuthoringTurnEngine {
         if (plan == null) {
             emitPreIntentToolPlanSkipped(eventSink, "planner-plan-empty", "");
             return new PreIntentToolPlanExecution(
-                    null, null, List.of(), List.of(), List.of(), null, planningResult.providerInvocations());
+                    null, null, List.of(), List.of(), List.of(), List.of(), null, planningResult.providerInvocations());
         }
         if (plan.resolvesPlatformGuidance()) {
             eventSink.append("thought.step", thoughtStepPayload(
@@ -3029,12 +3035,12 @@ public class AgenticAuthoringTurnEngine {
                             "groundedByDomain", true,
                             "groundedByComponentCapabilities", request.componentCapabilities() != null)));
             return new PreIntentToolPlanExecution(
-                    null, plan, List.of(), List.of(), List.of(), null, planningResult.providerInvocations());
+                    null, plan, List.of(), List.of(), List.of(), List.of(), null, planningResult.providerInvocations());
         }
         if (plan.toolCalls().isEmpty()) {
             emitPreIntentToolPlanSkipped(eventSink, "planner-tool-calls-empty", "");
             return new PreIntentToolPlanExecution(
-                    null, null, List.of(), List.of(), List.of(), null, planningResult.providerInvocations());
+                    null, null, List.of(), List.of(), List.of(), List.of(), null, planningResult.providerInvocations());
         }
         eventSink.append("thought.step", safeToolProjection(
                 "tool.plan",
@@ -3048,6 +3054,8 @@ public class AgenticAuthoringTurnEngine {
         List<AgenticAuthoringProjectKnowledgeProjection> domainKnowledge = new ArrayList<>();
         List<AgenticAuthoringDomainBindingService.BindingProjection> domainBindings = new ArrayList<>();
         List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection> verifiedOperations = new ArrayList<>();
+        List<AgenticAuthoringOperationalBindingVerificationService.RelatedResourceSurfaceProjection>
+                verifiedRelatedResourceSurfaces = new ArrayList<>();
         DomainRuleCatalogResponse domainRuleSearch = null;
         int executed = 0;
         for (AgenticAuthoringToolCall toolCall : plan.toolCalls()) {
@@ -3073,6 +3081,10 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringResourceCandidatesResult payload = resourceDiscoveryPayload(result);
             if (payload != null) {
                 resourceDiscovery = payload;
+                if (result.valid()) {
+                    verifiedOperations.addAll(payload.verifiedOperations());
+                    verifiedRelatedResourceSurfaces.addAll(payload.verifiedRelatedResourceSurfaces());
+                }
             }
             if (result.valid() && result.payload() instanceof DomainRuleCatalogResponse searchProjection) {
                 domainRuleSearch = searchProjection;
@@ -3101,6 +3113,7 @@ public class AgenticAuthoringTurnEngine {
                 List.copyOf(domainKnowledge),
                 List.copyOf(domainBindings),
                 List.copyOf(verifiedOperations),
+                List.copyOf(verifiedRelatedResourceSurfaces),
                 domainRuleSearch,
                 planningResult.providerInvocations());
     }
@@ -3383,6 +3396,23 @@ public class AgenticAuthoringTurnEngine {
         envelope.put("source", "schemas.filtered+resource.capabilities+schemas.actions");
         envelope.put("operationCount", operations.size());
         envelope.set("entries", objectMapper.valueToTree(operations));
+        return copyWithContextHints(request, contextHints);
+    }
+
+    private AgenticAuthoringTurnStreamRequest withVerifiedRelatedResourceSurfaceContext(
+            AgenticAuthoringTurnStreamRequest request,
+            List<AgenticAuthoringOperationalBindingVerificationService.RelatedResourceSurfaceProjection> surfaces) {
+        if (request == null || surfaces == null || surfaces.isEmpty()) {
+            return request;
+        }
+        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
+                ? request.contextHints().deepCopy()
+                : objectMapper.createObjectNode();
+        ObjectNode envelope = contextHints.putObject("verifiedRelatedResourceSurfaces");
+        envelope.put("schemaVersion", "praxis-agentic-authoring-verified-related-resource-surfaces.v1");
+        envelope.put("source", "schemas.surfaces");
+        envelope.put("surfaceCount", surfaces.size());
+        envelope.set("entries", objectMapper.valueToTree(surfaces));
         return copyWithContextHints(request, contextHints);
     }
 
@@ -6356,6 +6386,7 @@ public class AgenticAuthoringTurnEngine {
         }
         ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
         sanitized.remove("verifiedDomainOperations");
+        sanitized.remove("verifiedRelatedResourceSurfaces");
         return copyWithContextHints(request, sanitized.isEmpty() ? null : sanitized);
     }
 
@@ -8306,6 +8337,8 @@ public class AgenticAuthoringTurnEngine {
             List<AgenticAuthoringProjectKnowledgeProjection> domainKnowledge,
             List<AgenticAuthoringDomainBindingService.BindingProjection> domainBindings,
             List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection> verifiedOperations,
+            List<AgenticAuthoringOperationalBindingVerificationService.RelatedResourceSurfaceProjection>
+                    verifiedRelatedResourceSurfaces,
             DomainRuleCatalogResponse domainRuleSearch,
             List<AiProviderInvocationTelemetry> providerInvocations) {
 
@@ -8313,11 +8346,15 @@ public class AgenticAuthoringTurnEngine {
             domainKnowledge = domainKnowledge == null ? List.of() : List.copyOf(domainKnowledge);
             domainBindings = domainBindings == null ? List.of() : List.copyOf(domainBindings);
             verifiedOperations = verifiedOperations == null ? List.of() : List.copyOf(verifiedOperations);
+            verifiedRelatedResourceSurfaces = verifiedRelatedResourceSurfaces == null
+                    ? List.of()
+                    : List.copyOf(verifiedRelatedResourceSurfaces);
             providerInvocations = providerInvocations == null ? List.of() : List.copyOf(providerInvocations);
         }
 
         private static PreIntentToolPlanExecution empty() {
-            return new PreIntentToolPlanExecution(null, null, List.of(), List.of(), List.of(), null, List.of());
+            return new PreIntentToolPlanExecution(
+                    null, null, List.of(), List.of(), List.of(), List.of(), null, List.of());
         }
     }
 

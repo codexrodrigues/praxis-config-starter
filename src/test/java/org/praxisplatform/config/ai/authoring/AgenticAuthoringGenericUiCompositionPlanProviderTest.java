@@ -3003,7 +3003,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
-    void blocksRelatedResourcePlanWhenSemanticDecisionOmitsTargetSurface() {
+    void keepsRelatedResourcePlanPendingCanonicalSurfaceVerificationWhenSemanticDecisionOmitsTargetSurface() {
         AgenticAuthoringVisualizationDecision visualization =
                 new AgenticAuthoringVisualizationDecision(
                         "praxis-agentic-authoring-visualization-decision.v1",
@@ -3029,8 +3029,10 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                         intent("create", "page", "create_artifact", "/api/operations/missoes", visualization)))
                 .orElseThrow();
 
-        assertThat(result.valid()).isFalse();
-        assertThat(result.failureCodes()).containsExactly("related-resource-target-surface-required");
+        assertThat(result.valid()).isTrue();
+        assertThat(result.uiCompositionPlan().at("/widgets/1/inputs/surfaceId").asText()).isEmpty();
+        assertThat(result.uiCompositionPlan().at("/diagnostics/relatedResourceGrounding/status").asText())
+                .isEqualTo("surface-id-selected-runtime-verification-required");
     }
 
     private void addVerifiedOperation(

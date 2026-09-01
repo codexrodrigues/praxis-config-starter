@@ -17,10 +17,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.domain.Scope;
 import org.praxisplatform.config.dto.RegistryIngestionRequest;
+import org.praxisplatform.config.projection.AiRegistryAuthoringManifestProjection;
 import org.praxisplatform.config.rag.RagDocumentIdentity;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
+import org.praxisplatform.config.repository.projection.AiRegistryMaterialSummary;
 import org.praxisplatform.config.service.RegistryIngestionService;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
@@ -175,16 +177,16 @@ public class AiRegistryBootstrapService {
             return true;
         }
         Map<String, JsonNode> persistedManifests = new HashMap<>();
-        for (AiRegistry entry : repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+        for (AiRegistryAuthoringManifestProjection entry : repository.findAuthoringManifestSummaries(
                 REGISTRY_TYPE_COMPONENT_DEF,
                 COMPONENT_DEF_COMPONENT_TYPE,
-                Scope.SYSTEM,
+                Scope.SYSTEM.name(),
                 SNAPSHOT_METADATA_SCOPE_KEY)) {
             try {
-                JsonNode payload = objectMapper.readTree(entry.getPayload());
+                JsonNode manifest = objectMapper.readTree(entry.getAuthoringManifest());
                 persistedManifests.put(
                         entry.getRegistryKey(),
-                        payload.path("componentDefinition").path("jsonSchema").path("authoringManifest"));
+                        manifest);
             } catch (Exception ex) {
                 log.warn(
                         "AI registry component payload is unreadable; forcing snapshot refresh (componentId={}).",
@@ -334,8 +336,8 @@ public class AiRegistryBootstrapService {
         Set<String> canonicalIds = request.getComponents() != null
                 ? new LinkedHashSet<>(request.getComponents().keySet())
                 : Set.of();
-        List<AiRegistry> existingDefinitions =
-                repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+        List<AiRegistryMaterialSummary> existingDefinitions =
+                repository.findMaterialSummaries(
                         REGISTRY_TYPE_COMPONENT_DEF,
                         COMPONENT_DEF_COMPONENT_TYPE,
                         Scope.SYSTEM,
@@ -344,32 +346,34 @@ public class AiRegistryBootstrapService {
             return;
         }
 
-        List<AiRegistry> obsoleteDefinitions = existingDefinitions.stream()
-                .filter(definition -> !canonicalIds.contains(definition.getRegistryKey()))
+        List<AiRegistryMaterialSummary> obsoleteDefinitions = existingDefinitions.stream()
+                .filter(definition -> !canonicalIds.contains(definition.registryKey()))
                 .toList();
         if (obsoleteDefinitions.isEmpty()) {
             return;
         }
 
         deleteObsoleteRagDocuments(obsoleteDefinitions, previousSnapshotMetadata);
-        repository.deleteAllInBatch(obsoleteDefinitions);
+        repository.deleteAllByIdInBatch(obsoleteDefinitions.stream()
+                .map(AiRegistryMaterialSummary::id)
+                .toList());
         log.info("AI registry bootstrap pruned {} obsolete component definitions.", obsoleteDefinitions.size());
     }
 
     private void deleteObsoleteRagDocuments(
-            List<AiRegistry> obsoleteDefinitions,
+            List<AiRegistryMaterialSummary> obsoleteDefinitions,
             SnapshotMetadata previousSnapshotMetadata) {
         if (previousSnapshotMetadata == null || previousSnapshotMetadata.releaseId() == null) {
             return;
         }
         List<String> documentIds = new ArrayList<>();
-        for (AiRegistry definition : obsoleteDefinitions) {
-            String payload = definition.getPayload();
+        for (AiRegistryMaterialSummary definition : obsoleteDefinitions) {
+            String payload = definition.payload();
             String contentHash = RagDocumentIdentity.sha256(payload != null ? payload : "");
             documentIds.add(RagDocumentIdentity.buildDocumentId(
                     null,
                     null,
-                    definition.getRegistryKey(),
+                    definition.registryKey(),
                     previousSnapshotMetadata.releaseId(),
                     RagResourceTypes.COMPONENT_DEFINITION,
                     contentHash,

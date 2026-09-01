@@ -2941,10 +2941,13 @@ public class AgenticAuthoringPreviewService {
             grounding.put("surfaceId", surfaceId);
             grounding.put("parentResourcePath", parentResourcePath);
             grounding.put("relationshipAuthoredByComponent", false);
-            if (surfaceId.isBlank() || parentResourcePath.isBlank()) {
+            if (parentResourcePath.isBlank()) {
                 grounding.put("status", "invalid-authoring-input");
                 addAllOnce(failureCodes, List.of("related-resource-authoring-input-incomplete"));
                 continue;
+            }
+            if (surfaceId.isBlank()) {
+                grounding.put("status", "surface-selection-pending");
             }
             String parentResourceKey = relatedResourceParentResourceKey(request, parentResourcePath);
             if (parentResourceKey.isBlank()) {
@@ -2973,12 +2976,25 @@ public class AgenticAuthoringPreviewService {
                 addAllOnce(failureCodes, List.of("related-resource-parent-resource-path-mismatch"));
                 continue;
             }
-            JsonNode surface = findSurface(catalog.path("surfaces"), surfaceId);
+            JsonNode surface = resolveRelatedResourceSurface(
+                    catalog.path("surfaces"), surfaceId, parentResourceKey);
             if (!surface.isObject()
                     || !parentResourceKey.equals(surface.path("resourceKey").asText(""))) {
-                grounding.put("status", "surface-missing");
-                addAllOnce(failureCodes, List.of("related-resource-target-surface-missing"));
+                if (surfaceId.isBlank()) {
+                    grounding.put("status", "surface-required");
+                    addAllOnce(failureCodes, List.of("related-resource-target-surface-required"));
+                } else {
+                    grounding.put("status", "surface-missing");
+                    addAllOnce(failureCodes, List.of("related-resource-target-surface-missing"));
+                }
                 continue;
+            }
+            String resolvedSurfaceId = surface.path("id").asText("").trim();
+            if (!surfaceId.equals(resolvedSurfaceId)
+                    && widget.path("inputs") instanceof ObjectNode relatedInputs) {
+                relatedInputs.put("surfaceId", resolvedSurfaceId);
+                surfaceId = resolvedSurfaceId;
+                grounding.put("surfaceId", resolvedSurfaceId);
             }
             if (!"ITEM".equals(surface.path("scope").asText(""))) {
                 grounding.put("status", "surface-scope-incompatible");
@@ -3023,6 +3039,42 @@ public class AgenticAuthoringPreviewService {
                         List.copyOf(failureCodes),
                         List.copyOf(warnings))
                 : RelatedResourceSurfaceVerification.success(plan);
+    }
+
+    private JsonNode resolveRelatedResourceSurface(
+            JsonNode surfaces,
+            String surfaceRef,
+            String parentResourceKey) {
+        JsonNode directSurface = findSurface(surfaces, surfaceRef);
+        if (directSurface.isObject()
+                || !surfaces.isArray()
+                || parentResourceKey == null
+                || parentResourceKey.isBlank()) {
+            return directSurface;
+        }
+        if (surfaceRef == null || surfaceRef.isBlank()) {
+            JsonNode uniqueRelatedSurface = MissingNode.getInstance();
+            for (JsonNode surface : surfaces) {
+                if (parentResourceKey.equals(surface.path("resourceKey").asText("").trim())
+                        && surface.path("relatedResource").isObject()) {
+                    if (uniqueRelatedSurface.isObject()) {
+                        return MissingNode.getInstance();
+                    }
+                    uniqueRelatedSurface = surface;
+                }
+            }
+            return uniqueRelatedSurface;
+        }
+        for (JsonNode surface : surfaces) {
+            String surfaceId = surface.path("id").asText("").trim();
+            String resourceKey = surface.path("resourceKey").asText("").trim();
+            if (!surfaceId.isBlank()
+                    && parentResourceKey.equals(resourceKey)
+                    && surfaceRef.equals(resourceKey + ".surface." + surfaceId)) {
+                return surface;
+            }
+        }
+        return MissingNode.getInstance();
     }
 
     private ObjectNode relatedResourceGrounding(ObjectNode plan) {

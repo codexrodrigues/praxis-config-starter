@@ -44,6 +44,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngine.Agentic
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngine.Completion;
 import org.praxisplatform.config.dto.AiSchemaContext;
 import org.praxisplatform.config.domain.ApiMetadata;
+import org.praxisplatform.config.projection.ApiMetadataCandidateProjection;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiPrincipalContext;
@@ -71,6 +72,137 @@ class AgenticAuthoringTurnEngineTest {
     private Path tempDir;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void preservesOperationalVerificationFromPreIntentResourceSearchForTheSameTurn() {
+        AgenticAuthoringOperationalBindingVerificationService.OperationProjection operation =
+                new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
+                        "operations.missoes",
+                        "resource:operations.missoes",
+                        "resource_operation",
+                        "operations.missoes",
+                        "/api/operations/missoes",
+                        "/api/operations/missoes/filter/cursor",
+                        "post",
+                        "response",
+                        "/schemas/filtered?path=/api/operations/missoes/filter/cursor&operation=post&schemaType=response",
+                        "/api/operations/missoes/capabilities",
+                        "cursor",
+                        "",
+                        "",
+                        "principal_capability",
+                        new AgenticAuthoringOperationalBindingVerificationService.AvailabilityProjection(
+                                true, "", "resource_capabilities"),
+                        "v1",
+                        List.of("schema-grounding-verified"));
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/operations/missoes",
+                "post",
+                operation.schemaUrl(),
+                operation.apiPath(),
+                "POST",
+                1d,
+                "governed operational binding",
+                List.of("domain-binding"));
+        AgenticAuthoringOperationalBindingVerificationService.RelatedResourceSurfaceProjection teamSurface =
+                new AgenticAuthoringOperationalBindingVerificationService.RelatedResourceSurfaceProjection(
+                        "team",
+                        "operations.missoes",
+                        "/api/operations/missoes",
+                        "ITEM",
+                        "READ_PROJECTION",
+                        "Equipe da missão",
+                        "Participantes relacionados à missão.",
+                        "mission-command-center",
+                        objectMapper.createArrayNode().add("team").add("related-resource"),
+                        "/api/operations/missoes/{id}/team",
+                        objectMapper.createObjectNode().put("allowed", false).put("reason", "resource-context-required"),
+                        objectMapper.createObjectNode()
+                                .put("parentResourceKey", "operations.missoes")
+                                .put("childResourceKey", "operations.missao-participantes"),
+                        "/schemas/surfaces?resource=operations.missoes");
+        AgenticAuthoringResourceCandidatesResult candidates = new AgenticAuthoringResourceCandidatesResult(
+                true,
+                AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                "operations.missoes",
+                "page",
+                "",
+                null,
+                List.of(candidate),
+                List.of(),
+                List.of(),
+                null,
+                null,
+                Map.of(
+                        AgenticAuthoringResourceCandidatesResult.VERIFIED_OPERATIONS_CONTEXT_KEY,
+                        List.of(operation),
+                        AgenticAuthoringResourceCandidatesResult.VERIFIED_RELATED_RESOURCE_SURFACES_CONTEXT_KEY,
+                        List.of(teamSurface)));
+        AgenticAuthoringToolRegistry registry = Mockito.mock(AgenticAuthoringToolRegistry.class);
+        when(registry.execute(any(), any(), eq("retrieveEvidence"), eq("http://localhost:8088")))
+                .thenReturn(AgenticAuthoringToolResult.success(
+                        AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                        candidates,
+                        Map.of("candidateCount", 1)));
+        AgenticAuthoringPreIntentToolPlanningService planner = (request, principal) ->
+                AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
+                        "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                        "Use the canonical resource binding.",
+                        List.of(new AgenticAuthoringToolCall(
+                                AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                                "pre_intent_resource_discovery",
+                                new AgenticAuthoringResourceCandidatesRequest(
+                                        "operations.missoes", request.userPrompt(), "page", 6))),
+                        "authoring_or_other",
+                        "",
+                        true,
+                        objectMapper.createObjectNode(),
+                        "page",
+                        "praxis-related-resource-outlet",
+                        "parent-child-related-resource"));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                null,
+                new AgenticAuthoringOrchestrator(new AgenticAuthoringToolLoopExecutor(
+                        registry,
+                        new AgenticAuthoringDefaultToolLoopPlanner())),
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                null,
+                planner);
+
+        Object execution = ReflectionTestUtils.invokeMethod(
+                engine,
+                "maybeRunPreIntentToolPlan",
+                request("Crie uma pagina pai-filho para operations.missoes."),
+                new AiPrincipalContext("tenant", "user", "local", true),
+                new CapturingSink(),
+                "http://localhost:8088");
+        List<?> verifiedOperations = ReflectionTestUtils.invokeMethod(execution, "verifiedOperations");
+        List<?> verifiedSurfaces = ReflectionTestUtils.invokeMethod(
+                execution,
+                "verifiedRelatedResourceSurfaces");
+
+        assertThat(verifiedOperations).hasSize(1);
+        assertThat(verifiedOperations.get(0)).isEqualTo(operation);
+        assertThat(verifiedSurfaces).hasSize(1);
+        assertThat(verifiedSurfaces.get(0)).isEqualTo(teamSurface);
+        AgenticAuthoringTurnStreamRequest groundedRequest = ReflectionTestUtils.invokeMethod(
+                engine,
+                "withVerifiedRelatedResourceSurfaceContext",
+                request("Crie uma pagina pai-filho para operations.missoes."),
+                verifiedSurfaces);
+        assertThat(groundedRequest.contextHints()
+                        .at("/verifiedRelatedResourceSurfaces/entries/0/surfaceId")
+                        .asText())
+                .isEqualTo("team");
+        verify(registry, times(1)).execute(
+                any(), any(), eq("retrieveEvidence"), eq("http://localhost:8088"));
+    }
 
     @Test
     void verifiesSelectedMasterDetailResourceBeforePlanningWorkspaceComposition() {
@@ -11169,8 +11301,8 @@ class AgenticAuthoringTurnEngineTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
-                "tenant", "local", "default", "v1")).thenReturn(List.of(
+        when(repository.findCandidateProjectionsByScope(
+                "tenant", "local", "default", "v1")).thenReturn(candidateProjections(
                 new ApiMetadata(
                         "/api/human-resources/vw-analytics-folha-pagamento",
                         "GET",
@@ -11231,8 +11363,8 @@ class AgenticAuthoringTurnEngineTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
-                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
+        when(repository.findCandidateProjectionsByScope(
+                "tenant", "local", "default", "v1")).thenReturn(candidateProjections(new ApiMetadata(
                 "/api/human-resources/funcionarios",
                 "GET",
                 "pessoas,funcionarios,rh",
@@ -11292,8 +11424,8 @@ class AgenticAuthoringTurnEngineTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
-                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
+        when(repository.findCandidateProjectionsByScope(
+                "tenant", "local", "default", "v1")).thenReturn(candidateProjections(new ApiMetadata(
                 "/api/human-resources/funcionarios",
                 "GET",
                 "pessoas,funcionarios,cargos,departamentos,folha,rh",
@@ -11345,8 +11477,8 @@ class AgenticAuthoringTurnEngineTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
-                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
+        when(repository.findCandidateProjectionsByScope(
+                "tenant", "local", "default", "v1")).thenReturn(candidateProjections(new ApiMetadata(
                 "/api/human-resources/funcionarios",
                 "GET",
                 "human-resources,funcionarios,pessoas,colaboradores",
@@ -11394,8 +11526,8 @@ class AgenticAuthoringTurnEngineTest {
         AgenticAuthoringIntentResolutionResult firstIntent = clarificationRequiredIntent();
         AgenticAuthoringIntentResolutionResult secondIntent = validIntentWithToolCandidate();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
-                "tenant", "local", "default", "v1")).thenReturn(List.of(
+        when(repository.findCandidateProjectionsByScope(
+                "tenant", "local", "default", "v1")).thenReturn(candidateProjections(
                 new ApiMetadata(
                         "/api/human-resources/vw-analytics-folha-pagamento",
                         "GET",
@@ -11472,8 +11604,8 @@ class AgenticAuthoringTurnEngineTest {
         AgenticAuthoringIntentResolutionResult firstIntent = clarificationRequiredIntent();
         AgenticAuthoringIntentResolutionResult secondIntent = validIntentWithToolCandidate();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
-                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
+        when(repository.findCandidateProjectionsByScope(
+                "tenant", "local", "default", "v1")).thenReturn(candidateProjections(new ApiMetadata(
                 "/api/human-resources/vw-analytics-folha-pagamento",
                 "GET",
                 "analytics,folha,pagamento",
@@ -11568,7 +11700,7 @@ class AgenticAuthoringTurnEngineTest {
         verify(intentResolverService, org.mockito.Mockito.times(1))
                 .resolve(any(), eq("tenant"), eq("user"), eq("local"));
         verify(previewService, never()).preview(any(), eq("tenant"), eq("user"), eq("local"));
-        verify(repository).findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+        verify(repository).findCandidateProjectionsByScope(
                 "tenant", "local", "default", "v1");
         org.assertj.core.api.Assertions.assertThat(sink.payloads)
                 .noneSatisfy(payload -> {
@@ -11615,8 +11747,8 @@ class AgenticAuthoringTurnEngineTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
-                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
+        when(repository.findCandidateProjectionsByScope(
+                "tenant", "local", "default", "v1")).thenReturn(candidateProjections(new ApiMetadata(
                 "/api/human-resources/funcionarios",
                 "GET",
                 "funcionarios,colaboradores,recursos humanos,pessoas",
@@ -12089,8 +12221,8 @@ class AgenticAuthoringTurnEngineTest {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
-                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
+        when(repository.findCandidateProjectionsByScope(
+                "tenant", "local", "default", "v1")).thenReturn(candidateProjections(new ApiMetadata(
                 "/api/human-resources/funcionarios",
                 "GET",
                 "funcionarios,colaboradores,recursos humanos,pessoas",
@@ -14733,8 +14865,8 @@ class AgenticAuthoringTurnEngineTest {
 
     private ApiMetadataRepository funcionarioRepository() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
-        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
-                "tenant", "local", "default", "v1")).thenReturn(List.of(new ApiMetadata(
+        when(repository.findCandidateProjectionsByScope(
+                "tenant", "local", "default", "v1")).thenReturn(candidateProjections(new ApiMetadata(
                 "/api/human-resources/funcionarios",
                 "GET",
                 "funcionarios,colaboradores,recursos humanos,pessoas,cargo,departamento",
@@ -14747,6 +14879,62 @@ class AgenticAuthoringTurnEngineTest {
                 "{}",
                 null)));
         return repository;
+    }
+
+    private List<ApiMetadataCandidateProjection> candidateProjections(ApiMetadata... metadata) {
+        return java.util.Arrays.stream(metadata)
+                .map(source -> (ApiMetadataCandidateProjection) new ApiMetadataCandidateProjection() {
+                    @Override
+                    public String getPath() {
+                        return source.getPath();
+                    }
+
+                    @Override
+                    public String getMethod() {
+                        return source.getMethod();
+                    }
+
+                    @Override
+                    public String getTags() {
+                        return source.getTags();
+                    }
+
+                    @Override
+                    public String getSummary() {
+                        return source.getSummary();
+                    }
+
+                    @Override
+                    public String getDescription() {
+                        return source.getDescription();
+                    }
+
+                    @Override
+                    public String getOperationId() {
+                        return source.getOperationId();
+                    }
+
+                    @Override
+                    public String getRequestSchema() {
+                        return null;
+                    }
+
+                    @Override
+                    public String getResponseSchema() {
+                        return null;
+                    }
+
+                    @Override
+                    public String getParameters() {
+                        return null;
+                    }
+
+                    @Override
+                    public String getRawJson() {
+                        return null;
+                    }
+                })
+                .toList();
     }
 
     private AgenticAuthoringPreIntentToolPlanningService coordinatedDashboardPlanner() {

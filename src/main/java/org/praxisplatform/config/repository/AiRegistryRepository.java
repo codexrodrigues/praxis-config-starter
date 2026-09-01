@@ -5,8 +5,10 @@ import java.util.Optional;
 import java.util.UUID;
 import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.domain.Scope;
+import org.praxisplatform.config.projection.AiRegistryAuthoringManifestProjection;
 import org.praxisplatform.config.projection.AiRegistryTemplateSearchProjection;
 import org.praxisplatform.config.projection.ComponentDefinitionProjection;
+import org.praxisplatform.config.repository.projection.AiRegistryMaterialSummary;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -39,8 +41,41 @@ public interface AiRegistryRepository extends
       @Param("scope") String scope,
       @Param("scopeKey") String scopeKey);
 
-  List<AiRegistry> findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
-      String registryType, String componentType, Scope scope, String scopeKey);
+  @Query(
+      value =
+          """
+      SELECT
+          registry_key AS registryKey,
+          payload #>> '{componentDefinition,jsonSchema,authoringManifest}' AS authoringManifest
+      FROM ai_registry
+      WHERE registry_type = :registryType
+        AND component_type = :componentType
+        AND scope = :scope
+        AND scope_key = :scopeKey
+      """,
+      nativeQuery = true)
+  List<AiRegistryAuthoringManifestProjection> findAuthoringManifestSummaries(
+      @Param("registryType") String registryType,
+      @Param("componentType") String componentType,
+      @Param("scope") String scope,
+      @Param("scopeKey") String scopeKey);
+
+  @Query("""
+      select new org.praxisplatform.config.repository.projection.AiRegistryMaterialSummary(
+          registry.id,
+          registry.registryKey,
+          registry.payload)
+      from AiRegistry registry
+      where registry.registryType = :registryType
+        and registry.componentType = :componentType
+        and registry.scope = :scope
+        and registry.scopeKey = :scopeKey
+      """)
+  List<AiRegistryMaterialSummary> findMaterialSummaries(
+      @Param("registryType") String registryType,
+      @Param("componentType") String componentType,
+      @Param("scope") Scope scope,
+      @Param("scopeKey") String scopeKey);
 
   @Query(
       value =

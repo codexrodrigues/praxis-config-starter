@@ -22,9 +22,11 @@ import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.AiRegistry;
 import org.praxisplatform.config.domain.Scope;
 import org.praxisplatform.config.dto.RegistryIngestionRequest;
+import org.praxisplatform.config.projection.AiRegistryAuthoringManifestProjection;
 import org.praxisplatform.config.rag.RagResourceTypes;
 import org.praxisplatform.config.rag.RagVectorStoreService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
+import org.praxisplatform.config.repository.projection.AiRegistryMaterialSummary;
 import org.praxisplatform.config.service.RegistryIngestionService;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ResourceLoader;
@@ -80,9 +82,9 @@ class AiRegistryBootstrapServiceTest {
         when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
                 anyString(), anyString(), anyString(), any(Scope.class), anyString()))
                 .thenReturn(Optional.of(snapshotMetadata(snapshotHash)));
-        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
-                "component_definition", "component-definition", Scope.SYSTEM, "GLOBAL"))
-                .thenReturn(List.of(componentDefinitionWithManifest("columns.add")));
+        when(repository.findAuthoringManifestSummaries(
+                "component_definition", "component-definition", "SYSTEM", "GLOBAL"))
+                .thenReturn(List.of(authoringManifestProjection(componentDefinitionWithManifest("columns.add"))));
 
         service().bootstrapIfNeeded();
 
@@ -111,9 +113,10 @@ class AiRegistryBootstrapServiceTest {
                                 snapshotHash,
                                 "snapshot-v1",
                                 "2026-04-23T00:00:00Z")));
-        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
-                "component_definition", "component-definition", Scope.SYSTEM, "GLOBAL"))
-                .thenReturn(List.of(componentDefinitionWithManifest("column.valueMapping.set")));
+        when(repository.findAuthoringManifestSummaries(
+                "component_definition", "component-definition", "SYSTEM", "GLOBAL"))
+                .thenReturn(List.of(authoringManifestProjection(
+                        componentDefinitionWithManifest("column.valueMapping.set"))));
 
         service().bootstrapIfNeeded();
 
@@ -193,6 +196,7 @@ class AiRegistryBootstrapServiceTest {
                 anyString(), anyString(), anyString(), any(Scope.class), anyString()))
                 .thenReturn(Optional.of(snapshotMetadata("old-hash", previousVersion, previousGeneratedAt)), Optional.empty());
         AiRegistry obsolete = AiRegistry.builder()
+                .id(UUID.fromString("123e4567-e89b-12d3-a456-426614174099"))
                 .registryType("component_definition")
                 .registryKey("legacy-component")
                 .componentType("component-definition")
@@ -200,13 +204,13 @@ class AiRegistryBootstrapServiceTest {
                 .scopeKey("GLOBAL")
                 .payload("{\"componentDefinition\":{\"id\":\"legacy-component\"}}")
                 .build();
-        when(repository.findAllByRegistryTypeAndComponentTypeAndScopeAndScopeKey(
+        when(repository.findMaterialSummaries(
                 "component_definition", "component-definition", Scope.SYSTEM, "GLOBAL"))
-                .thenReturn(List.of(obsolete));
+                .thenReturn(List.of(materialSummary(obsolete)));
 
         service().bootstrapIfNeeded();
 
-        verify(repository).deleteAllInBatch(List.of(obsolete));
+        verify(repository).deleteAllByIdInBatch(List.of(obsolete.getId()));
         ArgumentCaptor<List<String>> deletedIds = ArgumentCaptor.forClass(List.class);
         verify(ragVectorStoreService).deleteDocuments(deletedIds.capture());
         String expectedReleaseId = org.praxisplatform.config.rag.RagDocumentIdentity.resolveReleaseId(
@@ -236,7 +240,7 @@ class AiRegistryBootstrapServiceTest {
         verify(ingestionService, never()).reconcileRegistry(any(), isNull(), isNull(), anyString());
         verify(statusService, never()).getStatus();
         verify(repository, never()).save(any());
-        verify(repository, never()).deleteAllInBatch(any());
+        verify(repository, never()).deleteAllByIdInBatch(any());
         verify(ragVectorStoreService, never()).deleteDocuments(any());
         assertThat(state.isSucceeded()).isFalse();
         assertThat(state.getError())
@@ -311,6 +315,33 @@ class AiRegistryBootstrapServiceTest {
                         }
                         """.formatted(operationId))
                 .build();
+    }
+
+    private AiRegistryMaterialSummary materialSummary(AiRegistry registry) {
+        return new AiRegistryMaterialSummary(
+                registry.getId(),
+                registry.getRegistryKey(),
+                registry.getPayload());
+    }
+
+    private AiRegistryAuthoringManifestProjection authoringManifestProjection(AiRegistry registry)
+            throws Exception {
+        String manifest = objectMapper.readTree(registry.getPayload())
+                .path("componentDefinition")
+                .path("jsonSchema")
+                .path("authoringManifest")
+                .toString();
+        return new AiRegistryAuthoringManifestProjection() {
+            @Override
+            public String getRegistryKey() {
+                return registry.getRegistryKey();
+            }
+
+            @Override
+            public String getAuthoringManifest() {
+                return manifest;
+            }
+        };
     }
 
     private String sha256(String value) throws Exception {
