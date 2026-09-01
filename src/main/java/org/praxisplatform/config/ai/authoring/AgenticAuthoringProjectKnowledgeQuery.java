@@ -9,7 +9,8 @@ public record AgenticAuthoringProjectKnowledgeQuery(
         String resourceKey,
         List<String> kinds,
         String nodeType,
-        int limit
+        int limit,
+        String semanticQuery
 ) {
 
     private static final int DEFAULT_LIMIT = 8;
@@ -21,6 +22,7 @@ public record AgenticAuthoringProjectKnowledgeQuery(
         contextKey = clean(contextKey);
         resourceKey = clean(resourceKey);
         nodeType = clean(nodeType);
+        semanticQuery = clean(semanticQuery);
         kinds = kinds == null
                 ? List.of()
                 : kinds.stream()
@@ -32,6 +34,17 @@ public record AgenticAuthoringProjectKnowledgeQuery(
             limit = DEFAULT_LIMIT;
         }
         limit = Math.min(limit, MAX_LIMIT);
+    }
+
+    public AgenticAuthoringProjectKnowledgeQuery(
+            String tenantId,
+            String environment,
+            String contextKey,
+            String resourceKey,
+            List<String> kinds,
+            String nodeType,
+            int limit) {
+        this(tenantId, environment, contextKey, resourceKey, kinds, nodeType, limit, null);
     }
 
     private static String clean(String value) {

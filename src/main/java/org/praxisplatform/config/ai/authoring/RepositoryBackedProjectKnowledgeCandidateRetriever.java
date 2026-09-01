@@ -7,6 +7,7 @@ import org.praxisplatform.config.repository.DomainKnowledgeConceptRepository;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 @Component
 @RequiredArgsConstructor
@@ -21,6 +22,9 @@ public class RepositoryBackedProjectKnowledgeCandidateRetriever
 
     @Override
     public List<DomainKnowledgeConcept> retrieve(AgenticAuthoringProjectKnowledgeQuery query) {
+        if (query == null || isSemanticOnlyQuery(query)) {
+            return List.of();
+        }
         return conceptRepository.findGovernedProjectKnowledgeCandidates(
                 query.tenantId(),
                 query.environment(),
@@ -28,6 +32,12 @@ public class RepositoryBackedProjectKnowledgeCandidateRetriever
                 query.resourceKey(),
                 query.nodeType(),
                 PageRequest.of(0, candidatePoolSize(query.limit())));
+    }
+
+    private boolean isSemanticOnlyQuery(AgenticAuthoringProjectKnowledgeQuery query) {
+        return StringUtils.hasText(query.semanticQuery())
+                && !StringUtils.hasText(query.contextKey())
+                && !StringUtils.hasText(query.resourceKey());
     }
 
     private int candidatePoolSize(int requestedLimit) {

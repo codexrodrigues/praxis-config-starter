@@ -111,6 +111,55 @@ class VectorRankedProjectKnowledgeCandidateRetrieverTest {
     }
 
     @Test
+    void ranksUnscopedProjectKnowledgeByTheSemanticUserQueryWithoutCanonicalEnumeration() {
+        AgenticAuthoringProjectKnowledgeQuery query = new AgenticAuthoringProjectKnowledgeQuery(
+                "tenant-a",
+                "dev",
+                null,
+                null,
+                List.of("project_preference", "governance_constraint"),
+                null,
+                8,
+                "preciso monta uma ficha pra cadastra funsionario");
+        DomainKnowledgeConcept identityCard = concept("knowledge:identity-card");
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.search(
+                eq("preciso monta uma ficha pra cadastra funsionario"),
+                eq(24),
+                any()))
+                .thenReturn(List.of(document("knowledge:identity-card")));
+        when(conceptRepository.findWithSourceReleaseByTenantIdAndEnvironmentAndConceptKeyIn(
+                eq("tenant-a"),
+                eq("dev"),
+                eq(List.of("knowledge:identity-card"))))
+                .thenReturn(List.of(identityCard));
+
+        List<DomainKnowledgeConcept> result = retriever.retrieve(query);
+
+        assertThat(result).containsExactly(identityCard);
+        verify(conceptRepository, never()).findGovernedProjectKnowledgeCandidates(
+                any(), any(), any(), any(), any(), any(Pageable.class));
+    }
+
+    @Test
+    void doesNotEnumerateUnscopedKnowledgeWhenSemanticRetrievalIsUnavailable() {
+        AgenticAuthoringProjectKnowledgeQuery query = new AgenticAuthoringProjectKnowledgeQuery(
+                "tenant-a",
+                "dev",
+                null,
+                null,
+                List.of("project_preference"),
+                null,
+                8,
+                "employee identity card");
+        when(ragVectorStoreService.isAvailable()).thenReturn(false);
+
+        assertThat(retriever.retrieve(query)).isEmpty();
+        verify(conceptRepository, never()).findGovernedProjectKnowledgeCandidates(
+                any(), any(), any(), any(), any(), any(Pageable.class));
+    }
+
+    @Test
     void fallsBackToCanonicalRepositoryWhenVectorSearchIsEmpty() {
         AgenticAuthoringProjectKnowledgeQuery query = query(5);
         DomainKnowledgeConcept concept = concept("knowledge:fallback-empty-search");

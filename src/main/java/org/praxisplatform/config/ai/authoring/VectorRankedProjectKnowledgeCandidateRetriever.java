@@ -40,8 +40,11 @@ public class VectorRankedProjectKnowledgeCandidateRetriever
 
     @Override
     public List<DomainKnowledgeConcept> retrieve(AgenticAuthoringProjectKnowledgeQuery query) {
-        if (query == null || isUnscopedEnumeration(query) || !ragVectorStoreService.isAvailable()) {
+        if (query == null || isUnscopedEnumeration(query)) {
             return repositoryFallback(query);
+        }
+        if (!ragVectorStoreService.isAvailable()) {
+            return isSemanticOnlyQuery(query) ? List.of() : repositoryFallback(query);
         }
         String searchText = searchText(query);
         if (!StringUtils.hasText(searchText)) {
@@ -52,17 +55,20 @@ public class VectorRankedProjectKnowledgeCandidateRetriever
                 Math.max(query.limit(), 1) * VECTOR_OVERSAMPLE_FACTOR,
                 filter(query));
         if (documents.isEmpty()) {
-            return repositoryFallback(query);
+            return isSemanticOnlyQuery(query) ? List.of() : repositoryFallback(query);
         }
         List<String> conceptKeys = conceptKeys(documents);
         if (conceptKeys.isEmpty()) {
-            return repositoryFallback(query);
+            return isSemanticOnlyQuery(query) ? List.of() : repositoryFallback(query);
         }
         List<DomainKnowledgeConcept> concepts = conceptRepository.findWithSourceReleaseByTenantIdAndEnvironmentAndConceptKeyIn(
                 query.tenantId(),
                 query.environment(),
                 conceptKeys);
         List<DomainKnowledgeConcept> ranked = rankedConcepts(conceptKeys, concepts);
+        if (isSemanticOnlyQuery(query)) {
+            return ranked;
+        }
         return mergeWithCanonicalPool(ranked, repositoryFallback(query));
     }
 
@@ -75,6 +81,13 @@ public class VectorRankedProjectKnowledgeCandidateRetriever
      */
     private boolean isUnscopedEnumeration(AgenticAuthoringProjectKnowledgeQuery query) {
         return !StringUtils.hasText(query.contextKey())
+                && !StringUtils.hasText(query.resourceKey())
+                && !StringUtils.hasText(query.semanticQuery());
+    }
+
+    private boolean isSemanticOnlyQuery(AgenticAuthoringProjectKnowledgeQuery query) {
+        return StringUtils.hasText(query.semanticQuery())
+                && !StringUtils.hasText(query.contextKey())
                 && !StringUtils.hasText(query.resourceKey());
     }
 
@@ -109,7 +122,11 @@ public class VectorRankedProjectKnowledgeCandidateRetriever
     }
 
     private String searchText(AgenticAuthoringProjectKnowledgeQuery query) {
+        if (isSemanticOnlyQuery(query)) {
+            return query.semanticQuery();
+        }
         List<String> tokens = new ArrayList<>();
+        add(tokens, query.semanticQuery());
         add(tokens, query.contextKey());
         add(tokens, query.resourceKey());
         add(tokens, query.nodeType());
