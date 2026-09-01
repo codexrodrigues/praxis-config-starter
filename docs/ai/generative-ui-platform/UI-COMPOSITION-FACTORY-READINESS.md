@@ -361,6 +361,23 @@ runner now accepts `ExpectedConfigVersion`, and the workflow passes its resolved
 independently attested. The failed run is not functional certification and is
 not eligible for a blind rerun.
 
+After focused review and `30/30` local runner/evidence contract tests, the
+corrected hosted replay,
+[Actions #33514163373](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33514163373),
+passed in 11m34s. HTTP/SSE, Domain Catalog v2, the production-like Page Builder
+gate, portable evidence validation and sanitized publication all completed. The
+browser profile discovered and passed `2/2` tests in 40,496 ms with zero retries.
+Its receipt is `first-pass`: one initial/total human turn, zero clarifications,
+corrective prompts, governed revisions or deterministic repairs, and all nine
+matrix-owned functional assertions, including a fresh detail load after reload.
+Apply, persisted and reload payloads share SHA-256
+`675dade7b3f19eb5750dfae1eba86a466abca91ffaccdfe827be37bc54643a81`;
+the portable report attestation SHA-256 is
+`452c4a88fcdc7c223cb2ee423b49e45b9164fabeacedf62675c2690f75b71614`.
+This closes the hosted functional gate for the current immutable cut. The
+five-run independent stability series remains required before broad Ergo
+promotion.
+
 ### P0 — Shared golden corpus and attestation
 
 Issue: [#357](https://github.com/codexrodrigues/praxis-config-starter/issues/357).
