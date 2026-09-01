@@ -310,9 +310,9 @@ archetype after governed related surfaces are available. The backend does not in
 target: the LLM must select the exact `targetSurfaceId`, and preview still verifies it against the
 current Metadata contract. Focused regression coverage proves that a compact plan with
 `requiresFullIntentResolution=false` cannot bypass the full resolver and that its authored target is
-preserved. The archetype remains uncertified until this fix is released and one focal canary passes,
-followed by five independent zero-retry, zero-corrective-prompt runs accepted by the Config evidence
-validator. A run with
+preserved. At that point the archetype remained uncertified until the fix could be released, a focal
+canary could pass and five independent zero-retry, zero-corrective-prompt runs could be accepted by
+the Config evidence validator. A run with
 `--no-domain-catalog-rag` is diagnostic only and cannot certify this profile.
 
 The first hosted OpenAI replay after that resolver correction,
@@ -347,8 +347,42 @@ serialized with the persisted revision lease, so concurrent hosts cannot make a 
 mutate the corpus or combine searchable counts from different services. A gate must remain fail-closed
 when `READY` is reported without reconciled counts; retrying or weakening the equality is not evidence.
 
-Classification remains `suportado-parcialmente` until that production-like evidence closes. No Ergo
-consumer migration should begin from this slice before certification.
+The canonical reconciliation was released as Config Starter `0.1.0-rc.141`, adopted by Quickstart,
+and then exercised from Maven Central rather than rebuilt from the Config checkout. Published-artifact
+canary
+[`33542971198`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33542971198)
+proved that the SHA-512-verified Central JAR and the JAR nested in Quickstart were byte-identical. It
+also passed the live OpenAI `gpt-5.6-terra` related-resource scenario with Domain Catalog RAG
+`PUBLISHED + reconciled` at `460/460`, two browser tests, no retry and a first-pass receipt.
+
+The final stability series then passed in five strictly sequential hosted executions against Config
+`d1515d17f17d817610763ef2bb889a254842557e`, Quickstart
+`b7d374a17cd4f5fc4aa31a9fd8511764772a6c75`, Metadata
+`8f7c52a38bef3937afd030126f0ed6b0bdd49f88` and Angular
+`06bc36bfddd3ca2b86d0b3eba158c346e46bc1ad`:
+
+| Run | Artifact | Raw report SHA-256 | Browser duration |
+| --- | ---: | --- | ---: |
+| [#33544642331](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33544642331) | `9815477426` | `703cae47b9e379b8b24a346095524a860f93083718858194ff9a6a1359efa06a` | 117,599 ms |
+| [#33546067965](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33546067965) | `9815964496` | `2c7c03090ed00b06a0b887fa88009db62ae62d78a18c10d21575538d3fa8fd79` | 108,063 ms |
+| [#33547345682](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33547345682) | `9816412793` | `28fb33e75d174cd6cf299ccce20c4bd6751c82c73d35891cc0404f33ca41c0ed` | 94,242 ms |
+| [#33548525967](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33548525967) | `9816834196` | `62b1e7acd2f9c04d4183d94c6f48a1c3f0806cf108c8b190acab034bdf250c93` | 85,914 ms |
+| [#33549822211](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33549822211) | `9817390646` | `67962725aa4e2d60635e56d0a7f21233271682ac6436dab5eb0da27b705eaea9` | 93,306 ms |
+
+The portable validator accepted `5/5` unique reports with one stable coordinate
+(`62007d839357e235e2fe5cedc258788235866d3d8dc3cd951f3f1079917214bd`), `10/10` browser tests,
+zero retries and 499,124 ms total. Every receipt is first-pass: one initial prompt and one human turn,
+zero clarification, governed revision, corrective prompt or deterministic repair. Every run proves
+parent Table + related outlet, parent-derived child creation, child read/update/delete, parent-switch
+isolation, terminal/apply lineage, version/ETag and persisted/reloaded semantic equality. All five
+publication source audits passed with no findings.
+
+This certifies the narrow `related-resource` profile for platform-internal factory use. The individual
+slice changes from `suportado-parcialmente` to `ja-suportado-so-ux`: no additional contract is needed
+for the certified flow, but the broader factory remains `suportado-parcialmente` until the remaining
+archetypes and portfolio target in #372 close. Ergo adoption should therefore start only as a bounded
+pilot using the certified profile and the same fail-closed evidence gate, not as an unrestricted
+Dynamic Page promotion.
 
 ### P1 — Canonical tabs/nested-workspace certification
 
