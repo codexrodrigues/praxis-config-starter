@@ -279,7 +279,9 @@ public class DomainCatalogIngestionService {
 
     @EventListener(ApplicationReadyEvent.class)
     void recoverInterruptedRagPublications() {
-        if (!domainCatalogRagPublicationEnabled || ragPublicationStateService == null) {
+        if (!domainCatalogRagPublicationEnabled
+                || ragPublicationStateService == null
+                || !ragVectorStoreService.isAvailable()) {
             return;
         }
         for (UUID releaseId : ragPublicationStateService.recoverInterrupted()) {

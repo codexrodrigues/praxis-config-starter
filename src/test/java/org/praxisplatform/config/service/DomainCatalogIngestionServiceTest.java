@@ -48,6 +48,95 @@ class DomainCatalogIngestionServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void skipsInterruptedPublicationRecoveryWhenVectorStoreIsUnavailable() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogRagPublicationStateService publicationStateService =
+                mock(DomainCatalogRagPublicationStateService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                null,
+                publicationStateService,
+                true,
+                false,
+                100,
+                3,
+                0L,
+                event -> { });
+        when(ragVectorStoreService.isAvailable()).thenReturn(false);
+
+        service.recoverInterruptedRagPublications();
+
+        verify(ragVectorStoreService).isAvailable();
+        verify(publicationStateService, never()).recoverInterrupted();
+    }
+
+    @Test
+    void skipsInterruptedPublicationRecoveryWhenPublicationIsDisabled() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogRagPublicationStateService publicationStateService =
+                mock(DomainCatalogRagPublicationStateService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                null,
+                publicationStateService,
+                false,
+                false,
+                100,
+                3,
+                0L,
+                event -> { });
+
+        service.recoverInterruptedRagPublications();
+
+        verify(ragVectorStoreService, never()).isAvailable();
+        verify(publicationStateService, never()).recoverInterrupted();
+    }
+
+    @Test
+    void recoversInterruptedPublicationsWhenVectorStoreIsAvailable() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogRagPublicationStateService publicationStateService =
+                mock(DomainCatalogRagPublicationStateService.class);
+        UUID releaseId = UUID.fromString("d070c524-b67a-4cc0-b754-d652d7424e14");
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                null,
+                publicationStateService,
+                true,
+                false,
+                100,
+                3,
+                0L,
+                event -> { });
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(publicationStateService.recoverInterrupted()).thenReturn(List.of(releaseId));
+        when(releaseRepository.findById(releaseId)).thenReturn(Optional.empty());
+
+        service.recoverInterruptedRagPublications();
+
+        verify(publicationStateService).recoverInterrupted();
+        verify(releaseRepository).findById(releaseId);
+    }
+
+    @Test
     void publishesScopedProjectionInvalidationAfterCatalogPersistence() throws Exception {
         DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
         DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
