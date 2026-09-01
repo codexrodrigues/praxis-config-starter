@@ -294,8 +294,11 @@ function publishedRelatedResult(run) {
     embeddingProvider: 'gemini',
     dependencyAttestation: {
       configStarter: {
+        artifactId: 'praxis-config-starter',
+        version: '1.0.0',
         localJarSha256: hash,
         quickstartNestedJarSha256: hash,
+        quickstartEntry: 'BOOT-INF/lib/praxis-config-starter-1.0.0.jar',
         byteIdentical: true,
       },
     },
@@ -505,7 +508,11 @@ test('aggregates five unique published results on identical immutable coordinate
   try {
     const paths = Array.from({ length: 5 }, (_, index) => {
       const path = join(directory, `run-${index + 1}.json`);
-      writeFileSync(path, JSON.stringify(publishedRelatedResult(index + 1)));
+      const result = publishedRelatedResult(index + 1);
+      const rebuiltJarSha256 = (index + 10).toString(16).repeat(64);
+      result.dependencyAttestation.configStarter.localJarSha256 = rebuiltJarSha256;
+      result.dependencyAttestation.configStarter.quickstartNestedJarSha256 = rebuiltJarSha256;
+      writeFileSync(path, JSON.stringify(result));
       return path;
     });
     const summary = validatePublishedGateEvidenceSet({
@@ -519,6 +526,15 @@ test('aggregates five unique published results on identical immutable coordinate
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('rejects a published result whose nested Config Starter JAR differs from the local build', () => {
+  const result = publishedRelatedResult(1);
+  result.dependencyAttestation.configStarter.quickstartNestedJarSha256 = 'b'.repeat(64);
+  assert.throws(
+    () => validatePublishedGateResult(result, '/tmp/production-like-result.json', relatedProfile),
+    /JAR attestation is not byte-identical/,
+  );
 });
 
 test('rejects duplicate report attestations across published runs', () => {
