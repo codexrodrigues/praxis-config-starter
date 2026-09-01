@@ -394,7 +394,7 @@ jobs:
             PublicationProfile = if ($includeLiveHttpSse) { 'page-builder-http-sse' } else { 'page-builder' }
           }
           if ($includeLiveHttpSse) {
-            $publicationArgs.HttpArtifactRoot = "$env:GITHUB_WORKSPACE\artifacts\ai-sse-smoke"
+            $publicationArgs.HttpArtifactRoot = "$env:GITHUB_WORKSPACE\praxis-config-starter\artifacts\ai-sse-smoke"
           }
           .\tools\Export-AgenticProductionLikeEvidence.ps1 @publicationArgs
 
@@ -404,7 +404,7 @@ jobs:
         with:
           name: agentic-authoring-smoke-artifacts
           path: |
-            artifacts/ai-sse-smoke/**/summary.json
+            praxis-config-starter/artifacts/ai-sse-smoke/**/summary.json
             praxis-config-starter/artifacts/page-builder-agentic-e2e/**/result.json
             praxis-config-starter/artifacts/page-builder-agentic-e2e/**/source-audit.json
             praxis-config-starter/artifacts/agentic-authoring-publication/**
