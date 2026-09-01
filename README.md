@@ -406,7 +406,9 @@ accepted, not that derived indexes are ready. A bounded managed worker coalesces
 Callers must poll `GET /api/praxis/config/api-catalog/rag/status?serviceKey=...&releaseId=...` with the
 same `X-Tenant-ID` and `X-Env`. `PENDING` and `PROCESSING` are non-terminal; `READY` is returned only
 when expected, legacy-indexed, published and searchable counts agree. `FAILED` includes a stable
-`failureCode` and sanitized `failureMessage`. An idempotent asynchronous rebuild can be requested with
+`failureCode` and sanitized `failureMessage`; embedding failures may additionally identify only the
+canonical provider and normalized failure kind, never the provider response body. An idempotent
+asynchronous rebuild can be requested with
 `POST /api/praxis/config/api-catalog/rag/reconcile?serviceKey=...&releaseId=...`; its `202` response must
 also be followed through the status endpoint. Provider or vector-store failures never roll back the
 canonical rows, and persisted unfinished work is resumed after restart.

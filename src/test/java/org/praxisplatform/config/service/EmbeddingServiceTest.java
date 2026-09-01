@@ -27,6 +27,8 @@ import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
 import org.springframework.ai.google.genai.text.GoogleGenAiTextEmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
+import org.springframework.ai.retry.NonTransientAiException;
+import org.springframework.ai.retry.TransientAiException;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -170,6 +172,71 @@ class EmbeddingServiceTest {
 
         assertEquals(List.of(1.0f, 2.0f), vector);
         verify(client, times(2)).call(any(EmbeddingRequest.class));
+    }
+
+    @Test
+    void embedRetriesSpringAiWrappedOpenAiRateLimitWithinTheCanonicalBudget() {
+        OpenAiEmbeddingModel client = Mockito.mock(OpenAiEmbeddingModel.class);
+        NonTransientAiException providerFailure = new NonTransientAiException(
+                "HTTP 429 - {\"error\":{\"code\":\"rate_limit_exceeded\"}}");
+        EmbeddingResponse response = new EmbeddingResponse(
+                List.of(new Embedding(new float[] {1.0f, 2.0f}, 0)));
+        when(client.call(any(EmbeddingRequest.class)))
+                .thenThrow(providerFailure)
+                .thenReturn(response);
+
+        EmbeddingService service = openAiService(client);
+        ReflectionTestUtils.setField(service, "retryMaxAttempts", 2);
+        ReflectionTestUtils.setField(service, "retryInitialDelayMs", 0L);
+        ReflectionTestUtils.setField(service, "retryMaxDelayMs", 0L);
+
+        List<Float> vector = service.embed("rate limited document");
+
+        assertEquals(List.of(1.0f, 2.0f), vector);
+        verify(client, times(2)).call(any(EmbeddingRequest.class));
+    }
+
+    @Test
+    void embedRetriesSpringAiWrappedOpenAiServerFailureWithinTheCanonicalBudget() {
+        OpenAiEmbeddingModel client = Mockito.mock(OpenAiEmbeddingModel.class);
+        TransientAiException providerFailure = new TransientAiException(
+                "HTTP 503 - {\"error\":{\"code\":\"service_unavailable\"}}");
+        EmbeddingResponse response = new EmbeddingResponse(
+                List.of(new Embedding(new float[] {1.0f, 2.0f}, 0)));
+        when(client.call(any(EmbeddingRequest.class)))
+                .thenThrow(providerFailure)
+                .thenReturn(response);
+
+        EmbeddingService service = openAiService(client);
+        ReflectionTestUtils.setField(service, "retryMaxAttempts", 2);
+        ReflectionTestUtils.setField(service, "retryInitialDelayMs", 0L);
+        ReflectionTestUtils.setField(service, "retryMaxDelayMs", 0L);
+
+        List<Float> vector = service.embed("temporarily unavailable document");
+
+        assertEquals(List.of(1.0f, 2.0f), vector);
+        verify(client, times(2)).call(any(EmbeddingRequest.class));
+    }
+
+    @Test
+    void embedDoesNotRetrySpringAiWrappedOpenAiQuotaExhaustion() {
+        OpenAiEmbeddingModel client = Mockito.mock(OpenAiEmbeddingModel.class);
+        NonTransientAiException providerFailure = new NonTransientAiException(
+                "HTTP 429 - {\"error\":{\"code\":\"insufficient_quota\"}}");
+        when(client.call(any(EmbeddingRequest.class))).thenThrow(providerFailure);
+
+        EmbeddingService service = openAiService(client);
+        ReflectionTestUtils.setField(service, "retryMaxAttempts", 2);
+        ReflectionTestUtils.setField(service, "retryInitialDelayMs", 0L);
+        ReflectionTestUtils.setField(service, "retryMaxDelayMs", 0L);
+
+        AiProviderCallException failure = assertThrows(
+                AiProviderCallException.class,
+                () -> service.embed("quota exhausted document"));
+
+        assertEquals(AiProviderCallException.Kind.QUOTA_EXHAUSTED, failure.getKind());
+        assertEquals("openai HTTP 429 (quota_exhausted)", failure.getMessage());
+        verify(client, times(1)).call(any(EmbeddingRequest.class));
     }
 
     @Test

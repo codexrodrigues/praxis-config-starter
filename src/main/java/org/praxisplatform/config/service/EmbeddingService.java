@@ -22,6 +22,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -32,6 +34,8 @@ import org.springframework.ai.google.genai.text.GoogleGenAiTextEmbeddingOptions;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.retry.NonTransientAiException;
+import org.springframework.ai.retry.TransientAiException;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -60,6 +64,8 @@ public class EmbeddingService {
     private static final String DEFAULT_GEMINI_EMBEDDING_MODEL = "gemini-embedding-2";
     private static final int MAX_BATCH_UTF8_BYTES = 240_000;
     private static final int MAX_BATCH_INPUTS = 256;
+    private static final Pattern SPRING_AI_HTTP_STATUS_PREFIX =
+            Pattern.compile("^\\s*(?:HTTP\\s+)?(\\d{3})\\s+-", Pattern.CASE_INSENSITIVE);
 
     @Value("${spring.ai.embedding.provider:gemini}")
     private String provider;
@@ -248,6 +254,23 @@ public class EmbeddingService {
                     openAiRetryAfter(openAiFailure, Instant.now()),
                     openAiFailure);
         }
+        NonTransientAiException springAiNonTransientFailure =
+                findCause(failure, NonTransientAiException.class);
+        if (springAiNonTransientFailure != null) {
+            AiProviderCallException classified = classifySpringAiHttpFailure(
+                    providerName, springAiNonTransientFailure);
+            if (classified != null) {
+                return classified;
+            }
+        }
+        TransientAiException springAiTransientFailure = findCause(failure, TransientAiException.class);
+        if (springAiTransientFailure != null) {
+            AiProviderCallException classified = classifySpringAiHttpFailure(
+                    providerName, springAiTransientFailure);
+            if (classified != null) {
+                return classified;
+            }
+        }
         Throwable root = rootCause(failure);
         if (root instanceof HttpTimeoutException
                 || root instanceof SocketTimeoutException
@@ -262,6 +285,35 @@ public class EmbeddingService {
             return AiProviderCallException.transport(providerName, root);
         }
         return AiProviderCallException.unknown(providerName, root);
+    }
+
+    /**
+     * Adapts Spring AI retry exceptions, whose public exception types expose the HTTP status only
+     * through the error-handler message prefix. The raw message is used exclusively as a
+     * classification hint; the canonical exception message remains sanitized.
+     */
+    private AiProviderCallException classifySpringAiHttpFailure(
+            String providerName, RuntimeException failure) {
+        String message = failure.getMessage();
+        if (message == null || message.isBlank()) {
+            return null;
+        }
+        Matcher matcher = SPRING_AI_HTTP_STATUS_PREFIX.matcher(message);
+        if (!matcher.find()) {
+            return null;
+        }
+        int statusCode;
+        try {
+            statusCode = Integer.parseInt(matcher.group(1));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+        return AiProviderCallException.fromHttpStatusSanitized(
+                providerName,
+                statusCode,
+                message,
+                null,
+                failure);
     }
 
     private <T extends Throwable> T findCause(Throwable failure, Class<T> type) {

@@ -354,6 +354,34 @@ class ApiMetadataIngestionServiceTest {
     }
 
     @Test
+    void shouldExposeOnlyCanonicalProviderKindForEmbeddingFailure() {
+        ApiMetadata row = metadata(41L, "/api/users", "GET", null);
+        ApiMetadataIndexingScope scope = new ApiMetadataIndexingScope(
+                "tenant-a", "prod", "default", "release-1");
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant-a", "prod", "default", "release-1"))
+                .thenReturn(List.of(row));
+        when(embeddingService.embed(anyString())).thenThrow(
+                AiProviderCallException.fromHttpStatusSanitized(
+                        "openai",
+                        429,
+                        "rate_limit_exceeded with sensitive provider detail",
+                        null,
+                        null));
+
+        service.processIndexingClaim(new ApiMetadataIndexingStateService.WorkClaim(scope, 7L, 1L));
+
+        verify(indexingStateService).fail(
+                scope,
+                7L,
+                "EMBEDDING_FAILED",
+                "API metadata derived indexing failed; canonical metadata remains persisted."
+                        + " provider=openai kind=rate_limit.");
+        verify(repository, never()).delete(any());
+    }
+
+    @Test
     void shouldClassifyVectorPublicationFailureAfterLegacyIndexing() {
         ApiMetadata row = metadata(41L, "/api/users", "GET", List.of(0.1f, 0.2f));
         ApiMetadataIndexingScope scope = new ApiMetadataIndexingScope(
