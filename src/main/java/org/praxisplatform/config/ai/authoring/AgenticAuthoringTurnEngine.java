@@ -335,7 +335,7 @@ public class AgenticAuthoringTurnEngine {
                         request,
                         principalContext,
                         eventSink,
-                        plannedResourceDiscovery);
+                        plannedResourceDiscovery.candidates());
             }
             boolean resourceDiscoveryContextPresent = hasResourceDiscoveryContext(request);
             boolean compactIntentProgress = compactPlatformGuidanceOpportunity
@@ -391,6 +391,16 @@ public class AgenticAuthoringTurnEngine {
             }
             AgenticAuthoringTurnRoute route = routeClassifier.classify(request, intentResolution, state);
             state = state.withRouteClass(route.routeClass());
+            if (intentResolution != null
+                    && "needs_clarification".equals(route.routeClass())
+                    && intentResolution.candidates() != null
+                    && !intentResolution.candidates().isEmpty()) {
+                request = withResourceCandidateProjectKnowledgeContext(
+                        request,
+                        principalContext,
+                        eventSink,
+                        intentResolution.candidates());
+            }
             emitIntentResolved(eventSink, intentResolution, route, request);
             AgenticAuthoringTurnOutcome clientActionOutcome = maybeCompleteDeclaredClientAction(
                     request,
@@ -459,7 +469,7 @@ public class AgenticAuthoringTurnEngine {
                         refinedIntentRequest,
                         principalContext,
                         eventSink,
-                        resourceDiscovery);
+                        resourceDiscovery.candidates());
                 intentResolution = intentResolverService.resolve(
                         toIntentRequest(refinedIntentRequest),
                         principalContext.tenantId(),
@@ -6133,18 +6143,17 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnStreamRequest request,
             AiPrincipalContext principalContext,
             AgenticAuthoringTurnEventSink eventSink,
-            AgenticAuthoringResourceCandidatesResult resourceDiscovery) {
+            List<AgenticAuthoringCandidate> candidates) {
         if (projectKnowledgeService == null
                 || eventSink.terminalReached()
-                || resourceDiscovery == null
-                || resourceDiscovery.candidates() == null
-                || resourceDiscovery.candidates().isEmpty()) {
+                || candidates == null
+                || candidates.isEmpty()) {
             return request;
         }
         LinkedHashMap<String, AgenticAuthoringProjectKnowledgeProjection> projectionsByKey =
                 new LinkedHashMap<>();
         LinkedHashSet<String> resourceKeys = new LinkedHashSet<>();
-        for (AgenticAuthoringCandidate candidate : resourceDiscovery.candidates()) {
+        for (AgenticAuthoringCandidate candidate : candidates) {
             String resourceKey = resourceKeyFromPath(candidate == null ? null : candidate.resourcePath());
             if (!StringUtils.hasText(resourceKey) || resourceKeys.contains(resourceKey)) {
                 continue;
