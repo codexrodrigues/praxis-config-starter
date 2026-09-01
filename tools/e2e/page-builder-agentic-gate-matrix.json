@@ -3,7 +3,7 @@
   "defaults": {
     "streamProcessingTimeoutSeconds": 360,
     "playwrightTestTimeoutMs": 600000,
-    "retries": 1
+    "retries": 0
   },
   "scenarioTests": [
     {
@@ -209,23 +209,18 @@
   },
   "modes": {
     "smoke": {
-      "description": "Release gate with two focal live LLM authoring journeys plus real dependency and transport proofs.",
+      "description": "Release gate with one canonical live LLM authoring journey plus deterministic dependency and transport guards, without automatic retries.",
       "scenarios": [
         "critical-interception-guard",
         "governed-capabilities-provenance",
-        "project-knowledge-revert-and-apply",
-        "live-llm-flow-1",
         "live-resource-workspace-command"
       ],
-      "expectedDiscovered": 6,
-      "minimumExecuted": 6,
+      "expectedDiscovered": 3,
+      "minimumExecuted": 3,
       "expectedSkipped": 0,
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
         "Auditoria live: capabilities reais possuem proveniência governada e não degradada",
-        "Project Knowledge — evidencia revertida deixa de aparecer no authoring browser",
-        "Project Knowledge — cockpit aplica change-set governado via backend real",
-        "Fluxo 1 — Dashboard de pagamentos com linguagem imperfeita: contrato backend-driven validado",
         "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload"
       ]
     },

@@ -20,6 +20,7 @@ param(
     [string] $ValidationMode = "smoke",
     [int] $PlaywrightTestTimeoutMs = 0,
     [int] $Retries = -1,
+    [switch] $ConfirmPaidProviderRun,
     [switch] $ValidateEvidenceParsersOnly
 )
 
@@ -1031,6 +1032,10 @@ if ($ValidateEvidenceParsersOnly.IsPresent) {
     Assert-EmptyDiagnosticEvidenceSerializationFixture
     Write-Output "Invoke-PbAgenticFullE2E: Playwright summary, scenario receipt, governed projection, runtime secret, and empty diagnostic evidence fixtures passed."
     exit 0
+}
+
+if (-not $ConfirmPaidProviderRun.IsPresent) {
+    throw "The Page Builder production-like runner calls a paid provider. Re-run with -ConfirmPaidProviderRun only after approving this single live gate."
 }
 
 $starterRoot = Split-Path -Parent $PSScriptRoot

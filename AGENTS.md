@@ -72,7 +72,8 @@ Release e Gate de Authoring
 - Workflow: `.github/workflows/agentic-authoring-smoke.yml`.
 - O workflow instala o starter do checkout no Maven local do runner, empacota `praxis-api-quickstart` contra essa versao local e roda o smoke HTTP/SSE completo.
 - `quickstart_ref`, `metadata_ref` e `ui_ref` devem ser SHAs imutaveis de 40 caracteres. Branches moveis, inclusive `main`, falham antes dos checkouts downstream.
-- Para mudancas que toquem fluxo agentic do page-builder, SSE browser, patch/apply ou contrato ponta a ponta com Angular, habilitar tambem o input `run_page_builder_full_e2e=true` nesse mesmo workflow.
+- O input `paid_gate_lane` e exclusivo: use `none` para validacao deterministica, `http-sse` para a jornada HTTP paga, `page-builder` para o gate browser ou `llm-compliance` para o shadow de compliance. Nunca combine lanes pagas no mesmo corte.
+- Para mudancas que toquem fluxo agentic do page-builder, SSE browser, patch/apply ou contrato ponta a ponta com Angular, selecione `paid_gate_lane=page-builder` e nao execute outra lane paga por reflexo.
 - Para release, manter `page_builder_e2e_mode=smoke`. Usar `page_builder_e2e_mode=full` apenas quando a investigacao exigir deliberadamente a matriz browser/LLM completa.
 - O gate opcional faz checkout de `praxis-ui-angular`, sobe o quickstart em loopback na porta `8088`, Angular em loopback na porta `4003` e executa `praxis-page-builder-agentic-production-like.playwright.config.ts` contra PostgreSQL/pgvector, LLM e embeddings reais, com stream em modo `signed-url-token` e segredo efemero.
 - A fonte unica de timeouts, retries e contagens esperadas e `tools/e2e/page-builder-agentic-gate-matrix.json`. Testes com mocks pertencem a lane/config `mocked` e nunca contam como evidencia production-like.
@@ -95,13 +96,16 @@ Comandos de Validacao Local
   - `mvn -B -P ci-smoke-unit -T 1C clean verify`
 - Mudancas localizadas em authoring/registry:
   - preferir testes focais de `src/test/java/org/praxisplatform/config/ai/**` antes de suite ampla.
-- Smoke local completo com quickstart:
-  - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart`
+- Smoke local deterministico com quickstart:
+  - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart -DomainRuleLifecycleOnly`
+- Smoke local pago HTTP/SSE, somente depois de aprovacao deliberada do custo:
+  - adicionar `-ConfirmPaidProviderRun` e nao combinar com `-DomainRuleLifecycleOnly`.
 - E2E local do page-builder agentic:
-  - smoke de release: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-PbAgenticFullE2E.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart -UiRoot ..\praxis-ui-angular -ValidationMode smoke`
+  - smoke de release pago: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-PbAgenticFullE2E.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart -UiRoot ..\praxis-ui-angular -ValidationMode smoke -ConfirmPaidProviderRun`
   - matriz completa deliberada: adicionar `-ValidationMode full`.
 - Disparo local do workflow GitHub quando `gh` estiver autenticado:
-  - `gh workflow run agentic-authoring-smoke.yml --repo codexrodrigues/praxis-config-starter -f provider=openai`
+  - deterministico: `gh workflow run agentic-authoring-smoke.yml --repo codexrodrigues/praxis-config-starter -f provider=openai -f paid_gate_lane=none`
+  - pago: substituir `none` por exatamente uma lane aprovada; nunca disparar uma sequencia de lanes para diagnostico exploratorio.
 
 Validacao Downstream
 - Quando a mudanca tocar contrato publico, release, authoring, AI tools, streaming ou integracao real de host, validar com `praxis-api-quickstart`.

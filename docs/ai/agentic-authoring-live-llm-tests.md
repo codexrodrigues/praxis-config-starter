@@ -35,11 +35,11 @@ GitHub Actions:
 1. Open `Agentic Authoring HTTP Smoke`.
 2. Run the workflow manually.
 3. Select `provider`.
-4. Enable `run_llm_compliance_policy_shadow`.
+4. Select `paid_gate_lane=llm-compliance`.
 
-To run only the compliance-policy shadow gate, disable `run_quickstart_http_smoke`,
-disable `run_domain_catalog_v2_smoke`, keep `run_page_builder_full_e2e` disabled,
-and enable `run_llm_compliance_policy_shadow`.
+The paid lane selector is exclusive, so the compliance-policy shadow cannot be combined with the
+paid HTTP/SSE or Page Builder gates. The deterministic HTTP and Domain Catalog validations may remain
+enabled because they do not call an external provider.
 
 By default, provider quota or temporary provider unavailability writes a sanitized
 `providerStatus=unavailable` report and skips the compliance-policy assertion. Enable

@@ -1088,7 +1088,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\tools\Invoke-PbAgenticFullE2E.ps1 `
   -Provider openai `
   -QuickstartRoot ..\praxis-api-quickstart `
-  -UiRoot ..\praxis-ui-angular
+  -UiRoot ..\praxis-ui-angular `
+  -ConfirmPaidProviderRun
 ```
 
 Resultado:

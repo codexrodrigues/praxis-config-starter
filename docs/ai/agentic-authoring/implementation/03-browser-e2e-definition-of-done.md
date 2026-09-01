@@ -26,7 +26,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -Provider openai `
   -QuickstartRoot ..\praxis-api-quickstart `
   -UiRoot ..\praxis-ui-angular `
-  -ValidationMode smoke
+  -ValidationMode smoke `
+  -ConfirmPaidProviderRun
 ```
 
 Esse runner:
@@ -42,8 +43,8 @@ Esse runner:
 - exige AI Registry `ready` com o hash do snapshot Config versionado, Domain Catalog ingerido e API Catalog com indexacao canonica `READY`;
 - exige que o teste negativo de interceptacao critica passe e deriva dele `criticalEndpointMocks=0`; o artifact registra tentativas e retries realmente observados;
 - desabilita trace, video e screenshot na lane live para que a evidencia publicavel permaneça estruturada e sanitizada;
-- valida e copia para `agentic-authoring-publication` apenas o resultado production-like e a auditoria de source no perfil explicito `page-builder`; o perfil `page-builder-http-sse` acrescenta o resumo HTTP/SSE somente quando a jornada live correspondente tambem foi executada;
-- nao mistura o lifecycle HTTP deterministico (`domain_rule_lifecycle_only=true`) com evidencia SSE de provider real: esse lifecycle usa `provider=not-used` e permanece uma prova separada, enquanto a publicacao Page Builder continua autocontida;
+- exige `-ConfirmPaidProviderRun`, usa zero retries automaticos e valida/copia para `agentic-authoring-publication` apenas o resultado production-like e a auditoria de source no perfil `page-builder`;
+- nao mistura a jornada Page Builder com outra lane paga; o lifecycle HTTP deterministico usa `provider=not-used` e permanece uma prova separada, enquanto a publicacao Page Builder continua autocontida;
 - nenhum log, payload, relatorio HTML ou JSON bruto do Playwright entra no artifact remoto;
 - gera segredo de stream efemero, exige working trees limpos para fontes exercitadas diretamente, materializa Metadata da arvore exata de `git archive`, registra commit/tree SHAs e versoes efetivamente empacotadas sem segredos e comprova o teardown dos listeners.
 
@@ -104,15 +105,16 @@ Input obrigatorio quando o PR mexer em:
 
 Input:
 
-- `run_page_builder_full_e2e=true`
+- `paid_gate_lane=page-builder`
 - `page_builder_e2e_mode=smoke` para release
 - `page_builder_e2e_mode=single-table`, `crud-simple`, `related-resource` ou `tabs-nested` para
   certificacao focal; escopo de catalogo, RAG, cenarios e retries continuam
   definidos somente em `tools/e2e/page-builder-agentic-gate-matrix.json`
 - `page_builder_e2e_mode=full` somente para matriz completa deliberada
 
-Para certificar uma serie hospedada, execute os cinco workflows de forma
-estritamente sequencial e baixe o artifact de cada run em um diretorio distinto.
+O gate de release executa somente o perfil proporcional ao corte. Nao execute uma serie hospedada de
+perfis por reflexo; cada lane ou perfil adicional exige uma aprovacao de custo independente e uma
+hipotese de validacao que nao possa ser provada pelos artefatos da execucao anterior.
 O relatorio Playwright bruto continua fora do artifact remoto; cada
 `production-like-result.json` publica apenas a atestacao sanitizada produzida
 pelo validador dentro do runner, incluindo hash do relatorio, contagens,

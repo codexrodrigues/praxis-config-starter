@@ -6,6 +6,14 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const runnerSource = readFileSync(resolve(scriptDir, '..', 'Invoke-PbAgenticFullE2E.ps1'), 'utf8');
+const httpRunnerSource = readFileSync(
+  resolve(scriptDir, '..', 'Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1'),
+  'utf8',
+);
+const dispatchRunnerSource = readFileSync(
+  resolve(scriptDir, '..', 'Invoke-GitHubAgenticAuthoringSmokeWorkflow.ps1'),
+  'utf8',
+);
 const matrix = JSON.parse(
   readFileSync(resolve(scriptDir, 'page-builder-agentic-gate-matrix.json'), 'utf8'),
 );
@@ -70,31 +78,64 @@ test('exposes every canonical matrix mode through workflow dispatch', () => {
   assert.deepEqual(options, Object.keys(matrix.modes));
 });
 
-test('publishes HTTP/SSE evidence only for the live provider HTTP lane', () => {
-  assert.match(
-    workflowSource,
-    /\$includeLiveHttpSse\s*=\s*'\$\{\{ inputs\.run_quickstart_http_smoke \}\}' -eq 'true' -and[\s\S]*?'\$\{\{ inputs\.domain_rule_lifecycle_only \}\}' -ne 'true'/,
+test('exposes one exclusive paid lane and removes combinable paid toggles', () => {
+  const inputBlock = workflowSource.match(/paid_gate_lane:[\s\S]*?page_builder_e2e_mode:/);
+  assert.ok(inputBlock, 'paid_gate_lane workflow input must exist');
+  const options = [...inputBlock[0].matchAll(/^\s{10}- ([a-z0-9-]+)$/gm)].map(
+    (match) => match[1],
   );
+  assert.deepEqual(options, ['none', 'http-sse', 'page-builder', 'llm-compliance']);
+  assert.doesNotMatch(workflowSource, /run_page_builder_full_e2e/);
+  assert.doesNotMatch(workflowSource, /domain_rule_lifecycle_only/);
+  assert.doesNotMatch(workflowSource, /run_llm_compliance_policy_shadow/);
   assert.match(
     workflowSource,
-    /PublicationProfile = if \(\$includeLiveHttpSse\) \{ 'page-builder-http-sse' \} else \{ 'page-builder' \}/,
-  );
-  assert.match(
-    workflowSource,
-    /if \(\$includeLiveHttpSse\) \{[\s\S]*?\$publicationArgs\.HttpArtifactRoot/,
-  );
-  assert.match(
-    workflowSource,
-    /\$publicationArgs\.HttpArtifactRoot\s*=\s*"\$env:GITHUB_WORKSPACE\\praxis-config-starter\\artifacts\\ai-sse-smoke"/,
+    /if: inputs\.paid_gate_lane == 'page-builder'[\s\S]*?Invoke-PbAgenticFullE2E\.ps1[\s\S]*?-ConfirmPaidProviderRun/,
   );
   assert.match(
     workflowSource,
-    /^\s+praxis-config-starter\/artifacts\/ai-sse-smoke\/\*\*\/summary\.json$/m,
+    /if: inputs\.paid_gate_lane == 'llm-compliance'[\s\S]*?AgenticAuthoringLlmCompliancePolicyIntegrationTest/,
   );
-  assert.doesNotMatch(
+  assert.match(
     workflowSource,
-    /^\s+artifacts\/ai-sse-smoke\/\*\*\/summary\.json$/m,
+    /if \('\$\{\{ inputs\.paid_gate_lane \}\}' -eq 'http-sse'\) \{[\s\S]*?ConfirmPaidProviderRun = \$true/,
   );
+  assert.match(
+    workflowSource,
+    /if \(\$paidGateLane -eq 'http-sse' -and -not \$runQuickstartHttpSmoke\) \{[\s\S]*?throw/,
+  );
+  assert.match(workflowSource, /PublicationProfile = 'page-builder'/);
+  assert.doesNotMatch(workflowSource, /page-builder-http-sse/);
+});
+
+test('requires explicit paid-run confirmation and disables automatic retries', () => {
+  assert.equal(matrix.defaults.retries, 0);
+  assert.deepEqual(matrix.modes.smoke.scenarios, [
+    'critical-interception-guard',
+    'governed-capabilities-provenance',
+    'live-resource-workspace-command',
+  ]);
+  assert.equal(matrix.modes.smoke.expectedDiscovered, 3);
+  assert.match(runnerSource, /\[switch\]\s+\$ConfirmPaidProviderRun/);
+  assert.match(runnerSource, /if \(-not \$ConfirmPaidProviderRun\.IsPresent\) \{/);
+  assert.match(httpRunnerSource, /\[switch\]\s+\$ConfirmPaidProviderRun/);
+  assert.match(
+    httpRunnerSource,
+    /if \(-not \$DomainRuleLifecycleOnly\.IsPresent -and -not \$ConfirmPaidProviderRun\.IsPresent\) \{/,
+  );
+});
+
+test('dispatch helper mirrors the canonical paid lanes and matrix modes', () => {
+  assert.match(
+    dispatchRunnerSource,
+    /\[ValidateSet\("none", "http-sse", "page-builder", "llm-compliance"\)\]/,
+  );
+  assert.match(
+    dispatchRunnerSource,
+    /\[ValidateSet\("smoke", "single-table", "crud-simple", "related-resource", "tabs-nested", "full"\)\]/,
+  );
+  assert.match(dispatchRunnerSource, /paid_gate_lane = \$PaidGateLane/);
+  assert.doesNotMatch(dispatchRunnerSource, /RunPageBuilderFullE2E/);
 });
 
 test('materializes focused catalog scope from the canonical gate profile', () => {
