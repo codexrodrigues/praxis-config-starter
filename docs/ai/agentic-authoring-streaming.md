@@ -645,6 +645,11 @@ CRUD usa `praxis-crud`; pares divergentes sao rejeitados pelo plano estruturado.
 passe LLM sem relaxar grounding ou apply. A orientacao encaminhada ao resolver usa
 `praxis-agentic-authoring-pre-intent-orientation-context.v2`. A presenca de actions governadas nao
 decide o layout; metadata e capabilities continuam sendo a fonte exclusiva da descoberta de comandos.
+O plano pre-intent nao seleciona `targetSurfaceId`: para `parent-child-related-resource`, o resolver
+sempre executa a fase semantica completa depois que as surfaces relacionadas governadas estiverem
+disponiveis no grounding, mesmo quando o modelo compacto retornar
+`requiresFullIntentResolution=false`. Essa regra nao escolhe a surface de forma deterministica; ela
+somente impede que uma composicao incompleta seja promovida antes da decisao LLM sobre o alvo exato.
 Quando o passe compacto focal retorna `resolved=false`, ele nao encerra a decisao: o resolver executa
 uma unica fase `intent_full` e preserva no mesmo `providerInvocations` a sequencia
 `intent_fast` -> `intent_full`, distinguindo fallback semantico de retry do provider pelo nome da fase.

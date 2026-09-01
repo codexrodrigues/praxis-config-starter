@@ -11601,6 +11601,130 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void relatedResourcePageRequiresFullSemanticTargetSelectionEvenWhenCompactPlanDisablesIt() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate missionCandidate = new AgenticAuthoringCandidate(
+                "/api/operations/missoes",
+                "get",
+                "/schemas/filtered?path=/api/operations/missoes&operation=get&schemaType=response",
+                "/api/operations/missoes",
+                "GET",
+                1.0d,
+                "Canonical mission binding verified against schema and resource capabilities.",
+                List.of(
+                        "tool-search-api-resources",
+                        "domain-binding",
+                        "schema-grounding-verified",
+                        "resource-capabilities-verified",
+                        "semantic-role:operational-resource"));
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(missionCandidate));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "page",
+                        "create_artifact",
+                        "/api/operations/missoes",
+                        null,
+                        "none",
+                        "Vou criar a composição pai-filho com a superfície governada selecionada.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"),
+                        null,
+                        new AgenticAuthoringVisualizationDecision(
+                                "praxis-agentic-authoring-visualization-decision.v1",
+                                "governed-parent-child-related-resource",
+                                "parent-child-related-resource",
+                                "praxis-related-resource-outlet",
+                                List.of(),
+                                false,
+                                true,
+                                List.of(),
+                                true,
+                                false,
+                                "llm-full-semantic-resolution",
+                                "team"),
+                        false,
+                        "component_authoring")));
+        AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", false);
+        constraints.putArray("filters");
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "A parent-child composition needs a governed related surface selection.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                false,
+                constraints,
+                "page",
+                "praxis-related-resource-outlet",
+                "parent-child-related-resource");
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(
+                requestWithContextHints(
+                        "Crie uma página de missões com a equipe relacionada.",
+                        "deterministic-smoke-disabled",
+                        resourceDiscoveryContext(
+                                "page",
+                                List.of(missionCandidate),
+                                new AgenticAuthoringResourceSearchFocus(
+                                        "operations.missoes",
+                                        List.of("equipe relacionada"),
+                                        "composição pai-filho",
+                                        "",
+                                        "foco semântico authorado pela LLM"))),
+                "tenant",
+                "user",
+                "local",
+                orientation);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.visualizationDecision()).isNotNull();
+        assertThat(result.visualizationDecision().layoutKind())
+                .isEqualTo("parent-child-related-resource");
+        assertThat(result.visualizationDecision().primaryComponent())
+                .isEqualTo("praxis-related-resource-outlet");
+        assertThat(result.visualizationDecision().targetSurfaceId()).isEqualTo("team");
+        assertThat(result.warnings())
+                .doesNotContain("llm-intent-resolution-satisfied-by-pre-intent-governed-evidence");
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+    }
+
+    @Test
     void canonicalSingleTableIgnoresRedundantFullPassFlagWhenSemanticCompositionIsComplete() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);

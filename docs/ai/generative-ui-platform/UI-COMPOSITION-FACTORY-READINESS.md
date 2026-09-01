@@ -293,11 +293,26 @@ sanitized receipt and `domainCatalogRagRequired=true`. Both managed runners cons
 they enable Domain Catalog RAG and require the typed publication state to reach
 `PUBLISHED + reconciled` before Angular or Playwright starts. The Angular scenario uses the
 Quickstart mission/team pilot and the Core runtime fix that keeps contextual read URL separate from
-the flat child command resource. Focused Java and Node gates pass, but the archetype is not
-certified: the first integrated attempt failed to close vector publication and its no-refresh rerun
-received provider `429 credit_balance_exhausted` before the browser tests. After provider recovery,
-the required order is one successful focal run followed by five independent zero-retry,
-zero-corrective-prompt runs accepted by the Config evidence validator. A run with
+the flat child command resource.
+
+The first OpenAI canary after provider recovery, workflow
+[`33527586797`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33527586797),
+closed refs, packaging, HTTP/SSE, Domain Catalog publication and browser bootstrap, then failed closed
+before apply. The compact model correctly authored `layoutKind=parent-child-related-resource` and
+`primaryComponent=praxis-related-resource-outlet`, but returned
+`requiresFullIntentResolution=false`; because the compact contract does not author
+`targetSurfaceId`, the previous resolver skipped the full semantic pass and preview reported
+`related-resource-target-surface-required`. This was a Config orchestration defect, not a missing
+Metadata or Angular relation contract.
+
+The canonical resolver now always executes full semantic resolution for this exact structured
+archetype after governed related surfaces are available. The backend does not infer, sort or copy the
+target: the LLM must select the exact `targetSurfaceId`, and preview still verifies it against the
+current Metadata contract. Focused regression coverage proves that a compact plan with
+`requiresFullIntentResolution=false` cannot bypass the full resolver and that its authored target is
+preserved. The archetype remains uncertified until this fix is released and one focal canary passes,
+followed by five independent zero-retry, zero-corrective-prompt runs accepted by the Config evidence
+validator. A run with
 `--no-domain-catalog-rag` is diagnostic only and cannot certify this profile.
 
 API Catalog readiness is scoped by the same canonical identity used by its persisted state:
