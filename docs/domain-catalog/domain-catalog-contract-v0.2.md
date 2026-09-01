@@ -69,7 +69,10 @@ must carry the same `X-Tenant-ID` and `X-Env` scope used for ingestion.
 The `Domain Catalog PostgreSQL Migration` workflow applies the complete Flyway
 chain to an ephemeral PostgreSQL/pgvector database. It proves that V31 accepts
 the same release key in different scopes while rejecting a duplicate inside one
-exact tenant/environment scope.
+exact tenant/environment scope. The same gate verifies that the V16 canonical
+vector identity index is installed and reproduces the legacy physical-id
+collision before proving that reconciliation removes only the divergent row,
+preserves other scopes and keeps the current physical id idempotent.
 
 RAG publication is a derived materialization, not the source of truth for the
 catalog. By default the starter schedules RAG publication after the catalog
