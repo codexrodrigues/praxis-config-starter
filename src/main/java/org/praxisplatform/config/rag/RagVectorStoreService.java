@@ -13,6 +13,7 @@ import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,16 +30,28 @@ public class RagVectorStoreService {
     private final ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider;
     private final RagEmbeddingProfile embeddingProfile;
     private final String tableName;
+    private final boolean enabled;
 
     public RagVectorStoreService(
             ObjectProvider<VectorStore> vectorStoreProvider,
             @Qualifier("configNamedParameterJdbcTemplate") ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider,
             RagEmbeddingProfile embeddingProfile,
             @Value("${praxis.ai.rag.vector-store.table:vector_store}") String tableName) {
+        this(vectorStoreProvider, jdbcTemplateProvider, embeddingProfile, tableName, true);
+    }
+
+    @Autowired
+    RagVectorStoreService(
+            ObjectProvider<VectorStore> vectorStoreProvider,
+            @Qualifier("configNamedParameterJdbcTemplate") ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider,
+            RagEmbeddingProfile embeddingProfile,
+            @Value("${praxis.ai.rag.vector-store.table:vector_store}") String tableName,
+            @Value("${praxis.ai.rag.vector-store.enabled:true}") boolean enabled) {
         this.vectorStoreProvider = vectorStoreProvider;
         this.jdbcTemplateProvider = jdbcTemplateProvider;
         this.embeddingProfile = embeddingProfile;
         this.tableName = resolveTableName(tableName);
+        this.enabled = enabled;
     }
 
     public void deleteDocumentsByScope(
@@ -346,7 +359,7 @@ public class RagVectorStoreService {
     }
 
     public boolean isAvailable() {
-        return vectorStoreProvider.getIfAvailable() != null;
+        return enabled && vectorStoreProvider.getIfAvailable() != null;
     }
 
     public void upsertDocuments(List<Document> documents) {

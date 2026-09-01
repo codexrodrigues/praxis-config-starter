@@ -55,6 +55,18 @@ class RagVectorStoreServiceTest {
     }
 
     @Test
+    void shouldReportUnavailableWhenCanonicalVectorStoreToggleIsDisabled() {
+        RagVectorStoreService disabledService = new RagVectorStoreService(
+                vectorStoreProvider,
+                jdbcTemplateProvider,
+                embeddingProfile,
+                "vector_store",
+                false);
+
+        assertThat(disabledService.isAvailable()).isFalse();
+    }
+
+    @Test
     void shouldDeduplicateDocumentsUsingScopeAndContentHashMetadata() {
         when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
         Map<String, Object> sharedMetadata = Map.of(
