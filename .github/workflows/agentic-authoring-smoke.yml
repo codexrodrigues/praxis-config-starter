@@ -63,6 +63,7 @@ on:
           - smoke
           - single-table
           - crud-simple
+          - master-detail
           - related-resource
           - tabs-nested
           - full

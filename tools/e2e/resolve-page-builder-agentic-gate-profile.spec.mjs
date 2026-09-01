@@ -73,6 +73,38 @@ test('resolves the focal CRUD profile with its matrix-owned receipt', () => {
   ]);
 });
 
+test('resolves the focal master-detail profile from the existing operational receipt', () => {
+  const profile = resolveGateProfile(loadGateMatrix(), 'master-detail');
+
+  assert.equal(profile.expectedDiscovered, 2);
+  assert.equal(profile.minimumExecuted, 2);
+  assert.equal(profile.expectedSkipped, 0);
+  assert.equal(profile.retries, 0);
+  assert.equal(profile.domainCatalogRagRequired, true);
+  assert.equal(profile.domainCatalogResourceKey, 'operations.missoes');
+  assert.equal(profile.apiCatalogGroup, 'operations');
+  assert.deepEqual(profile.apiCatalogPathPrefixes, ['/api/operations/missoes']);
+  assert.deepEqual(profile.scenarios, [
+    'critical-interception-guard',
+    'live-resource-workspace-command',
+  ]);
+  assert.deepEqual(profile.receiptRequirements.map((entry) => entry.scenarioId), [
+    'live-resource-workspace-command',
+  ]);
+  assert.equal(profile.receiptRequirements[0].archetype, 'master-detail-command');
+  assert.deepEqual(profile.receiptRequirements[0].requiredFunctionalAssertions, [
+    'composition.master-visible',
+    'composition.detail-visible',
+    'composition.selection-propagated',
+    'discovery.actions.http-200',
+    'discovery.capabilities.http-200',
+    'command.execute.http-200',
+    'command.duplicate.http-409',
+    'resource.refresh-observed',
+    'persistence.reload-rendered',
+  ]);
+});
+
 test('resolves the focal related-resource profile with governed mission scope', () => {
   const profile = resolveGateProfile(loadGateMatrix(), 'related-resource');
 
