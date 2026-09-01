@@ -192,6 +192,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("single-table + artifactKind=table + praxis-table")
                 .contains("resource-master-detail")
                 .contains("resource-crud + praxis-crud")
+                .contains("tabs_layout + artifactKind=page + praxis-tabs")
                 .contains("Feasibility questions stay platform_guidance")
                 .contains("they do not")
                 .contains("informações salariais")
@@ -211,6 +212,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("praxis-crud")
                 .contains("layoutKind")
                 .contains("AI-authored semantic composition archetype")
+                .contains("tabs_layout")
                 .contains("Canonical business subject explicitly requested by the user")
                 .contains("Dimensions, fields, filters, groupings")
                 .contains("collection dashboard with filters, charts, and a detail table");
@@ -382,6 +384,50 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
     }
 
     @Test
+    void preservesCanonicalTabsCompositionWithoutRequiringASecondIntentPass() throws Exception {
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                          "semanticIntentClass": "authoring_or_other",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "requiresFullIntentResolution": false,
+                          "queryConstraints": {
+                            "appliesToDataSelection": false,
+                            "filters": []
+                          },
+                          "groundingProfile": "api_resource",
+                          "artifactKind": "page",
+                          "primaryComponent": "praxis-tabs",
+                          "layoutKind": "tabs_layout",
+                          "retrievalQuery": "missões operacionais",
+                          "resourceSearchFocus": {
+                            "primaryBusinessEntity": "operations.missoes",
+                            "supportingConcepts": ["seleção", "detalhes"],
+                            "desiredSurface": "tabs com coleção e detalhe sincronizados",
+                            "uncertainty": null,
+                            "rationale": "A composição em abas preserva a lista e o detalhe da mesma missão."
+                          },
+                          "reason": "Preserve the AI-authored tabs composition."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("crie uma página de missões com lista e detalhes em abas"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().artifactKind()).isEqualTo("page");
+        assertThat(result.plan().primaryComponent()).isEqualTo("praxis-tabs");
+        assertThat(result.plan().layoutKind()).isEqualTo("tabs_layout");
+        assertThat(result.plan().requiresFullIntentResolution()).isFalse();
+    }
+
+    @Test
     void preservesCanonicalSingleTableWithoutRequiringASecondIntentPass() throws Exception {
         when(providerManagementService.generateJson(
                 any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
@@ -498,6 +544,17 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         result.put("primaryComponent", "praxis-crud");
         Boolean wrongSingleTableComponent = ReflectionTestUtils.invokeMethod(service, "isValidStructuredPlan", result);
         assertThat(wrongSingleTableComponent).isFalse();
+
+        result.put("artifactKind", "page");
+        result.put("layoutKind", "tabs_layout");
+        result.put("primaryComponent", "praxis-table");
+        Boolean wrongTabsComponent = ReflectionTestUtils.invokeMethod(service, "isValidStructuredPlan", result);
+        assertThat(wrongTabsComponent).isFalse();
+
+        result.put("artifactKind", "table");
+        result.put("primaryComponent", "praxis-tabs");
+        Boolean wrongTabsArtifact = ReflectionTestUtils.invokeMethod(service, "isValidStructuredPlan", result);
+        assertThat(wrongTabsArtifact).isFalse();
     }
 
     @Test

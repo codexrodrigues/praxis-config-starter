@@ -2958,6 +2958,8 @@ public class AgenticAuthoringIntentResolverService {
                     && "praxis-table".equals(semanticOrientation.primaryComponent());
             case "resource-crud" -> "page".equals(semanticOrientation.artifactKind())
                     && "praxis-crud".equals(semanticOrientation.primaryComponent());
+            case "tabs_layout" -> "page".equals(semanticOrientation.artifactKind())
+                    && "praxis-tabs".equals(semanticOrientation.primaryComponent());
             default -> false;
         };
     }

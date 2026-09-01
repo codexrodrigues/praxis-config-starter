@@ -308,6 +308,24 @@ when `READY` is reported without reconciled counts; retrying or weakening the eq
 Classification remains `suportado-parcialmente` until that production-like evidence closes. No Ergo
 consumer migration should begin from this slice before certification.
 
+### P1 — Canonical tabs/nested-workspace certification
+
+Issues: [#414](https://github.com/codexrodrigues/praxis-config-starter/issues/414) and
+[praxis-ui-angular#479](https://github.com/codexrodrigues/praxis-ui-angular/issues/479).
+
+The runtime, authoring catalog, generic `UiCompositionPlan` provider and nested compiler already support
+`praxis-tabs` with a collection widget and a synchronized detail/form widget. The remaining Config gap was
+in the compact semantic orientation: `praxis-tabs` was an allowed primary component, while `tabs_layout`
+was not an allowed complete composition archetype. That forced a redundant full intent pass and could turn
+an explicit, fully grounded creation request into clarification.
+
+The canonical path treats `artifactKind=page + primaryComponent=praxis-tabs + layoutKind=tabs_layout`
+as one complete AI-authored composition decision. The path is semantic, not lexical: it is accepted only
+after the LLM authors the structured combination and the unique resource keeps its governed binding,
+schema and capability evidence. The normal resource, preview, compiler and apply gates remain mandatory.
+Certification still requires the Angular production-like OpenAI scenario to prove first-pass
+materialization, persisted nested paths, selection continuity and zero retry.
+
 ### P0 — Shared golden corpus and attestation
 
 Issue: [#357](https://github.com/codexrodrigues/praxis-config-starter/issues/357).

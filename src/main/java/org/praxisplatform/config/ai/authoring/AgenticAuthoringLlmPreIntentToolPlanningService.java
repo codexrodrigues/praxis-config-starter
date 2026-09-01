@@ -55,7 +55,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             "single-table",
             "resource-master-detail",
             "parent-child-related-resource",
-            "resource-crud");
+            "resource-crud",
+            "tabs_layout");
 
     private final AiProviderManagementService providerManagementService;
     private final ObjectMapper objectMapper;
@@ -313,6 +314,11 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         }
         if ("resource-crud".equals(layoutKind)
                 && !"praxis-crud".equals(primaryComponent)) {
+            return false;
+        }
+        if ("tabs_layout".equals(layoutKind)
+                && (!("page".equals(text(result, "artifactKind")))
+                        || !"praxis-tabs".equals(primaryComponent))) {
             return false;
         }
         String groundingProfile = text(result, "groundingProfile");
@@ -729,8 +735,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 regions such as filters, KPIs, multiple charts and a detail/list/table surface. Use artifactKind page
                 for general layout or content composition where analytics are not the dominant requested outcome.
                 Author layoutKind independently: single-table + artifactKind=table + praxis-table; resource-master-detail + praxis-table;
-                parent-child-related-resource + praxis-related-resource-outlet; resource-crud + praxis-crud.
-                Otherwise use null/full pass. Never keyword-route or substitute primaryComponent for layoutKind.
+                parent-child-related-resource + praxis-related-resource-outlet; resource-crud + praxis-crud;
+                tabs_layout + artifactKind=page + praxis-tabs.
+                Never keyword-route or substitute primaryComponent for layoutKind.
                 Canonical response locale: %s
                 Context JSON: %s
                 """.formatted(selectedDomainDecisionInstruction, responseLocale, context.toString());
@@ -1207,7 +1214,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         layoutKindEnum.addNull();
         layoutKind.put(
                 "description",
-                "AI-authored semantic composition archetype: single-table, resource-master-detail, parent-child-related-resource, or resource-crud.");
+                "AI-authored semantic composition archetype: single-table, resource-master-detail, parent-child-related-resource, resource-crud, or tabs_layout. tabs_layout requires artifactKind=page and primaryComponent=praxis-tabs.");
         nullableString(properties, "retrievalQuery");
         nullableString(properties, "reason");
         ObjectNode focus = properties.putObject("resourceSearchFocus");

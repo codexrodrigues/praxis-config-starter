@@ -11382,6 +11382,83 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void canonicalTabsPageUsesVerifiedGovernedResourceWithoutFullProviderPass() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate missionCandidate = new AgenticAuthoringCandidate(
+                "/api/operations/missoes",
+                "post",
+                "/schemas/filtered?path=/api/operations/missoes/filter/cursor&operation=post&schemaType=response",
+                "/api/operations/missoes/filter/cursor",
+                "POST",
+                1.0d,
+                "Canonical mission binding verified against schema and resource capabilities.",
+                List.of(
+                        "tool-search-api-resources",
+                        "domain-binding",
+                        "schema-grounding-verified",
+                        "resource-capabilities-verified",
+                        "semantic-role:operational-resource"));
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(missionCandidate));
+        AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", false);
+        constraints.putArray("filters");
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "Tabs already preserve the requested governed collection and detail composition.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                true,
+                constraints,
+                "page",
+                "praxis-tabs",
+                "tabs_layout");
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(
+                requestWithContextHints(
+                        "Crie uma página operacional de missões com tabela e detalhes em abas.",
+                        "deterministic-smoke-disabled",
+                        resourceDiscoveryContext(
+                                "page",
+                                List.of(missionCandidate),
+                                new AgenticAuthoringResourceSearchFocus(
+                                        "operations.missoes",
+                                        List.of("seleção", "detalhes"),
+                                        "tabs com coleção e detalhe sincronizados",
+                                        "",
+                                        "foco semântico authorado pela LLM"))),
+                "tenant",
+                "user",
+                "local",
+                orientation);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.selectedCandidate()).isEqualTo(missionCandidate);
+        assertThat(result.visualizationDecision().layoutKind()).isEqualTo("tabs_layout");
+        assertThat(result.visualizationDecision().primaryComponent()).isEqualTo("praxis-tabs");
+        assertThat(result.warnings()).contains(
+                "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                "llm-pre-intent-resource-discovery-used");
+        Mockito.verifyNoInteractions(llmIntentResolver);
+    }
+
+    @Test
     void canonicalSingleTableIgnoresRedundantFullPassFlagWhenSemanticCompositionIsComplete() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
