@@ -159,6 +159,45 @@ test('resolves the focal tabs-nested profile with its functional receipt', () =>
   ]);
 });
 
+test('resolves the independent business-command profile with governed employee scope', () => {
+  const profile = resolveGateProfile(loadGateMatrix(), 'business-command');
+
+  assert.equal(profile.expectedDiscovered, 2);
+  assert.equal(profile.minimumExecuted, 2);
+  assert.equal(profile.expectedSkipped, 0);
+  assert.equal(profile.retries, 0);
+  assert.equal(profile.humanTurnLimit, 1);
+  assert.equal(profile.domainCatalogRagRequired, true);
+  assert.equal(profile.domainCatalogResourceKey, 'human-resources.funcionarios');
+  assert.equal(profile.apiCatalogGroup, 'human-resources');
+  assert.deepEqual(profile.apiCatalogPathPrefixes, [
+    '/api/human-resources/funcionarios',
+  ]);
+  assert.deepEqual(profile.scenarios, [
+    'critical-interception-guard',
+    'business-command-control',
+  ]);
+  assert.deepEqual(profile.receiptRequirements.map((entry) => entry.scenarioId), [
+    'business-command-control',
+  ]);
+  assert.equal(profile.receiptRequirements[0].archetype, 'business-command');
+  assert.deepEqual(profile.receiptRequirements[0].requiredFunctionalAssertions, [
+    'discovery.actions-capabilities.http-200',
+    'command.contract-form-confirmation-version',
+    'command.confirmation-cancelled',
+    'command.cancelled-not-sent',
+    'command.stale-version.http-412',
+    'command.governed-error-visible',
+    'command.confirmation-accepted',
+    'command.governed-headers-observed',
+    'command.execute.http-200',
+    'resource.refresh-observed',
+    'resource.read-after-write-observed',
+    'resource.availability-transition-observed',
+    'persistence.reload-equivalent',
+  ]);
+});
+
 test('keeps the Windows runner matrix-driven for new focal modes and domain scope', () => {
   assert.doesNotMatch(
     windowsRunnerSource,
