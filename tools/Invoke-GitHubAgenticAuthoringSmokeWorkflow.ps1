@@ -7,6 +7,8 @@ param(
     [string] $QuickstartRef = "cdb9ef3ae29155ec676149fec21d1147979b8211",
     [string] $MetadataRef = "83e32d40e8a6338953580616c762f4722fa3b4f6",
     [string] $UiRef = "2882822b4b6202aa94665d2ba5769ee369fe559b",
+    [ValidateSet("source-checkout", "maven-central")]
+    [string] $ConfigArtifactSource = "source-checkout",
     [int] $QuickstartStartupTimeoutSeconds = 180,
     [ValidateSet("none", "http-sse", "page-builder", "llm-compliance")]
     [string] $PaidGateLane = "none",
@@ -62,6 +64,7 @@ $dispatchBody = @{
         quickstart_ref = $QuickstartRef
         metadata_ref = $MetadataRef
         ui_ref = $UiRef
+        config_artifact_source = $ConfigArtifactSource
         paid_gate_lane = $PaidGateLane
         page_builder_e2e_mode = $PageBuilderE2EMode
         page_builder_e2e_timeout_minutes = [string] $PageBuilderE2ETimeoutMinutes
@@ -85,6 +88,7 @@ if ($NoWait.IsPresent) {
         quickstartRef = $QuickstartRef
         metadataRef = $MetadataRef
         uiRef = $UiRef
+        configArtifactSource = $ConfigArtifactSource
         paidGateLane = $PaidGateLane
         pageBuilderE2EMode = $PageBuilderE2EMode
         pageBuilderE2ETimeoutMinutes = $PageBuilderE2ETimeoutMinutes
@@ -136,6 +140,7 @@ $result = [pscustomobject]@{
     quickstartRef = $QuickstartRef
     metadataRef = $MetadataRef
     uiRef = $UiRef
+    configArtifactSource = $ConfigArtifactSource
     paidGateLane = $PaidGateLane
     pageBuilderE2EMode = $PageBuilderE2EMode
     pageBuilderE2ETimeoutMinutes = $PageBuilderE2ETimeoutMinutes

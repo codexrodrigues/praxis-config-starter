@@ -296,7 +296,8 @@ function publishedRelatedResult(run) {
       configStarter: {
         artifactId: 'praxis-config-starter',
         version: '1.0.0',
-        localJarSha256: hash,
+        source: 'maven-central',
+        referenceJarSha256: hash,
         quickstartNestedJarSha256: hash,
         quickstartEntry: 'BOOT-INF/lib/praxis-config-starter-1.0.0.jar',
         byteIdentical: true,
@@ -510,7 +511,7 @@ test('aggregates five unique published results on identical immutable coordinate
       const path = join(directory, `run-${index + 1}.json`);
       const result = publishedRelatedResult(index + 1);
       const rebuiltJarSha256 = (index + 10).toString(16).repeat(64);
-      result.dependencyAttestation.configStarter.localJarSha256 = rebuiltJarSha256;
+      result.dependencyAttestation.configStarter.referenceJarSha256 = rebuiltJarSha256;
       result.dependencyAttestation.configStarter.quickstartNestedJarSha256 = rebuiltJarSha256;
       writeFileSync(path, JSON.stringify(result));
       return path;
@@ -528,12 +529,21 @@ test('aggregates five unique published results on identical immutable coordinate
   }
 });
 
-test('rejects a published result whose nested Config Starter JAR differs from the local build', () => {
+test('rejects a published result whose nested Config Starter JAR differs from the reference artifact', () => {
   const result = publishedRelatedResult(1);
   result.dependencyAttestation.configStarter.quickstartNestedJarSha256 = 'b'.repeat(64);
   assert.throws(
     () => validatePublishedGateResult(result, '/tmp/production-like-result.json', relatedProfile),
     /JAR attestation is not byte-identical/,
+  );
+});
+
+test('rejects a published result without a canonical Config artifact source', () => {
+  const result = publishedRelatedResult(1);
+  result.dependencyAttestation.configStarter.source = 'local-cache';
+  assert.throws(
+    () => validatePublishedGateResult(result, '/tmp/production-like-result.json', relatedProfile),
+    /artifact source is invalid/,
   );
 });
 

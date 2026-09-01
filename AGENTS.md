@@ -70,7 +70,7 @@ Regras Locais Obrigatorias
 Release e Gate de Authoring
 - Antes de criar tag/publicar no Maven Central, o gate recomendado e `Agentic Authoring HTTP Smoke`.
 - Workflow: `.github/workflows/agentic-authoring-smoke.yml`.
-- O workflow instala o starter do checkout no Maven local do runner, empacota `praxis-api-quickstart` contra essa versao local e roda o smoke HTTP/SSE completo.
+- O input `config_artifact_source` torna a proveniencia explicita: `source-checkout` instala o starter do checkout para a prova pre-release; `maven-central` baixa e valida o SHA-512 da coordenada fixada pelo Quickstart para a prova pos-release. Nos dois modos, o gate empacota o host e exige identidade byte a byte entre o artefato de referencia e o JAR aninhado.
 - `quickstart_ref`, `metadata_ref` e `ui_ref` devem ser SHAs imutaveis de 40 caracteres. Branches moveis, inclusive `main`, falham antes dos checkouts downstream.
 - O input `paid_gate_lane` e exclusivo: use `none` para validacao deterministica, `http-sse` para a jornada HTTP paga, `page-builder` para o gate browser ou `llm-compliance` para o shadow de compliance. Nunca combine lanes pagas no mesmo corte.
 - Toda lane diferente de `none` deve aguardar aprovacao no GitHub Environment protegido `ai-paid-gates`; o dispatch sozinho nao autoriza custo nem libera secrets ao job principal.
@@ -106,6 +106,7 @@ Comandos de Validacao Local
   - matriz completa deliberada: adicionar `-ValidationMode full`.
 - Disparo local do workflow GitHub quando `gh` estiver autenticado:
   - deterministico: `gh workflow run agentic-authoring-smoke.yml --repo codexrodrigues/praxis-config-starter -f provider=openai -f paid_gate_lane=none`
+  - prova publicada: adicionar `-f config_artifact_source=maven-central` somente depois que o Quickstart pinado consumir uma coordenada disponivel no Maven Central;
   - pago: substituir `none` por exatamente uma lane aprovada; nunca disparar uma sequencia de lanes para diagnostico exploratorio.
 
 Validacao Downstream
