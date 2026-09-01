@@ -339,7 +339,7 @@ public class ApiMetadataIngestionService {
                     scope,
                     claim.revision(),
                     indexingFailureCode(ex),
-                    "API metadata derived indexing failed; canonical metadata remains persisted.");
+                    indexingFailureMessage(ex));
             log.warn(
                     "API metadata indexing failed for tenant={}, env={}, serviceKey={}, release={}, revision={}: {}",
                     scope.tenantId(),
@@ -400,6 +400,31 @@ public class ApiMetadataIngestionService {
         return ex instanceof ConfigurationIngestionException
                 ? "EMBEDDING_FAILED"
                 : "RAG_PUBLICATION_FAILED";
+    }
+
+    private String indexingFailureMessage(RuntimeException ex) {
+        String message = "API metadata derived indexing failed; canonical metadata remains persisted.";
+        AiProviderCallException providerFailure = findCause(ex, AiProviderCallException.class);
+        if (providerFailure == null) {
+            return message;
+        }
+        return message
+                + " provider=" + providerFailure.getProvider()
+                + " kind=" + providerFailure.getKind().name().toLowerCase(java.util.Locale.ROOT) + ".";
+    }
+
+    private <T extends Throwable> T findCause(Throwable failure, Class<T> type) {
+        Throwable current = failure;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return type.cast(current);
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private String buildSummary(String path, String method, String tags, String summary, String description,
