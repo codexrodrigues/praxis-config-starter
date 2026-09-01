@@ -71,6 +71,18 @@ test('publishes HTTP/SSE evidence only for the live provider HTTP lane', () => {
     workflowSource,
     /if \(\$includeLiveHttpSse\) \{[\s\S]*?\$publicationArgs\.HttpArtifactRoot/,
   );
+  assert.match(
+    workflowSource,
+    /\$publicationArgs\.HttpArtifactRoot\s*=\s*"\$env:GITHUB_WORKSPACE\\praxis-config-starter\\artifacts\\ai-sse-smoke"/,
+  );
+  assert.match(
+    workflowSource,
+    /^\s+praxis-config-starter\/artifacts\/ai-sse-smoke\/\*\*\/summary\.json$/m,
+  );
+  assert.doesNotMatch(
+    workflowSource,
+    /^\s+artifacts\/ai-sse-smoke\/\*\*\/summary\.json$/m,
+  );
 });
 
 test('materializes focused catalog scope from the canonical gate profile', () => {
