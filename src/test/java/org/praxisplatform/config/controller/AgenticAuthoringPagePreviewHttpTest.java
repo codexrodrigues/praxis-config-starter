@@ -50,6 +50,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceCandidates
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReferenceUiCompositionPlanProvider;
 import org.praxisplatform.config.domain.ApiMetadata;
+import org.praxisplatform.config.projection.ApiMetadataCandidateProjection;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
 import org.praxisplatform.config.service.AiJsonSchema;
 import org.praxisplatform.config.service.AiProviderManagementService;
@@ -67,7 +68,7 @@ class AgenticAuthoringPagePreviewHttpTest {
 
     private AgenticAuthoringIntentResolverService quickstartIntentResolver() {
         ApiMetadataRepository repository = mock(ApiMetadataRepository.class);
-        when(repository.findAll()).thenReturn(List.of(
+        when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
                         "/api/human-resources/vw-analytics-folha-pagamento",
                         "POST",
@@ -95,6 +96,64 @@ class AgenticAuthoringPagePreviewHttpTest {
         return new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+    }
+
+    private List<ApiMetadataCandidateProjection> projections(ApiMetadata... metadata) {
+        return java.util.Arrays.stream(metadata).map(this::projection).toList();
+    }
+
+    private ApiMetadataCandidateProjection projection(ApiMetadata metadata) {
+        return new ApiMetadataCandidateProjection() {
+            @Override
+            public String getPath() {
+                return metadata.getPath();
+            }
+
+            @Override
+            public String getMethod() {
+                return metadata.getMethod();
+            }
+
+            @Override
+            public String getTags() {
+                return metadata.getTags();
+            }
+
+            @Override
+            public String getSummary() {
+                return metadata.getSummary();
+            }
+
+            @Override
+            public String getDescription() {
+                return metadata.getDescription();
+            }
+
+            @Override
+            public String getOperationId() {
+                return metadata.getOperationId();
+            }
+
+            @Override
+            public String getRequestSchema() {
+                return null;
+            }
+
+            @Override
+            public String getResponseSchema() {
+                return null;
+            }
+
+            @Override
+            public String getParameters() {
+                return null;
+            }
+
+            @Override
+            public String getRawJson() {
+                return null;
+            }
+        };
     }
 
     @Test
