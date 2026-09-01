@@ -267,6 +267,38 @@ of unproved archetypes. Platform readiness remains `suportado-parcialmente` unti
 resource, richer business-command and tabs/nested-workspace profiles complete the matrix required by
 #372 before broad Ergo promotion.
 
+### P1 — Canonical parent-child/related-resource certification
+
+Issues: [#382](https://github.com/codexrodrigues/praxis-config-starter/issues/382) and
+[praxis-ui-angular#455](https://github.com/codexrodrigues/praxis-ui-angular/issues/455).
+
+The inventory found no missing backend relation or Angular outlet contract. The metadata surface
+already owns `childResourceKey`, `childResourcePath`, `childParentField`, selection identity,
+operations and availability. The uncovered authoring contract gap is intentionally narrow:
+`AgenticAuthoringVisualizationDecision.targetSurfaceId` records the exact canonical surface selected
+by the LLM after governed grounding. It does not copy the relationship into Config.
+
+The semantic path now recognizes `layoutKind=parent-child-related-resource` with
+`primaryComponent=praxis-related-resource-outlet`, materializes a parent Table, selection state and
+`parentResourceId` binding, and fails closed when the target surface is absent. Preview then fetches
+`/schemas/surfaces?resource={parentResourceKey}` with the current principal and requires the exact
+surface, `ITEM` scope, explicit availability and a complete `relatedResource` contract. A catalog
+result of `resource-context-required` is accepted as the legitimate pre-selection state; invented,
+unavailable or incomplete surfaces block before apply. The semantic policy independently requires
+`relatedResourceGrounding.status=verified`.
+
+The Config gate matrix now owns the focal `related-resource` profile, operations catalog scope and
+sanitized receipt. The Angular scenario uses the Quickstart mission/team pilot and the Core runtime
+fix that keeps contextual read URL separate from the flat child command resource. Focused Java and
+Node gates pass, but the archetype is not certified: the first integrated attempt failed to close API
+Catalog vector publication and its no-refresh rerun received provider
+`429 credit_balance_exhausted` before the browser tests. After provider recovery, the required order
+is one successful focal run followed by five independent zero-retry, zero-corrective-prompt runs
+accepted by the Config evidence validator.
+
+Classification remains `suportado-parcialmente` until that production-like evidence closes. No Ergo
+consumer migration should begin from this slice before certification.
+
 ### P0 — Shared golden corpus and attestation
 
 Issue: [#357](https://github.com/codexrodrigues/praxis-config-starter/issues/357).

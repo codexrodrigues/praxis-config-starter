@@ -72,6 +72,30 @@ test('resolves the focal CRUD profile with its matrix-owned receipt', () => {
   ]);
 });
 
+test('resolves the focal related-resource profile with governed mission scope', () => {
+  const profile = resolveGateProfile(loadGateMatrix(), 'related-resource');
+
+  assert.equal(profile.expectedDiscovered, 2);
+  assert.equal(profile.retries, 0);
+  assert.equal(profile.domainCatalogResourceKey, 'operations.missoes');
+  assert.equal(profile.apiCatalogGroup, 'operations');
+  assert.deepEqual(profile.apiCatalogPathPrefixes, [
+    '/api/operations/missoes',
+    '/api/operations/missao-participantes',
+  ]);
+  assert.deepEqual(profile.scenarios, [
+    'critical-interception-guard',
+    'related-resource-control',
+  ]);
+  assert.deepEqual(profile.receiptRequirements.map((entry) => entry.scenarioId), [
+    'related-resource-control',
+  ]);
+  assert.equal(
+    profile.receiptRequirements[0].archetype,
+    'parent-child-related-resource',
+  );
+});
+
 test('keeps the Windows runner matrix-driven for new focal modes and domain scope', () => {
   assert.doesNotMatch(
     windowsRunnerSource,

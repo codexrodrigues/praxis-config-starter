@@ -57,6 +57,9 @@ import org.springframework.util.StringUtils;
 @ConditionalOnBean({DomainCatalogReleaseRepository.class, DomainCatalogItemRepository.class})
 public class DomainCatalogIngestionService {
 
+    private static final int DEFAULT_RAG_PUBLICATION_MAX_ATTEMPTS = 3;
+    private static final long DEFAULT_RAG_PUBLICATION_RETRY_BACKOFF_MS = 1_000L;
+
     private static final List<String> ITEM_ARRAYS = List.of(
             "contexts",
             "nodes",
@@ -76,6 +79,8 @@ public class DomainCatalogIngestionService {
     private final boolean domainCatalogRagPublicationEnabled;
     private final boolean asyncRagPublicationEnabled;
     private final int ragPublicationBatchSize;
+    private final int ragPublicationMaxAttempts;
+    private final long ragPublicationRetryBackoffMs;
     private final ExecutorService ragPublicationExecutor;
     private final ApplicationEventPublisher applicationEventPublisher;
 
@@ -154,6 +159,10 @@ public class DomainCatalogIngestionService {
             boolean asyncRagPublicationEnabled,
             @Value("${praxis.domain-catalog.rag-publication.batch-size:100}")
             int ragPublicationBatchSize,
+            @Value("${praxis.domain-catalog.rag-publication.max-attempts:3}")
+            int ragPublicationMaxAttempts,
+            @Value("${praxis.domain-catalog.rag-publication.retry-backoff-ms:1000}")
+            long ragPublicationRetryBackoffMs,
             ApplicationEventPublisher applicationEventPublisher) {
         this(
                 releaseRepository,
@@ -165,6 +174,8 @@ public class DomainCatalogIngestionService {
                 domainCatalogRagPublicationEnabled,
                 asyncRagPublicationEnabled,
                 ragPublicationBatchSize,
+                ragPublicationMaxAttempts,
+                ragPublicationRetryBackoffMs,
                 applicationEventPublisher);
     }
 
@@ -181,7 +192,27 @@ public class DomainCatalogIngestionService {
             ApplicationEventPublisher applicationEventPublisher) {
         this(releaseRepository, itemRepository, objectMapper, ragVectorStoreService, schemaValidationService,
                 domainKnowledgeProjectionService, domainCatalogRagPublicationEnabled, asyncRagPublicationEnabled,
-                ragPublicationBatchSize, applicationEventPublisher, true);
+                ragPublicationBatchSize, DEFAULT_RAG_PUBLICATION_MAX_ATTEMPTS,
+                DEFAULT_RAG_PUBLICATION_RETRY_BACKOFF_MS, applicationEventPublisher);
+    }
+
+    DomainCatalogIngestionService(
+            DomainCatalogReleaseRepository releaseRepository,
+            DomainCatalogItemRepository itemRepository,
+            ObjectMapper objectMapper,
+            RagVectorStoreService ragVectorStoreService,
+            DomainCatalogSchemaValidationService schemaValidationService,
+            DomainKnowledgeProjectionService domainKnowledgeProjectionService,
+            boolean domainCatalogRagPublicationEnabled,
+            boolean asyncRagPublicationEnabled,
+            int ragPublicationBatchSize,
+            int ragPublicationMaxAttempts,
+            long ragPublicationRetryBackoffMs,
+            ApplicationEventPublisher applicationEventPublisher) {
+        this(releaseRepository, itemRepository, objectMapper, ragVectorStoreService, schemaValidationService,
+                domainKnowledgeProjectionService, domainCatalogRagPublicationEnabled, asyncRagPublicationEnabled,
+                ragPublicationBatchSize, ragPublicationMaxAttempts, ragPublicationRetryBackoffMs,
+                applicationEventPublisher, true);
     }
 
     private DomainCatalogIngestionService(
@@ -194,6 +225,8 @@ public class DomainCatalogIngestionService {
             boolean domainCatalogRagPublicationEnabled,
             boolean asyncRagPublicationEnabled,
             int ragPublicationBatchSize,
+            int ragPublicationMaxAttempts,
+            long ragPublicationRetryBackoffMs,
             ApplicationEventPublisher applicationEventPublisher,
             boolean ignored) {
         this.releaseRepository = releaseRepository;
@@ -205,6 +238,8 @@ public class DomainCatalogIngestionService {
         this.domainCatalogRagPublicationEnabled = domainCatalogRagPublicationEnabled;
         this.asyncRagPublicationEnabled = asyncRagPublicationEnabled;
         this.ragPublicationBatchSize = Math.max(1, ragPublicationBatchSize);
+        this.ragPublicationMaxAttempts = Math.max(1, ragPublicationMaxAttempts);
+        this.ragPublicationRetryBackoffMs = Math.max(0L, ragPublicationRetryBackoffMs);
         this.ragPublicationExecutor = asyncRagPublicationEnabled ? createRagPublicationExecutor() : null;
         this.applicationEventPublisher = applicationEventPublisher;
     }
@@ -237,9 +272,12 @@ public class DomainCatalogIngestionService {
                 log.info("Repaired missing resourceKey for domain catalog release {}", release.getReleaseKey());
             }
             long existingItemCount = itemRepository.countByRelease(release);
-            if (domainKnowledgeProjectionService != null && existingItemCount > 0L) {
-                List<DomainCatalogItem> existingItems = itemRepository.findByRelease(release);
-                if (!existingItems.isEmpty()) {
+            List<DomainCatalogItem> existingItems = existingItemCount > 0L
+                    && (domainKnowledgeProjectionService != null || domainCatalogRagPublicationEnabled)
+                    ? itemRepository.findByRelease(release)
+                    : List.of();
+            if (!existingItems.isEmpty()) {
+                if (domainKnowledgeProjectionService != null) {
                     domainKnowledgeProjectionService.project(release, existingItems);
                     publishReleaseChanged(release);
                     log.info(
@@ -247,6 +285,7 @@ public class DomainCatalogIngestionService {
                             release.getReleaseKey(),
                             existingItems.size());
                 }
+                reconcileRagPublicationAfterPersistence(release, existingItems);
             }
             log.info(
                     "Skipped domain catalog release {} because sourceHash {} is already ingested",
@@ -704,7 +743,7 @@ public class DomainCatalogIngestionService {
         int publishedDocuments = 0;
         for (int start = 0; start < documents.size(); start += ragPublicationBatchSize) {
             int end = Math.min(start + ragPublicationBatchSize, documents.size());
-            ragVectorStoreService.upsertDocuments(documents.subList(start, end));
+            upsertRagBatchWithRetry(release, documents.subList(start, end));
             publishedDocuments += end - start;
         }
         ragVectorStoreService.deleteDocumentsByCanonicalScopeExceptRelease(
@@ -720,6 +759,81 @@ public class DomainCatalogIngestionService {
                 release.getReleaseKey(),
                 TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt),
                 ragPublicationBatchSize);
+    }
+
+    private void upsertRagBatchWithRetry(DomainCatalogRelease release, List<Document> documents) {
+        for (int attempt = 1; attempt <= ragPublicationMaxAttempts; attempt++) {
+            try {
+                ragVectorStoreService.upsertDocuments(documents);
+                return;
+            } catch (RuntimeException ex) {
+                if (attempt >= ragPublicationMaxAttempts) {
+                    throw ex;
+                }
+                long retryDelayMs = retryDelayMillis(attempt);
+                log.warn(
+                        "Domain catalog RAG batch failed for release {} on attempt {}/{}; retrying in {} ms: {}",
+                        release.getReleaseKey(),
+                        attempt,
+                        ragPublicationMaxAttempts,
+                        retryDelayMs,
+                        ex.getMessage());
+                try {
+                    TimeUnit.MILLISECONDS.sleep(retryDelayMs);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(
+                            "Domain catalog RAG batch retry interrupted for release " + release.getReleaseKey(),
+                            interrupted);
+                }
+            }
+        }
+    }
+
+    private long retryDelayMillis(int failedAttempt) {
+        if (ragPublicationRetryBackoffMs == 0L) {
+            return 0L;
+        }
+        int exponent = Math.min(Math.max(failedAttempt - 1, 0), 10);
+        long multiplier = 1L << exponent;
+        if (ragPublicationRetryBackoffMs > Long.MAX_VALUE / multiplier) {
+            return 60_000L;
+        }
+        return Math.min(ragPublicationRetryBackoffMs * multiplier, 60_000L);
+    }
+
+    private void reconcileRagPublicationAfterPersistence(
+            DomainCatalogRelease release,
+            List<DomainCatalogItem> items) {
+        if (!domainCatalogRagPublicationEnabled
+                || !ragVectorStoreService.isAvailable()
+                || items == null
+                || items.isEmpty()) {
+            return;
+        }
+        long expectedDocumentCount = items.stream()
+                .filter(this::isRagIndexable)
+                .count();
+        RagVectorStoreService.RagCorpusReleaseStatus status = ragVectorStoreService.corpusReleaseStatus(
+                release.getTenantId(),
+                release.getEnvironment(),
+                release.getReleaseKey(),
+                RagResourceTypes.DOMAIN_CATALOG,
+                expectedDocumentCount);
+        if (status != null && status.available() && status.reconciled()) {
+            log.debug(
+                    "Domain catalog RAG already reconciled for idempotent release {} ({}/{} documents)",
+                    release.getReleaseKey(),
+                    status.documentCount(),
+                    status.expectedChunkCount());
+            return;
+        }
+        log.info(
+                "Reconciling domain catalog RAG for idempotent release {} ({}/{} documents)",
+                release.getReleaseKey(),
+                status != null ? status.documentCount() : 0,
+                expectedDocumentCount);
+        publishRagDocumentsAfterPersistence(release, items);
     }
 
     private void publishRagDocumentsAfterPersistence(DomainCatalogRelease release, List<DomainCatalogItem> items) {

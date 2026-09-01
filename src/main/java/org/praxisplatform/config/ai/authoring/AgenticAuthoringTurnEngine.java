@@ -3469,7 +3469,8 @@ public class AgenticAuthoringTurnEngine {
                         ? semanticDecision.visualizationDecision()
                         : intentResolution.visualizationDecision();
         return visualizationDecision != null
-                && "resource-master-detail".equals(safeText(visualizationDecision.layoutKind()));
+                && ("resource-master-detail".equals(safeText(visualizationDecision.layoutKind()))
+                || "parent-child-related-resource".equals(safeText(visualizationDecision.layoutKind())));
     }
 
     private ArtifactReconciliationOutcome reconcilePlannedArtifact(

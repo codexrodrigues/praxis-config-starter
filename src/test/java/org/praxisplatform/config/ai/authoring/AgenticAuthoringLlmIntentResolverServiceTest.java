@@ -217,6 +217,105 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .containsExactly("intent_full", "intent_full_visualization_repair");
     }
 
+    @Test
+    void preservesExactRelatedResourceSurfaceSelectedByTheSemanticResolver() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "resolved": true,
+                          "semanticIntentClass": "component_authoring",
+                          "operationKind": "create",
+                          "artifactKind": "page",
+                          "changeKind": "create_artifact",
+                          "selectedResourcePath": "/api/operations/missoes",
+                          "resourceSearchQuery": null,
+                          "followUpKind": "none",
+                          "requiresGovernedAuthoring": false,
+                          "assistantMessage": "Vou preparar a página de missões e equipe.",
+                          "visualizationDecision": {
+                            "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
+                            "intent": "mission-team-workspace",
+                            "layoutKind": "parent-child-related-resource",
+                            "primaryComponent": "praxis-related-resource-outlet",
+                            "axes": [],
+                            "includeSummary": false,
+                            "includeDetailTable": false,
+                            "excludedComponentIds": [],
+                            "includeFilters": false,
+                            "includeKpis": false,
+                            "provenance": "llm-authored-semantic-decision",
+                            "targetSurfaceId": "team"
+                          },
+                          "consultativeRetrievalPlan": null,
+                          "quickReplies": [],
+                          "clarificationQuestions": [],
+                          "warnings": [],
+                          "queryConstraints": {"filters": []}
+                        }
+                        """));
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode orientation = contextHints.putObject("preIntentSemanticOrientation");
+        orientation.put("artifactKind", "page");
+        orientation.put("primaryComponent", "praxis-related-resource-outlet");
+        orientation.put("layoutKind", "parent-child-related-resource");
+        contextHints.putObject("resourceDiscovery").put("artifactKind", "page");
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        new AgenticAuthoringIntentResolutionRequest(
+                                "Crie uma página de missões com a equipe relacionada.",
+                                "praxis-ui-angular",
+                                "praxis-dynamic-page-builder",
+                                "/page-builder-ia",
+                                objectMapper.createObjectNode(),
+                                null,
+                                "openai",
+                                "gpt-5.6-terra",
+                                "test-key",
+                                "session-related-resource",
+                                "turn-related-resource",
+                                List.of(),
+                                null,
+                                List.of(),
+                                contextHints),
+                        "Crie uma página de missões com a equipe relacionada.",
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(new AgenticAuthoringCandidate(
+                                "/api/operations/missoes",
+                                "post",
+                                "/schemas/filtered/missoes",
+                                "/api/operations/missoes/filter",
+                                "post",
+                                0.97d,
+                                "semantic mission resource",
+                                List.of("domain-catalog", "api-catalog"))),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("parent-child-related-resource")
+                .contains("targetSurfaceId");
+        assertThat(result.visualizationDecision()).isNotNull();
+        assertThat(result.visualizationDecision().layoutKind())
+                .isEqualTo("parent-child-related-resource");
+        assertThat(result.visualizationDecision().primaryComponent())
+                .isEqualTo("praxis-related-resource-outlet");
+        assertThat(result.visualizationDecision().targetSurfaceId()).isEqualTo("team");
+    }
+
     private JsonNode dashboardResolution(String axes) throws Exception {
         return objectMapper.readTree("""
                 {

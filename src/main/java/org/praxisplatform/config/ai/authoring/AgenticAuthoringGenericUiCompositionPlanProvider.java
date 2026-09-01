@@ -87,7 +87,11 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 || hasVisualIntent(visualizationDecision, "accordion", "expansion", "expansivel", "paineis"));
         boolean masterDetailRequested = "page".equals(artifactKind)
                 && hasLayoutKind(visualizationDecision, "resource-master-detail");
+        boolean relatedResourceRequested = "page".equals(artifactKind)
+                && hasLayoutKind(visualizationDecision, "parent-child-related-resource")
+                && isPrimaryComponent(visualizationDecision, "praxis-related-resource-outlet");
         boolean crudRequested = !masterDetailRequested
+                && !relatedResourceRequested
                 && !excludesComponent(visualizationDecision, "praxis-crud")
                 && isPrimaryComponent(visualizationDecision, "praxis-crud");
         if (!List.of("table", "dashboard", "page", "chart").contains(artifactKind)
@@ -105,7 +109,16 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         }
         boolean chartOnly = isChartOnlyRequest(request, visualizationDecision);
         boolean dashboardMaterialization = shouldMaterializeDashboard(request, artifactKind, visualizationDecision);
-        ObjectNode plan = masterDetailRequested ? pagePlan(request, candidate, visualizationDecision) : crudRequested ? crudPlan(request, candidate) : expansionRequested ? expansionPlan(candidate) : tabsRequested ? tabsPlan(request, candidate, visualizationDecision) : chartOnly ? singleChartPlan(request, candidate, visualizationDecision) : switch (artifactKind) {
+        if (relatedResourceRequested && safe(visualizationDecision.targetSurfaceId()).isBlank()) {
+            return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                    false,
+                    List.of("related-resource-target-surface-required"),
+                    List.of("ui-composition-plan-provider:related-resource-fail-closed"),
+                    objectMapper.createObjectNode(),
+                    emptyCompiledFormPatch()));
+        }
+        ObjectNode plan = relatedResourceRequested ? relatedResourcePagePlan(request, candidate, visualizationDecision)
+                : masterDetailRequested ? pagePlan(request, candidate, visualizationDecision) : crudRequested ? crudPlan(request, candidate) : expansionRequested ? expansionPlan(candidate) : tabsRequested ? tabsPlan(request, candidate, visualizationDecision) : chartOnly ? singleChartPlan(request, candidate, visualizationDecision) : switch (artifactKind) {
             case "dashboard" -> dashboardPlan(request, candidate, visualizationDecision);
             case "table" -> dashboardMaterialization
                     ? dashboardPlan(request, candidate, visualizationDecision)
@@ -116,7 +129,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                     : tablePlan(request, candidate);
         };
         preserveComponentSelectionAudit(request, plan);
-        String providerArtifactKind = masterDetailRequested ? "page" : crudRequested ? "crud" : chartOnly ? "chart" : dashboardMaterialization ? "dashboard" : artifactKind;
+        String providerArtifactKind = relatedResourceRequested ? "related-resource-page" : masterDetailRequested ? "page" : crudRequested ? "crud" : chartOnly ? "chart" : dashboardMaterialization ? "dashboard" : artifactKind;
         return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
                 true,
                 List.of(),
@@ -742,6 +755,110 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         addMasterDetailCanvas(plan, candidate, filterKey, masterKey, detailKey, grounding.filterOperationCount() > 0);
         addMasterDetailDeviceLayouts(plan, filterKey, masterKey, detailKey, grounding.filterOperationCount() > 0);
         addResourceWorkspaceGrounding(plan, grounding);
+        return plan;
+    }
+
+    private ObjectNode relatedResourcePagePlan(
+            AgenticAuthoringPlanRequest request,
+            AgenticAuthoringCandidate candidate,
+            AgenticAuthoringVisualizationDecision visualizationDecision) {
+        ObjectNode plan = basePlan("master-detail-dashboard");
+        ResourceWorkspaceGrounding grounding = resourceWorkspaceGrounding(request, candidate);
+        String parentKey = widgetKey(candidate, "parent");
+        String relatedKey = widgetKey(candidate, "related");
+        ArrayNode widgets = plan.putArray("widgets");
+
+        ObjectNode parent = widgets.addObject();
+        parent.put("key", parentKey);
+        parent.put("componentId", "praxis-table");
+        parent.put("role", "master");
+        parent.putObject("outputs").put("selectionChange", "emit");
+        ObjectNode parentInputs = parent.putObject("inputs");
+        parentInputs.put("resourcePath", businessResourcePath(candidate.resourcePath()));
+        parentInputs.put("tableId", parentKey);
+        parentInputs.put("componentInstanceId", parentKey);
+        parentInputs.put("configPersistenceStrategy", "input-first");
+        parentInputs.put("enableCustomization", true);
+        ObjectNode parentConfig = parentInputs.putObject("config");
+        parentConfig.put("title", resourceTitle(candidate));
+        parentConfig.putArray("columns");
+        parentConfig.putObject("behavior")
+                .putObject("selection")
+                .put("enabled", true)
+                .put("type", "single")
+                .put("mode", "row");
+
+        ObjectNode related = widgets.addObject();
+        related.put("key", relatedKey);
+        related.put("componentId", "praxis-related-resource-outlet");
+        related.put("role", "detail");
+        ObjectNode relatedInputs = related.putObject("inputs");
+        relatedInputs.put("surfaceId", safe(visualizationDecision.targetSurfaceId()));
+        relatedInputs.put("parentResourcePath", businessResourcePath(candidate.resourcePath()));
+        relatedInputs.putNull("parentResourceId");
+        relatedInputs.put("mode", "inline");
+        relatedInputs.put("strictValidation", true);
+
+        plan.putObject("state").putObject("values").putNull("selectedParentId");
+        ArrayNode bindings = plan.putArray("bindings");
+        ObjectNode selection = bindings.addObject();
+        selection.put("id", parentKey + ".selectionChange->state.selectedParentId");
+        selection.put("intent", "selection-sync");
+        selection.putObject("from")
+                .put("kind", "component-port")
+                .put("widget", parentKey)
+                .put("port", "selectionChange")
+                .put("direction", "output");
+        selection.putObject("to")
+                .put("kind", "state")
+                .put("path", "selectedParentId")
+                .put("layer", "values");
+        selection.putObject("transform")
+                .put("kind", "pick-path")
+                .put("id", "pick-related-parent-id")
+                .put("path", "payload.row.id")
+                .put("inputSource", "event");
+        selection.putObject("policy")
+                .put("distinct", true)
+                .put("missingValuePolicy", "skip");
+
+        ObjectNode context = bindings.addObject();
+        context.put("id", "state.selectedParentId->" + relatedKey + ".parentResourceId");
+        context.put("intent", "state-read");
+        context.putObject("from")
+                .put("kind", "state")
+                .put("path", "selectedParentId")
+                .put("layer", "values");
+        context.putObject("to")
+                .put("kind", "component-port")
+                .put("widget", relatedKey)
+                .put("port", "parentResourceId")
+                .put("direction", "input");
+        context.putObject("policy")
+                .put("distinct", true)
+                .put("missingValuePolicy", "skip");
+
+        ObjectNode canvas = plan.putObject("canvas");
+        canvas.put("mode", "grid");
+        canvas.put("columns", 12);
+        canvas.put("rowUnit", "80px");
+        canvas.put("gap", "16px");
+        canvas.put("autoRows", "fixed");
+        ObjectNode items = canvas.putObject("items");
+        putCanvasItem(items, parentKey, 1, 1, 7, 8);
+        putCanvasItem(items, relatedKey, 8, 1, 5, 8);
+        addMasterDetailDeviceLayouts(plan, "", parentKey, relatedKey, false);
+
+        addResourceWorkspaceGrounding(plan, grounding);
+        ObjectNode planDiagnostics = plan.path("diagnostics") instanceof ObjectNode existingDiagnostics
+                ? existingDiagnostics
+                : plan.putObject("diagnostics");
+        ObjectNode diagnostics = planDiagnostics.putObject("relatedResourceGrounding");
+        diagnostics.put("schemaVersion", "praxis-related-resource-authoring-grounding.v1");
+        diagnostics.put("status", "surface-id-selected-runtime-verification-required");
+        diagnostics.put("parentResourcePath", businessResourcePath(candidate.resourcePath()));
+        diagnostics.put("surfaceId", safe(visualizationDecision.targetSurfaceId()));
+        diagnostics.put("relationshipAuthoredByComponent", false);
         return plan;
     }
 

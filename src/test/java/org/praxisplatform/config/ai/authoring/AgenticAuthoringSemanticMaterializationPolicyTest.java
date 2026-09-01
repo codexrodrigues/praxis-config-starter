@@ -316,4 +316,72 @@ class AgenticAuthoringSemanticMaterializationPolicyTest {
         assertThat(bound.failureCodes()).doesNotContain(
                 AgenticAuthoringSemanticMaterializationPolicy.RESOURCE_BINDING_MISMATCH_FAILURE);
     }
+
+    @Test
+    void requiresCanonicalSurfaceVerificationForParentChildMaterialization() {
+        AgenticAuthoringSemanticDecision semanticDecision = new AgenticAuthoringSemanticDecision(
+                AgenticAuthoringSemanticDecision.SCHEMA_VERSION,
+                "decision-related-resource",
+                "create",
+                "page",
+                "create_artifact",
+                new AgenticAuthoringSemanticDecision.SelectedResource(
+                        "/api/operations/missoes",
+                        "post",
+                        "/schemas/filtered?path=/api/operations/missoes/filter&operation=post&schemaType=response",
+                        "/api/operations/missoes/filter",
+                        "post"),
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "mission-team-workspace",
+                        "parent-child-related-resource",
+                        "praxis-related-resource-outlet",
+                        List.of(),
+                        false,
+                        false,
+                        List.of(),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision",
+                        "team"),
+                null,
+                false,
+                "",
+                "",
+                "");
+        ObjectNode materialization = objectMapper.createObjectNode();
+        materialization.put("layoutPreset", "master-detail-dashboard");
+        materialization.putArray("widgets")
+                .addObject()
+                .put("componentId", "praxis-table")
+                .putObject("inputs")
+                .put("resourcePath", "/api/operations/missoes");
+        materialization.withArray("widgets")
+                .addObject()
+                .put("componentId", "praxis-related-resource-outlet")
+                .putObject("inputs")
+                .put("parentResourcePath", "/api/operations/missoes")
+                .put("surfaceId", "team");
+        materialization.withObject("/diagnostics/resourceWorkspaceGrounding")
+                .put("status", "verified");
+        materialization.withObject("/diagnostics/relatedResourceGrounding")
+                .put("status", "surface-id-selected-runtime-verification-required")
+                .put("childResourcePath", "/api/operations/missao-participantes");
+
+        AgenticAuthoringSemanticMaterializationPolicy.ValidationResult pending =
+                AgenticAuthoringSemanticMaterializationPolicy.validate(semanticDecision, materialization);
+        assertThat(pending.failureCodes()).contains(
+                AgenticAuthoringSemanticMaterializationPolicy.RELATED_RESOURCE_GROUNDING_REQUIRED_FAILURE);
+        assertThat(pending.failureCodes()).doesNotContain(
+                AgenticAuthoringSemanticMaterializationPolicy.RESOURCE_BINDING_MISMATCH_FAILURE);
+
+        materialization.withObject("/diagnostics/relatedResourceGrounding").put("status", "verified");
+        AgenticAuthoringSemanticMaterializationPolicy.ValidationResult verified =
+                AgenticAuthoringSemanticMaterializationPolicy.validate(semanticDecision, materialization);
+        assertThat(verified.failureCodes()).doesNotContain(
+                AgenticAuthoringSemanticMaterializationPolicy.RELATED_RESOURCE_GROUNDING_REQUIRED_FAILURE,
+                AgenticAuthoringSemanticMaterializationPolicy.RESOURCE_BINDING_MISMATCH_FAILURE,
+                AgenticAuthoringSemanticMaterializationPolicy.PRIMARY_COMPONENT_REQUIRED_FAILURE,
+                AgenticAuthoringSemanticMaterializationPolicy.LAYOUT_REQUIRED_FAILURE);
+    }
 }

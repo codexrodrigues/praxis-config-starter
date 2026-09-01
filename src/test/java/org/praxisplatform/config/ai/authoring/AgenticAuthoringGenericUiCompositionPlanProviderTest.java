@@ -2958,6 +2958,81 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         return contextHints;
     }
 
+    @Test
+    void createsCanonicalParentChildRelatedResourcePlanFromSemanticSurfaceSelection() {
+        AgenticAuthoringVisualizationDecision visualization =
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "mission-team-workspace",
+                        "parent-child-related-resource",
+                        "praxis-related-resource-outlet",
+                        List.of(),
+                        false,
+                        false,
+                        List.of(),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision",
+                        "team");
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie uma página de missões com a equipe relacionada.",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                null,
+                intent("create", "page", "create_artifact", "/api/operations/missoes", visualization));
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(request).orElseThrow();
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.warnings())
+                .containsExactly("ui-composition-plan-provider:generic-resource-related-resource-page");
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("master-detail-dashboard");
+        assertThat(plan.path("widgets")).hasSize(2);
+        assertThat(plan.at("/widgets/0/componentId").asText()).isEqualTo("praxis-table");
+        assertThat(plan.at("/widgets/1/componentId").asText())
+                .isEqualTo("praxis-related-resource-outlet");
+        assertThat(plan.at("/widgets/1/inputs/surfaceId").asText()).isEqualTo("team");
+        assertThat(plan.at("/widgets/1/inputs/parentResourcePath").asText())
+                .isEqualTo("/api/operations/missoes");
+        assertThat(plan.at("/bindings/0/transform/path").asText()).isEqualTo("payload.row.id");
+        assertThat(plan.at("/bindings/1/to/port").asText()).isEqualTo("parentResourceId");
+        assertThat(plan.at("/diagnostics/relatedResourceGrounding/relationshipAuthoredByComponent")
+                .asBoolean()).isFalse();
+    }
+
+    @Test
+    void blocksRelatedResourcePlanWhenSemanticDecisionOmitsTargetSurface() {
+        AgenticAuthoringVisualizationDecision visualization =
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "related-resource-workspace",
+                        "parent-child-related-resource",
+                        "praxis-related-resource-outlet",
+                        List.of(),
+                        false,
+                        false,
+                        List.of(),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision",
+                        "");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(
+                new AgenticAuthoringPlanRequest(
+                        "Crie uma página pai-filho.",
+                        "openai",
+                        "gpt-5.6-terra",
+                        "test-key",
+                        null,
+                        intent("create", "page", "create_artifact", "/api/operations/missoes", visualization)))
+                .orElseThrow();
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).containsExactly("related-resource-target-surface-required");
+    }
+
     private void addVerifiedOperation(
             ArrayNode entries,
             String resourcePath,

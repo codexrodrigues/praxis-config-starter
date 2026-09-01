@@ -12,6 +12,8 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
     static final String LAYOUT_REQUIRED_FAILURE = "semantic-preview-layout-required";
     static final String RESOURCE_WORKSPACE_GROUNDING_REQUIRED_FAILURE =
             "semantic-preview-resource-workspace-grounding-required";
+    static final String RELATED_RESOURCE_GROUNDING_REQUIRED_FAILURE =
+            "semantic-preview-related-resource-grounding-required";
     static final String RESOURCE_BINDING_MISMATCH_FAILURE = "semantic-preview-resource-binding-mismatch";
     static final String AXIS_SCHEMA_VERIFICATION_REQUIRED_FAILURE = "semantic-preview-axis-schema-verification-required";
     static final String AXIS_STATS_CAPABILITY_VERIFICATION_REQUIRED_FAILURE =
@@ -62,6 +64,10 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         if (hasUnverifiedResourceWorkspace(structuralMaterialization, semanticEvidence)) {
             failureCodes.add(RESOURCE_WORKSPACE_GROUNDING_REQUIRED_FAILURE);
             warnings.add("semantic-resource-workspace-grounding-required");
+        }
+        if (hasUnverifiedRelatedResource(semanticDecision, structuralMaterialization, semanticEvidence)) {
+            failureCodes.add(RELATED_RESOURCE_GROUNDING_REQUIRED_FAILURE);
+            warnings.add("semantic-related-resource-grounding-required");
         }
         if (requiresChartMaterialization(semanticDecision)
                 && !containsComponent(structuralMaterialization, "praxis-chart")) {
@@ -144,6 +150,7 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
                 ? ""
                 : safe(semanticDecision.visualizationDecision().layoutKind());
         return "resource-master-detail".equals(semanticLayout)
+                || "parent-child-related-resource".equals(semanticLayout)
                 || "single-table".equals(semanticLayout)
                 || materialization != null
                         && List.of("master-detail-dashboard", "single-table-page").contains(
@@ -169,6 +176,32 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
                 .asText()));
     }
 
+    private static boolean hasUnverifiedRelatedResource(
+            AgenticAuthoringSemanticDecision semanticDecision,
+            JsonNode structuralMaterialization,
+            JsonNode evidenceMaterialization) {
+        String semanticLayout = semanticDecision == null || semanticDecision.visualizationDecision() == null
+                ? ""
+                : safe(semanticDecision.visualizationDecision().layoutKind());
+        if (!"parent-child-related-resource".equals(semanticLayout)) {
+            return false;
+        }
+        if (structuralMaterialization == null
+                || structuralMaterialization.isMissingNode()
+                || structuralMaterialization.isNull()) {
+            return true;
+        }
+        JsonNode diagnostics = evidenceMaterialization == null
+                ? structuralMaterialization.path("diagnostics")
+                : evidenceMaterialization.path("diagnostics").isObject()
+                        ? evidenceMaterialization.path("diagnostics")
+                        : structuralMaterialization.path("diagnostics");
+        return !"verified".equals(safe(diagnostics
+                .path("relatedResourceGrounding")
+                .path("status")
+                .asText()));
+    }
+
     private static JsonNode structuralMaterialization(JsonNode materialization) {
         if (materialization == null) {
             return null;
@@ -187,6 +220,7 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
         String expectedLayoutPreset = switch (semanticLayout) {
             case "single-table" -> "single-table-page";
             case "resource-master-detail" -> "master-detail-dashboard";
+            case "parent-child-related-resource" -> "master-detail-dashboard";
             case "resource-crud" -> "resource-crud";
             default -> "";
         };
@@ -238,9 +272,11 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
                     bindings.add(value);
                 }
             }
-            for (JsonNode child : node) {
-                collectResourceBindings(child, bindings);
-            }
+            node.fields().forEachRemaining(field -> {
+                if (!"diagnostics".equals(field.getKey())) {
+                    collectResourceBindings(field.getValue(), bindings);
+                }
+            });
         } else if (node.isArray()) {
             for (JsonNode child : node) {
                 collectResourceBindings(child, bindings);

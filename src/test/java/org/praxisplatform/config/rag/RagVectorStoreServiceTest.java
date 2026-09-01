@@ -2,6 +2,7 @@ package org.praxisplatform.config.rag;
 
 import org.junit.jupiter.api.Tag;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -78,12 +79,10 @@ class RagVectorStoreServiceTest {
 
         service.upsertDocuments(List.of(first, duplicate));
 
-        ArgumentCaptor<List<String>> idsCaptor = ArgumentCaptor.forClass(List.class);
         ArgumentCaptor<List<Document>> docsCaptor = ArgumentCaptor.forClass(List.class);
-        verify(vectorStore).delete(idsCaptor.capture());
         verify(vectorStore).add(docsCaptor.capture());
+        verify(vectorStore, never()).delete(org.mockito.ArgumentMatchers.anyList());
 
-        assertThat(idsCaptor.getValue()).containsExactly(first.getId());
         assertThat(docsCaptor.getValue()).hasSize(1);
         assertThat(docsCaptor.getValue().get(0).getId()).isEqualTo(first.getId());
         assertThat(docsCaptor.getValue().get(0).getMetadata())
@@ -137,17 +136,10 @@ class RagVectorStoreServiceTest {
 
         service.upsertDocuments(documents);
 
-        ArgumentCaptor<List<String>> idsCaptor = ArgumentCaptor.forClass(List.class);
         ArgumentCaptor<List<Document>> docsCaptor = ArgumentCaptor.forClass(List.class);
-        verify(vectorStore, times(3)).delete(idsCaptor.capture());
         verify(vectorStore, times(3)).add(docsCaptor.capture());
+        verify(vectorStore, never()).delete(org.mockito.ArgumentMatchers.anyList());
 
-        assertThat(idsCaptor.getAllValues())
-                .extracting(List::size)
-                .containsExactly(
-                        RagVectorStoreService.UPSERT_BATCH_SIZE,
-                        RagVectorStoreService.UPSERT_BATCH_SIZE,
-                        5);
         assertThat(docsCaptor.getAllValues())
                 .extracting(List::size)
                 .containsExactly(
@@ -156,6 +148,28 @@ class RagVectorStoreServiceTest {
                         5);
         assertThat(docsCaptor.getAllValues().stream().flatMap(List::stream).map(Document::getId))
                 .containsExactlyElementsOf(documents.stream().map(Document::getId).toList());
+    }
+
+    @Test
+    void shouldPreserveExistingDocumentsWhenProviderUpsertFails() {
+        when(vectorStoreProvider.getIfAvailable()).thenReturn(vectorStore);
+        Document document = Document.builder()
+                .id("stable-id")
+                .text("content")
+                .metadata(Map.of(
+                        RagMetadataKeys.COMPONENT_ID, "component-a",
+                        RagMetadataKeys.DOC_TYPE, "component_definition",
+                        RagMetadataKeys.CONTENT_HASH, "hash-a"))
+                .build();
+        org.mockito.Mockito.doThrow(new IllegalStateException("embedding unavailable"))
+                .when(vectorStore)
+                .add(org.mockito.ArgumentMatchers.anyList());
+
+        assertThatThrownBy(() -> service.upsertDocuments(List.of(document)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("embedding unavailable");
+
+        verify(vectorStore, never()).delete(org.mockito.ArgumentMatchers.anyList());
     }
 
     @Test
