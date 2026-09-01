@@ -1114,12 +1114,95 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         ArrayNode widgets = plan.putArray("widgets");
         String tabsKey = widgetKey(candidate, "tabs");
         addTabs(widgets, candidate, tabsKey, request, visualizationDecision);
+        if (!tabsShouldIncludeChart(visualizationDecision)) {
+            addTabsStateAndBindings(
+                    plan,
+                    tabsKey,
+                    widgetKey(candidate, "tabs-list"),
+                    widgetKey(candidate, "tabs-detail"));
+        }
         ObjectNode canvas = plan.putObject("canvas");
         canvas.put("mode", "grid");
         canvas.put("columns", 12);
         canvas.put("rowUnit", "72px");
         putCanvasItem(canvas.putObject("items"), tabsKey, 1, 1, 12, 8);
         return plan;
+    }
+
+    private void addTabsStateAndBindings(
+            ObjectNode plan,
+            String tabsKey,
+            String listKey,
+            String detailKey) {
+        plan.putObject("state").putObject("values").putNull("selectedItem");
+        ArrayNode bindings = plan.putArray("bindings");
+
+        ObjectNode selection = bindings.addObject();
+        selection.put("id", tabsKey + "." + listKey + ".rowClick->state.selectedItem");
+        selection.put("intent", "state-write");
+        ObjectNode selectionFrom = selection.putObject("from");
+        selectionFrom.put("kind", "component-port");
+        selectionFrom.put("widget", tabsKey);
+        selectionFrom.put("port", "rowClick");
+        selectionFrom.put("direction", "output");
+        addNestedWidgetPath(
+                selectionFrom.putArray("nestedPath"),
+                "list",
+                0,
+                listKey,
+                "praxis-table");
+        selection.putObject("to")
+                .put("kind", "state")
+                .put("path", "selectedItem");
+        selection.putObject("transform")
+                .put("kind", "pick-path")
+                .put("id", "pick-selected-row")
+                .put("path", "payload.row");
+        selection.putObject("policy")
+                .put("distinct", true)
+                .put("missingValuePolicy", "skip");
+        selection.putObject("metadata")
+                .put("source", "ui-composition-plan")
+                .put("traceKey", "verified-nested-component-port-composition")
+                .putArray("tags")
+                .add("tabs-nested")
+                .add("selection-state");
+
+        ObjectNode detail = bindings.addObject();
+        detail.put("id", "state.selectedItem->" + tabsKey + "." + detailKey + ".resourceId");
+        detail.put("intent", "state-read");
+        detail.putObject("from")
+                .put("kind", "state")
+                .put("path", "selectedItem");
+        ObjectNode detailTo = detail.putObject("to");
+        detailTo.put("kind", "component-port");
+        detailTo.put("widget", tabsKey);
+        detailTo.put("port", "resourceId");
+        detailTo.put("direction", "input");
+        addNestedWidgetPath(
+                detailTo.putArray("nestedPath"),
+                "details",
+                1,
+                detailKey,
+                "praxis-dynamic-form");
+        detail.putObject("condition")
+                .putArray("!!")
+                .addObject()
+                .put("var", "state.selectedItem");
+        detail.putObject("transform")
+                .put("kind", "pick-path")
+                .put("id", "selected-item-resource-id")
+                .put("inputSource", "payload")
+                .put("path", "id");
+        detail.putObject("policy")
+                .put("distinct", true)
+                .put("missingValuePolicy", "skip");
+        detail.putObject("metadata")
+                .put("source", "ui-composition-plan")
+                .put("traceKey", "verified-nested-component-port-composition")
+                .putArray("tags")
+                .add("tabs-nested")
+                .add("detail-resource-id");
     }
 
     private ObjectNode expansionPlan(AgenticAuthoringCandidate candidate) {
@@ -1458,6 +1541,22 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         inputs.putNull("resourceId");
         inputs.putObject("config")
                 .put("title", "Detalhes de " + resourceTitle(candidate));
+    }
+
+    private void addNestedWidgetPath(
+            ArrayNode nestedPath,
+            String tabId,
+            int tabIndex,
+            String widgetKey,
+            String componentType) {
+        nestedPath.addObject()
+                .put("kind", "tab")
+                .put("id", tabId)
+                .put("index", tabIndex);
+        nestedPath.addObject()
+                .put("kind", "widget")
+                .put("key", widgetKey)
+                .put("componentType", componentType);
     }
 
     private void addNestedChart(

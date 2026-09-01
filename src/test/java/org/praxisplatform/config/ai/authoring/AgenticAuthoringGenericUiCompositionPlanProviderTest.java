@@ -2179,7 +2179,32 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .contains("\"resourcePath\":\"/api/acme/orders\"")
                 .doesNotContain("human-resources")
                 .doesNotContain("payroll");
+        assertThat(plan.at("/state/values/selectedItem").isNull()).isTrue();
+        JsonNode selectionBinding = plan.path("bindings").path(0);
+        assertThat(selectionBinding.path("intent").asText()).isEqualTo("state-write");
+        assertThat(selectionBinding.at("/from/widget").asText()).isEqualTo("orders-tabs");
+        assertThat(selectionBinding.at("/from/port").asText()).isEqualTo("rowClick");
+        assertThat(selectionBinding.at("/from/nestedPath/0/id").asText()).isEqualTo("list");
+        assertThat(selectionBinding.at("/from/nestedPath/1/key").asText()).isEqualTo("orders-tabs-list");
+        assertThat(selectionBinding.at("/transform/path").asText()).isEqualTo("payload.row");
+        JsonNode detailBinding = plan.path("bindings").path(1);
+        assertThat(detailBinding.path("intent").asText()).isEqualTo("state-read");
+        assertThat(detailBinding.at("/to/widget").asText()).isEqualTo("orders-tabs");
+        assertThat(detailBinding.at("/to/port").asText()).isEqualTo("resourceId");
+        assertThat(detailBinding.at("/to/nestedPath/0/id").asText()).isEqualTo("details");
+        assertThat(detailBinding.at("/to/nestedPath/1/key").asText()).isEqualTo("orders-tabs-detail");
+        assertThat(detailBinding.at("/transform/path").asText()).isEqualTo("id");
         assertThat(plan.path("canvas").path("items").path("orders-tabs").path("colSpan").asInt()).isEqualTo(12);
+
+        ObjectNode basePatch = objectMapper.createObjectNode();
+        basePatch.put("profileId", "ui-composition-plan");
+        AgenticAuthoringUiCompositionPlanCompiler.CompileResult compiled =
+                new AgenticAuthoringUiCompositionPlanCompiler(objectMapper).compile(plan, basePatch);
+        assertThat(compiled.valid()).withFailMessage("%s", compiled.failureCodes()).isTrue();
+        JsonNode links = compiled.compiledFormPatch().at("/patch/page/composition/links");
+        assertThat(links).hasSize(2);
+        assertThat(links.at("/0/from/ref/nestedPath/1/key").asText()).isEqualTo("orders-tabs-list");
+        assertThat(links.at("/1/to/ref/nestedPath/1/key").asText()).isEqualTo("orders-tabs-detail");
     }
 
     @Test
