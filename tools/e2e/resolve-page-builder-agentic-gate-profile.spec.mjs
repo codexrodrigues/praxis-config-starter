@@ -98,6 +98,34 @@ test('resolves the focal related-resource profile with governed mission scope', 
   );
 });
 
+test('resolves the focal tabs-nested profile with its functional receipt', () => {
+  const profile = resolveGateProfile(loadGateMatrix(), 'tabs-nested');
+
+  assert.equal(profile.expectedDiscovered, 2);
+  assert.equal(profile.retries, 0);
+  assert.equal(profile.humanTurnLimit, 1);
+  assert.equal(profile.domainCatalogRagRequired, true);
+  assert.equal(profile.domainCatalogResourceKey, 'operations.missoes');
+  assert.deepEqual(profile.apiCatalogPathPrefixes, ['/api/operations/missoes']);
+  assert.deepEqual(profile.scenarios, [
+    'critical-interception-guard',
+    'tabs-nested-workspace-control',
+  ]);
+  assert.deepEqual(profile.receiptRequirements.map((entry) => entry.scenarioId), [
+    'tabs-nested-workspace-control',
+  ]);
+  assert.deepEqual(profile.receiptRequirements[0].requiredFunctionalAssertions, [
+    'composition.tabs-root',
+    'composition.nested-table-form',
+    'composition.selection-state-resource-id',
+    'runtime.first-selection-details-loaded',
+    'runtime.tab-switch-context-preserved',
+    'runtime.second-selection-replaces-detail',
+    'runtime.narrow-viewport-functional',
+    'persistence.reload-equivalent',
+  ]);
+});
+
 test('keeps the Windows runner matrix-driven for new focal modes and domain scope', () => {
   assert.doesNotMatch(
     windowsRunnerSource,

@@ -68,6 +68,12 @@
       ]
     },
     {
+      "scenarioId": "tabs-nested-workspace-control",
+      "testTitles": [
+        "Tabs nested preserva a seleção entre abas e recarrega detalhes no primeiro passe"
+      ]
+    },
+    {
       "scenarioId": "live-resource-workspace-command",
       "testTitles": [
         "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload"
@@ -170,6 +176,22 @@
           "related.parent-switch-no-data-leak",
           "persistence.reload-equivalent"
         ]
+      },
+      {
+        "scenarioId": "tabs-nested-workspace-control",
+        "archetype": "tabs-nested",
+        "testTitle": "Tabs nested preserva a seleção entre abas e recarrega detalhes no primeiro passe",
+        "attachmentName": "tabs-nested-first-pass-receipt.json",
+        "requiredFunctionalAssertions": [
+          "composition.tabs-root",
+          "composition.nested-table-form",
+          "composition.selection-state-resource-id",
+          "runtime.first-selection-details-loaded",
+          "runtime.tab-switch-context-preserved",
+          "runtime.second-selection-replaces-detail",
+          "runtime.narrow-viewport-functional",
+          "persistence.reload-equivalent"
+        ]
       }
     ],
     "semanticRefinements": [
@@ -262,6 +284,28 @@
         "Parent-child materializa Related Resource Outlet e isola a equipe pela missão no primeiro passe"
       ]
     },
+    "tabs-nested": {
+      "description": "Focal live LLM proof for a canonical tabs workspace with nested Table-to-state-to-Form composition, without Playwright retries.",
+      "retries": 0,
+      "humanTurnLimit": 1,
+      "domainCatalogRagRequired": true,
+      "domainCatalogResourceKey": "operations.missoes",
+      "apiCatalogGroup": "operations",
+      "apiCatalogPathPrefixes": [
+        "/api/operations/missoes"
+      ],
+      "scenarios": [
+        "critical-interception-guard",
+        "tabs-nested-workspace-control"
+      ],
+      "expectedDiscovered": 2,
+      "minimumExecuted": 2,
+      "expectedSkipped": 0,
+      "requiredPassedTests": [
+        "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "Tabs nested preserva a seleção entre abas e recarrega detalhes no primeiro passe"
+      ]
+    },
     "full": {
       "description": "Deliberate live LLM matrix with all non-mocked browser scenarios.",
       "scenarios": [
@@ -275,12 +319,13 @@
         "live-llm-flow-2",
         "crud-simple-control",
         "related-resource-control",
+        "tabs-nested-workspace-control",
         "live-resource-workspace-command",
         "single-table-control",
         "table-human-refinement"
       ],
-      "expectedDiscovered": 14,
-      "minimumExecuted": 14,
+      "expectedDiscovered": 15,
+      "minimumExecuted": 15,
       "expectedSkipped": 0,
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
@@ -294,6 +339,7 @@
         "Fluxo 2 — Formulário de funcionários com linguagem imperfeita: contrato backend-driven validado",
         "CRUD simples materializa host canônico e executa create read update delete no primeiro passe",
         "Parent-child materializa Related Resource Outlet e isola a equipe pela missão no primeiro passe",
+        "Tabs nested preserva a seleção entre abas e recarrega detalhes no primeiro passe",
         "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
         "single-table control persiste, recarrega e renderiza dados reais no primeiro passe",
         "table-human refinement preserva colunas entre decisões semânticas e DOM"
