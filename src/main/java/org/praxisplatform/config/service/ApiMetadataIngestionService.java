@@ -171,6 +171,7 @@ public class ApiMetadataIngestionService {
         RagVectorStoreService.RagCorpusReleaseStatus corpus = ragVectorStoreService.corpusReleaseStatus(
                 scope.tenantId(),
                 scope.environment(),
+                scope.serviceKey(),
                 scope.releaseId(),
                 RagResourceTypes.API_METADATA,
                 snapshot.expectedDocumentCount());
@@ -195,6 +196,7 @@ public class ApiMetadataIngestionService {
         RagVectorStoreService.RagCorpusReleaseStatus status = ragVectorStoreService.corpusReleaseStatus(
                 resolvedTenant,
                 resolvedEnv,
+                resolvedServiceKey,
                 resolvedReleaseId,
                 RagResourceTypes.API_METADATA,
                 expectedDocumentCount);
@@ -324,9 +326,14 @@ public class ApiMetadataIngestionService {
             if (!indexingStateService.commitLegacyEmbeddings(scope, claim.revision(), embeddingsById)) {
                 return;
             }
-            PublicationOutcome outcome = publishCanonicalRagDocuments(
-                    scope.tenantId(), scope.environment(), scope.serviceKey(), scope.releaseId());
-            indexingStateService.complete(scope, claim.revision(), outcome.publishedDocumentCount());
+            indexingStateService.publishAndCompleteIfCurrent(
+                    scope,
+                    claim.revision(),
+                    () -> publishCanonicalRagDocuments(
+                            scope.tenantId(),
+                            scope.environment(),
+                            scope.serviceKey(),
+                            scope.releaseId()).publishedDocumentCount());
         } catch (RuntimeException ex) {
             indexingStateService.fail(
                     scope,
@@ -643,9 +650,10 @@ public class ApiMetadataIngestionService {
         List<Document> documents = metadataRows.stream()
                 .map(this::toRagDocument)
                 .toList();
-        ragVectorStoreService.deleteDocumentsByRelease(
+        ragVectorStoreService.deleteDocumentsByReleaseScope(
                 tenantId,
                 environment,
+                serviceKey,
                 releaseId,
                 RagResourceTypes.API_METADATA);
         ragVectorStoreService.upsertDocuments(documents);
@@ -724,6 +732,7 @@ public class ApiMetadataIngestionService {
         metadata.put(RagMetadataKeys.COMPONENT_ID, componentId);
         metadata.put(RagMetadataKeys.DOC_TYPE, RagResourceTypes.API_METADATA);
         metadata.put(RagMetadataKeys.RELEASE_ID, releaseId);
+        metadata.put(RagMetadataKeys.SERVICE_KEY, meta.getServiceKey());
         metadata.put(RagMetadataKeys.CONTENT_HASH, contentHash);
         metadata.put(RagMetadataKeys.CHUNK_INDEX, 0);
         metadata.put(RagMetadataKeys.DB_ID, meta.getId());

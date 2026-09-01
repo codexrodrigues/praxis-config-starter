@@ -234,6 +234,48 @@ public class RagVectorStoreService {
         }
     }
 
+    public void deleteDocumentsByReleaseScope(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId,
+            String resourceType) {
+        if (vectorStoreProvider.getIfAvailable() == null) {
+            return;
+        }
+        NamedParameterJdbcTemplate jdbcTemplate = jdbcTemplateProvider.getIfAvailable();
+        if (jdbcTemplate == null) {
+            log.warn("Skipping vector store scoped release purge because configNamedParameterJdbcTemplate is unavailable.");
+            return;
+        }
+
+        String sql = """
+            DELETE FROM %s
+            WHERE COALESCE(metadata ->> 'tenantId', 'global') = :tenantId
+              AND COALESCE(metadata ->> 'environment', 'global') = :environment
+              AND COALESCE(metadata ->> 'releaseId', 'v1') = :releaseId
+              AND COALESCE(metadata ->> 'resourceType', metadata ->> 'docType', metadata ->> 'sourceKind') = :resourceType
+              AND COALESCE(metadata ->> 'serviceKey', '') IN (:serviceKey, '')
+            """.formatted(tableName);
+
+        Map<String, Object> params = Map.of(
+                "tenantId", RagDocumentIdentity.normalizeToken(tenantId, "global"),
+                "environment", RagDocumentIdentity.normalizeToken(environment, "global"),
+                "serviceKey", normalizeNullableScopeValue(serviceKey),
+                "releaseId", RagDocumentIdentity.normalizeToken(releaseId, "v1"),
+                "resourceType", RagDocumentIdentity.normalizeToken(resourceType, "unknown-kind"));
+
+        int deletedRows = jdbcTemplate.update(sql, params);
+        log.debug(
+                "Purged {} scoped release vector document(s) for tenant={}, env={}, service={}, release={}, resourceType={}",
+                deletedRows,
+                tenantId,
+                environment,
+                serviceKey,
+                releaseId,
+                resourceType);
+    }
+
     public void deleteDocumentsByResourceTypeExceptRelease(
             String tenantId,
             String environment,
@@ -520,6 +562,22 @@ public class RagVectorStoreService {
             String releaseId,
             String resourceType,
             long expectedChunkCount) {
+        return corpusReleaseStatus(
+                tenantId,
+                environment,
+                null,
+                releaseId,
+                resourceType,
+                expectedChunkCount);
+    }
+
+    public RagCorpusReleaseStatus corpusReleaseStatus(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId,
+            String resourceType,
+            long expectedChunkCount) {
         NamedParameterJdbcTemplate jdbcTemplate = jdbcTemplateProvider.getIfAvailable();
         if (jdbcTemplate == null) {
             return RagCorpusReleaseStatus.unavailable(
@@ -533,6 +591,10 @@ public class RagVectorStoreService {
         String resolvedEnvironment = normalizedScope(environment, "global");
         String resolvedRelease = normalizedScope(releaseId, "v1");
         String resolvedResourceType = normalizedScope(resourceType, RagResourceTypes.COMPONENT_DEFINITION);
+        boolean scopedByService = serviceKey != null;
+        String serviceScopePredicate = scopedByService
+                ? "  AND COALESCE(metadata ->> 'serviceKey', '') = :serviceKey\n"
+                : "";
         String sql = """
             SELECT
               COALESCE(metadata ->> 'sourceId', metadata ->> 'componentId', metadata ->> 'resourceId', id) AS source_id,
@@ -548,15 +610,19 @@ public class RagVectorStoreService {
               AND COALESCE(metadata ->> 'releaseId', 'v1') = :releaseId
               AND COALESCE(metadata ->> 'resourceType', metadata ->> 'docType', metadata ->> 'sourceKind') = :resourceType
               AND COALESCE(metadata ->> 'embeddingProfile', '') = :embeddingProfile
+            %s
             GROUP BY source_id, source_kind, chunk_kind, ai_visibility, corpus_version
             ORDER BY source_id, chunk_kind
-            """.formatted(tableName);
-        Map<String, Object> params = Map.of(
-                "tenantId", resolvedTenant,
-                "environment", resolvedEnvironment,
-                "releaseId", resolvedRelease,
-                "resourceType", resolvedResourceType,
-                "embeddingProfile", embeddingProfile.id());
+            """.formatted(tableName, serviceScopePredicate);
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("tenantId", resolvedTenant);
+        params.put("environment", resolvedEnvironment);
+        params.put("releaseId", resolvedRelease);
+        params.put("resourceType", resolvedResourceType);
+        params.put("embeddingProfile", embeddingProfile.id());
+        if (scopedByService) {
+            params.put("serviceKey", normalizeNullableScopeValue(serviceKey));
+        }
         try {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, params);
             return RagCorpusReleaseStatus.fromRows(
@@ -584,6 +650,9 @@ public class RagVectorStoreService {
         String environment = normalizeMetadataToken(
                 metadata.get(RagMetadataKeys.ENVIRONMENT),
                 "global");
+        String serviceKey = normalizeMetadataToken(
+                metadata.get(RagMetadataKeys.SERVICE_KEY),
+                "global");
         String releaseId = normalizeMetadataToken(
                 firstNonNull(metadata.get(RagMetadataKeys.RELEASE_ID), metadata.get(RagMetadataKeys.VERSION)),
                 "v1");
@@ -602,6 +671,7 @@ public class RagVectorStoreService {
                 "|",
                 tenantId,
                 environment,
+                serviceKey,
                 releaseId,
                 componentId,
                 docType,

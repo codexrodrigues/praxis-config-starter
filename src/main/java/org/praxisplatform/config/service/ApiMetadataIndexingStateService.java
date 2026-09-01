@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.LongSupplier;
 import org.praxisplatform.config.domain.ApiMetadata;
 import org.praxisplatform.config.domain.ApiMetadataIndexingState;
 import org.praxisplatform.config.domain.ApiMetadataIndexingStatus;
@@ -120,11 +121,15 @@ public class ApiMetadataIndexingStateService {
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
-    public boolean complete(ApiMetadataIndexingScope scope, long revision, long publishedCount) {
+    public boolean publishAndCompleteIfCurrent(
+            ApiMetadataIndexingScope scope,
+            long revision,
+            LongSupplier publisher) {
         ApiMetadataIndexingState state = lock(scope).orElse(null);
         if (!isCurrentProcessing(state, revision)) {
             return false;
         }
+        long publishedCount = publisher.getAsLong();
         long expected = metadataRepository.countByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
                 scope.tenantId(), scope.environment(), scope.serviceKey(), scope.releaseId());
         long indexed = metadataRepository
