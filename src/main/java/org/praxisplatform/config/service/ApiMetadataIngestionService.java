@@ -339,19 +339,25 @@ public class ApiMetadataIngestionService {
                             scope.serviceKey(),
                             scope.releaseId()).publishedDocumentCount());
         } catch (RuntimeException ex) {
+            AiProviderCallException providerFailure = findCause(ex, AiProviderCallException.class);
             indexingStateService.fail(
                     scope,
                     claim.revision(),
                     indexingFailureCode(ex),
                     indexingFailureMessage(ex));
             log.warn(
-                    "API metadata indexing failed for tenant={}, env={}, serviceKey={}, release={}, revision={}: {}",
+                    "API metadata indexing failed for tenant={}, env={}, serviceKey={}, release={}, revision={}: "
+                            + "failureType={}, provider={}, kind={}, statusCode={}, providerRequestId={}",
                     scope.tenantId(),
                     scope.environment(),
                     scope.serviceKey(),
                     scope.releaseId(),
                     claim.revision(),
-                    ex.getClass().getSimpleName());
+                    ex.getClass().getSimpleName(),
+                    providerFailure != null ? providerFailure.getProvider() : null,
+                    providerFailure != null ? providerFailure.getKind() : null,
+                    providerFailure != null ? providerFailure.getStatusCode() : null,
+                    providerFailure != null ? providerFailure.getProviderRequestId() : null);
         }
     }
 

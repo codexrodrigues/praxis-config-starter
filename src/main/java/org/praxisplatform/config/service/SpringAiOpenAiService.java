@@ -918,8 +918,13 @@ public class SpringAiOpenAiService implements AiProvider {
             return exception;
         }
         if (root instanceof OpenAIServiceException exception) {
-            return AiProviderCallException.fromHttpStatus(
-                    PROVIDER, exception.statusCode(), summarizeErrorBody(exception.getMessage()));
+            return AiProviderCallException.fromHttpStatusSanitized(
+                    PROVIDER,
+                    exception.statusCode(),
+                    summarizeErrorBody(exception.getMessage()),
+                    null,
+                    openAiRequestId(exception),
+                    exception);
         }
         if (isTimeout(root)) {
             return AiProviderCallException.timeout(PROVIDER, root);
@@ -928,6 +933,13 @@ public class SpringAiOpenAiService implements AiProvider {
             return AiProviderCallException.transport(PROVIDER, root);
         }
         return AiProviderCallException.unknown(PROVIDER, root);
+    }
+
+    private String openAiRequestId(OpenAIServiceException failure) {
+        if (failure.headers() == null) {
+            return null;
+        }
+        return failure.headers().values("x-request-id").stream().findFirst().orElse(null);
     }
 
     private AiProviderStreamException classifyStreamFailure(Throwable failure) {

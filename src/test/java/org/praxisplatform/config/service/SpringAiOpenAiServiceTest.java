@@ -502,6 +502,8 @@ class SpringAiOpenAiServiceTest {
                     assertThrows(AiProviderCallException.class, () -> quotaService.generateText("ping"));
             assertEquals(AiProviderCallException.Kind.QUOTA_EXHAUSTED, quota.getKind());
             assertEquals(429, quota.getStatusCode());
+            assertEquals("req_responses_safe_123", quota.getProviderRequestId());
+            assertEquals("openai HTTP 429 (quota_exhausted)", quota.getMessage());
         } finally {
             quotaService.closeDefaultClient();
             quotaServer.stop(0);
@@ -722,6 +724,7 @@ class SpringAiOpenAiServiceTest {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/responses", exchange -> {
             exchange.getRequestBody().readAllBytes();
+            exchange.getResponseHeaders().add("x-request-id", "req_responses_safe_123");
             writeJson(exchange, status, response);
         });
         return server;

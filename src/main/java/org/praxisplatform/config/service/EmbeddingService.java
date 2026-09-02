@@ -252,6 +252,7 @@ public class EmbeddingService {
                     openAiFailure.statusCode(),
                     openAiFailure.code().orElseGet(() -> openAiFailure.type().orElse("unknown")),
                     openAiRetryAfter(openAiFailure, Instant.now()),
+                    openAiRequestId(openAiFailure),
                     openAiFailure);
         }
         NonTransientAiException springAiNonTransientFailure =
@@ -835,6 +836,13 @@ public class EmbeddingService {
                 failure.headers().values("retry-after-ms"),
                 failure.headers().values("retry-after"),
                 now);
+    }
+
+    private String openAiRequestId(OpenAIServiceException failure) {
+        if (failure.headers() == null) {
+            return null;
+        }
+        return failure.headers().values("x-request-id").stream().findFirst().orElse(null);
     }
 
     private Instant later(Instant first, Instant second) {

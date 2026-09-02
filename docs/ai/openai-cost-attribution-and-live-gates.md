@@ -67,6 +67,18 @@ OpenAI Responses requests carry only bounded, non-content metadata:
 
 Prompts, responses, credentials, tenant IDs and user IDs are excluded. `store=false` remains enabled.
 
+## Provider failure correlation
+
+When an OpenAI SDK failure is normalized as an `AiProviderCallException`, the Config Starter retains
+only the provider-owned `x-request-id` needed for operational correlation. The value is accepted
+only when it is a single safe identifier of at most 128 characters; raw headers and malformed values
+are discarded.
+
+The sanitized identifier is written to the API metadata indexing failure log together with the
+provider, normalized failure kind and HTTP status. It is not added to prompts, responses, metrics,
+canonical status messages or provider request metadata. Use it when escalating a failed live gate
+to OpenAI support; never copy the API key or raw provider response into an issue or artifact.
+
 ## Public host protection
 
 The quickstart applies a dedicated per-client rate limit before the broader config limit for
