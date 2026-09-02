@@ -251,6 +251,8 @@ test('keeps the Windows runner matrix-driven for new focal modes and domain scop
   assert.match(windowsRunnerSource, /SPRING_AI_ENABLED = '\$\(\$providerRequired\.ToString\(\)\.ToLowerInvariant\(\)\)'/);
   assert.match(windowsRunnerSource, /Skipping pgvector preflight because runtime excellence/);
   assert.match(windowsRunnerSource, /Skipping Domain Catalog and API Catalog ingestion because runtime excellence/);
+  assert.match(windowsRunnerSource, /scripts\\build-libs\.js --prod --only praxis-page-builder/);
+  assert.doesNotMatch(windowsRunnerSource, /ng build praxis-page-builder/);
   assert.match(windowsRunnerSource, /praxis-page-builder-runtime-excellence\.playwright\.config\.ts/);
 });
 

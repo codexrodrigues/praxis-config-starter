@@ -1353,11 +1353,11 @@ try {
             providerUsed = $false
             planFixtureSha256 = [string] $runtimeReceiptDefinition.expectedPlanFixtureSha256
         }
-        Write-Phase "Building the Page Builder package used by the deterministic TypeScript compiler proof."
+        Write-Phase "Building the canonical Page Builder dependency closure used by the deterministic TypeScript compiler proof."
         Push-Location $UiRoot
         try {
-            & cmd.exe /c "npx.cmd ng build praxis-page-builder"
-            if ($LASTEXITCODE -ne 0) { throw "Page Builder focal build failed with exit code $LASTEXITCODE." }
+            & cmd.exe /c "node.exe scripts\build-libs.js --prod --only praxis-page-builder"
+            if ($LASTEXITCODE -ne 0) { throw "Page Builder dependency-closure build failed with exit code $LASTEXITCODE." }
         } finally {
             Pop-Location
         }
