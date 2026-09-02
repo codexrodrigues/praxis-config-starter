@@ -47,7 +47,10 @@ test('runs the portable evidence validator and publishes semantic requirements',
   assert.match(runnerSource, /semanticRefinementRequirements = @\(/);
   assert.match(runnerSource, /domainCatalogRagRequired = \$modeDomainCatalogRagRequired/);
   assert.match(runnerSource, /domainCatalogResourceKey = if \(/);
-  assert.match(runnerSource, /apiCatalogGroup = \$modeApiCatalogGroup/);
+  assert.match(
+    runnerSource,
+    /apiCatalogGroup = if \(\[string\]::IsNullOrWhiteSpace\(\$modeApiCatalogGroup\)\) \{ \$null \} else \{ \$modeApiCatalogGroup \}/,
+  );
   assert.match(runnerSource, /apiCatalogPathPrefixes = @\(\$modeApiCatalogPathPrefixes\)/);
   assert.match(runnerSource, /requiredOperationIds = @\(\$_\.requiredOperationIds\)/);
   assert.match(runnerSource, /\$publishedDiagnosticEvidence\s*=\s*@\(\)/);

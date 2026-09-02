@@ -10,9 +10,10 @@ under [praxis-ui-angular#482](https://github.com/codexrodrigues/praxis-ui-angula
 [praxis-config-starter#428](https://github.com/codexrodrigues/praxis-config-starter/issues/428). A
 separate deterministic runtime-excellence profile now compiles and persists a certified
 `UiCompositionPlan` and exercises the complete command lifecycle without OpenAI, embeddings, RAG or
-API-catalog ingestion. Its Java compiler proof is green locally; the real browser execution remains
-the next acceptance step. Live first-pass authoring remains a distinct certification axis and still
-requires its published canary and five-run stability series.
+API-catalog ingestion. Its Java and TypeScript compiler proofs and its first real-browser canary are
+green; the five-run deterministic stability series remains the final runtime-excellence acceptance
+step. Live first-pass authoring remains a distinct certification axis and still requires its own
+published canary and five-run stability series.
 
 The first remote integration cut was intentionally diagnostic, not a certification result. It
 revealed three independent gate defects: the Angular checkout had to build the complete Page Builder
@@ -31,7 +32,12 @@ runtime journey took 72,007 ms and the complete Playwright run 78,378 ms. Source
 capabilities remained non-degraded. This is the successful canary, not the five-run stability
 certificate. The canary also exposed one final evidence-packaging gap: the workflow result referenced
 the sanitized validation summary but did not upload it. That derived-artifact path is now corrected;
-the stability series must use the resulting immutable Config head.
+the stability series must use the resulting immutable Config head. The portable validator now accepts
+each sanitized result through `--runtime-result`, revalidates its provider-independent execution,
+canonical matrix, compiler hashes, byte-identical Config JAR, registry state, exact Playwright result
+and runtime receipt attestation, then rejects duplicate raw-report hashes or coordinate drift across
+the requested series. The original canary was successfully revalidated through that path; it remains
+excluded from the final series because it predates the evidence-packaging and canonical-null fixes.
 
 ## Decision
 

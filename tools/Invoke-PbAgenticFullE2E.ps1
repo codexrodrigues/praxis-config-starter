@@ -1803,7 +1803,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             humanTurnLimit = if ($humanTurnLimit -gt 0) { $humanTurnLimit } else { $null }
             domainCatalogRagRequired = $modeDomainCatalogRagRequired
             domainCatalogResourceKey = if ([string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey)) { $null } else { $modeDomainCatalogResourceKey }
-            apiCatalogGroup = $modeApiCatalogGroup
+            apiCatalogGroup = if ([string]::IsNullOrWhiteSpace($modeApiCatalogGroup)) { $null } else { $modeApiCatalogGroup }
             apiCatalogPathPrefixes = @($modeApiCatalogPathPrefixes)
             diagnosticProjectionRequirements = @($gateMatrix.evidence.governedStateProjections |
                 Where-Object { $_.scenarioId -in $selectedScenarioIds } |
