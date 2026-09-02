@@ -65,6 +65,16 @@ export function validateGateMatrix(matrix) {
   assertUniqueStrings(modeNames, 'modes');
   for (const modeName of modeNames) {
     const mode = matrix.modes[modeName];
+    const executionLane = mode.executionLane ?? 'live';
+    assertCondition(['live', 'runtime-excellence'].includes(executionLane),
+      `modes.${modeName}.executionLane must be live or runtime-excellence.`);
+    if (mode.providerRequired !== undefined) {
+      assertCondition(typeof mode.providerRequired === 'boolean',
+        `modes.${modeName}.providerRequired must be a boolean.`);
+    }
+    const providerRequired = mode.providerRequired ?? executionLane === 'live';
+    assertCondition(providerRequired === (executionLane === 'live'),
+      `modes.${modeName}.providerRequired must match its execution lane.`);
     assertUniqueStrings(mode.scenarios, `modes.${modeName}.scenarios`);
     for (const scenarioId of mode.scenarios) {
       assertCondition(scenarioById.has(scenarioId),
@@ -113,11 +123,26 @@ export function validateGateMatrix(matrix) {
           `modes.${modeName}.apiCatalogPathPrefixes must contain canonical /api paths.`);
       }
     }
+    if (executionLane === 'runtime-excellence') {
+      assertCondition(mode.humanTurnLimit === undefined,
+        `modes.${modeName} cannot declare humanTurnLimit in runtime-excellence.`);
+      assertCondition(mode.domainCatalogRagRequired !== true,
+        `modes.${modeName} cannot require Domain Catalog RAG in runtime-excellence.`);
+      assertCondition(mode.domainCatalogResourceKey === undefined,
+        `modes.${modeName} cannot declare a Domain Catalog resource in runtime-excellence.`);
+      assertCondition(mode.apiCatalogGroup === undefined && mode.apiCatalogPathPrefixes === undefined,
+        `modes.${modeName} cannot require API Catalog ingestion in runtime-excellence.`);
+    }
   }
 
   const evidence = matrix.evidence;
   assertCondition(evidence && typeof evidence === 'object', 'Gate matrix evidence is missing.');
-  for (const category of ['scenarioReceipts', 'governedStateProjections', 'semanticRefinements']) {
+  for (const category of [
+    'scenarioReceipts',
+    'runtimeExcellenceReceipts',
+    'governedStateProjections',
+    'semanticRefinements',
+  ]) {
     assertCondition(Array.isArray(evidence[category]), `evidence.${category} must be an array.`);
   }
   assertCondition(
@@ -127,6 +152,10 @@ export function validateGateMatrix(matrix) {
   );
   const definitions = [
     ...evidence.scenarioReceipts.map((entry) => ({ ...entry, kind: 'receipt' })),
+    ...evidence.runtimeExcellenceReceipts.map((entry) => ({
+      ...entry,
+      kind: 'runtime-excellence-receipt',
+    })),
     ...evidence.governedStateProjections.map((entry) => ({ ...entry, kind: 'projection' })),
     ...evidence.semanticRefinements.map((entry) => ({ ...entry, kind: 'semantic-refinement' })),
   ];
@@ -136,18 +165,45 @@ export function validateGateMatrix(matrix) {
       `Evidence ${definition.attachmentName} references unknown scenario: ${definition.scenarioId}`);
     assertCondition(scenarioById.get(definition.scenarioId).testTitles.includes(definition.testTitle),
       `Evidence ${definition.attachmentName} testTitle diverges from scenarioTests.`);
-    if (definition.kind === 'receipt') {
+    if (definition.kind === 'receipt' || definition.kind === 'runtime-excellence-receipt') {
       assertCondition(typeof definition.archetype === 'string'
           && /^[a-z0-9][a-z0-9-]*$/.test(definition.archetype),
       `Evidence ${definition.attachmentName} archetype is invalid.`);
       assertUniqueStrings(definition.requiredFunctionalAssertions,
-        `evidence.scenarioReceipts.${definition.scenarioId}.requiredFunctionalAssertions`);
+        `evidence.${definition.kind}.${definition.scenarioId}.requiredFunctionalAssertions`);
+    }
+    if (definition.kind === 'runtime-excellence-receipt') {
+      assertCondition(typeof definition.planFixture === 'string'
+          && /^tools\/e2e\/fixtures\/[a-z0-9][a-z0-9.-]+\.ui-composition-plan\.json$/.test(definition.planFixture),
+      `Evidence ${definition.attachmentName} planFixture is invalid.`);
+      assertCondition(typeof definition.expectedCompiledPayloadSha256 === 'string'
+          && /^[0-9a-f]{64}$/.test(definition.expectedCompiledPayloadSha256),
+      `Evidence ${definition.attachmentName} expectedCompiledPayloadSha256 is invalid.`);
+      assertCondition(typeof definition.expectedPlanFixtureSha256 === 'string'
+          && /^[0-9a-f]{64}$/.test(definition.expectedPlanFixtureSha256),
+      `Evidence ${definition.attachmentName} expectedPlanFixtureSha256 is invalid.`);
     }
     if (definition.kind === 'semantic-refinement') {
       assertCondition(typeof definition.turnLimitSource === 'string' && definition.turnLimitSource.length > 0,
         `Evidence ${definition.attachmentName} turnLimitSource is missing.`);
       assertUniqueStrings(definition.requiredOperationIds,
         `evidence.semanticRefinements.${definition.scenarioId}.requiredOperationIds`);
+    }
+  }
+  for (const [modeName, mode] of Object.entries(matrix.modes)) {
+    const executionLane = mode.executionLane ?? 'live';
+    const selectedRuntimeReceipts = evidence.runtimeExcellenceReceipts
+      .filter((entry) => mode.scenarios.includes(entry.scenarioId));
+    const selectedAgenticReceipts = evidence.scenarioReceipts
+      .filter((entry) => mode.scenarios.includes(entry.scenarioId));
+    if (executionLane === 'runtime-excellence') {
+      assertCondition(selectedRuntimeReceipts.length === mode.scenarios.length,
+        `modes.${modeName} must attach one runtime-excellence receipt to every scenario.`);
+      assertCondition(selectedAgenticReceipts.length === 0,
+        `modes.${modeName} cannot require an agentic first-pass receipt in runtime-excellence.`);
+    } else {
+      assertCondition(selectedRuntimeReceipts.length === 0,
+        `modes.${modeName} cannot include runtime-excellence receipts in the live lane.`);
     }
   }
   return matrix;
@@ -166,6 +222,8 @@ export function resolveGateProfile(matrix, modeName) {
     matrixSchemaVersion: matrix.schemaVersion,
     mode: modeName,
     description: mode.description,
+    executionLane: mode.executionLane ?? 'live',
+    providerRequired: mode.providerRequired ?? (mode.executionLane ?? 'live') === 'live',
     scenarios: [...mode.scenarios],
     expectedDiscovered: mode.expectedDiscovered,
     minimumExecuted: mode.minimumExecuted,
@@ -180,6 +238,8 @@ export function resolveGateProfile(matrix, modeName) {
     apiCatalogPathPrefixes: [...(mode.apiCatalogPathPrefixes ?? [])],
     requiredPassedTests: [...mode.requiredPassedTests],
     receiptRequirements: matrix.evidence.scenarioReceipts
+      .filter((entry) => mode.scenarios.includes(entry.scenarioId)),
+    runtimeExcellenceReceiptRequirements: matrix.evidence.runtimeExcellenceReceipts
       .filter((entry) => mode.scenarios.includes(entry.scenarioId)),
     diagnosticProjectionRequirements: matrix.evidence.governedStateProjections
       .filter((entry) => mode.scenarios.includes(entry.scenarioId)),

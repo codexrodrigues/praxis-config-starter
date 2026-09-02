@@ -4,11 +4,70 @@ Status: canonical master-detail certified in five consecutive hosted production-
 the published Config artifact; canonical single-table creation and semantic refinement stable in
 five consecutive local production-like runs; canonical CRUD-simple certified in five consecutive
 local production-like runs with zero retries; canonical Tabs/nested workspace and related-resource
-certified in five consecutive hosted production-like runs with zero retries, 2026-09-01.
-The independent `business-command` runtime correction, browser receipt and focal gate profile are
-implemented under [praxis-ui-angular#482](https://github.com/codexrodrigues/praxis-ui-angular/issues/482)
-and [praxis-config-starter#428](https://github.com/codexrodrigues/praxis-config-starter/issues/428),
-but remain uncertified until the published canary and five-run stability series pass.
+certified in five consecutive hosted production-like runs with zero retries, 2026-09-01; canonical
+`business-command` runtime excellence certified in five consecutive hosted production-like runs
+with zero retries and no AI provider, 2026-09-02.
+The independent `business-command` runtime correction and live-authoring focal gate are implemented
+under [praxis-ui-angular#482](https://github.com/codexrodrigues/praxis-ui-angular/issues/482) and
+[praxis-config-starter#428](https://github.com/codexrodrigues/praxis-config-starter/issues/428). A
+separate deterministic runtime-excellence profile now compiles and persists a certified
+`UiCompositionPlan` and exercises the complete command lifecycle without OpenAI, embeddings, RAG or
+API-catalog ingestion. Its Java and TypeScript compiler proofs, real-browser canary and five-run
+deterministic stability certificate are green. Live first-pass authoring remains a distinct
+certification axis and still requires its own published canary and five-run stability series.
+
+The first remote integration cut was intentionally diagnostic, not a certification result. It
+revealed three independent gate defects: the Angular checkout had to build the complete Page Builder
+dependency closure instead of relying on pre-existing `dist`; the runtime browser context had to use
+the same authenticated user scope as the Config API fixture; and the Angular production-like source
+audit had encoded the literal live-lane variable rather than the real-backend safety invariant. The
+branches now contain corrections for all three, backed by local compiler, resolver, audit and
+scenario-discovery evidence.
+
+[The provider-independent Windows canary](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33670821997)
+then passed on 2026-09-02 against Config `392b7a01`, Angular `9dbc33fc5`, Metadata
+`8f7c52a3` and Quickstart `6a3fe77a`: one scenario discovered and passed, zero retry, zero critical
+mock, `providerUsed=false`, byte-identical Config JAR and 15 validated functional assertions. The
+runtime journey took 72,007 ms and the complete Playwright run 78,378 ms. Source plan
+`a774a841...d2aac` compiled, persisted and reloaded as payload `721bca02...806b`; registry
+capabilities remained non-degraded. This is the successful canary, not the five-run stability
+certificate. The canary also exposed one final evidence-packaging gap: the workflow result referenced
+the sanitized validation summary but did not upload it. That derived-artifact path is now corrected;
+the stability series must use the resulting immutable Config head. The portable validator now accepts
+each sanitized result through `--runtime-result`, revalidates its provider-independent execution,
+canonical matrix, compiler hashes, byte-identical Config JAR, registry state, exact Playwright result
+and runtime receipt attestation, then rejects duplicate raw-report hashes or coordinate drift across
+the requested series. The original canary was successfully revalidated through that path; it remains
+excluded from the final series because it predates the evidence-packaging and canonical-null fixes.
+
+The first series attempt then passed three strictly sequential runs but failed on run four
+[`33677612885`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33677612885):
+the newly created employee was absent from the first 25 pages of a Table whose remote request had no
+declared sort. This exposed a certified-archetype defect rather than a provider outage. The canonical
+fixture now declares server-side `id desc`, the browser must observe `sort=id,desc` and the receipt
+must include `resource.deterministic-default-sort-observed`. The Java and TypeScript compilers agree
+on the corrected plan and payload hashes. Because the semantic plan and Angular proof changed, the
+three earlier passes do not count toward certification and the stability series restarts at zero.
+
+The corrected immutable cut then passed a fresh canary
+[`33680251218`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33680251218)
+and five strictly sequential hosted runs with no retry:
+[`33681311664`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33681311664),
+[`33682227811`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33682227811),
+[`33683411353`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33683411353),
+[`33684499316`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33684499316) and
+[`33685643624`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33685643624).
+The portable aggregate validator accepted five unique report hashes, `5/5` discovered/passed, zero
+retries, `providerUsed=false` in every receipt and one immutable coordinate
+`99947732cb34a35bd514deb1525b9293000ded1736f7719fb3700014d041e78b`. The certified source plan is
+`694dba6cb77d9f243754dc7c48d82c8f3ae12313c70cbfd7729c6b6943f4e9d8`; Java and TypeScript
+materialize the byte-equivalent persisted payload
+`8c5742a203354a30724c3614cdd748a682c8a953c6829e2f98312b2289c9af31`. The five Playwright results
+totaled 363,959 ms; functional journey durations ranged from 62,248 to 71,376 ms. The exercised code
+heads were Config `e74fceb3bbee310efdeabf844102724f71a810f2`, Angular
+`fa0e69bbb66d9516ec1274255a8b488ae4053788`, Metadata
+`8f7c52a38bef3937afd030126f0ed6b0bdd49f88` and Quickstart
+`6a3fe77a74eb192cfb0f20ae592af16491c86c30`.
 
 ## Decision
 
@@ -286,6 +345,26 @@ The matrix and portable validator reject a receipt that omits any of those asser
 the implementation path only. The archetype remains outside the certified portfolio count until a
 published-artifact canary and five consecutive hosted OpenAI runs pass with zero retry under one
 immutable coordinate.
+
+That live-authoring criterion does not gate runtime excellence. The matrix also owns
+`business-command-runtime-excellence`, which has `executionLane=runtime-excellence`, exactly one
+scenario, zero retries and `providerRequired=false`. It consumes
+`tools/e2e/fixtures/business-command-runtime-excellence.ui-composition-plan.json`, compiles the same
+semantic plan with the Java owner compiler and the built TypeScript package, persists the resulting
+`WidgetPageDefinition`, and then reuses the complete real employee command journey. The receipt is
+`praxis.page-builder-runtime-excellence-receipt/v1`; it proves source/compiled/persisted/reloaded
+hash lineage plus every discovery, confirmation, optimistic-concurrency, error, header, refresh,
+read-after-write and availability assertion. It deliberately contains no artificial prompt, turn,
+stream or backend-patch-authority evidence.
+
+The runner derives provider use from the matrix. In this deterministic lane it disables Spring AI,
+the vector store, API Metadata RAG, Domain Catalog RAG and Project Knowledge RAG; skips pgvector,
+Domain Catalog ingestion and API Catalog upload; and does not require
+`-ConfirmPaidProviderRun` or a provider key. PostgreSQL, Metadata, Config persistence, Quickstart
+resource endpoints, registry capabilities and the real Angular runtime remain mandatory. This
+separation classifies the original blocker as
+`ja-suportado-mal-nomeado-ou-mal-materializado`: the platform contracts existed, but the gate had
+incorrectly coupled runtime acceptance to live authoring infrastructure.
 
 The decision must describe semantic intent, archetype, resources, surfaces, actions, capabilities, components, slots, bindings and transactional lifecycle. It should materialize both compact authoring input and portable runtime output without leaking Angular implementation detail into Java.
 

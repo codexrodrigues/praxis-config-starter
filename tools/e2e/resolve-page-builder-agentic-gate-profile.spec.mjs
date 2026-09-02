@@ -198,6 +198,43 @@ test('resolves the independent business-command profile with governed employee s
   ]);
 });
 
+test('resolves business-command runtime excellence without paid-provider or RAG coupling', () => {
+  const profile = resolveGateProfile(
+    loadGateMatrix(),
+    'business-command-runtime-excellence',
+  );
+
+  assert.equal(profile.executionLane, 'runtime-excellence');
+  assert.equal(profile.providerRequired, false);
+  assert.equal(profile.expectedDiscovered, 1);
+  assert.equal(profile.minimumExecuted, 1);
+  assert.equal(profile.expectedSkipped, 0);
+  assert.equal(profile.retries, 0);
+  assert.equal(profile.humanTurnLimit, null);
+  assert.equal(profile.domainCatalogRagRequired, false);
+  assert.equal(profile.domainCatalogResourceKey, null);
+  assert.equal(profile.apiCatalogGroup, null);
+  assert.deepEqual(profile.apiCatalogPathPrefixes, []);
+  assert.deepEqual(profile.scenarios, ['business-command-runtime-excellence']);
+  assert.deepEqual(profile.receiptRequirements, []);
+  assert.deepEqual(
+    profile.runtimeExcellenceReceiptRequirements.map((entry) => entry.scenarioId),
+    ['business-command-runtime-excellence'],
+  );
+  assert.equal(
+    profile.runtimeExcellenceReceiptRequirements[0].planFixture,
+    'tools/e2e/fixtures/business-command-runtime-excellence.ui-composition-plan.json',
+  );
+  assert.equal(
+    profile.runtimeExcellenceReceiptRequirements[0].expectedCompiledPayloadSha256,
+    '8c5742a203354a30724c3614cdd748a682c8a953c6829e2f98312b2289c9af31',
+  );
+  assert.equal(
+    profile.runtimeExcellenceReceiptRequirements[0].expectedPlanFixtureSha256,
+    '694dba6cb77d9f243754dc7c48d82c8f3ae12313c70cbfd7729c6b6943f4e9d8',
+  );
+});
+
 test('keeps the Windows runner matrix-driven for new focal modes and domain scope', () => {
   assert.doesNotMatch(
     windowsRunnerSource,
@@ -209,6 +246,14 @@ test('keeps the Windows runner matrix-driven for new focal modes and domain scop
   assert.match(windowsRunnerSource, /domain-catalog\/rag\/status/);
   assert.match(windowsRunnerSource, /PUBLISHED/);
   assert.match(windowsRunnerSource, /reconciled/);
+  assert.match(windowsRunnerSource, /\$executionLane -eq "runtime-excellence"/);
+  assert.match(windowsRunnerSource, /if \(\$providerRequired -and -not \$ConfirmPaidProviderRun\.IsPresent\)/);
+  assert.match(windowsRunnerSource, /SPRING_AI_ENABLED = '\$\(\$providerRequired\.ToString\(\)\.ToLowerInvariant\(\)\)'/);
+  assert.match(windowsRunnerSource, /Skipping pgvector preflight because runtime excellence/);
+  assert.match(windowsRunnerSource, /Skipping Domain Catalog and API Catalog ingestion because runtime excellence/);
+  assert.match(windowsRunnerSource, /scripts\\build-libs\.js --prod --only praxis-page-builder/);
+  assert.doesNotMatch(windowsRunnerSource, /ng build praxis-page-builder/);
+  assert.match(windowsRunnerSource, /praxis-page-builder-runtime-excellence\.playwright\.config\.ts/);
 });
 
 test('rejects a non-positive human turn limit', () => {
@@ -232,6 +277,29 @@ test('rejects a non-boolean Domain Catalog RAG requirement', () => {
   assert.throws(
     () => validateGateMatrix(matrix),
     /domainCatalogRagRequired must be a boolean/,
+  );
+});
+
+test('rejects paid-provider and catalog coupling in runtime excellence', () => {
+  const provider = clone(loadGateMatrix());
+  provider.modes['business-command-runtime-excellence'].providerRequired = true;
+  assert.throws(
+    () => validateGateMatrix(provider),
+    /providerRequired must match its execution lane/,
+  );
+
+  const rag = clone(loadGateMatrix());
+  rag.modes['business-command-runtime-excellence'].domainCatalogRagRequired = true;
+  assert.throws(
+    () => validateGateMatrix(rag),
+    /cannot require Domain Catalog RAG in runtime-excellence/,
+  );
+
+  const catalog = clone(loadGateMatrix());
+  catalog.modes['business-command-runtime-excellence'].apiCatalogGroup = 'human-resources';
+  assert.throws(
+    () => validateGateMatrix(catalog),
+    /cannot require API Catalog ingestion in runtime-excellence/,
   );
 });
 

@@ -1,0 +1,222 @@
+{
+  "kind": "praxis.ui-composition-plan",
+  "version": "1.0",
+  "layoutPreset": "master-detail-dashboard",
+  "layoutPresetOptions": {
+    "sourceResource": "/api/human-resources/funcionarios",
+    "density": "comfortable",
+    "responsiveStrategy": "canvas-device-layouts"
+  },
+  "canvas": {
+    "mode": "grid",
+    "columns": 12,
+    "rowUnit": "80px",
+    "gap": "16px",
+    "autoRows": "fixed",
+    "items": {
+      "funcionarios-master": {
+        "col": 1,
+        "row": 1,
+        "colSpan": 7,
+        "rowSpan": 8
+      },
+      "funcionarios-detail": {
+        "col": 8,
+        "row": 1,
+        "colSpan": 5,
+        "rowSpan": 8
+      }
+    }
+  },
+  "deviceLayouts": {
+    "mobile": {
+      "canvas": {
+        "columns": 1,
+        "rowUnit": "88px",
+        "gap": "12px",
+        "autoRows": "fixed",
+        "items": {
+          "funcionarios-master": {
+            "col": 1,
+            "row": 1,
+            "colSpan": 1,
+            "rowSpan": 7
+          },
+          "funcionarios-detail": {
+            "col": 1,
+            "row": 8,
+            "colSpan": 1,
+            "rowSpan": 8
+          }
+        }
+      }
+    },
+    "tablet": {
+      "canvas": {
+        "columns": 6,
+        "rowUnit": "80px",
+        "gap": "14px",
+        "autoRows": "fixed",
+        "items": {
+          "funcionarios-master": {
+            "col": 1,
+            "row": 1,
+            "colSpan": 6,
+            "rowSpan": 7
+          },
+          "funcionarios-detail": {
+            "col": 1,
+            "row": 8,
+            "colSpan": 6,
+            "rowSpan": 8
+          }
+        }
+      }
+    }
+  },
+  "state": {
+    "values": {
+      "selectedItem": null
+    }
+  },
+  "widgets": [
+    {
+      "key": "funcionarios-master",
+      "componentId": "praxis-table",
+      "role": "master",
+      "bindingOrder": [
+        "resourcePath",
+        "tableId",
+        "componentInstanceId",
+        "config",
+        "configPersistenceStrategy",
+        "enableCustomization"
+      ],
+      "outputs": {
+        "selectionChange": "emit"
+      },
+      "inputs": {
+        "resourcePath": "/api/human-resources/funcionarios",
+        "tableId": "funcionarios-master",
+        "componentInstanceId": "funcionarios-master",
+        "configPersistenceStrategy": "input-first",
+        "enableCustomization": true,
+        "config": {
+          "title": "Funcionários",
+          "columns": [],
+          "behavior": {
+            "selection": {
+              "enabled": true,
+              "type": "single"
+            },
+            "sorting": {
+              "enabled": true,
+              "strategy": "server",
+              "defaultSort": {
+                "column": "id",
+                "direction": "desc"
+              }
+            }
+          },
+          "actions": {
+            "collection": {
+              "discovery": {
+                "enabled": false
+              }
+            },
+            "row": {
+              "enabled": true,
+              "discovery": {
+                "enabled": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "key": "funcionarios-detail",
+      "componentId": "praxis-dynamic-form",
+      "role": "detail",
+      "inputs": {
+        "resourcePath": "/api/human-resources/funcionarios",
+        "schemaUrl": "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+        "submitUrl": "/api/human-resources/funcionarios/filter",
+        "submitMethod": "POST",
+        "formId": "funcionarios-detail",
+        "mode": "view",
+        "schemaSource": "resource",
+        "enableCustomization": true,
+        "config": {
+          "title": "Detalhes de Funcionários"
+        }
+      }
+    }
+  ],
+  "bindings": [
+    {
+      "id": "funcionarios-master.selectionChange->state.selectedItem",
+      "intent": "state-write",
+      "from": {
+        "kind": "component-port",
+        "widget": "funcionarios-master",
+        "port": "selectionChange",
+        "direction": "output"
+      },
+      "to": {
+        "kind": "state",
+        "path": "selectedItem"
+      },
+      "transform": {
+        "kind": "pick-path",
+        "id": "pick-selected-row",
+        "path": "payload.row"
+      },
+      "policy": {
+        "distinct": true,
+        "missingValuePolicy": "skip"
+      },
+      "metadata": {
+        "source": "ui-composition-plan",
+        "traceKey": "verified-component-port-composition",
+        "tags": [
+          "master-detail",
+          "selection-state"
+        ]
+      }
+    },
+    {
+      "id": "state.selectedItem->funcionarios-detail.initialValue",
+      "intent": "state-read",
+      "from": {
+        "kind": "state",
+        "path": "selectedItem"
+      },
+      "to": {
+        "kind": "component-port",
+        "widget": "funcionarios-detail",
+        "port": "initialValue",
+        "direction": "input"
+      },
+      "condition": {
+        "!!": [
+          {
+            "var": "state.selectedItem"
+          }
+        ]
+      },
+      "policy": {
+        "distinct": true,
+        "missingValuePolicy": "skip"
+      },
+      "metadata": {
+        "source": "ui-composition-plan",
+        "traceKey": "verified-component-port-composition",
+        "tags": [
+          "master-detail",
+          "detail-initial-value"
+        ]
+      }
+    }
+  ]
+}

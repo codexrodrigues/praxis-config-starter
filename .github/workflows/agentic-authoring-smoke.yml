@@ -68,6 +68,11 @@ on:
           - tabs-nested
           - business-command
           - full
+      run_page_builder_runtime_excellence:
+        description: 'Run the deterministic business-command runtime-excellence gate without any paid provider, embeddings, or RAG.'
+        required: false
+        default: false
+        type: boolean
       page_builder_e2e_timeout_minutes:
         description: 'Timeout for the Page Builder Playwright gate step.'
         required: false
@@ -184,7 +189,7 @@ jobs:
           token: ${{ secrets.RELEASE_PAT || github.token }}
 
       - name: Checkout praxis-ui-angular
-        if: inputs.paid_gate_lane == 'page-builder'
+        if: inputs.paid_gate_lane == 'page-builder' || inputs.run_page_builder_runtime_excellence == true
         uses: actions/checkout@v5
         with:
           repository: codexrodrigues/praxis-ui-angular
@@ -200,7 +205,7 @@ jobs:
           cache: maven
 
       - name: Set up Node.js 20
-        if: inputs.paid_gate_lane == 'page-builder'
+        if: inputs.paid_gate_lane == 'page-builder' || inputs.run_page_builder_runtime_excellence == true
         uses: actions/setup-node@v5
         with:
           node-version: '20.x'
@@ -228,9 +233,13 @@ jobs:
           }
           $provider = '${{ inputs.provider }}'
           $paidGateLane = '${{ inputs.paid_gate_lane }}'
+          $runRuntimeExcellence = '${{ inputs.run_page_builder_runtime_excellence }}' -eq 'true'
           $runQuickstartHttpSmoke = '${{ inputs.run_quickstart_http_smoke }}' -eq 'true'
           if ($paidGateLane -eq 'http-sse' -and -not $runQuickstartHttpSmoke) {
             throw 'paid_gate_lane=http-sse requires run_quickstart_http_smoke=true.'
+          }
+          if ($runRuntimeExcellence -and $paidGateLane -ne 'none') {
+            throw 'run_page_builder_runtime_excellence is provider-independent and must use paid_gate_lane=none.'
           }
           $requiresExternalProvider = $paidGateLane -ne 'none'
           $costMode = if ($requiresExternalProvider) { 'external-provider' } else { 'deterministic' }
@@ -344,19 +353,19 @@ jobs:
         run: mvn -B -DskipTests "-Dpraxis.core.version=$env:METADATA_STARTER_VERSION" "-Dpraxis.config.version=$env:STARTER_VERSION" package
 
       - name: Install praxis-ui-angular dependencies
-        if: inputs.paid_gate_lane == 'page-builder'
+        if: inputs.paid_gate_lane == 'page-builder' || inputs.run_page_builder_runtime_excellence == true
         shell: pwsh
         working-directory: praxis-ui-angular
         run: npm ci --no-audit --fund=false
 
       - name: Install Playwright Chromium
-        if: inputs.paid_gate_lane == 'page-builder'
+        if: inputs.paid_gate_lane == 'page-builder' || inputs.run_page_builder_runtime_excellence == true
         shell: pwsh
         working-directory: praxis-ui-angular
         run: npx playwright install chromium
 
       - name: Verify immutable source checkouts remain clean
-        if: inputs.paid_gate_lane == 'page-builder'
+        if: inputs.paid_gate_lane == 'page-builder' || inputs.run_page_builder_runtime_excellence == true
         shell: pwsh
         run: |
           $roots = @(
@@ -420,27 +429,36 @@ jobs:
           PRAXIS_AI_PROVIDER: ${{ inputs.provider }}
         run: mvn -B "-Dtest=AgenticAuthoringLlmCompliancePolicyIntegrationTest" test
 
-      - name: Run page-builder agentic E2E gate
-        if: inputs.paid_gate_lane == 'page-builder'
+      - name: Run Page Builder live-authoring or runtime-excellence E2E gate
+        if: inputs.paid_gate_lane == 'page-builder' || inputs.run_page_builder_runtime_excellence == true
         shell: pwsh
         working-directory: praxis-config-starter
         timeout-minutes: ${{ fromJSON(inputs.page_builder_e2e_timeout_minutes) }}
         run: |
-          .\tools\Invoke-PbAgenticFullE2E.ps1 `
-            -Provider '${{ inputs.provider }}' `
-            -JavaHome "$env:JAVA_HOME" `
-            -QuickstartRoot "$env:GITHUB_WORKSPACE\praxis-api-quickstart" `
-            -MetadataRoot "$env:GITHUB_WORKSPACE\praxis-metadata-starter" `
-            -ExpectedConfigVersion "$env:STARTER_VERSION" `
-            -ExpectedMetadataVersion "$env:METADATA_STARTER_VERSION" `
-            -UiRoot "$env:GITHUB_WORKSPACE\praxis-ui-angular" `
-            -ReferenceStarterJarPath "$env:LOCAL_STARTER_JAR" `
-            -ConfigArtifactSource '${{ inputs.config_artifact_source }}' `
-            -EnvFile "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1" `
-            -StartupTimeoutSec ([int]'${{ inputs.quickstart_startup_timeout_seconds }}') `
-            -UiStartupTimeoutSec ([int]'${{ inputs.page_builder_ui_startup_timeout_seconds }}') `
-            -ValidationMode '${{ inputs.page_builder_e2e_mode }}' `
-            -ConfirmPaidProviderRun
+          $runtimeExcellence = '${{ inputs.run_page_builder_runtime_excellence }}' -eq 'true'
+          $gateArgs = @{
+            Provider = '${{ inputs.provider }}'
+            JavaHome = "$env:JAVA_HOME"
+            QuickstartRoot = "$env:GITHUB_WORKSPACE\praxis-api-quickstart"
+            MetadataRoot = "$env:GITHUB_WORKSPACE\praxis-metadata-starter"
+            ExpectedConfigVersion = "$env:STARTER_VERSION"
+            ExpectedMetadataVersion = "$env:METADATA_STARTER_VERSION"
+            UiRoot = "$env:GITHUB_WORKSPACE\praxis-ui-angular"
+            ReferenceStarterJarPath = "$env:LOCAL_STARTER_JAR"
+            ConfigArtifactSource = '${{ inputs.config_artifact_source }}'
+            EnvFile = "$env:GITHUB_WORKSPACE\praxis-config-starter\.env.openai.local.ps1"
+            StartupTimeoutSec = [int]'${{ inputs.quickstart_startup_timeout_seconds }}'
+            UiStartupTimeoutSec = [int]'${{ inputs.page_builder_ui_startup_timeout_seconds }}'
+            ValidationMode = if ($runtimeExcellence) {
+              'business-command-runtime-excellence'
+            } else {
+              '${{ inputs.page_builder_e2e_mode }}'
+            }
+          }
+          if (-not $runtimeExcellence) {
+            $gateArgs.ConfirmPaidProviderRun = $true
+          }
+          .\tools\Invoke-PbAgenticFullE2E.ps1 @gateArgs
 
       - name: Build sanitized production-like evidence
         if: inputs.paid_gate_lane == 'page-builder'
@@ -463,6 +481,7 @@ jobs:
             praxis-config-starter/artifacts/ai-sse-smoke/**/summary.json
             praxis-config-starter/artifacts/page-builder-agentic-e2e/**/result.json
             praxis-config-starter/artifacts/page-builder-agentic-e2e/**/source-audit.json
+            praxis-config-starter/artifacts/page-builder-agentic-e2e/**/evidence-validation-summary.json
             praxis-config-starter/artifacts/agentic-authoring-publication/**
           if-no-files-found: ignore
           retention-days: 14

@@ -10,6 +10,8 @@ import {
   validateGateReport,
   validatePublishedGateEvidenceSet,
   validatePublishedGateResult,
+  validateRuntimeExcellenceEvidenceSet,
+  validateRuntimeExcellenceResult,
 } from './validate-page-builder-agentic-gate-evidence.mjs';
 
 const profile = resolveGateProfile(loadGateMatrix(), 'single-table');
@@ -17,7 +19,15 @@ const crudProfile = resolveGateProfile(loadGateMatrix(), 'crud-simple');
 const masterDetailProfile = resolveGateProfile(loadGateMatrix(), 'master-detail');
 const relatedProfile = resolveGateProfile(loadGateMatrix(), 'related-resource');
 const businessCommandProfile = resolveGateProfile(loadGateMatrix(), 'business-command');
+const businessCommandRuntimeProfile = resolveGateProfile(
+  loadGateMatrix(),
+  'business-command-runtime-excellence',
+);
 const hash = 'a'.repeat(64);
+const runtimeCompiledHash =
+  '8c5742a203354a30724c3614cdd748a682c8a953c6829e2f98312b2289c9af31';
+const runtimePlanHash =
+  '694dba6cb77d9f243754dc7c48d82c8f3ae12313c70cbfd7729c6b6943f4e9d8';
 
 function jsonAttachment(name, value) {
   return {
@@ -203,6 +213,54 @@ function businessCommandReceipt() {
   };
 }
 
+function businessCommandRuntimeReceipt() {
+  return {
+    schemaVersion: 'praxis.page-builder-runtime-excellence-receipt/v1',
+    scenarioId: 'business-command-runtime-excellence',
+    archetype: 'business-command',
+    providerUsed: false,
+    materialization: {
+      sourceKind: 'praxis.ui-composition-plan',
+      sourceSha256: runtimePlanHash,
+      typescriptCompilerValid: true,
+      compiledPayloadSha256: runtimeCompiledHash,
+      persistedPayloadSha256: runtimeCompiledHash,
+      reloadPayloadSha256: runtimeCompiledHash,
+      persistedPageEquivalent: true,
+      reloadEquivalent: true,
+    },
+    persistence: {
+      version: 1,
+      etagPresent: true,
+    },
+    functionalAssertions: [
+      'materialization.ui-composition-plan-typescript-valid',
+      'materialization.persisted-page-equivalent',
+      'discovery.actions-capabilities.http-200',
+      'command.contract-form-confirmation-version',
+      'command.confirmation-cancelled',
+      'command.cancelled-not-sent',
+      'command.stale-version.http-412',
+      'command.governed-error-visible',
+      'command.confirmation-accepted',
+      'command.governed-headers-observed',
+      'command.execute.http-200',
+      'resource.refresh-observed',
+      'resource.read-after-write-observed',
+      'resource.availability-transition-observed',
+      'resource.deterministic-default-sort-observed',
+      'persistence.reload-equivalent',
+    ],
+    timingMs: {
+      planCompiled: 10,
+      persisted: 20,
+      runtimeFunctional: 40,
+      reloadCompleted: 50,
+      total: 50,
+    },
+  };
+}
+
 function result(attachments = []) {
   return {
     status: 'passed',
@@ -366,6 +424,34 @@ function businessCommandReport() {
   };
 }
 
+function businessCommandRuntimeReport() {
+  return {
+    config: {},
+    suites: [{
+      title: 'business-command-runtime-excellence',
+      file: 'business-command-runtime-excellence.spec.ts',
+      column: 1,
+      line: 1,
+      specs: [spec(
+        businessCommandRuntimeProfile.requiredPassedTests[0],
+        [jsonAttachment(
+          'business-command-runtime-excellence-receipt.json',
+          businessCommandRuntimeReceipt(),
+        )],
+      )],
+    }],
+    errors: [],
+    stats: {
+      startTime: '2026-09-02T00:00:00.000Z',
+      duration: 100,
+      expected: 1,
+      skipped: 0,
+      unexpected: 0,
+      flaky: 0,
+    },
+  };
+}
+
 function publishedRelatedResult(run) {
   const publishedReceipt = {
     ...relatedReceipt(),
@@ -476,6 +562,169 @@ function publishedRelatedResult(run) {
   };
 }
 
+function publishedRuntimeExcellenceResult(run) {
+  const runtimeReceipt = businessCommandRuntimeReceipt();
+  const compactReceipt = {
+    scenarioId: runtimeReceipt.scenarioId,
+    providerUsed: false,
+    totalMs: runtimeReceipt.timingMs.total,
+    sourceSha256: runtimeReceipt.materialization.sourceSha256,
+    persistedPayloadSha256: runtimeReceipt.materialization.persistedPayloadSha256,
+  };
+  const reportSha256 = String(run).repeat(64);
+  const runtimeRequirements = businessCommandRuntimeProfile.runtimeExcellenceReceiptRequirements
+    .map((definition) => ({
+      scenarioId: definition.scenarioId,
+      archetype: definition.archetype,
+      planFixture: definition.planFixture,
+      expectedPlanFixtureSha256: definition.expectedPlanFixtureSha256,
+      expectedCompiledPayloadSha256: definition.expectedCompiledPayloadSha256,
+      requiredFunctionalAssertions: definition.requiredFunctionalAssertions,
+    }));
+  return {
+    schemaVersion: 'praxis.page-builder-runtime-excellence-result/v1',
+    productionLike: true,
+    criticalEndpointMocks: 0,
+    criticalInterceptionGuard: {
+      testTitle: 'critical interception guard',
+      applicable: false,
+      passed: null,
+    },
+    executionLane: 'runtime-excellence',
+    validationMode: businessCommandRuntimeProfile.mode,
+    e2ePassed: true,
+    provider: null,
+    providerRequired: false,
+    model: null,
+    embeddingProvider: 'not-used',
+    datasourceKinds: { application: 'postgresql', config: 'postgresql' },
+    dependencyAttestation: {
+      configStarter: {
+        artifactId: 'praxis-config-starter',
+        version: '1.0.0',
+        source: 'source-checkout',
+        referenceJarSha256: hash,
+        quickstartNestedJarSha256: hash,
+        quickstartEntry: 'BOOT-INF/lib/praxis-config-starter-1.0.0.jar',
+        byteIdentical: true,
+      },
+    },
+    pgvector: null,
+    compilerProofs: {
+      java: {
+        test: 'AgenticAuthoringUiCompositionPlanCompilerTest#compilesCertifiedBusinessCommandRuntimeFixtureWithoutAiProvider',
+        passed: true,
+        providerUsed: false,
+        planFixtureSha256: runtimePlanHash,
+      },
+      typescript: {
+        passed: true,
+        providerUsed: false,
+        sourceSha256: runtimePlanHash,
+        persistedPayloadSha256: runtimeCompiledHash,
+      },
+    },
+    backendBaseUrl: 'http://127.0.0.1:18081',
+    uiBaseUrl: 'http://localhost:4200',
+    loopbackOnly: true,
+    cleanupVerified: true,
+    artifactRoot: '/tmp/runtime-excellence',
+    sourceAudit: { passed: true, artifact: 'source-audit.json' },
+    evidenceValidation: {
+      passed: true,
+      artifact: 'evidence-validation-summary.json',
+      attestation: {
+        schemaVersion: 'praxis.page-builder-agentic-gate-run-attestation/v1',
+        reportSha256,
+        durationMs: 100 + run,
+        discovered: 1,
+        passed: 1,
+        retries: 0,
+        receipts: [],
+        runtimeExcellenceReceipts: [compactReceipt],
+        semanticRefinements: [],
+      },
+    },
+    git: ['config', 'metadata', 'quickstart', 'angular'].map((name) => ({
+      name,
+      sha: 'b'.repeat(40),
+      treeSha: 'c'.repeat(40),
+      materialization: 'working-tree',
+      dirty: false,
+    })),
+    versions: {
+      configStarter: '1.0.0',
+      quickstartConfigDependency: '1.0.0',
+      metadataStarterDependency: '1.0.0',
+      quickstart: '1.0.0',
+      angularWorkspace: '1.0.0',
+      java: 21,
+      node: 'v20',
+      playwright: '1.55',
+      chromium: '140',
+    },
+    contractHash: hash,
+    capabilities: {
+      source: 'registry',
+      degraded: false,
+      catalogCount: 10,
+      chartResourceBinding: true,
+    },
+    aiRegistry: {
+      ready: true,
+      snapshotHash: hash,
+      bootstrapOutcome: 'snapshot-current',
+    },
+    catalogs: { domain: null, api: null },
+    matrix: {
+      schemaVersion: businessCommandRuntimeProfile.matrixSchemaVersion,
+      executionLane: businessCommandRuntimeProfile.executionLane,
+      providerRequired: businessCommandRuntimeProfile.providerRequired,
+      scenarios: [...businessCommandRuntimeProfile.scenarios],
+      expectedDiscovered: businessCommandRuntimeProfile.expectedDiscovered,
+      minimumExecuted: businessCommandRuntimeProfile.minimumExecuted,
+      expectedSkipped: businessCommandRuntimeProfile.expectedSkipped,
+      requiredPassedTests: [...businessCommandRuntimeProfile.requiredPassedTests],
+      streamProcessingTimeoutSeconds:
+        businessCommandRuntimeProfile.streamProcessingTimeoutSeconds,
+      playwrightTestTimeoutMs: businessCommandRuntimeProfile.playwrightTestTimeoutMs,
+      retries: businessCommandRuntimeProfile.retries,
+      humanTurnLimit: businessCommandRuntimeProfile.humanTurnLimit,
+      domainCatalogRagRequired: businessCommandRuntimeProfile.domainCatalogRagRequired,
+      domainCatalogResourceKey: businessCommandRuntimeProfile.domainCatalogResourceKey,
+      apiCatalogGroup: businessCommandRuntimeProfile.apiCatalogGroup,
+      apiCatalogPathPrefixes: [...businessCommandRuntimeProfile.apiCatalogPathPrefixes],
+      diagnosticProjectionRequirements:
+        businessCommandRuntimeProfile.diagnosticProjectionRequirements,
+      receiptRequirements: businessCommandRuntimeProfile.receiptRequirements,
+      runtimeExcellenceReceiptRequirements: runtimeRequirements,
+      semanticRefinementRequirements:
+        businessCommandRuntimeProfile.semanticRefinementRequirements,
+    },
+    playwright: {
+      discovered: 1,
+      executed: 1,
+      passed: 1,
+      skipped: 0,
+      failed: 0,
+      flaky: 0,
+      attempts: 1,
+      retryAttempts: 0,
+      durationMs: 100 + run,
+      tests: [{
+        title: businessCommandRuntimeProfile.requiredPassedTests[0],
+        status: 'expected',
+        attempts: 1,
+        retryAttempts: 0,
+      }],
+    },
+    scenarioEvidence: [],
+    runtimeExcellenceEvidence: [compactReceipt],
+    diagnosticEvidence: [],
+    failureType: null,
+  };
+}
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -541,6 +790,42 @@ test('accepts an independent zero-retry business-command report', () => {
   assert.equal(summary.retries, 0);
   assert.equal(summary.receipts[0].scenarioId, 'business-command-control');
   assert.equal(summary.receipts[0].firstPassFunctional, true);
+});
+
+test('accepts business-command runtime excellence without agentic authoring evidence', () => {
+  const summary = validateGateReport(
+    businessCommandRuntimeReport(),
+    '/tmp/business-command-runtime-excellence-report.json',
+    businessCommandRuntimeProfile,
+  );
+  assert.equal(summary.discovered, 1);
+  assert.deepEqual(summary.receipts, []);
+  assert.equal(summary.runtimeExcellenceReceipts.length, 1);
+  assert.equal(
+    summary.runtimeExcellenceReceipts[0].scenarioId,
+    'business-command-runtime-excellence',
+  );
+  assert.equal(summary.runtimeExcellenceReceipts[0].providerUsed, false);
+});
+
+test('rejects runtime excellence when compiled and persisted materializations diverge', () => {
+  const value = businessCommandRuntimeReport();
+  mutateAttachment(
+    value,
+    'Business command executa lifecycle',
+    'business-command-runtime-excellence-receipt.json',
+    (body) => {
+      body.materialization.persistedPayloadSha256 = 'b'.repeat(64);
+    },
+  );
+  assert.throws(
+    () => validateGateReport(
+      value,
+      '/tmp/business-command-runtime-excellence-report.json',
+      businessCommandRuntimeProfile,
+    ),
+    /materialization lineage is incomplete/,
+  );
 });
 
 test('rejects CRUD evidence that omits one functional operation', () => {
@@ -657,6 +942,89 @@ test('accepts a sanitized published related-resource result', () => {
   assert.equal(summary.passed, 2);
   assert.equal(summary.retries, 0);
   assert.equal(summary.receipts[0].scenarioId, 'related-resource-control');
+});
+
+test('accepts a sanitized provider-independent runtime-excellence result', () => {
+  const result = publishedRuntimeExcellenceResult(1);
+  result.matrix.apiCatalogGroup = '';
+  const summary = validateRuntimeExcellenceResult(
+    result,
+    '/tmp/runtime-excellence-result.json',
+    businessCommandRuntimeProfile,
+  );
+  assert.equal(summary.passed, 1);
+  assert.equal(summary.retries, 0);
+  assert.equal(summary.runtimeExcellenceReceipts[0].providerUsed, false);
+});
+
+test('aggregates five unique runtime-excellence results on identical immutable coordinates', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'praxis-runtime-excellence-evidence-'));
+  try {
+    const paths = Array.from({ length: 5 }, (_, index) => {
+      const path = join(directory, `run-${index + 1}.json`);
+      writeFileSync(path, JSON.stringify(publishedRuntimeExcellenceResult(index + 1)));
+      return path;
+    });
+    const summary = validateRuntimeExcellenceEvidenceSet({
+      resultPaths: paths,
+      expectedRuns: 5,
+      profile: businessCommandRuntimeProfile,
+    });
+    assert.equal(summary.passedRuns, 5);
+    assert.equal(summary.totals.passed, 5);
+    assert.equal(summary.totals.retries, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('rejects runtime-excellence publication that attests provider use', () => {
+  const result = publishedRuntimeExcellenceResult(1);
+  result.runtimeExcellenceEvidence[0].providerUsed = true;
+  assert.throws(
+    () => validateRuntimeExcellenceResult(
+      result,
+      '/tmp/runtime-excellence-result.json',
+      businessCommandRuntimeProfile,
+    ),
+    /providerUsed=false/,
+  );
+});
+
+test('rejects runtime-excellence publication whose persisted hash diverges', () => {
+  const result = publishedRuntimeExcellenceResult(1);
+  result.evidenceValidation.attestation.runtimeExcellenceReceipts[0]
+    .persistedPayloadSha256 = 'b'.repeat(64);
+  assert.throws(
+    () => validateRuntimeExcellenceResult(
+      result,
+      '/tmp/runtime-excellence-result.json',
+      businessCommandRuntimeProfile,
+    ),
+    /persisted payload hash diverges/,
+  );
+});
+
+test('rejects immutable coordinate drift across runtime-excellence runs', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'praxis-runtime-excellence-drift-'));
+  try {
+    const first = join(directory, 'run-1.json');
+    const second = join(directory, 'run-2.json');
+    writeFileSync(first, JSON.stringify(publishedRuntimeExcellenceResult(1)));
+    const drifted = publishedRuntimeExcellenceResult(2);
+    drifted.git[3].sha = 'd'.repeat(40);
+    writeFileSync(second, JSON.stringify(drifted));
+    assert.throws(
+      () => validateRuntimeExcellenceEvidenceSet({
+        resultPaths: [first, second],
+        expectedRuns: 2,
+        profile: businessCommandRuntimeProfile,
+      }),
+      /identical immutable coordinates/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('aggregates five unique published results on identical immutable coordinates', () => {

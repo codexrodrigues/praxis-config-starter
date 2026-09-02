@@ -1036,10 +1036,6 @@ if ($ValidateEvidenceParsersOnly.IsPresent) {
     exit 0
 }
 
-if (-not $ConfirmPaidProviderRun.IsPresent) {
-    throw "The Page Builder production-like runner calls a paid provider. Re-run with -ConfirmPaidProviderRun only after approving this single live gate."
-}
-
 $starterRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $starterRoot
 if ([string]::IsNullOrWhiteSpace($QuickstartRoot)) { $QuickstartRoot = Join-Path $workspaceRoot "praxis-api-quickstart" }
@@ -1059,6 +1055,25 @@ if ($ValidationMode -notmatch '^[a-z0-9][a-z0-9-]*$') {
 }
 $modeMatrix = $gateMatrix.modes.$ValidationMode
 if ($null -eq $modeMatrix) { throw "Validation mode is missing from the canonical gate matrix: $ValidationMode" }
+$executionLane = if ($null -ne $modeMatrix.executionLane) {
+    [string] $modeMatrix.executionLane
+} else {
+    "live"
+}
+if ($executionLane -notin @("live", "runtime-excellence")) {
+    throw "Validation mode declares an unsupported execution lane: $executionLane"
+}
+$providerRequired = if ($null -ne $modeMatrix.providerRequired) {
+    [bool] $modeMatrix.providerRequired
+} else {
+    $executionLane -eq "live"
+}
+if ($providerRequired -ne ($executionLane -eq "live")) {
+    throw "Validation mode provider requirement diverges from its execution lane: $ValidationMode"
+}
+if ($providerRequired -and -not $ConfirmPaidProviderRun.IsPresent) {
+    throw "The live Page Builder authoring lane calls a paid provider. Re-run with -ConfirmPaidProviderRun only after approving this single live gate."
+}
 $modeDomainCatalogResourceKey = if ($null -ne $modeMatrix.domainCatalogResourceKey) {
     [string] $modeMatrix.domainCatalogResourceKey
 } else {
@@ -1069,8 +1084,10 @@ $modeApiCatalogGroup = if ($null -ne $modeMatrix.apiCatalogGroup -and
     [string] $modeMatrix.apiCatalogGroup
 } elseif (-not [string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey)) {
     $modeDomainCatalogResourceKey.Split('.')[0]
-} else {
+} elseif ($executionLane -eq "live") {
     "human-resources"
+} else {
+    ""
 }
 $modeApiCatalogPathPrefixes = if ($null -ne $modeMatrix.apiCatalogPathPrefixes) {
     @($modeMatrix.apiCatalogPathPrefixes | ForEach-Object { [string] $_ })
@@ -1088,13 +1105,21 @@ if (-not [string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey) -and
     $modeDomainCatalogResourceKey -notmatch '^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$') {
     throw "Validation mode declares an invalid canonical domain catalog resource identity: $modeDomainCatalogResourceKey"
 }
-if ($modeApiCatalogGroup -notmatch '^[a-z0-9][a-z0-9-]*$') {
+if (-not [string]::IsNullOrWhiteSpace($modeApiCatalogGroup) -and
+    $modeApiCatalogGroup -notmatch '^[a-z0-9][a-z0-9-]*$') {
     throw "Validation mode declares an invalid canonical API catalog group: $modeApiCatalogGroup"
 }
 foreach ($pathPrefix in $modeApiCatalogPathPrefixes) {
     if ($pathPrefix -notmatch '^/api/[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)+$') {
         throw "Validation mode declares an invalid canonical API catalog path prefix: $pathPrefix"
     }
+}
+if ($executionLane -eq "runtime-excellence" -and (
+    $modeDomainCatalogRagRequired -or
+    -not [string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey) -or
+    -not [string]::IsNullOrWhiteSpace($modeApiCatalogGroup) -or
+    $modeApiCatalogPathPrefixes.Count -gt 0)) {
+    throw "Runtime-excellence mode cannot depend on Domain Catalog RAG or API Catalog ingestion: $ValidationMode"
 }
 $isHumanResourcesFocusedMode = $ValidationMode -in @("smoke", "single-table") -or
     $modeDomainCatalogResourceKey.StartsWith("human-resources.", [StringComparison]::Ordinal)
@@ -1137,9 +1162,15 @@ if ($Retries -lt 0) {
 }
 
 $null = . $EnvFile
-$resolvedEmbeddingProvider = if ([string]::IsNullOrWhiteSpace($EmbeddingProvider)) { $Provider } else { $EmbeddingProvider }
+$resolvedEmbeddingProvider = if (-not $providerRequired) {
+    "not-used"
+} elseif ([string]::IsNullOrWhiteSpace($EmbeddingProvider)) {
+    $Provider
+} else {
+    $EmbeddingProvider
+}
 $domainCatalogRagPublicationEnabled = $modeDomainCatalogRagRequired.ToString().ToLowerInvariant()
-if ($resolvedEmbeddingProvider -ieq "mock") {
+if ($providerRequired -and $resolvedEmbeddingProvider -ieq "mock") {
     throw "EMBEDDING_PROVIDER=mock is not valid for the production-like Page Builder gate."
 }
 Assert-PostgresUrl "SPRING_DATASOURCE_URL" $env:SPRING_DATASOURCE_URL
@@ -1150,7 +1181,7 @@ Assert-RequiredValue "CONFIG_DATASOURCE_USERNAME" $env:CONFIG_DATASOURCE_USERNAM
 Assert-RequiredValue "CONFIG_DATASOURCE_PASSWORD" $env:CONFIG_DATASOURCE_PASSWORD
 $providerKeyName = if ($Provider -eq "openai") { "PRAXIS_AI_OPENAI_API_KEY" } else { "PRAXIS_AI_GEMINI_API_KEY" }
 $providerKeyValue = [Environment]::GetEnvironmentVariable($providerKeyName)
-Assert-RequiredValue $providerKeyName $providerKeyValue
+if ($providerRequired) { Assert-RequiredValue $providerKeyName $providerKeyValue }
 
 $javaExecutable = Join-Path $JavaHome "bin\java.exe"
 $javaVersion = (& cmd.exe /d /c "`"$javaExecutable`" -version 2>&1" | Out-String)
@@ -1274,9 +1305,12 @@ $loopbackVerified = $false
 $aiRegistryEvidence = $null
 $domainCatalogEvidence = $null
 $apiCatalogEvidence = $null
+$javaCompilerEvidence = $null
+$apiCatalogReleaseId = ""
+$runtimeExcellenceEvidence = @()
 
 try {
-    Write-Phase "Starting Page Builder agentic E2E gate. provider=$Provider validationMode=$ValidationMode backend=$backendUrl ui=$uiUrl artifactRoot=$artifactRoot."
+    Write-Phase "Starting Page Builder gate. executionLane=$executionLane providerRequired=$providerRequired validationMode=$ValidationMode backend=$backendUrl ui=$uiUrl artifactRoot=$artifactRoot."
     if (-not $configStarterArtifactEvidence.byteIdentical) {
         throw "Quickstart nested praxis-config-starter jar does not match the selected reference artifact. source=$ConfigArtifactSource referenceSha256=$($configStarterArtifactEvidence.referenceJarSha256) nestedSha256=$($configStarterArtifactEvidence.quickstartNestedJarSha256) Resolve the selected artifact and clean-package the Quickstart."
     }
@@ -1284,12 +1318,50 @@ try {
     if ($null -ne (Get-ListenPid $BackendPort)) { throw "Port $BackendPort is already in use." }
     if ($null -ne (Get-ListenPid $UiPort)) { throw "Port $UiPort is already in use." }
 
-    Write-Phase "Verifying PostgreSQL pgvector extension and vector_store schema."
-    $pgvectorEvidence = Invoke-PgvectorPreflight `
-        $QuickstartRoot `
-        $JavaHome `
-        (Join-Path $starterRoot "tools\e2e\PgvectorPreflight.java") `
-        $artifactRoot
+    if ($providerRequired) {
+        Write-Phase "Verifying PostgreSQL pgvector extension and vector_store schema."
+        $pgvectorEvidence = Invoke-PgvectorPreflight `
+            $QuickstartRoot `
+            $JavaHome `
+            (Join-Path $starterRoot "tools\e2e\PgvectorPreflight.java") `
+            $artifactRoot
+    } else {
+        Write-Phase "Skipping pgvector preflight because runtime excellence does not use embeddings or RAG."
+    }
+
+    if ($executionLane -eq "runtime-excellence") {
+        $runtimeReceiptDefinition = @($gateMatrix.evidence.runtimeExcellenceReceipts |
+            Where-Object { $_.scenarioId -in $selectedScenarioIds }) | Select-Object -First 1
+        if ($null -eq $runtimeReceiptDefinition) {
+            throw "Runtime-excellence mode has no canonical receipt definition: $ValidationMode"
+        }
+        $planFixturePath = Join-Path $starterRoot ([string] $runtimeReceiptDefinition.planFixture)
+        if (-not (Test-Path -LiteralPath $planFixturePath -PathType Leaf)) {
+            throw "Certified runtime-excellence UiCompositionPlan fixture not found: $planFixturePath"
+        }
+        Write-Phase "Validating the certified UiCompositionPlan with the Java compiler."
+        Push-Location $starterRoot
+        try {
+            & mvn "-Dtest=AgenticAuthoringUiCompositionPlanCompilerTest#compilesCertifiedBusinessCommandRuntimeFixtureWithoutAiProvider" test
+            if ($LASTEXITCODE -ne 0) { throw "Java UiCompositionPlan compiler proof failed with exit code $LASTEXITCODE." }
+        } finally {
+            Pop-Location
+        }
+        $javaCompilerEvidence = [ordered]@{
+            test = "AgenticAuthoringUiCompositionPlanCompilerTest#compilesCertifiedBusinessCommandRuntimeFixtureWithoutAiProvider"
+            passed = $true
+            providerUsed = $false
+            planFixtureSha256 = [string] $runtimeReceiptDefinition.expectedPlanFixtureSha256
+        }
+        Write-Phase "Building the canonical Page Builder dependency closure used by the deterministic TypeScript compiler proof."
+        Push-Location $UiRoot
+        try {
+            & cmd.exe /c "node.exe scripts\build-libs.js --prod --only praxis-page-builder"
+            if ($LASTEXITCODE -ne 0) { throw "Page Builder dependency-closure build failed with exit code $LASTEXITCODE." }
+        } finally {
+            Pop-Location
+        }
+    }
 
     Write-Phase "Auditing real Angular authoring sources before starting services."
     Push-Location $UiRoot
@@ -1340,14 +1412,14 @@ Set-Location '$QuickstartRoot'
 `$env:PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET = '$streamSecret'
 `$env:PRAXIS_RESOURCE_VERSION_ETAG_SECRET = '$resourceVersionEtagSecret'
 `$env:PRAXIS_AI_REGISTRY_BOOTSTRAP_ENABLED = 'true'
-`$env:SPRING_AI_ENABLED = 'true'
-`$env:PRAXIS_AI_RAG_VECTOR_STORE_ENABLED = 'true'
-`$env:PRAXIS_API_METADATA_RAG_PUBLICATION_ENABLED = 'true'
+`$env:SPRING_AI_ENABLED = '$($providerRequired.ToString().ToLowerInvariant())'
+`$env:PRAXIS_AI_RAG_VECTOR_STORE_ENABLED = '$($providerRequired.ToString().ToLowerInvariant())'
+`$env:PRAXIS_API_METADATA_RAG_PUBLICATION_ENABLED = '$($providerRequired.ToString().ToLowerInvariant())'
 `$env:EMBEDDING_PROVIDER = '$resolvedEmbeddingProvider'
 `$env:PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ENABLED = '$domainCatalogRagPublicationEnabled'
-`$env:PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ASYNC_ENABLED = 'true'
-`$env:PRAXIS_PROJECT_KNOWLEDGE_RAG_PUBLICATION_ENABLED = 'true'
-`$env:PRAXIS_PROJECT_KNOWLEDGE_RAG_RETRIEVAL_ENABLED = 'true'
+`$env:PRAXIS_DOMAIN_CATALOG_RAG_PUBLICATION_ASYNC_ENABLED = '$($providerRequired.ToString().ToLowerInvariant())'
+`$env:PRAXIS_PROJECT_KNOWLEDGE_RAG_PUBLICATION_ENABLED = '$($providerRequired.ToString().ToLowerInvariant())'
+`$env:PRAXIS_PROJECT_KNOWLEDGE_RAG_RETRIEVAL_ENABLED = '$($providerRequired.ToString().ToLowerInvariant())'
 if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = `$env:PRAXIS_AI_OPENAI_MODEL }
 & '$JavaHome\bin\java.exe' -jar '$JarPath'
 "@
@@ -1365,18 +1437,19 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
     Write-Phase "Verifying canonical AI Registry bootstrap and immutable snapshot hash."
     $aiRegistryEvidence = Wait-AiRegistryReady $backendUrl $uiUrl $expectedRegistrySnapshotHash $StartupTimeoutSec
 
-    $domainCatalogGroups = if ($ValidationMode -eq "full") {
-        @("human-resources", "operations")
-    } else {
-        @($modeApiCatalogGroup)
-    }
-    $domainCatalogEvidence = Invoke-DomainCatalogIngest `
-        $backendUrl $uiUrl "desenv" "local" $domainCatalogGroups $modeDomainCatalogResourceKey `
-        $modeDomainCatalogRagRequired $domainCatalogRagTimeoutSec
+    if ($providerRequired) {
+        $domainCatalogGroups = if ($ValidationMode -eq "full") {
+            @("human-resources", "operations")
+        } else {
+            @($modeApiCatalogGroup)
+        }
+        $domainCatalogEvidence = Invoke-DomainCatalogIngest `
+            $backendUrl $uiUrl "desenv" "local" $domainCatalogGroups $modeDomainCatalogResourceKey `
+            $modeDomainCatalogRagRequired $domainCatalogRagTimeoutSec
 
-    Push-Location $UiRoot
-    try {
-        Write-Phase "Uploading API catalog into praxis-config-starter."
+        Push-Location $UiRoot
+        try {
+            Write-Phase "Uploading API catalog into praxis-config-starter."
         $env:BACKEND_URL = $backendUrl
         $env:CATALOG_URL = "$backendUrl/schemas/catalog"
         $env:CONFIG_ORIGIN = $uiUrl
@@ -1418,21 +1491,24 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         & cmd.exe /c "npx.cmd ts-node --project tools/tsconfig.tools.json tools/ai-registry/upload-api-catalog.ts"
         if ($LASTEXITCODE -ne 0) { throw "API catalog upload or canonical indexing failed with exit code $LASTEXITCODE." }
         Write-Phase "API catalog upload and canonical indexing reached READY."
-        $apiCatalogEvidence = [ordered]@{
-            source = "/schemas/catalog"
-            indexingState = "READY"
-            scope = if ($focusedApiCatalogPathPrefixes.Count -gt 0) {
-                if ([string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey)) {
-                    "$modeApiCatalogGroup-focused"
+            $apiCatalogEvidence = [ordered]@{
+                source = "/schemas/catalog"
+                indexingState = "READY"
+                scope = if ($focusedApiCatalogPathPrefixes.Count -gt 0) {
+                    if ([string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey)) {
+                        "$modeApiCatalogGroup-focused"
+                    } else {
+                        "resource:$modeDomainCatalogResourceKey"
+                    }
                 } else {
-                    "resource:$modeDomainCatalogResourceKey"
+                    "full"
                 }
-            } else {
-                "full"
             }
+        } finally {
+            Pop-Location
         }
-    } finally {
-        Pop-Location
+    } else {
+        Write-Phase "Skipping Domain Catalog and API Catalog ingestion because runtime excellence consumes real metadata directly and does not author through RAG."
     }
 
     Write-Phase "Verifying governed component capabilities without browser interception."
@@ -1498,9 +1574,16 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $env:PLAYWRIGHT_BASE_URL = $uiUrl
         $env:PRAXIS_E2E_API_CATALOG_RELEASE_ID = $apiCatalogReleaseId
         $env:PRAXIS_E2E_AGENTIC_VALIDATION_MODE = $ValidationMode
-        $env:PRAXIS_E2E_AGENTIC_EXECUTION_LANE = "live"
+        $env:PRAXIS_E2E_AGENTIC_EXECUTION_LANE = $executionLane
         $env:PRAXIS_E2E_SCENARIO_IDS = $selectedScenarioIds -join ","
         $env:PRAXIS_E2E_JSON_REPORT_PATH = $playwrightReportPath
+        if ($executionLane -eq "runtime-excellence") {
+            $env:PRAXIS_E2E_RUNTIME_EXCELLENCE_PLAN_PATH = $planFixturePath
+            $env:PRAXIS_E2E_PAGE_BUILDER_MODULE_PATH = Join-Path $UiRoot "dist\praxis-page-builder\fesm2022\praxisui-page-builder.mjs"
+        } else {
+            Remove-Item Env:\PRAXIS_E2E_RUNTIME_EXCELLENCE_PLAN_PATH -ErrorAction SilentlyContinue
+            Remove-Item Env:\PRAXIS_E2E_PAGE_BUILDER_MODULE_PATH -ErrorAction SilentlyContinue
+        }
         if ($humanTurnLimit -gt 0) {
             $env:PRAXIS_E2E_HUMAN_TURN_LIMIT = "$humanTurnLimit"
             $env:PRAXIS_E2E_HUMAN_TURN_LIMIT_SOURCE = "canonical-gate-profile"
@@ -1513,7 +1596,12 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         } else {
             Remove-Item Env:\PRAXIS_E2E_TEST_TIMEOUT_MS -ErrorAction SilentlyContinue
         }
-        & cmd.exe /c "npx.cmd playwright test --config=tools/e2e/playwright/praxis-page-builder-agentic-production-like.playwright.config.ts --retries=$Retries"
+        $playwrightConfig = if ($executionLane -eq "runtime-excellence") {
+            "tools/e2e/playwright/praxis-page-builder-runtime-excellence.playwright.config.ts"
+        } else {
+            "tools/e2e/playwright/praxis-page-builder-agentic-production-like.playwright.config.ts"
+        }
+        & cmd.exe /c "npx.cmd playwright test --config=$playwrightConfig --retries=$Retries"
         $playwrightExitCode = $LASTEXITCODE
         if (Test-Path -LiteralPath $playwrightReportPath) {
             $playwrightSummary = Get-PlaywrightSummary $playwrightReportPath
@@ -1583,14 +1671,18 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             passed = [int] $validatedRun.passed
             retries = [int] $validatedRun.retries
             receipts = @($validatedRun.receipts)
+            runtimeExcellenceReceipts = @($validatedRun.runtimeExcellenceReceipts)
             semanticRefinements = @($validatedRun.semanticRefinements)
         }
+        $runtimeExcellenceEvidence = @($validatedRun.runtimeExcellenceReceipts)
         $evidenceValidationPassed = $true
         Write-Phase "Playwright Page Builder validation completed."
     } finally {
         Remove-Item Env:\PRAXIS_E2E_SCENARIO_IDS -ErrorAction SilentlyContinue
         Remove-Item Env:\PRAXIS_E2E_HUMAN_TURN_LIMIT -ErrorAction SilentlyContinue
         Remove-Item Env:\PRAXIS_E2E_HUMAN_TURN_LIMIT_SOURCE -ErrorAction SilentlyContinue
+        Remove-Item Env:\PRAXIS_E2E_RUNTIME_EXCELLENCE_PLAN_PATH -ErrorAction SilentlyContinue
+        Remove-Item Env:\PRAXIS_E2E_PAGE_BUILDER_MODULE_PATH -ErrorAction SilentlyContinue
         Pop-Location
     }
 
@@ -1614,23 +1706,35 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         $publishedDiagnosticEvidence = @($governedStateProjections)
     }
 
-    $modelId = if ($Provider -eq "openai") { $env:PRAXIS_AI_OPENAI_MODEL } else { $env:PRAXIS_AI_GEMINI_MODEL }
+    $modelId = if (-not $providerRequired) {
+        $null
+    } elseif ($Provider -eq "openai") {
+        $env:PRAXIS_AI_OPENAI_MODEL
+    } else {
+        $env:PRAXIS_AI_GEMINI_MODEL
+    }
     $criticalGuardTitle = [string] $gateMatrix.evidence.criticalInterceptionGuardTest
     $criticalGuardPassed = @($playwrightSummary.tests | Where-Object {
         $_.title -eq $criticalGuardTitle -and $_.status -eq "expected"
     }).Count -eq 1
     [pscustomobject]@{
-        schemaVersion = "praxis.page-builder-agentic-production-like-result/v1"
+        schemaVersion = if ($executionLane -eq "runtime-excellence") {
+            "praxis.page-builder-runtime-excellence-result/v1"
+        } else {
+            "praxis.page-builder-agentic-production-like-result/v1"
+        }
         productionLike = ($null -eq $gateFailure)
-        criticalEndpointMocks = if ($criticalGuardPassed) { 0 } else { $null }
+        criticalEndpointMocks = if ($criticalGuardPassed -or $executionLane -eq "runtime-excellence") { 0 } else { $null }
         criticalInterceptionGuard = [ordered]@{
             testTitle = $criticalGuardTitle
-            passed = $criticalGuardPassed
+            applicable = ($executionLane -eq "live")
+            passed = if ($executionLane -eq "live") { $criticalGuardPassed } else { $null }
         }
-        executionLane = "live"
+        executionLane = $executionLane
         validationMode = $ValidationMode
         e2ePassed = ($null -eq $gateFailure)
-        provider = $Provider
+        provider = if ($providerRequired) { $Provider } else { $null }
+        providerRequired = $providerRequired
         model = $modelId
         embeddingProvider = $resolvedEmbeddingProvider
         datasourceKinds = [ordered]@{ application = "postgresql"; config = "postgresql" }
@@ -1638,6 +1742,19 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             configStarter = $configStarterArtifactEvidence
         }
         pgvector = $pgvectorEvidence
+        compilerProofs = [ordered]@{
+            java = $javaCompilerEvidence
+            typescript = if ($runtimeExcellenceEvidence.Count -eq 1) {
+                [ordered]@{
+                    passed = $true
+                    providerUsed = $false
+                    sourceSha256 = [string] $runtimeExcellenceEvidence[0].sourceSha256
+                    persistedPayloadSha256 = [string] $runtimeExcellenceEvidence[0].persistedPayloadSha256
+                }
+            } else {
+                $null
+            }
+        }
         backendBaseUrl = $backendUrl
         uiBaseUrl = $uiUrl
         loopbackOnly = $loopbackVerified
@@ -1673,6 +1790,8 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         }
         matrix = [ordered]@{
             schemaVersion = $gateMatrix.schemaVersion
+            executionLane = $executionLane
+            providerRequired = $providerRequired
             scenarios = @($modeMatrix.scenarios)
             expectedDiscovered = [int] $modeMatrix.expectedDiscovered
             minimumExecuted = [int] $modeMatrix.minimumExecuted
@@ -1684,7 +1803,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             humanTurnLimit = if ($humanTurnLimit -gt 0) { $humanTurnLimit } else { $null }
             domainCatalogRagRequired = $modeDomainCatalogRagRequired
             domainCatalogResourceKey = if ([string]::IsNullOrWhiteSpace($modeDomainCatalogResourceKey)) { $null } else { $modeDomainCatalogResourceKey }
-            apiCatalogGroup = $modeApiCatalogGroup
+            apiCatalogGroup = if ([string]::IsNullOrWhiteSpace($modeApiCatalogGroup)) { $null } else { $modeApiCatalogGroup }
             apiCatalogPathPrefixes = @($modeApiCatalogPathPrefixes)
             diagnosticProjectionRequirements = @($gateMatrix.evidence.governedStateProjections |
                 Where-Object { $_.scenarioId -in $selectedScenarioIds } |
@@ -1704,6 +1823,18 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
                         requiredFunctionalAssertions = @($_.requiredFunctionalAssertions)
                     }
                 })
+            runtimeExcellenceReceiptRequirements = @($gateMatrix.evidence.runtimeExcellenceReceipts |
+                Where-Object { $_.scenarioId -in $selectedScenarioIds } |
+                ForEach-Object {
+                    [ordered]@{
+                        scenarioId = [string] $_.scenarioId
+                        archetype = [string] $_.archetype
+                        planFixture = [string] $_.planFixture
+                        expectedPlanFixtureSha256 = [string] $_.expectedPlanFixtureSha256
+                        expectedCompiledPayloadSha256 = [string] $_.expectedCompiledPayloadSha256
+                        requiredFunctionalAssertions = @($_.requiredFunctionalAssertions)
+                    }
+                })
             semanticRefinementRequirements = @($gateMatrix.evidence.semanticRefinements |
                 Where-Object { $_.scenarioId -in $selectedScenarioIds } |
                 ForEach-Object {
@@ -1718,6 +1849,7 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         }
         playwright = $playwrightSummary
         scenarioEvidence = @($scenarioEvidence)
+        runtimeExcellenceEvidence = @($runtimeExcellenceEvidence)
         diagnosticEvidence = @($publishedDiagnosticEvidence)
         failureType = if ($null -eq $gateFailure) { $null } else { $gateFailure.Exception.GetType().FullName }
     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $resultPath -Encoding utf8

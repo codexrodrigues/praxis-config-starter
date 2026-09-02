@@ -47,6 +47,10 @@ function sameOrderedStrings(left, right) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function canonicalNullableString(value) {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
 function collectSpecs(suites, output = []) {
   for (const suite of suites ?? []) {
     output.push(...(suite.specs ?? []));
@@ -176,6 +180,87 @@ function validateReceipt(receipt, definition, retry) {
   };
 }
 
+function validateRuntimeExcellenceReceipt(receipt, definition, retry) {
+  assertExactKeys(receipt, [
+    'schemaVersion',
+    'scenarioId',
+    'archetype',
+    'providerUsed',
+    'materialization',
+    'persistence',
+    'functionalAssertions',
+    'timingMs',
+  ], `Runtime excellence receipt ${definition.scenarioId}`);
+  assertCondition(
+    receipt.schemaVersion === 'praxis.page-builder-runtime-excellence-receipt/v1',
+    `Runtime excellence receipt ${definition.scenarioId} has an unexpected schemaVersion.`,
+  );
+  assertCondition(
+    receipt.scenarioId === definition.scenarioId && receipt.archetype === definition.archetype,
+    `Runtime excellence receipt ${definition.scenarioId} identity diverges from the gate matrix.`,
+  );
+  assertCondition(receipt.providerUsed === false && retry === 0,
+    `Runtime excellence receipt ${definition.scenarioId} must not use a provider or Playwright retry.`);
+
+  assertExactKeys(receipt.materialization, [
+    'sourceKind',
+    'sourceSha256',
+    'typescriptCompilerValid',
+    'compiledPayloadSha256',
+    'persistedPayloadSha256',
+    'reloadPayloadSha256',
+    'persistedPageEquivalent',
+    'reloadEquivalent',
+  ], `Runtime excellence receipt ${definition.scenarioId} materialization`);
+  const materialization = receipt.materialization;
+  assertCondition(materialization.sourceKind === 'praxis.ui-composition-plan'
+      && materialization.typescriptCompilerValid === true
+      && /^[0-9a-f]{64}$/.test(materialization.sourceSha256)
+      && materialization.sourceSha256 === definition.expectedPlanFixtureSha256
+      && /^[0-9a-f]{64}$/.test(materialization.compiledPayloadSha256)
+      && materialization.compiledPayloadSha256 === definition.expectedCompiledPayloadSha256
+      && materialization.compiledPayloadSha256 === materialization.persistedPayloadSha256
+      && materialization.persistedPayloadSha256 === materialization.reloadPayloadSha256
+      && materialization.persistedPageEquivalent === true
+      && materialization.reloadEquivalent === true,
+  `Runtime excellence receipt ${definition.scenarioId} materialization lineage is incomplete.`);
+
+  assertExactKeys(receipt.persistence, ['version', 'etagPresent'],
+    `Runtime excellence receipt ${definition.scenarioId} persistence`);
+  assertCondition(Number.isInteger(receipt.persistence.version)
+      && receipt.persistence.version >= 1
+      && receipt.persistence.etagPresent === true,
+  `Runtime excellence receipt ${definition.scenarioId} persistence is incomplete.`);
+
+  assertUniqueStrings(
+    receipt.functionalAssertions,
+    `Runtime excellence receipt ${definition.scenarioId} functionalAssertions`,
+    /^[a-z0-9][a-z0-9.-]{0,119}$/,
+  );
+  assertCondition(sameOrderedStrings(
+    [...receipt.functionalAssertions].sort(),
+    [...definition.requiredFunctionalAssertions].sort(),
+  ), `Runtime excellence receipt ${definition.scenarioId} functional assertions diverge from the gate matrix.`);
+
+  const milestones = ['planCompiled', 'persisted', 'runtimeFunctional', 'reloadCompleted', 'total'];
+  assertExactKeys(receipt.timingMs, milestones,
+    `Runtime excellence receipt ${definition.scenarioId} timingMs`);
+  const timingValues = milestones.map((name) => receipt.timingMs[name]);
+  assertCondition(timingValues.every((value) => Number.isInteger(value) && value >= 0),
+    `Runtime excellence receipt ${definition.scenarioId} timings must be non-negative integers.`);
+  assertCondition(timingValues.slice(1).every((value, index) => value >= timingValues[index])
+      && receipt.timingMs.reloadCompleted === receipt.timingMs.total,
+  `Runtime excellence receipt ${definition.scenarioId} timing milestones are not monotonic.`);
+
+  return {
+    scenarioId: definition.scenarioId,
+    providerUsed: false,
+    totalMs: receipt.timingMs.total,
+    sourceSha256: materialization.sourceSha256,
+    persistedPayloadSha256: materialization.persistedPayloadSha256,
+  };
+}
+
 function validateSemanticRefinement(evidence, definition, profile) {
   assertObject(evidence, `Semantic refinement ${definition.scenarioId}`);
   assertCondition(evidence.canonicalFocalRefinement === true,
@@ -276,6 +361,14 @@ export function validateGateReport(report, reportPath, profile) {
     const result = resultByTitle.get(definition.testTitle);
     return validateReceipt(findAttachment(result, definition, reportPath), definition, result.retry);
   });
+  const runtimeExcellenceReceipts = profile.runtimeExcellenceReceiptRequirements.map((definition) => {
+    const result = resultByTitle.get(definition.testTitle);
+    return validateRuntimeExcellenceReceipt(
+      findAttachment(result, definition, reportPath),
+      definition,
+      result.retry,
+    );
+  });
   const semanticRefinements = profile.semanticRefinementRequirements.map((definition) => {
     const result = resultByTitle.get(definition.testTitle);
     return validateSemanticRefinement(findAttachment(result, definition, reportPath), definition, profile);
@@ -288,6 +381,7 @@ export function validateGateReport(report, reportPath, profile) {
     passed: titles.length,
     retries: 0,
     receipts,
+    runtimeExcellenceReceipts,
     semanticRefinements,
   };
 }
@@ -576,6 +670,247 @@ export function validatePublishedGateEvidenceSet({ resultPaths, expectedRuns, pr
   };
 }
 
+function validatePublishedRuntimeExcellenceReceipt(evidence, definition, context) {
+  assertObject(evidence, context);
+  assertCondition(evidence.scenarioId === definition.scenarioId,
+    `${context} identity diverges from the gate matrix.`);
+  assertCondition(evidence.providerUsed === false,
+    `${context} must attest providerUsed=false.`);
+  assertNonNegativeInteger(evidence.totalMs, `${context} totalMs`);
+  assertCondition(evidence.sourceSha256 === definition.expectedPlanFixtureSha256,
+    `${context} source hash diverges from the certified UiCompositionPlan fixture.`);
+  assertCondition(evidence.persistedPayloadSha256 === definition.expectedCompiledPayloadSha256,
+    `${context} persisted payload hash diverges from the certified compiler output.`);
+  return {
+    scenarioId: evidence.scenarioId,
+    providerUsed: false,
+    totalMs: evidence.totalMs,
+    sourceSha256: evidence.sourceSha256,
+    persistedPayloadSha256: evidence.persistedPayloadSha256,
+  };
+}
+
+export function validateRuntimeExcellenceResult(result, resultPath, profile) {
+  assertObject(result, `Runtime excellence result ${resultPath}`);
+  assertCondition(profile.executionLane === 'runtime-excellence' && profile.providerRequired === false,
+    `Mode ${profile.mode} is not a provider-independent runtime-excellence profile.`);
+  assertCondition(result.schemaVersion === 'praxis.page-builder-runtime-excellence-result/v1',
+    `Runtime excellence result ${resultPath} has an unexpected schemaVersion.`);
+  assertCondition(result.productionLike === true
+      && result.executionLane === 'runtime-excellence'
+      && result.validationMode === profile.mode
+      && result.e2ePassed === true
+      && result.provider === null
+      && result.providerRequired === false
+      && result.model === null
+      && result.embeddingProvider === 'not-used'
+      && result.criticalEndpointMocks === 0
+      && result.criticalInterceptionGuard?.applicable === false
+      && result.criticalInterceptionGuard?.passed === null
+      && result.loopbackOnly === true
+      && result.cleanupVerified === true
+      && result.failureType === null,
+  `Runtime excellence result ${resultPath} is not a successful provider-independent execution.`);
+  assertCondition(result.datasourceKinds?.application === 'postgresql'
+      && result.datasourceKinds?.config === 'postgresql',
+  `Runtime excellence result ${resultPath} did not use PostgreSQL for both runtime stores.`);
+  assertCondition(result.pgvector === null
+      && result.catalogs?.domain === null
+      && result.catalogs?.api === null,
+  `Runtime excellence result ${resultPath} unexpectedly used vector or catalog ingestion evidence.`);
+  assertCondition(result.sourceAudit?.passed === true,
+    `Runtime excellence result ${resultPath} did not pass the source audit.`);
+  assertCondition(result.capabilities?.source === 'registry'
+      && result.capabilities?.degraded === false,
+  `Runtime excellence result ${resultPath} capabilities are not registry-backed and non-degraded.`);
+  assertCondition(result.aiRegistry?.ready === true
+      && /^[0-9a-f]{64}$/.test(result.aiRegistry?.snapshotHash),
+  `Runtime excellence result ${resultPath} has no ready immutable AI Registry snapshot.`);
+  assertCondition(Array.isArray(result.scenarioEvidence) && result.scenarioEvidence.length === 0
+      && Array.isArray(result.diagnosticEvidence) && result.diagnosticEvidence.length === 0,
+  `Runtime excellence result ${resultPath} contains agentic or failure evidence.`);
+
+  const matrix = result.matrix;
+  assertObject(matrix, `Runtime excellence result ${resultPath} matrix`);
+  const expectedRuntimeRequirements = profile.runtimeExcellenceReceiptRequirements.map((definition) => ({
+    scenarioId: definition.scenarioId,
+    archetype: definition.archetype,
+    planFixture: definition.planFixture,
+    expectedPlanFixtureSha256: definition.expectedPlanFixtureSha256,
+    expectedCompiledPayloadSha256: definition.expectedCompiledPayloadSha256,
+    requiredFunctionalAssertions: definition.requiredFunctionalAssertions,
+  }));
+  assertCondition(matrix.schemaVersion === profile.matrixSchemaVersion
+      && matrix.executionLane === profile.executionLane
+      && matrix.providerRequired === profile.providerRequired
+      && sameOrderedStrings(matrix.scenarios, profile.scenarios)
+      && sameOrderedStrings(matrix.requiredPassedTests, profile.requiredPassedTests)
+      && matrix.expectedDiscovered === profile.expectedDiscovered
+      && matrix.minimumExecuted === profile.minimumExecuted
+      && matrix.expectedSkipped === profile.expectedSkipped
+      && matrix.retries === profile.retries
+      && matrix.streamProcessingTimeoutSeconds === profile.streamProcessingTimeoutSeconds
+      && matrix.playwrightTestTimeoutMs === profile.playwrightTestTimeoutMs
+      && matrix.humanTurnLimit === profile.humanTurnLimit
+      && matrix.domainCatalogRagRequired === profile.domainCatalogRagRequired
+      && matrix.domainCatalogResourceKey === profile.domainCatalogResourceKey
+      && canonicalNullableString(matrix.apiCatalogGroup)
+        === canonicalNullableString(profile.apiCatalogGroup)
+      && sameOrderedStrings(matrix.apiCatalogPathPrefixes, profile.apiCatalogPathPrefixes)
+      && stableJson(matrix.receiptRequirements) === stableJson(profile.receiptRequirements)
+      && stableJson(matrix.runtimeExcellenceReceiptRequirements) === stableJson(expectedRuntimeRequirements)
+      && stableJson(matrix.diagnosticProjectionRequirements) === stableJson(profile.diagnosticProjectionRequirements)
+      && stableJson(matrix.semanticRefinementRequirements) === stableJson(profile.semanticRefinementRequirements),
+  `Runtime excellence result ${resultPath} matrix projection diverges from the canonical profile.`);
+
+  const playwright = result.playwright;
+  assertObject(playwright, `Runtime excellence result ${resultPath} Playwright summary`);
+  for (const property of [
+    'discovered', 'executed', 'passed', 'skipped', 'failed', 'flaky',
+    'attempts', 'retryAttempts', 'durationMs',
+  ]) {
+    assertNonNegativeInteger(playwright[property],
+      `Runtime excellence result ${resultPath} playwright.${property}`);
+  }
+  assertCondition(playwright.discovered === profile.expectedDiscovered
+      && playwright.executed === profile.expectedDiscovered
+      && playwright.passed === profile.expectedDiscovered
+      && playwright.skipped === profile.expectedSkipped
+      && playwright.failed === 0
+      && playwright.flaky === 0
+      && playwright.attempts === profile.expectedDiscovered
+      && playwright.retryAttempts === 0,
+  `Runtime excellence result ${resultPath} Playwright summary is not exact and zero-retry.`);
+  const testTitles = playwright.tests?.map((entry) => entry?.title) ?? [];
+  assertUniqueStrings(testTitles, `Runtime excellence result ${resultPath} Playwright titles`);
+  assertCondition(sameOrderedStrings(testTitles, profile.requiredPassedTests)
+      && playwright.tests.every((entry) => entry.status === 'expected'
+        && entry.attempts === 1
+        && entry.retryAttempts === 0),
+  `Runtime excellence result ${resultPath} Playwright tests are not exact zero-retry passes.`);
+
+  assertObject(result.evidenceValidation,
+    `Runtime excellence result ${resultPath} evidenceValidation`);
+  const attestation = result.evidenceValidation.attestation;
+  assertCondition(result.evidenceValidation.passed === true,
+    `Runtime excellence result ${resultPath} did not pass raw-report validation.`);
+  assertObject(attestation, `Runtime excellence result ${resultPath} evidence attestation`);
+  assertCondition(attestation.schemaVersion === 'praxis.page-builder-agentic-gate-run-attestation/v1'
+      && /^[0-9a-f]{64}$/.test(attestation.reportSha256)
+      && attestation.durationMs === playwright.durationMs
+      && attestation.discovered === profile.expectedDiscovered
+      && attestation.passed === profile.expectedDiscovered
+      && attestation.retries === 0
+      && Array.isArray(attestation.receipts) && attestation.receipts.length === 0
+      && Array.isArray(attestation.semanticRefinements) && attestation.semanticRefinements.length === 0,
+  `Runtime excellence result ${resultPath} evidence attestation is incomplete or divergent.`);
+
+  const publishedReceipts = result.runtimeExcellenceEvidence;
+  const attestedReceipts = attestation.runtimeExcellenceReceipts;
+  assertCondition(Array.isArray(publishedReceipts)
+      && publishedReceipts.length === profile.runtimeExcellenceReceiptRequirements.length
+      && Array.isArray(attestedReceipts)
+      && attestedReceipts.length === profile.runtimeExcellenceReceiptRequirements.length,
+  `Runtime excellence result ${resultPath} receipt count diverges from the gate profile.`);
+  const runtimeExcellenceReceipts = profile.runtimeExcellenceReceiptRequirements.map((definition) => {
+    const publishedMatches = publishedReceipts.filter(
+      (entry) => entry?.scenarioId === definition.scenarioId,
+    );
+    const attestedMatches = attestedReceipts.filter(
+      (entry) => entry?.scenarioId === definition.scenarioId,
+    );
+    assertCondition(publishedMatches.length === 1 && attestedMatches.length === 1,
+      `Runtime excellence result ${resultPath} must publish and attest ${definition.scenarioId} exactly once.`);
+    const published = validatePublishedRuntimeExcellenceReceipt(
+      publishedMatches[0], definition, `Published runtime receipt ${definition.scenarioId}`,
+    );
+    const attested = validatePublishedRuntimeExcellenceReceipt(
+      attestedMatches[0], definition, `Attested runtime receipt ${definition.scenarioId}`,
+    );
+    assertCondition(stableJson(published) === stableJson(attested),
+      `Runtime excellence result ${resultPath} receipt ${definition.scenarioId} diverges from its attestation.`);
+    return published;
+  });
+
+  const javaProof = result.compilerProofs?.java;
+  const typescriptProof = result.compilerProofs?.typescript;
+  assertCondition(javaProof?.test
+      === 'AgenticAuthoringUiCompositionPlanCompilerTest#compilesCertifiedBusinessCommandRuntimeFixtureWithoutAiProvider'
+      && javaProof.passed === true
+      && javaProof.providerUsed === false
+      && javaProof.planFixtureSha256 === expectedRuntimeRequirements[0]?.expectedPlanFixtureSha256,
+  `Runtime excellence result ${resultPath} Java compiler proof is incomplete.`);
+  assertCondition(typescriptProof?.passed === true
+      && typescriptProof.providerUsed === false
+      && typescriptProof.sourceSha256 === expectedRuntimeRequirements[0]?.expectedPlanFixtureSha256
+      && typescriptProof.persistedPayloadSha256
+        === expectedRuntimeRequirements[0]?.expectedCompiledPayloadSha256,
+  `Runtime excellence result ${resultPath} TypeScript compiler proof is incomplete.`);
+
+  const configStarterDependency = validateConfigStarterDependencyAttestation(result, resultPath);
+  const coordinateProjection = {
+    provider: result.provider,
+    providerRequired: result.providerRequired,
+    model: result.model,
+    embeddingProvider: result.embeddingProvider,
+    contractHash: result.contractHash,
+    git: result.git,
+    versions: result.versions,
+    configStarterDependency,
+    aiRegistrySnapshotHash: result.aiRegistry.snapshotHash,
+    matrix,
+  };
+  const coordinateSha256 = createHash('sha256').update(stableJson(coordinateProjection)).digest('hex');
+  return {
+    resultPath,
+    reportSha256: attestation.reportSha256,
+    coordinateSha256,
+    durationMs: playwright.durationMs,
+    discovered: playwright.discovered,
+    passed: playwright.passed,
+    retries: 0,
+    runtimeExcellenceReceipts,
+  };
+}
+
+export function validateRuntimeExcellenceEvidenceSet({ resultPaths, expectedRuns, profile }) {
+  assertCondition(Number.isInteger(expectedRuns) && expectedRuns > 0,
+    'expectedRuns must be a positive integer.');
+  assertCondition(Array.isArray(resultPaths) && resultPaths.length === expectedRuns,
+    `Expected exactly ${expectedRuns} runtime result(s), received ${resultPaths?.length ?? 0}.`);
+  const resolvedPaths = resultPaths.map((path) => resolve(path));
+  assertCondition(new Set(resolvedPaths).size === resolvedPaths.length,
+    'Runtime result paths must be unique.');
+  const runs = resolvedPaths.map((resultPath, index) => {
+    const bytes = readFileSync(resultPath);
+    const result = JSON.parse(bytes.toString('utf8'));
+    return {
+      run: index + 1,
+      resultSha256: createHash('sha256').update(bytes).digest('hex'),
+      ...validateRuntimeExcellenceResult(result, resultPath, profile),
+    };
+  });
+  assertCondition(new Set(runs.map((run) => run.reportSha256)).size === runs.length,
+    'Runtime excellence runs must attest unique raw report hashes.');
+  assertCondition(new Set(runs.map((run) => run.coordinateSha256)).size === 1,
+    'Runtime excellence runs must exercise identical immutable coordinates.');
+  return {
+    schemaVersion: 'praxis.page-builder-runtime-excellence-published-evidence-summary/v1',
+    mode: profile.mode,
+    expectedRuns,
+    passedRuns: runs.length,
+    stable: true,
+    coordinateSha256: runs[0].coordinateSha256,
+    totals: {
+      discovered: runs.reduce((sum, run) => sum + run.discovered, 0),
+      passed: runs.reduce((sum, run) => sum + run.passed, 0),
+      retries: 0,
+      durationMs: runs.reduce((sum, run) => sum + run.durationMs, 0),
+    },
+    runs,
+  };
+}
+
 function parseCliArgs(args) {
   const options = {
     matrixPath: defaultMatrixPath,
@@ -583,6 +918,7 @@ function parseCliArgs(args) {
     expectedRuns: 1,
     reportPaths: [],
     publicationResultPaths: [],
+    runtimeResultPaths: [],
   };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -593,11 +929,19 @@ function parseCliArgs(args) {
     else if (argument === '--publication-result') {
       options.publicationResultPaths.push(resolve(args[++index] || ''));
     }
+    else if (argument === '--runtime-result') {
+      options.runtimeResultPaths.push(resolve(args[++index] || ''));
+    }
     else throw new Error(`Unknown argument: ${argument}`);
   }
   assertCondition(options.mode.length > 0, '--mode is required.');
-  assertCondition((options.reportPaths.length > 0) !== (options.publicationResultPaths.length > 0),
-    'Use exactly one evidence source: --report or --publication-result.');
+  const populatedSources = [
+    options.reportPaths,
+    options.publicationResultPaths,
+    options.runtimeResultPaths,
+  ].filter((paths) => paths.length > 0).length;
+  assertCondition(populatedSources === 1,
+    'Use exactly one evidence source: --report, --publication-result, or --runtime-result.');
   return options;
 }
 
@@ -605,13 +949,19 @@ if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
   try {
     const options = parseCliArgs(process.argv.slice(2));
     const profile = resolveGateProfile(loadGateMatrix(options.matrixPath), options.mode);
-    const summary = options.publicationResultPaths.length > 0
-      ? validatePublishedGateEvidenceSet({
+    const summary = options.runtimeResultPaths.length > 0
+      ? validateRuntimeExcellenceEvidenceSet({
+          resultPaths: options.runtimeResultPaths,
+          expectedRuns: options.expectedRuns,
+          profile,
+        })
+      : options.publicationResultPaths.length > 0
+        ? validatePublishedGateEvidenceSet({
           resultPaths: options.publicationResultPaths,
           expectedRuns: options.expectedRuns,
           profile,
         })
-      : validateGateEvidenceSet({
+        : validateGateEvidenceSet({
           reportPaths: options.reportPaths,
           expectedRuns: options.expectedRuns,
           profile,

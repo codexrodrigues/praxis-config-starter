@@ -86,6 +86,12 @@
       ]
     },
     {
+      "scenarioId": "business-command-runtime-excellence",
+      "testTitles": [
+        "Business command executa lifecycle governado a partir de UiCompositionPlan determinístico sem provider"
+      ]
+    },
+    {
       "scenarioId": "single-table-control",
       "testTitles": [
         "single-table control persiste, recarrega e renderiza dados reais no primeiro passe"
@@ -218,6 +224,35 @@
           "runtime.second-selection-replaces-detail",
           "runtime.narrow-viewport-functional",
           "runtime.post-reload-selection-details-loaded",
+          "persistence.reload-equivalent"
+        ]
+      }
+    ],
+    "runtimeExcellenceReceipts": [
+      {
+        "scenarioId": "business-command-runtime-excellence",
+        "archetype": "business-command",
+        "testTitle": "Business command executa lifecycle governado a partir de UiCompositionPlan determinístico sem provider",
+        "attachmentName": "business-command-runtime-excellence-receipt.json",
+        "planFixture": "tools/e2e/fixtures/business-command-runtime-excellence.ui-composition-plan.json",
+        "expectedPlanFixtureSha256": "694dba6cb77d9f243754dc7c48d82c8f3ae12313c70cbfd7729c6b6943f4e9d8",
+        "expectedCompiledPayloadSha256": "8c5742a203354a30724c3614cdd748a682c8a953c6829e2f98312b2289c9af31",
+        "requiredFunctionalAssertions": [
+          "materialization.ui-composition-plan-typescript-valid",
+          "materialization.persisted-page-equivalent",
+          "discovery.actions-capabilities.http-200",
+          "command.contract-form-confirmation-version",
+          "command.confirmation-cancelled",
+          "command.cancelled-not-sent",
+          "command.stale-version.http-412",
+          "command.governed-error-visible",
+          "command.confirmation-accepted",
+          "command.governed-headers-observed",
+          "command.execute.http-200",
+          "resource.refresh-observed",
+          "resource.read-after-write-observed",
+          "resource.availability-transition-observed",
+          "resource.deterministic-default-sort-observed",
           "persistence.reload-equivalent"
         ]
       }
@@ -370,6 +405,21 @@
       "requiredPassedTests": [
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
         "Business command confirma, rejeita versão obsoleta e materializa lifecycle governado no primeiro passe"
+      ]
+    },
+    "business-command-runtime-excellence": {
+      "description": "Deterministic runtime-excellence proof for the governed FORM business command. It compiles and persists the certified UiCompositionPlan fixture, then executes the complete command lifecycle against real metadata and resource endpoints without an LLM, embeddings, RAG, API catalog ingestion, or paid-provider credentials.",
+      "executionLane": "runtime-excellence",
+      "providerRequired": false,
+      "retries": 0,
+      "scenarios": [
+        "business-command-runtime-excellence"
+      ],
+      "expectedDiscovered": 1,
+      "minimumExecuted": 1,
+      "expectedSkipped": 0,
+      "requiredPassedTests": [
+        "Business command executa lifecycle governado a partir de UiCompositionPlan determinístico sem provider"
       ]
     },
     "full": {
