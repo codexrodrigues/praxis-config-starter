@@ -227,11 +227,11 @@ test('resolves business-command runtime excellence without paid-provider or RAG 
   );
   assert.equal(
     profile.runtimeExcellenceReceiptRequirements[0].expectedCompiledPayloadSha256,
-    '721bca02b364a2b383e6a27cf9c5926d1f7c90fd07d34b87727b732cf0dd806b',
+    '8c5742a203354a30724c3614cdd748a682c8a953c6829e2f98312b2289c9af31',
   );
   assert.equal(
     profile.runtimeExcellenceReceiptRequirements[0].expectedPlanFixtureSha256,
-    'a774a8413eb89cccfed85d80abb4f8c56c48f94e58e04aec76e6614cc05d2aac',
+    '694dba6cb77d9f243754dc7c48d82c8f3ae12313c70cbfd7729c6b6943f4e9d8',
   );
 });
 

@@ -108,6 +108,14 @@
             "selection": {
               "enabled": true,
               "type": "single"
+            },
+            "sorting": {
+              "enabled": true,
+              "strategy": "server",
+              "defaultSort": {
+                "column": "id",
+                "direction": "desc"
+              }
             }
           },
           "actions": {

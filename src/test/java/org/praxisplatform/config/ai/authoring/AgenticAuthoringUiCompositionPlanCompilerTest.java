@@ -34,7 +34,7 @@ class AgenticAuthoringUiCompositionPlanCompilerTest {
         JsonNode plan = objectMapper.readTree(Files.readString(fixture));
         assertThat(canonicalSha256(plan))
                 .as("the certified semantic plan identity must be platform-independent")
-                .isEqualTo("a774a8413eb89cccfed85d80abb4f8c56c48f94e58e04aec76e6614cc05d2aac");
+                .isEqualTo("694dba6cb77d9f243754dc7c48d82c8f3ae12313c70cbfd7729c6b6943f4e9d8");
         AgenticAuthoringUiCompositionPlanCompiler.CompileResult result =
                 compiler.compile(plan, objectMapper.createObjectNode());
 
@@ -57,7 +57,7 @@ class AgenticAuthoringUiCompositionPlanCompilerTest {
         assertThat(page.at("/composition/links/1/intent").asText()).isEqualTo("state-read");
         assertThat(canonicalSha256(page))
                 .as("the Java materialization must equal the TypeScript compiler projection")
-                .isEqualTo("721bca02b364a2b383e6a27cf9c5926d1f7c90fd07d34b87727b732cf0dd806b");
+                .isEqualTo("8c5742a203354a30724c3614cdd748a682c8a953c6829e2f98312b2289c9af31");
         assertThat(result.compiledFormPatch().path("warnings")).extracting(JsonNode::asText)
                 .containsExactly("ui-composition-plan-compiled-by-config");
     }

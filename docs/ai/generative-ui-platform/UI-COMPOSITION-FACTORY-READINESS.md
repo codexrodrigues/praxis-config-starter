@@ -39,6 +39,15 @@ and runtime receipt attestation, then rejects duplicate raw-report hashes or coo
 the requested series. The original canary was successfully revalidated through that path; it remains
 excluded from the final series because it predates the evidence-packaging and canonical-null fixes.
 
+The first series attempt then passed three strictly sequential runs but failed on run four
+[`33677612885`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33677612885):
+the newly created employee was absent from the first 25 pages of a Table whose remote request had no
+declared sort. This exposed a certified-archetype defect rather than a provider outage. The canonical
+fixture now declares server-side `id desc`, the browser must observe `sort=id,desc` and the receipt
+must include `resource.deterministic-default-sort-observed`. The Java and TypeScript compilers agree
+on the corrected plan and payload hashes. Because the semantic plan and Angular proof changed, the
+three earlier passes do not count toward certification and the stability series restarts at zero.
+
 ## Decision
 
 `praxis-config-starter` should become the canonical control plane for AI-authored UI composition decisions. It should not generate Angular implementation code and it should not introduce a second page DSL.
