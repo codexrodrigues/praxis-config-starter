@@ -1,0 +1,44 @@
+name: OpenAI Single Embedding Quota Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type ONE_PAID_EMBEDDING_REQUEST to authorize exactly one minimal OpenAI embeddings request.'
+        required: true
+        default: ''
+        type: string
+
+concurrency:
+  group: openai-single-embedding-quota-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: One paid embeddings request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: ai-paid-gates
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout praxis-config-starter
+        uses: actions/checkout@v5
+
+      - name: Validate explicit request authorization
+        shell: bash
+        env:
+          OPENAI_EMBEDDING_PROBE_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          if [[ "${OPENAI_EMBEDDING_PROBE_CONFIRMATION}" != "ONE_PAID_EMBEDDING_REQUEST" ]]; then
+            echo "The confirmation must be exactly ONE_PAID_EMBEDDING_REQUEST." >&2
+            exit 2
+          fi
+
+      - name: Execute exactly one minimal OpenAI embeddings request
+        shell: bash
+        env:
+          PRAXIS_AI_OPENAI_API_KEY: ${{ secrets.PRAXIS_AI_OPENAI_API_KEY }}
+          OPENAI_EMBEDDING_PROBE_CONFIRMATION: ${{ inputs.confirmation }}
+          OPENAI_EMBEDDING_PROBE_CLIENT_REQUEST_ID: praxis-embedding-probe-${{ github.run_id }}-${{ github.run_attempt }}
+        run: ./tools/openai/run-single-embedding-quota-probe.sh
