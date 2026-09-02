@@ -55,6 +55,26 @@ exclusive lane and its bounded journey budget. The
 HTTP smoke receipt also records the apply turn count and whether the governed review continuation was
 used, including the backend-issued reply and decision identifiers.
 
+## Single-call embeddings quota diagnostic
+
+Use `OpenAI Single Embedding Quota Probe` only when a non-generative `GET /models` key probe has
+already succeeded but OpenAI support or an observed failure requires the effective embeddings quota
+to be identified. This workflow is an operational diagnostic, not a release gate and not functional
+evidence for agentic authoring.
+
+The operator must type `ONE_PAID_EMBEDDING_REQUEST`, then approve the protected
+`ai-paid-gates` environment. One run executes exactly one `POST /v1/embeddings` request with
+`text-embedding-3-large`, a short fixed input, 768 dimensions, no redirect and zero retries. The
+workflow uses only `PRAXIS_AI_OPENAI_API_KEY`; it does not start Quickstart, publish a Domain Catalog
+or invoke an authoring turn.
+
+The log is intentionally bounded to HTTP status, model, dimensions, a safe client request id, the
+provider `x-request-id`, token usage on success, or `error.type`, `error.code` and `error.param` on
+failure. The raw response, provider message, embedding vector, organization/project identifiers and
+credential are never uploaded or printed. Forward only those sanitized fields to provider support.
+Do not rerun the workflow merely because a quota error was observed: the first result is the evidence
+the diagnostic exists to collect.
+
 ## Provider metadata
 
 OpenAI Responses requests carry only bounded, non-content metadata:
