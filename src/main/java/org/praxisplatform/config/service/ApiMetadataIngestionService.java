@@ -48,6 +48,8 @@ public class ApiMetadataIngestionService {
     private static final String DEFAULT_TENANT_ID = "GLOBAL";
     private static final String DEFAULT_ENVIRONMENT = "default";
     private static final String DEFAULT_SERVICE_KEY = "default";
+    // Bounds repeated provider work while keeping each checkpoint efficient for batch embeddings.
+    private static final int EMBEDDING_CHECKPOINT_SIZE = 20;
 
     private final ApiMetadataRepository repository;
     private final ObjectMapper objectMapper;
@@ -322,8 +324,10 @@ public class ApiMetadataIngestionService {
             List<ApiMetadata> rowsWithoutLegacyEmbedding = metadataRows.stream()
                     .filter(row -> row.getEmbedding() == null || row.getEmbedding().isEmpty())
                     .toList();
-            Map<Long, List<Float>> embeddingsById = embedStoredMetadata(rowsWithoutLegacyEmbedding);
-            if (!indexingStateService.commitLegacyEmbeddings(scope, claim.revision(), embeddingsById)) {
+            if (!embedAndCheckpointStoredMetadata(
+                    scope,
+                    claim.revision(),
+                    rowsWithoutLegacyEmbedding)) {
                 return;
             }
             indexingStateService.publishAndCompleteIfCurrent(
@@ -349,6 +353,23 @@ public class ApiMetadataIngestionService {
                     claim.revision(),
                     ex.getClass().getSimpleName());
         }
+    }
+
+    private boolean embedAndCheckpointStoredMetadata(
+            ApiMetadataIndexingScope scope,
+            long revision,
+            List<ApiMetadata> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return indexingStateService.commitLegacyEmbeddings(scope, revision, Map.of());
+        }
+        for (int offset = 0; offset < rows.size(); offset += EMBEDDING_CHECKPOINT_SIZE) {
+            int end = Math.min(offset + EMBEDDING_CHECKPOINT_SIZE, rows.size());
+            Map<Long, List<Float>> embeddingsById = embedStoredMetadata(rows.subList(offset, end));
+            if (!indexingStateService.commitLegacyEmbeddings(scope, revision, embeddingsById)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private Map<Long, List<Float>> embedStoredMetadata(List<ApiMetadata> rows) {

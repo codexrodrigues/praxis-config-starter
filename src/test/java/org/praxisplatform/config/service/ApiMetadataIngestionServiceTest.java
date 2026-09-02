@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -217,6 +218,100 @@ class ApiMetadataIngestionServiceTest {
                 org.mockito.ArgumentMatchers.eq(scope),
                 org.mockito.ArgumentMatchers.eq(7L),
                 any());
+    }
+
+    @Test
+    void shouldPersistCompletedEmbeddingCheckpointsAndResumeOnlyMissingRows() {
+        ApiMetadataIndexingScope scope = new ApiMetadataIndexingScope(
+                "tenant-a", "prod", "default", "release-1");
+        List<ApiMetadata> rows = metadataRows(21);
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant-a", "prod", "default", "release-1")).thenReturn(rows);
+        when(embeddingService.embedAll(any())).thenReturn(java.util.stream.IntStream.range(0, 20)
+                .mapToObj(index -> List.of(0.1f, (float) index))
+                .toList());
+        when(embeddingService.embed(anyString()))
+                .thenThrow(AiProviderCallException.fromHttpStatusSanitized(
+                        "openai", 429, "insufficient_quota", null, null))
+                .thenReturn(List.of(0.9f, 1.0f));
+        when(indexingStateService.commitLegacyEmbeddings(
+                org.mockito.ArgumentMatchers.eq(scope),
+                org.mockito.ArgumentMatchers.anyLong(),
+                any())).thenAnswer(invocation -> {
+                    Map<Long, List<Float>> checkpoint = invocation.getArgument(2);
+                    checkpoint.forEach((id, embedding) -> rows.stream()
+                            .filter(row -> row.getId().equals(id))
+                            .findFirst()
+                            .orElseThrow()
+                            .setEmbedding(embedding));
+                    return true;
+                });
+        allowCurrentPublication(scope, 8L);
+
+        service.processIndexingClaim(new ApiMetadataIndexingStateService.WorkClaim(scope, 7L, 21L));
+
+        assertThat(rows.subList(0, 20)).allMatch(row -> row.getEmbedding() != null);
+        assertThat(rows.get(20).getEmbedding()).isNull();
+        verify(indexingStateService).commitLegacyEmbeddings(
+                org.mockito.ArgumentMatchers.eq(scope),
+                org.mockito.ArgumentMatchers.eq(7L),
+                org.mockito.ArgumentMatchers.argThat(checkpoint -> checkpoint.size() == 20));
+        verify(indexingStateService).fail(
+                scope,
+                7L,
+                "EMBEDDING_FAILED",
+                "API metadata derived indexing failed; canonical metadata remains persisted."
+                        + " provider=openai kind=quota_exhausted.");
+
+        service.processIndexingClaim(new ApiMetadataIndexingStateService.WorkClaim(scope, 8L, 21L));
+
+        assertThat(rows.get(20).getEmbedding()).containsExactly(0.9f, 1.0f);
+        verify(embeddingService, org.mockito.Mockito.times(1)).embedAll(any());
+        verify(embeddingService, org.mockito.Mockito.times(2)).embed(anyString());
+        verify(indexingStateService).commitLegacyEmbeddings(
+                org.mockito.ArgumentMatchers.eq(scope),
+                org.mockito.ArgumentMatchers.eq(8L),
+                org.mockito.ArgumentMatchers.argThat(checkpoint ->
+                        checkpoint.size() == 1 && checkpoint.containsKey(rows.get(20).getId())));
+        verify(indexingStateService).publishAndCompleteIfCurrent(
+                org.mockito.ArgumentMatchers.eq(scope),
+                org.mockito.ArgumentMatchers.eq(8L),
+                any());
+    }
+
+    @Test
+    void shouldNotPersistOrPublishCheckpointRejectedByASupersedingRevision() {
+        ApiMetadataIndexingScope scope = new ApiMetadataIndexingScope(
+                "tenant-a", "prod", "default", "release-1");
+        List<ApiMetadata> rows = metadataRows(21);
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(repository.findAllByTenantIdAndEnvironmentAndServiceKeyAndReleaseId(
+                "tenant-a", "prod", "default", "release-1")).thenReturn(rows);
+        when(embeddingService.embedAll(any())).thenReturn(java.util.stream.IntStream.range(0, 20)
+                .mapToObj(index -> List.of(0.1f, (float) index))
+                .toList());
+        when(embeddingService.embed(anyString())).thenReturn(List.of(0.9f, 1.0f));
+        when(indexingStateService.commitLegacyEmbeddings(
+                org.mockito.ArgumentMatchers.eq(scope),
+                org.mockito.ArgumentMatchers.eq(7L),
+                any())).thenReturn(true, false);
+
+        service.processIndexingClaim(new ApiMetadataIndexingStateService.WorkClaim(scope, 7L, 21L));
+
+        ArgumentCaptor<Map<Long, List<Float>>> checkpoints = ArgumentCaptor.forClass(Map.class);
+        verify(indexingStateService, org.mockito.Mockito.times(2)).commitLegacyEmbeddings(
+                org.mockito.ArgumentMatchers.eq(scope),
+                org.mockito.ArgumentMatchers.eq(7L),
+                checkpoints.capture());
+        assertThat(checkpoints.getAllValues()).extracting(Map::size).containsExactly(20, 1);
+        verify(indexingStateService, never()).publishAndCompleteIfCurrent(
+                any(), org.mockito.ArgumentMatchers.anyLong(), any());
+        verify(indexingStateService, never()).fail(
+                any(), org.mockito.ArgumentMatchers.anyLong(), anyString(), anyString());
+        verify(ragVectorStoreService, never()).deleteDocumentsByReleaseScope(
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        verify(ragVectorStoreService, never()).upsertDocuments(any());
     }
 
     @Test
@@ -476,6 +571,16 @@ class ApiMetadataIngestionServiceTest {
         row.setRawJson("{\"path\":\"/api/users\",\"method\":\"GET\",\"summary\":\"List users\"}");
         row.setEmbedding(embedding);
         return row;
+    }
+
+    private List<ApiMetadata> metadataRows(int count) {
+        return java.util.stream.IntStream.range(0, count)
+                .mapToObj(index -> metadata(
+                        41L + index,
+                        "/api/users/" + index,
+                        "GET",
+                        null))
+                .toList();
     }
 
     private ApiMetadataIndexingStateService.StateSnapshot indexingState(ApiMetadataIndexingStatus status) {
