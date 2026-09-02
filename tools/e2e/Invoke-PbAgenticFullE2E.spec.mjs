@@ -63,7 +63,7 @@ test('compares the packaged Quickstart with the workflow-declared Config version
   );
   assert.match(
     workflowSource,
-    /-ExpectedConfigVersion "\$env:STARTER_VERSION"/,
+    /ExpectedConfigVersion = "\$env:STARTER_VERSION"/,
   );
 });
 
@@ -75,7 +75,11 @@ test('exposes every canonical matrix mode through workflow dispatch', () => {
   const options = [...inputBlock[0].matchAll(/^\s{10}- ([a-z0-9-]+)$/gm)].map(
     (match) => match[1],
   );
-  assert.deepEqual(options, Object.keys(matrix.modes));
+  const liveModes = Object.entries(matrix.modes)
+    .filter(([, mode]) => (mode.executionLane ?? 'live') === 'live')
+    .map(([name]) => name);
+  assert.deepEqual(options, liveModes);
+  assert.match(workflowSource, /run_page_builder_runtime_excellence:/);
 });
 
 test('exposes one exclusive paid lane and removes combinable paid toggles', () => {
@@ -90,7 +94,7 @@ test('exposes one exclusive paid lane and removes combinable paid toggles', () =
   assert.doesNotMatch(workflowSource, /run_llm_compliance_policy_shadow/);
   assert.match(
     workflowSource,
-    /if: inputs\.paid_gate_lane == 'page-builder'[\s\S]*?Invoke-PbAgenticFullE2E\.ps1[\s\S]*?-ConfirmPaidProviderRun/,
+    /if \(-not \$runtimeExcellence\) \{[\s\S]*?\$gateArgs\.ConfirmPaidProviderRun = \$true[\s\S]*?Invoke-PbAgenticFullE2E\.ps1 @gateArgs/,
   );
   assert.match(
     workflowSource,
@@ -137,7 +141,10 @@ test('requires explicit paid-run confirmation and disables automatic retries', (
   ]);
   assert.equal(matrix.modes.smoke.expectedDiscovered, 3);
   assert.match(runnerSource, /\[switch\]\s+\$ConfirmPaidProviderRun/);
-  assert.match(runnerSource, /if \(-not \$ConfirmPaidProviderRun\.IsPresent\) \{/);
+  assert.match(
+    runnerSource,
+    /if \(\$providerRequired -and -not \$ConfirmPaidProviderRun\.IsPresent\) \{/,
+  );
   assert.match(httpRunnerSource, /\[switch\]\s+\$ConfirmPaidProviderRun/);
   assert.match(
     httpRunnerSource,
