@@ -4,7 +4,7 @@ param(
     [string] $Ref = "main",
     [ValidateSet("openai", "gemini")]
     [string] $Provider = "openai",
-    [string] $QuickstartRef = "25954df626e8173fb1170593d7cbe3e7b370410c",
+    [string] $QuickstartRef = "0c22a6fe5ba5a456700656bf8f8d9a8cbc47033f",
     [string] $MetadataRef = "8f7c52a38bef3937afd030126f0ed6b0bdd49f88",
     [string] $UiRef = "99cda785b478c3351ef81242c630e0d47ff70421",
     [ValidateSet("source-checkout", "maven-central")]
