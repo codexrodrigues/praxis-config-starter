@@ -14,6 +14,15 @@ API-catalog ingestion. Its Java compiler proof is green locally; the real browse
 the next acceptance step. Live first-pass authoring remains a distinct certification axis and still
 requires its published canary and five-run stability series.
 
+The first remote integration cut was intentionally diagnostic, not a certification result. It
+revealed three independent gate defects: the Angular checkout had to build the complete Page Builder
+dependency closure instead of relying on pre-existing `dist`; the runtime browser context had to use
+the same authenticated user scope as the Config API fixture; and the Angular production-like source
+audit had encoded the literal live-lane variable rather than the real-backend safety invariant. The
+branches now contain corrections for all three, backed by local compiler, resolver, audit and
+scenario-discovery evidence. The runtime receipt is still absent, so the archetype remains
+uncertified until the next single Windows integration execution completes successfully.
+
 ## Decision
 
 `praxis-config-starter` should become the canonical control plane for AI-authored UI composition decisions. It should not generate Angular implementation code and it should not introduce a second page DSL.
