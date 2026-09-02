@@ -5,10 +5,14 @@ the published Config artifact; canonical single-table creation and semantic refi
 five consecutive local production-like runs; canonical CRUD-simple certified in five consecutive
 local production-like runs with zero retries; canonical Tabs/nested workspace and related-resource
 certified in five consecutive hosted production-like runs with zero retries, 2026-09-01.
-The independent `business-command` runtime correction, browser receipt and focal gate profile are
-implemented under [praxis-ui-angular#482](https://github.com/codexrodrigues/praxis-ui-angular/issues/482)
-and [praxis-config-starter#428](https://github.com/codexrodrigues/praxis-config-starter/issues/428),
-but remain uncertified until the published canary and five-run stability series pass.
+The independent `business-command` runtime correction and live-authoring focal gate are implemented
+under [praxis-ui-angular#482](https://github.com/codexrodrigues/praxis-ui-angular/issues/482) and
+[praxis-config-starter#428](https://github.com/codexrodrigues/praxis-config-starter/issues/428). A
+separate deterministic runtime-excellence profile now compiles and persists a certified
+`UiCompositionPlan` and exercises the complete command lifecycle without OpenAI, embeddings, RAG or
+API-catalog ingestion. Its Java compiler proof is green locally; the real browser execution remains
+the next acceptance step. Live first-pass authoring remains a distinct certification axis and still
+requires its published canary and five-run stability series.
 
 ## Decision
 
@@ -286,6 +290,26 @@ The matrix and portable validator reject a receipt that omits any of those asser
 the implementation path only. The archetype remains outside the certified portfolio count until a
 published-artifact canary and five consecutive hosted OpenAI runs pass with zero retry under one
 immutable coordinate.
+
+That live-authoring criterion does not gate runtime excellence. The matrix also owns
+`business-command-runtime-excellence`, which has `executionLane=runtime-excellence`, exactly one
+scenario, zero retries and `providerRequired=false`. It consumes
+`tools/e2e/fixtures/business-command-runtime-excellence.ui-composition-plan.json`, compiles the same
+semantic plan with the Java owner compiler and the built TypeScript package, persists the resulting
+`WidgetPageDefinition`, and then reuses the complete real employee command journey. The receipt is
+`praxis.page-builder-runtime-excellence-receipt/v1`; it proves source/compiled/persisted/reloaded
+hash lineage plus every discovery, confirmation, optimistic-concurrency, error, header, refresh,
+read-after-write and availability assertion. It deliberately contains no artificial prompt, turn,
+stream or backend-patch-authority evidence.
+
+The runner derives provider use from the matrix. In this deterministic lane it disables Spring AI,
+the vector store, API Metadata RAG, Domain Catalog RAG and Project Knowledge RAG; skips pgvector,
+Domain Catalog ingestion and API Catalog upload; and does not require
+`-ConfirmPaidProviderRun` or a provider key. PostgreSQL, Metadata, Config persistence, Quickstart
+resource endpoints, registry capabilities and the real Angular runtime remain mandatory. This
+separation classifies the original blocker as
+`ja-suportado-mal-nomeado-ou-mal-materializado`: the platform contracts existed, but the gate had
+incorrectly coupled runtime acceptance to live authoring infrastructure.
 
 The decision must describe semantic intent, archetype, resources, surfaces, actions, capabilities, components, slots, bindings and transactional lifecycle. It should materialize both compact authoring input and portable runtime output without leaking Angular implementation detail into Java.
 

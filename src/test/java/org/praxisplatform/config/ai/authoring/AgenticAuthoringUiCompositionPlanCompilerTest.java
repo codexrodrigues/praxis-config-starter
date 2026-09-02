@@ -5,6 +5,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HexFormat;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -14,6 +21,46 @@ class AgenticAuthoringUiCompositionPlanCompilerTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AgenticAuthoringUiCompositionPlanCompiler compiler =
             new AgenticAuthoringUiCompositionPlanCompiler(objectMapper);
+
+    @Test
+    void compilesCertifiedBusinessCommandRuntimeFixtureWithoutAiProvider() throws Exception {
+        Path fixture = Path.of(
+                "tools",
+                "e2e",
+                "fixtures",
+                "business-command-runtime-excellence.ui-composition-plan.json");
+        assertThat(Files.isRegularFile(fixture)).isTrue();
+
+        JsonNode plan = objectMapper.readTree(Files.readString(fixture));
+        assertThat(canonicalSha256(plan))
+                .as("the certified semantic plan identity must be platform-independent")
+                .isEqualTo("a774a8413eb89cccfed85d80abb4f8c56c48f94e58e04aec76e6614cc05d2aac");
+        AgenticAuthoringUiCompositionPlanCompiler.CompileResult result =
+                compiler.compile(plan, objectMapper.createObjectNode());
+
+        assertThat(result.valid())
+                .withFailMessage("Compilation failures: %s", result.failureCodes())
+                .isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+        JsonNode page = result.compiledFormPatch().at("/patch/page");
+        assertThat(page.path("layoutPreset").asText()).isEqualTo("master-detail-dashboard");
+        assertThat(page.path("widgets")).hasSize(2);
+        assertThat(page.at("/widgets/0/key").asText()).isEqualTo("funcionarios-master");
+        assertThat(page.at("/widgets/0/definition/id").asText()).isEqualTo("praxis-table");
+        assertThat(page.at("/widgets/0/definition/inputs/resourcePath").asText())
+                .isEqualTo("/api/human-resources/funcionarios");
+        assertThat(page.at("/widgets/0/definition/inputs/config/actions/row/discovery/enabled").asBoolean())
+                .isTrue();
+        assertThat(page.at("/widgets/1/definition/id").asText()).isEqualTo("praxis-dynamic-form");
+        assertThat(page.path("composition").path("links")).hasSize(2);
+        assertThat(page.at("/composition/links/0/intent").asText()).isEqualTo("state-write");
+        assertThat(page.at("/composition/links/1/intent").asText()).isEqualTo("state-read");
+        assertThat(canonicalSha256(page))
+                .as("the Java materialization must equal the TypeScript compiler projection")
+                .isEqualTo("721bca02b364a2b383e6a27cf9c5926d1f7c90fd07d34b87727b732cf0dd806b");
+        assertThat(result.compiledFormPatch().path("warnings")).extracting(JsonNode::asText)
+                .containsExactly("ui-composition-plan-compiled-by-config");
+    }
 
     @Test
     void compilesCanonicalPlanIntoTerminalPagePatch() throws Exception {
@@ -1053,5 +1100,28 @@ class AgenticAuthoringUiCompositionPlanCompilerTest {
         assertThat(result.diagnostics())
                 .extracting(diagnostic -> diagnostic.code() + "@" + diagnostic.path())
                 .containsExactly(expected);
+    }
+
+    private String canonicalSha256(JsonNode value) throws Exception {
+        byte[] bytes = objectMapper.writeValueAsString(canonicalize(value))
+                .getBytes(StandardCharsets.UTF_8);
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    }
+
+    private JsonNode canonicalize(JsonNode value) {
+        if (value.isObject()) {
+            ObjectNode result = objectMapper.createObjectNode();
+            var fields = new ArrayList<String>();
+            value.fieldNames().forEachRemaining(fields::add);
+            fields.sort(Comparator.naturalOrder());
+            fields.forEach(field -> result.set(field, canonicalize(value.get(field))));
+            return result;
+        }
+        if (value.isArray()) {
+            var result = objectMapper.createArrayNode();
+            value.forEach(item -> result.add(canonicalize(item)));
+            return result;
+        }
+        return value;
     }
 }

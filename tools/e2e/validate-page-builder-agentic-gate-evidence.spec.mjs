@@ -17,7 +17,15 @@ const crudProfile = resolveGateProfile(loadGateMatrix(), 'crud-simple');
 const masterDetailProfile = resolveGateProfile(loadGateMatrix(), 'master-detail');
 const relatedProfile = resolveGateProfile(loadGateMatrix(), 'related-resource');
 const businessCommandProfile = resolveGateProfile(loadGateMatrix(), 'business-command');
+const businessCommandRuntimeProfile = resolveGateProfile(
+  loadGateMatrix(),
+  'business-command-runtime-excellence',
+);
 const hash = 'a'.repeat(64);
+const runtimeCompiledHash =
+  '721bca02b364a2b383e6a27cf9c5926d1f7c90fd07d34b87727b732cf0dd806b';
+const runtimePlanHash =
+  'a774a8413eb89cccfed85d80abb4f8c56c48f94e58e04aec76e6614cc05d2aac';
 
 function jsonAttachment(name, value) {
   return {
@@ -203,6 +211,53 @@ function businessCommandReceipt() {
   };
 }
 
+function businessCommandRuntimeReceipt() {
+  return {
+    schemaVersion: 'praxis.page-builder-runtime-excellence-receipt/v1',
+    scenarioId: 'business-command-runtime-excellence',
+    archetype: 'business-command',
+    providerUsed: false,
+    materialization: {
+      sourceKind: 'praxis.ui-composition-plan',
+      sourceSha256: runtimePlanHash,
+      typescriptCompilerValid: true,
+      compiledPayloadSha256: runtimeCompiledHash,
+      persistedPayloadSha256: runtimeCompiledHash,
+      reloadPayloadSha256: runtimeCompiledHash,
+      persistedPageEquivalent: true,
+      reloadEquivalent: true,
+    },
+    persistence: {
+      version: 1,
+      etagPresent: true,
+    },
+    functionalAssertions: [
+      'materialization.ui-composition-plan-typescript-valid',
+      'materialization.persisted-page-equivalent',
+      'discovery.actions-capabilities.http-200',
+      'command.contract-form-confirmation-version',
+      'command.confirmation-cancelled',
+      'command.cancelled-not-sent',
+      'command.stale-version.http-412',
+      'command.governed-error-visible',
+      'command.confirmation-accepted',
+      'command.governed-headers-observed',
+      'command.execute.http-200',
+      'resource.refresh-observed',
+      'resource.read-after-write-observed',
+      'resource.availability-transition-observed',
+      'persistence.reload-equivalent',
+    ],
+    timingMs: {
+      planCompiled: 10,
+      persisted: 20,
+      runtimeFunctional: 40,
+      reloadCompleted: 50,
+      total: 50,
+    },
+  };
+}
+
 function result(attachments = []) {
   return {
     status: 'passed',
@@ -359,6 +414,34 @@ function businessCommandReport() {
       startTime: '2026-09-01T00:00:00.000Z',
       duration: 100,
       expected: 2,
+      skipped: 0,
+      unexpected: 0,
+      flaky: 0,
+    },
+  };
+}
+
+function businessCommandRuntimeReport() {
+  return {
+    config: {},
+    suites: [{
+      title: 'business-command-runtime-excellence',
+      file: 'business-command-runtime-excellence.spec.ts',
+      column: 1,
+      line: 1,
+      specs: [spec(
+        businessCommandRuntimeProfile.requiredPassedTests[0],
+        [jsonAttachment(
+          'business-command-runtime-excellence-receipt.json',
+          businessCommandRuntimeReceipt(),
+        )],
+      )],
+    }],
+    errors: [],
+    stats: {
+      startTime: '2026-09-02T00:00:00.000Z',
+      duration: 100,
+      expected: 1,
       skipped: 0,
       unexpected: 0,
       flaky: 0,
@@ -541,6 +624,42 @@ test('accepts an independent zero-retry business-command report', () => {
   assert.equal(summary.retries, 0);
   assert.equal(summary.receipts[0].scenarioId, 'business-command-control');
   assert.equal(summary.receipts[0].firstPassFunctional, true);
+});
+
+test('accepts business-command runtime excellence without agentic authoring evidence', () => {
+  const summary = validateGateReport(
+    businessCommandRuntimeReport(),
+    '/tmp/business-command-runtime-excellence-report.json',
+    businessCommandRuntimeProfile,
+  );
+  assert.equal(summary.discovered, 1);
+  assert.deepEqual(summary.receipts, []);
+  assert.equal(summary.runtimeExcellenceReceipts.length, 1);
+  assert.equal(
+    summary.runtimeExcellenceReceipts[0].scenarioId,
+    'business-command-runtime-excellence',
+  );
+  assert.equal(summary.runtimeExcellenceReceipts[0].providerUsed, false);
+});
+
+test('rejects runtime excellence when compiled and persisted materializations diverge', () => {
+  const value = businessCommandRuntimeReport();
+  mutateAttachment(
+    value,
+    'Business command executa lifecycle',
+    'business-command-runtime-excellence-receipt.json',
+    (body) => {
+      body.materialization.persistedPayloadSha256 = 'b'.repeat(64);
+    },
+  );
+  assert.throws(
+    () => validateGateReport(
+      value,
+      '/tmp/business-command-runtime-excellence-report.json',
+      businessCommandRuntimeProfile,
+    ),
+    /materialization lineage is incomplete/,
+  );
 });
 
 test('rejects CRUD evidence that omits one functional operation', () => {

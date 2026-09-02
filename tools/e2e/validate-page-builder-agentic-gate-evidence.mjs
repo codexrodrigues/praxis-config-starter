@@ -176,6 +176,87 @@ function validateReceipt(receipt, definition, retry) {
   };
 }
 
+function validateRuntimeExcellenceReceipt(receipt, definition, retry) {
+  assertExactKeys(receipt, [
+    'schemaVersion',
+    'scenarioId',
+    'archetype',
+    'providerUsed',
+    'materialization',
+    'persistence',
+    'functionalAssertions',
+    'timingMs',
+  ], `Runtime excellence receipt ${definition.scenarioId}`);
+  assertCondition(
+    receipt.schemaVersion === 'praxis.page-builder-runtime-excellence-receipt/v1',
+    `Runtime excellence receipt ${definition.scenarioId} has an unexpected schemaVersion.`,
+  );
+  assertCondition(
+    receipt.scenarioId === definition.scenarioId && receipt.archetype === definition.archetype,
+    `Runtime excellence receipt ${definition.scenarioId} identity diverges from the gate matrix.`,
+  );
+  assertCondition(receipt.providerUsed === false && retry === 0,
+    `Runtime excellence receipt ${definition.scenarioId} must not use a provider or Playwright retry.`);
+
+  assertExactKeys(receipt.materialization, [
+    'sourceKind',
+    'sourceSha256',
+    'typescriptCompilerValid',
+    'compiledPayloadSha256',
+    'persistedPayloadSha256',
+    'reloadPayloadSha256',
+    'persistedPageEquivalent',
+    'reloadEquivalent',
+  ], `Runtime excellence receipt ${definition.scenarioId} materialization`);
+  const materialization = receipt.materialization;
+  assertCondition(materialization.sourceKind === 'praxis.ui-composition-plan'
+      && materialization.typescriptCompilerValid === true
+      && /^[0-9a-f]{64}$/.test(materialization.sourceSha256)
+      && materialization.sourceSha256 === definition.expectedPlanFixtureSha256
+      && /^[0-9a-f]{64}$/.test(materialization.compiledPayloadSha256)
+      && materialization.compiledPayloadSha256 === definition.expectedCompiledPayloadSha256
+      && materialization.compiledPayloadSha256 === materialization.persistedPayloadSha256
+      && materialization.persistedPayloadSha256 === materialization.reloadPayloadSha256
+      && materialization.persistedPageEquivalent === true
+      && materialization.reloadEquivalent === true,
+  `Runtime excellence receipt ${definition.scenarioId} materialization lineage is incomplete.`);
+
+  assertExactKeys(receipt.persistence, ['version', 'etagPresent'],
+    `Runtime excellence receipt ${definition.scenarioId} persistence`);
+  assertCondition(Number.isInteger(receipt.persistence.version)
+      && receipt.persistence.version >= 1
+      && receipt.persistence.etagPresent === true,
+  `Runtime excellence receipt ${definition.scenarioId} persistence is incomplete.`);
+
+  assertUniqueStrings(
+    receipt.functionalAssertions,
+    `Runtime excellence receipt ${definition.scenarioId} functionalAssertions`,
+    /^[a-z0-9][a-z0-9.-]{0,119}$/,
+  );
+  assertCondition(sameOrderedStrings(
+    [...receipt.functionalAssertions].sort(),
+    [...definition.requiredFunctionalAssertions].sort(),
+  ), `Runtime excellence receipt ${definition.scenarioId} functional assertions diverge from the gate matrix.`);
+
+  const milestones = ['planCompiled', 'persisted', 'runtimeFunctional', 'reloadCompleted', 'total'];
+  assertExactKeys(receipt.timingMs, milestones,
+    `Runtime excellence receipt ${definition.scenarioId} timingMs`);
+  const timingValues = milestones.map((name) => receipt.timingMs[name]);
+  assertCondition(timingValues.every((value) => Number.isInteger(value) && value >= 0),
+    `Runtime excellence receipt ${definition.scenarioId} timings must be non-negative integers.`);
+  assertCondition(timingValues.slice(1).every((value, index) => value >= timingValues[index])
+      && receipt.timingMs.reloadCompleted === receipt.timingMs.total,
+  `Runtime excellence receipt ${definition.scenarioId} timing milestones are not monotonic.`);
+
+  return {
+    scenarioId: definition.scenarioId,
+    providerUsed: false,
+    totalMs: receipt.timingMs.total,
+    sourceSha256: materialization.sourceSha256,
+    persistedPayloadSha256: materialization.persistedPayloadSha256,
+  };
+}
+
 function validateSemanticRefinement(evidence, definition, profile) {
   assertObject(evidence, `Semantic refinement ${definition.scenarioId}`);
   assertCondition(evidence.canonicalFocalRefinement === true,
@@ -276,6 +357,14 @@ export function validateGateReport(report, reportPath, profile) {
     const result = resultByTitle.get(definition.testTitle);
     return validateReceipt(findAttachment(result, definition, reportPath), definition, result.retry);
   });
+  const runtimeExcellenceReceipts = profile.runtimeExcellenceReceiptRequirements.map((definition) => {
+    const result = resultByTitle.get(definition.testTitle);
+    return validateRuntimeExcellenceReceipt(
+      findAttachment(result, definition, reportPath),
+      definition,
+      result.retry,
+    );
+  });
   const semanticRefinements = profile.semanticRefinementRequirements.map((definition) => {
     const result = resultByTitle.get(definition.testTitle);
     return validateSemanticRefinement(findAttachment(result, definition, reportPath), definition, profile);
@@ -288,6 +377,7 @@ export function validateGateReport(report, reportPath, profile) {
     passed: titles.length,
     retries: 0,
     receipts,
+    runtimeExcellenceReceipts,
     semanticRefinements,
   };
 }
