@@ -4,16 +4,17 @@ Status: canonical master-detail certified in five consecutive hosted production-
 the published Config artifact; canonical single-table creation and semantic refinement stable in
 five consecutive local production-like runs; canonical CRUD-simple certified in five consecutive
 local production-like runs with zero retries; canonical Tabs/nested workspace and related-resource
-certified in five consecutive hosted production-like runs with zero retries, 2026-09-01.
+certified in five consecutive hosted production-like runs with zero retries, 2026-09-01; canonical
+`business-command` runtime excellence certified in five consecutive hosted production-like runs
+with zero retries and no AI provider, 2026-09-02.
 The independent `business-command` runtime correction and live-authoring focal gate are implemented
 under [praxis-ui-angular#482](https://github.com/codexrodrigues/praxis-ui-angular/issues/482) and
 [praxis-config-starter#428](https://github.com/codexrodrigues/praxis-config-starter/issues/428). A
 separate deterministic runtime-excellence profile now compiles and persists a certified
 `UiCompositionPlan` and exercises the complete command lifecycle without OpenAI, embeddings, RAG or
-API-catalog ingestion. Its Java and TypeScript compiler proofs and its first real-browser canary are
-green; the five-run deterministic stability series remains the final runtime-excellence acceptance
-step. Live first-pass authoring remains a distinct certification axis and still requires its own
-published canary and five-run stability series.
+API-catalog ingestion. Its Java and TypeScript compiler proofs, real-browser canary and five-run
+deterministic stability certificate are green. Live first-pass authoring remains a distinct
+certification axis and still requires its own published canary and five-run stability series.
 
 The first remote integration cut was intentionally diagnostic, not a certification result. It
 revealed three independent gate defects: the Angular checkout had to build the complete Page Builder
@@ -47,6 +48,26 @@ fixture now declares server-side `id desc`, the browser must observe `sort=id,de
 must include `resource.deterministic-default-sort-observed`. The Java and TypeScript compilers agree
 on the corrected plan and payload hashes. Because the semantic plan and Angular proof changed, the
 three earlier passes do not count toward certification and the stability series restarts at zero.
+
+The corrected immutable cut then passed a fresh canary
+[`33680251218`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33680251218)
+and five strictly sequential hosted runs with no retry:
+[`33681311664`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33681311664),
+[`33682227811`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33682227811),
+[`33683411353`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33683411353),
+[`33684499316`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33684499316) and
+[`33685643624`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33685643624).
+The portable aggregate validator accepted five unique report hashes, `5/5` discovered/passed, zero
+retries, `providerUsed=false` in every receipt and one immutable coordinate
+`99947732cb34a35bd514deb1525b9293000ded1736f7719fb3700014d041e78b`. The certified source plan is
+`694dba6cb77d9f243754dc7c48d82c8f3ae12313c70cbfd7729c6b6943f4e9d8`; Java and TypeScript
+materialize the byte-equivalent persisted payload
+`8c5742a203354a30724c3614cdd748a682c8a953c6829e2f98312b2289c9af31`. The five Playwright results
+totaled 363,959 ms; functional journey durations ranged from 62,248 to 71,376 ms. The exercised code
+heads were Config `e74fceb3bbee310efdeabf844102724f71a810f2`, Angular
+`fa0e69bbb66d9516ec1274255a8b488ae4053788`, Metadata
+`8f7c52a38bef3937afd030126f0ed6b0bdd49f88` and Quickstart
+`6a3fe77a74eb192cfb0f20ae592af16491c86c30`.
 
 ## Decision
 
