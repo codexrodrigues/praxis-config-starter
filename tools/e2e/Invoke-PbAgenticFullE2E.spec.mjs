@@ -108,6 +108,15 @@ test('exposes one exclusive paid lane and removes combinable paid toggles', () =
   assert.doesNotMatch(workflowSource, /page-builder-http-sse/);
 });
 
+test('uploads every artifact referenced by the runtime-excellence result', () => {
+  assert.match(
+    workflowSource,
+    /page-builder-agentic-e2e\/\*\*\/evidence-validation-summary\.json/,
+  );
+  assert.match(workflowSource, /page-builder-agentic-e2e\/\*\*\/result\.json/);
+  assert.match(workflowSource, /page-builder-agentic-e2e\/\*\*\/source-audit\.json/);
+});
+
 test('blocks every paid lane behind the protected GitHub environment', () => {
   assert.match(
     workflowSource,

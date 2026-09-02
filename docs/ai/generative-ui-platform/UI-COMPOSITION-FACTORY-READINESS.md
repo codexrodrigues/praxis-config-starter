@@ -20,8 +20,18 @@ dependency closure instead of relying on pre-existing `dist`; the runtime browse
 the same authenticated user scope as the Config API fixture; and the Angular production-like source
 audit had encoded the literal live-lane variable rather than the real-backend safety invariant. The
 branches now contain corrections for all three, backed by local compiler, resolver, audit and
-scenario-discovery evidence. The runtime receipt is still absent, so the archetype remains
-uncertified until the next single Windows integration execution completes successfully.
+scenario-discovery evidence.
+
+[The provider-independent Windows canary](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33670821997)
+then passed on 2026-09-02 against Config `392b7a01`, Angular `9dbc33fc5`, Metadata
+`8f7c52a3` and Quickstart `6a3fe77a`: one scenario discovered and passed, zero retry, zero critical
+mock, `providerUsed=false`, byte-identical Config JAR and 15 validated functional assertions. The
+runtime journey took 72,007 ms and the complete Playwright run 78,378 ms. Source plan
+`a774a841...d2aac` compiled, persisted and reloaded as payload `721bca02...806b`; registry
+capabilities remained non-degraded. This is the successful canary, not the five-run stability
+certificate. The canary also exposed one final evidence-packaging gap: the workflow result referenced
+the sanitized validation summary but did not upload it. That derived-artifact path is now corrected;
+the stability series must use the resulting immutable Config head.
 
 ## Decision
 
