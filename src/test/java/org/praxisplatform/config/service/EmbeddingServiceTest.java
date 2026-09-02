@@ -129,10 +129,14 @@ class EmbeddingServiceTest {
         when(providerFailure.statusCode()).thenReturn(429);
         when(providerFailure.code()).thenReturn(Optional.of("rate_limit_exceeded"));
         when(providerFailure.type()).thenReturn(Optional.of("requests"));
-        when(providerFailure.headers()).thenReturn(Headers.builder().put("retry-after-ms", "1500").build());
+        when(providerFailure.headers()).thenReturn(Headers.builder()
+                .put("retry-after-ms", "1500")
+                .put("x-request-id", "req_embedding_safe_123")
+                .build());
         when(client.call(any(EmbeddingRequest.class))).thenThrow(providerFailure);
 
-        EmbeddingService service = new EmbeddingService(provider(client), emptyGoogleGenAiProvider(), new ObjectMapper());
+        EmbeddingService service =
+                new EmbeddingService(provider(client), emptyGoogleGenAiProvider(), new ObjectMapper());
         ReflectionTestUtils.setField(service, "provider", "openai");
         ReflectionTestUtils.setField(service, "openaiApiKey", "key");
         ReflectionTestUtils.setField(service, "openaiModel", "text-embedding-3-large");
@@ -145,8 +149,36 @@ class EmbeddingServiceTest {
 
         assertEquals(AiProviderCallException.Kind.RATE_LIMIT, failure.getKind());
         assertEquals("openai HTTP 429 (rate_limit)", failure.getMessage());
+        assertEquals("req_embedding_safe_123", failure.getProviderRequestId());
         org.junit.jupiter.api.Assertions.assertTrue(
                 !failure.getRetryAfter().isBefore(before.plusMillis(1500)));
+    }
+
+    @Test
+    void embedDiscardsUnsafeOpenAiRequestId() {
+        OpenAiEmbeddingModel client = Mockito.mock(OpenAiEmbeddingModel.class);
+        OpenAIServiceException providerFailure = Mockito.mock(OpenAIServiceException.class);
+        when(providerFailure.statusCode()).thenReturn(429);
+        when(providerFailure.code()).thenReturn(Optional.of("rate_limit_exceeded"));
+        when(providerFailure.type()).thenReturn(Optional.of("requests"));
+        when(providerFailure.headers()).thenReturn(Headers.builder()
+                .put("x-request-id", "req_safe\ninjected-log=true")
+                .build());
+        when(client.call(any(EmbeddingRequest.class))).thenThrow(providerFailure);
+
+        EmbeddingService service =
+                new EmbeddingService(provider(client), emptyGoogleGenAiProvider(), new ObjectMapper());
+        ReflectionTestUtils.setField(service, "provider", "openai");
+        ReflectionTestUtils.setField(service, "openaiApiKey", "key");
+        ReflectionTestUtils.setField(service, "openaiModel", "text-embedding-3-large");
+        ReflectionTestUtils.setField(service, "openaiDimensions", 768);
+
+        AiProviderCallException failure = assertThrows(
+                AiProviderCallException.class,
+                () -> service.embed("only document"));
+
+        org.junit.jupiter.api.Assertions.assertNull(failure.getProviderRequestId());
+        assertEquals("openai HTTP 429 (rate_limit)", failure.getMessage());
     }
 
     @Test

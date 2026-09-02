@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import java.time.Instant;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * Falha normalizada em chamadas sincronas de providers AI.
@@ -10,6 +11,10 @@ import java.util.Locale;
  * opacas do SDK ou do HTTP client.</p>
  */
 public final class AiProviderCallException extends RuntimeException {
+
+    private static final int MAX_PROVIDER_REQUEST_ID_LENGTH = 128;
+    private static final Pattern SAFE_PROVIDER_REQUEST_ID =
+            Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]*");
 
     public enum Kind {
         TRANSPORT,
@@ -27,12 +32,14 @@ public final class AiProviderCallException extends RuntimeException {
     private final Kind kind;
     private final Integer statusCode;
     private final Instant retryAfter;
+    private final String providerRequestId;
 
     private AiProviderCallException(
             String provider,
             Kind kind,
             Integer statusCode,
             Instant retryAfter,
+            String providerRequestId,
             String message,
             Throwable cause) {
         super(message, cause);
@@ -40,6 +47,7 @@ public final class AiProviderCallException extends RuntimeException {
         this.kind = kind != null ? kind : Kind.UNKNOWN;
         this.statusCode = statusCode;
         this.retryAfter = retryAfter;
+        this.providerRequestId = sanitizeProviderRequestId(providerRequestId);
     }
 
     public String getProvider() {
@@ -58,6 +66,14 @@ public final class AiProviderCallException extends RuntimeException {
         return retryAfter;
     }
 
+    /**
+     * Returns the provider-owned request identifier when it is safe for operational correlation.
+     * Raw provider headers are deliberately not retained.
+     */
+    public String getProviderRequestId() {
+        return providerRequestId;
+    }
+
     public static AiProviderCallException fromHttpStatus(String provider, int statusCode, String reason) {
         return fromHttpStatus(provider, statusCode, reason, null);
     }
@@ -73,7 +89,7 @@ public final class AiProviderCallException extends RuntimeException {
             String reason,
             Instant retryAfter,
             Throwable cause) {
-        return fromHttpStatus(provider, statusCode, reason, retryAfter, cause, true);
+        return fromHttpStatus(provider, statusCode, reason, retryAfter, null, cause, true);
     }
 
     public static AiProviderCallException fromHttpStatusSanitized(
@@ -82,7 +98,24 @@ public final class AiProviderCallException extends RuntimeException {
             String classificationHint,
             Instant retryAfter,
             Throwable cause) {
-        return fromHttpStatus(provider, statusCode, classificationHint, retryAfter, cause, false);
+        return fromHttpStatus(provider, statusCode, classificationHint, retryAfter, null, cause, false);
+    }
+
+    public static AiProviderCallException fromHttpStatusSanitized(
+            String provider,
+            int statusCode,
+            String classificationHint,
+            Instant retryAfter,
+            String providerRequestId,
+            Throwable cause) {
+        return fromHttpStatus(
+                provider,
+                statusCode,
+                classificationHint,
+                retryAfter,
+                providerRequestId,
+                cause,
+                false);
     }
 
     private static AiProviderCallException fromHttpStatus(
@@ -90,6 +123,7 @@ public final class AiProviderCallException extends RuntimeException {
             int statusCode,
             String reason,
             Instant retryAfter,
+            String providerRequestId,
             Throwable cause,
             boolean includeReason) {
         Kind kind;
@@ -112,7 +146,8 @@ public final class AiProviderCallException extends RuntimeException {
         if (includeReason && reason != null && !reason.isBlank()) {
             message += ": " + reason;
         }
-        return new AiProviderCallException(provider, kind, statusCode, retryAfter, message, cause);
+        return new AiProviderCallException(
+                provider, kind, statusCode, retryAfter, providerRequestId, message, cause);
     }
 
     private static boolean isQuotaExhausted(String reason) {
@@ -130,15 +165,30 @@ public final class AiProviderCallException extends RuntimeException {
     }
 
     public static AiProviderCallException timeout(String provider, Throwable cause) {
-        return new AiProviderCallException(provider, Kind.TIMEOUT, null, null, provider + " call timed out", cause);
+        return new AiProviderCallException(
+                provider, Kind.TIMEOUT, null, null, null, provider + " call timed out", cause);
     }
 
     public static AiProviderCallException transport(String provider, Throwable cause) {
         return new AiProviderCallException(
-                provider, Kind.TRANSPORT, null, null, provider + " call transport failure", cause);
+                provider, Kind.TRANSPORT, null, null, null, provider + " call transport failure", cause);
     }
 
     public static AiProviderCallException unknown(String provider, Throwable cause) {
-        return new AiProviderCallException(provider, Kind.UNKNOWN, null, null, provider + " call failed", cause);
+        return new AiProviderCallException(
+                provider, Kind.UNKNOWN, null, null, null, provider + " call failed", cause);
+    }
+
+    private static String sanitizeProviderRequestId(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        if (normalized.isEmpty()
+                || normalized.length() > MAX_PROVIDER_REQUEST_ID_LENGTH
+                || !SAFE_PROVIDER_REQUEST_ID.matcher(normalized).matches()) {
+            return null;
+        }
+        return normalized;
     }
 }
