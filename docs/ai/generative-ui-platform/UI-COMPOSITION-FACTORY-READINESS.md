@@ -6,7 +6,8 @@ five consecutive local production-like runs; canonical CRUD-simple certified in 
 local production-like runs with zero retries; canonical Tabs/nested workspace and related-resource
 certified in five consecutive hosted production-like runs with zero retries, 2026-09-01; canonical
 `business-command` runtime excellence certified in five consecutive hosted production-like runs
-with zero retries and no AI provider, 2026-09-02.
+with zero retries and no AI provider, followed by five consecutive live OpenAI first-pass runs with
+zero retries, 2026-09-02.
 The independent `business-command` runtime correction and live-authoring focal gate are implemented
 under [praxis-ui-angular#482](https://github.com/codexrodrigues/praxis-ui-angular/issues/482) and
 [praxis-config-starter#428](https://github.com/codexrodrigues/praxis-config-starter/issues/428). A
@@ -14,7 +15,7 @@ separate deterministic runtime-excellence profile now compiles and persists a ce
 `UiCompositionPlan` and exercises the complete command lifecycle without OpenAI, embeddings, RAG or
 API-catalog ingestion. Its Java and TypeScript compiler proofs, real-browser canary and five-run
 deterministic stability certificate are green. Live first-pass authoring remains a distinct
-certification axis and still requires its own published canary and five-run stability series.
+certification axis; its published canary and five-run stability series are now also green.
 
 The first remote integration cut was intentionally diagnostic, not a certification result. It
 revealed three independent gate defects: the Angular checkout had to build the complete Page Builder
@@ -68,6 +69,54 @@ heads were Config `e74fceb3bbee310efdeabf844102724f71a810f2`, Angular
 `fa0e69bbb66d9516ec1274255a8b488ae4053788`, Metadata
 `8f7c52a38bef3937afd030126f0ed6b0bdd49f88` and Quickstart
 `6a3fe77a74eb192cfb0f20ae592af16491c86c30`.
+
+### Live OpenAI first-pass certificate
+
+The live `business-command` axis is independently certified against OpenAI, PostgreSQL/pgvector,
+Domain Catalog RAG, Quickstart and the Angular browser runtime. The first dispatch from a feature
+branch, [`33687277738`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33687277738),
+was rejected by the paid environment's `main`-only deployment policy before execution and is not a
+product result. The first `main` dispatch,
+[`33687401972`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33687401972),
+stopped during API Catalog embedding with `EMBEDDING_FAILED`, provider `openai` and
+`quota_exhausted`, before authoring or browser execution. A direct embeddings probe with the local
+project credential succeeded, proving that the repository environment secret referenced an older
+OpenAI project credential. After replacing that secret with the locally verified credential, the
+published canary
+[`33688501013`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33688501013)
+passed. The two pre-canary runs remain excluded from certification.
+
+The corrected immutable `main` cut then passed five strictly sequential live runs, with no rerun or
+retry:
+[`33689603198`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33689603198),
+[`33690522008`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33690522008),
+[`33691413901`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33691413901),
+[`33692288038`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33692288038) and
+[`33693050571`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33693050571).
+The portable aggregate accepted `5/5` runs, `10/10` tests, zero retries, five unique report hashes,
+one immutable coordinate
+`eb8f84c4e04e4e49e74fcbcc6d733f4eaf5f65dcf054ac0b7141188edb7b7667` and 490,469 ms of total
+Playwright duration. Every business-command receipt proves one initial prompt and one total turn,
+with zero clarification, governed revision, corrective typed prompt or deterministic repair. Every
+receipt is first-pass functional, contains the complete thirteen-assertion command lifecycle and
+persists/reloads the same payload hash
+`26db523197b75a8ace831f3644e3828b6c303237b9e3298babfa569d2f34b046`. Functional journey duration
+ranged from 86,358 to 99,350 ms.
+
+The live cut exercised Config `d49594cf7994d980ddd932631c5eae1a128745a9`, Angular
+`c0542bb9cd1a46327f7d8877adb81ab2fd2696bc`, Metadata
+`8f7c52a38bef3937afd030126f0ed6b0bdd49f88` and Quickstart
+`6a3fe77a74eb192cfb0f20ae592af16491c86c30`, using OpenAI for both authoring and embeddings. This
+closes the live first-pass criterion for the certified source cut. It does not claim that the live
+payload must be byte-identical to the provider-independent fixture: the two axes share the governed
+functional contract but attest different inputs and coordinates.
+
+The source cut is ready for a controlled Ergo productivity pilot of this archetype. It is not yet
+an unconditional factory default: the new Config code is newer than the Maven Central `rc.145`
+release, so a phase-closing release and one `config_artifact_source=maven-central` smoke remain
+required before the published-artifact criterion can close. The Ergo pilot must then measure typed
+prompts/turns, handwritten TypeScript/HTML/configuration, elapsed implementation time and functional
+rework; green library gates alone do not prove the factory productivity outcome.
 
 ## Decision
 
