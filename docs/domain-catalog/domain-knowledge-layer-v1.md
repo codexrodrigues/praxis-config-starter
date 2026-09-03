@@ -461,8 +461,12 @@ impact locally. `decisionDiagnostics` identifies the decision as governed
 semantic authoring owned by `praxis-config-starter`, records whether the source
 is persisted or ad hoc, and summarizes coverage, predicted materializations,
 required approvals and warnings. A materialization row may point to
-`target_layer=form_config`, but applying that payload to `FormConfig` remains a
-separate reviewed authoring operation.
+`target_layer=form_config`. For `visual_guidance`, publication can compile and
+apply that derived projection when `definition.materializationTargets[]`
+identifies the exact `praxis-dynamic-form` artifact and the canonical parameters
+contain the visual target and message. Without that explicit target, applying a
+payload to an arbitrary `FormConfig` remains a separate reviewed authoring
+operation.
 
 The definition timeline endpoint is a read-only observability projection. It is
 derived from the canonical definition and materialization records and may expose

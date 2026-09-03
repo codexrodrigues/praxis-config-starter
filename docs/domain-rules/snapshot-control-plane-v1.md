@@ -162,8 +162,11 @@ baseline; complete compilation, composition and hash checks apply to the new can
 
 This closes both maker-checker layers. Definition and materialization reads,
 including safe timelines, require `RULE_DEFINITION_READER` and use the
-server-resolved tenant/environment. Definition creation, intake and structural
-simulation require `RULE_DEFINITION_AUTHOR`; draft/proposed authoring transitions use the same role;
+server-resolved tenant/environment. Definition creation and intake require
+`RULE_DEFINITION_AUTHOR`; structural simulation requires either
+`RULE_DEFINITION_AUTHOR` or `RULE_DEFINITION_APPROVER`, so the independent
+reviewer can recompute canonical readiness without receiving authoring authority;
+draft/proposed authoring transitions continue to use the author role;
 approval, rejection, activation and retirement require
 `RULE_DEFINITION_APPROVER`, whose authenticated actor must differ from the
 persisted author. Snapshot reads require `RULE_SNAPSHOT_READER`; composition

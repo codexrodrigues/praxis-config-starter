@@ -50,6 +50,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class DomainRuleController {
 
     private static final String DEFINITION_READER_ROLE = "RULE_DEFINITION_READER";
+    private static final String DEFINITION_AUTHOR_ROLE = "RULE_DEFINITION_AUTHOR";
+    private static final String DEFINITION_APPROVER_ROLE = "RULE_DEFINITION_APPROVER";
 
     private final DomainRuleService domainRuleService;
     private final DomainRuleGovernancePrincipalResolver principalResolver;
@@ -197,13 +199,22 @@ public class DomainRuleController {
     }
 
     @PostMapping("/simulations")
+    @Operation(summary = "Simulate a governed domain-rule definition",
+            description = "Runs the canonical structural simulation for an authenticated definition author or approver. Readers and auditors cannot create simulation evidence.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Canonical simulation and publication readiness"),
+            @ApiResponse(responseCode = "403", description = "Principal lacks RULE_DEFINITION_AUTHOR and RULE_DEFINITION_APPROVER")
+    })
     public ResponseEntity<DomainRuleSimulationResponse> simulate(
             @RequestBody DomainRuleSimulationRequest request,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-Env", required = false) String environment,
             HttpServletRequest servletRequest) {
-        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
-                servletRequest, tenantId, environment, "RULE_DEFINITION_AUTHOR");
+        DomainRuleGovernancePrincipal principal = principalResolver.resolveAnyRole(
+                servletRequest,
+                tenantId,
+                environment,
+                List.of(DEFINITION_AUTHOR_ROLE, DEFINITION_APPROVER_ROLE));
         return ResponseEntity.ok(domainRuleService.simulate(
                 request, principal.tenantId(), principal.environment()));
     }

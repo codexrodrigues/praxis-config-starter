@@ -4307,7 +4307,7 @@ components:
 
     DomainRuleParameters:
       type: object
-      description: Parametros extensíveis de uma decisao governada. A propriedade `reactiveDetermination` e fechada quando o alvo explicito for `backend_determination/resource-reactive-determination`; outros tipos de regra continuam podendo publicar seus parametros canonicos.
+      description: Parametros extensíveis de uma decisao governada. A propriedade `reactiveDetermination` e fechada quando o alvo explicito for `backend_determination/resource-reactive-determination`. Para `visual_guidance` com alvo explícito `form_config/praxis-dynamic-form`, `visualBlockId` e `message` (ou `definition.summary`) permitem ao Config compilar a projeção `rule.visualBlockGuidance.add`; `materializedRuleId` e `severity` são opcionais. Outros tipos de regra continuam podendo publicar seus parametros canonicos.
       properties:
         reactiveDetermination:
           $ref: '#/components/schemas/DomainRuleReactiveDeterminationSpec'

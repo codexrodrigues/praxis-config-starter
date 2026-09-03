@@ -17,6 +17,19 @@ const windowsRunnerSource = readFileSync(
   'utf8',
 );
 
+test('resolves the smoke release gate with the governed mission scope required by its master-detail receipt', () => {
+  const profile = resolveGateProfile(loadGateMatrix(), 'smoke');
+
+  assert.equal(profile.domainCatalogRagRequired, true);
+  assert.equal(profile.domainCatalogResourceKey, 'operations.missoes');
+  assert.equal(profile.apiCatalogGroup, 'operations');
+  assert.deepEqual(profile.apiCatalogPathPrefixes, ['/api/operations/missoes']);
+  assert.deepEqual(profile.receiptRequirements.map((entry) => entry.scenarioId), [
+    'live-resource-workspace-command',
+  ]);
+  assert.equal(profile.receiptRequirements[0].archetype, 'master-detail-command');
+});
+
 test('validates the canonical matrix and resolves the single-table profile', () => {
   const matrix = loadGateMatrix();
   const profile = resolveGateProfile(matrix, 'single-table');
