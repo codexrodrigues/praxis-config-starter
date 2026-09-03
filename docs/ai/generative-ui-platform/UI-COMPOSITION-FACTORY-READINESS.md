@@ -111,12 +111,27 @@ closes the live first-pass criterion for the certified source cut. It does not c
 payload must be byte-identical to the provider-independent fixture: the two axes share the governed
 functional contract but attest different inputs and coordinates.
 
-The source cut is ready for a controlled Ergo productivity pilot of this archetype. It is not yet
-an unconditional factory default: the new Config code is newer than the Maven Central `rc.145`
-release, so a phase-closing release and one `config_artifact_source=maven-central` smoke remain
-required before the published-artifact criterion can close. The Ergo pilot must then measure typed
-prompts/turns, handwritten TypeScript/HTML/configuration, elapsed implementation time and functional
-rework; green library gates alone do not prove the factory productivity outcome.
+Published-artifact closure is also green. Config release
+[`v0.1.0-rc.146`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33694735673)
+was published to Maven Central, and Quickstart
+[`#262`](https://github.com/codexrodrigues/praxis-api-quickstart/pull/262) adopted that exact
+coordinate. The phase-closing
+[`33698631544`](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33698631544)
+smoke used `config_artifact_source=maven-central`, skipped the local Config install, resolved
+`rc.146`, and packaged it as `BOOT-INF/lib/praxis-config-starter-0.1.0-rc.146.jar`. The downloaded
+reference JAR and the nested Quickstart JAR were byte-identical at SHA-256
+`6455b3d6efd67b6ce268e6b00b51b7899fb871640f6eb76db1054b4ec23b8dc8`. The portable validator
+accepted `2/2` tests, zero retries, first-pass functionality, report
+`4b966cf5d2789344ddb9de306b19992f45094824ec337686eb2609eabdeea022` and result
+`dff5cec5eea582d72b058978020dd30ed1d797aa6987d3db35d42983489971e8`; the functional journey took
+94,481 ms and persisted the same live payload hash as the five-run source series.
+
+The published `business-command` archetype is therefore ready for a controlled Ergo productivity
+pilot. It is not yet an unconditional factory default: the pilot must measure typed prompts/turns,
+handwritten TypeScript/HTML/configuration, elapsed implementation time and functional rework, and
+the remaining certified archetypes must receive the same source-versus-published rigor. Green
+library gates prove executable capability and first-pass stability; they do not by themselves prove
+the factory productivity outcome in a consumer migration.
 
 ## Decision
 
