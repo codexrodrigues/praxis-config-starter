@@ -272,6 +272,12 @@
   "modes": {
     "smoke": {
       "description": "Release gate with one canonical live LLM authoring journey plus deterministic dependency and transport guards, without automatic retries.",
+      "domainCatalogRagRequired": true,
+      "domainCatalogResourceKey": "operations.missoes",
+      "apiCatalogGroup": "operations",
+      "apiCatalogPathPrefixes": [
+        "/api/operations/missoes"
+      ],
       "scenarios": [
         "critical-interception-guard",
         "governed-capabilities-provenance",

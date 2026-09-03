@@ -38,6 +38,9 @@ Esse runner:
 - usa `-ValidationMode smoke` como gate de release, os modos focais `single-table`,
   `crud-simple`, `master-detail`, `related-resource` e `tabs-nested` para certificacao dos respectivos arquetipos,
   e reserva `-ValidationMode full` para investigacao deliberada da matriz completa;
+- resolve o `smoke` e o perfil focal `master-detail` no mesmo escopo governado
+  `operations.missoes`, com RAG obrigatório e API Catalog restrito a
+  `/api/operations/missoes`, porque ambos executam o mesmo recibo operacional;
 - le timeouts, retries e contagens esperadas de `tools/e2e/page-builder-agentic-gate-matrix.json`;
 - rejeita provider/embeddings mock, datasource nao PostgreSQL, JAR divergente, contrato Config/Angular divergente, capabilities degradadas e interceptacao de endpoint critico;
 - exige AI Registry `ready` com o hash do snapshot Config versionado, Domain Catalog ingerido e API Catalog com indexacao canonica `READY`;

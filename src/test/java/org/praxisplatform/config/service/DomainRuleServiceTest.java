@@ -2990,6 +2990,170 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void publishesVisualGuidanceByCompilingExplicitFormConfigTarget() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("human-resources.funcionarios.rule.lgpd-cpf-guidance")
+                .version(1)
+                .ruleType("visual_guidance")
+                .status("approved")
+                .contextKey("human-resources")
+                .resourceKey("human-resources.funcionarios")
+                .serviceKey("praxis-api-quickstart")
+                .definition("""
+                        {
+                          "summary": "CPF exige revisão de privacidade.",
+                          "derivedMaterializationOperation": "rule.visualBlockGuidance.add",
+                          "materializationTargets": [{
+                            "targetLayer": "form_config",
+                            "targetArtifactType": "praxis-dynamic-form",
+                            "targetArtifactKey": "funcionarios-form-demo"
+                          }]
+                        }
+                        """)
+                .parameters("""
+                        {
+                          "visualBlockId": "lgpd-notice",
+                          "materializedRuleId": "lgpd-cpf-guidance",
+                          "message": "Revise finalidade, máscara e permissão antes de prosseguir.",
+                          "severity": "warning"
+                        }
+                        """)
+                .condition("""
+                        {"!=":[{"var":"cpf"},null]}
+                        """)
+                .governance("{\"requiredApprovals\":[\"privacy-office\"]}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "human-resources.funcionarios",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+        when(definitionRepository.save(any(DomainRuleDefinition.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                "tenant-a",
+                "dev",
+                definitionId))
+                .thenReturn(List.of());
+        when(materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(materializationRepository.save(any(DomainRuleMaterialization.class))).thenAnswer(invocation -> {
+            DomainRuleMaterialization materialization = invocation.getArgument(0);
+            if (materialization.getId() == null) {
+                materialization.setId(UUID.randomUUID());
+            }
+            materialization.onInsert();
+            return materialization;
+        });
+
+        var response = service.publish(
+                new DomainRulePublicationRequest(definitionId, null, true, null),
+                principal("release-manager"));
+
+        assertThat(response.publicationStatus()).isEqualTo("published");
+        assertThat(response.materializations()).singleElement().satisfies(item -> {
+            assertThat(item.targetLayer()).isEqualTo("form_config");
+            assertThat(item.targetArtifactType()).isEqualTo("praxis-dynamic-form");
+            assertThat(item.targetArtifactKey()).isEqualTo("funcionarios-form-demo");
+            assertThat(item.targetPointer()).isEqualTo("/formRules/-");
+            assertThat(item.materializedRuleId()).isEqualTo("lgpd-cpf-guidance");
+            assertThat(item.status()).isEqualTo("applied");
+            assertThat(item.sourceHash()).startsWith("derived:sha256:");
+            assertThat(item.materializedPayload().path("operation").asText())
+                    .isEqualTo("rule.visualBlockGuidance.add");
+            assertThat(item.materializedPayload().path("effect").path("targetBlockId").asText())
+                    .isEqualTo("lgpd-notice");
+            assertThat(item.materializedPayload().path("effect").path("condition").path("!=")).hasSize(2);
+            assertThat(item.materializedPayload().path("effect").path("properties").path("message").asText())
+                    .isEqualTo("Revise finalidade, máscara e permissão antes de prosseguir.");
+        });
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes"))
+                .singleElement()
+                .satisfies(outcome -> {
+                    assertThat(outcome.path("resolution").asText()).isEqualTo("created");
+                    assertThat(outcome.path("materializationKey").asText())
+                            .isEqualTo("human-resources.funcionarios.rule.lgpd-cpf-guidance:form_config:funcionarios-form-demo");
+                    assertThat(outcome.path("statusAtResolution").asText()).isEqualTo("pending_review");
+                });
+    }
+
+    @Test
+    void doesNotInferFormConfigTargetForVisualGuidance() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("human-resources.funcionarios.rule.lgpd-cpf-guidance")
+                .version(1)
+                .ruleType("visual_guidance")
+                .status("approved")
+                .contextKey("human-resources")
+                .resourceKey("human-resources.funcionarios")
+                .serviceKey("praxis-api-quickstart")
+                .definition("""
+                        {
+                          "summary": "CPF exige revisão de privacidade.",
+                          "derivedMaterializationOperation": "rule.visualBlockGuidance.add"
+                        }
+                        """)
+                .parameters("""
+                        {
+                          "visualBlockId": "lgpd-notice",
+                          "message": "Revise finalidade, máscara e permissão antes de prosseguir."
+                        }
+                        """)
+                .condition("""
+                        {"!=":[{"var":"cpf"},null]}
+                        """)
+                .governance("{\"requiredApprovals\":[\"privacy-office\"]}")
+                .build();
+
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a",
+                "dev",
+                "human-resources.funcionarios",
+                List.of("approved", "active")))
+                .thenReturn(List.of());
+        when(definitionRepository.save(any(DomainRuleDefinition.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(materializationRepository.findByTenantIdAndEnvironmentAndRuleDefinition_Id(
+                "tenant-a",
+                "dev",
+                definitionId))
+                .thenReturn(List.of());
+
+        var response = service.publish(
+                new DomainRulePublicationRequest(definitionId, null, true, null),
+                principal("release-manager"));
+
+        assertThat(response.publicationStatus()).isEqualTo("published");
+        assertThat(response.materializations()).isEmpty();
+        assertThat(response.explainability()
+                .path("publicationDiagnostics")
+                .path("materializationOutcomes"))
+                .isEmpty();
+    }
+
+    @Test
     void publicationReusesExistingDerivedMaterializationForStableKeyAndSourceHash() {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);

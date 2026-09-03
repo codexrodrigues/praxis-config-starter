@@ -1227,7 +1227,72 @@ public class DomainRuleService {
                 && isApprovalPolicyRuleType(definition.getRuleType())) {
             return buildApprovalPolicyMaterializedPayload(definition, request.targetArtifactKey());
         }
+        if ("form_config".equals(request.targetLayer())
+                && "praxis-dynamic-form".equals(request.targetArtifactType())
+                && definition != null
+                && isVisualGuidanceRuleType(definition.getRuleType())) {
+            return buildVisualGuidanceMaterializedPayload(definition);
+        }
         return objectMapper.createObjectNode();
+    }
+
+    private ObjectNode buildVisualGuidanceMaterializedPayload(DomainRuleDefinition definition) {
+        JsonNode authoredDefinition = read(definition.getDefinition());
+        JsonNode parameters = read(definition.getParameters());
+        JsonNode condition = read(definition.getCondition());
+        if (parameters == null || !parameters.isObject()) {
+            throw new ConfigurationIngestionException(
+                    "Visual guidance materialization requires canonical parameters");
+        }
+
+        String visualBlockId = normalize(parameters.path("visualBlockId").asText(null));
+        requireText(visualBlockId, "parameters.visualBlockId");
+        String message = normalize(parameters.path("message").asText(null));
+        if (!StringUtils.hasText(message) && authoredDefinition != null && authoredDefinition.isObject()) {
+            message = normalize(authoredDefinition.path("summary").asText(null));
+        }
+        requireText(message, "parameters.message or definition.summary");
+
+        String operation = authoredDefinition != null && authoredDefinition.isObject()
+                ? normalize(authoredDefinition.path("derivedMaterializationOperation").asText(null))
+                : null;
+        if (!StringUtils.hasText(operation) && authoredDefinition != null && authoredDefinition.isObject()) {
+            operation = normalize(authoredDefinition.path("recommendedOperation").asText(null));
+        }
+        operation = normalizeOrDefault(operation, "rule.visualBlockGuidance.add");
+        if (!"rule.visualBlockGuidance.add".equals(operation)) {
+            throw new ConfigurationIngestionException(
+                    "Visual guidance form_config materialization requires operation=rule.visualBlockGuidance.add");
+        }
+
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("id", deriveVisualGuidanceRuleId(definition, parameters));
+        payload.put("operation", operation);
+        ObjectNode metadata = payload.putObject("metadata");
+        metadata.put("origin", "domain_rule_definition");
+        metadata.put("ruleType", definition.getRuleType());
+        metadata.put("reviewStatus", "pending");
+
+        ObjectNode effect = payload.putObject("effect");
+        if (condition != null && !condition.isNull()) {
+            effect.set("condition", condition);
+        }
+        effect.put("targetBlockId", visualBlockId);
+        ObjectNode properties = effect.putObject("properties");
+        properties.put("severity", normalizeOrDefault(
+                parameters.path("severity").asText(null),
+                "warning"));
+        properties.put("message", message);
+        return payload;
+    }
+
+    private String deriveVisualGuidanceRuleId(
+            DomainRuleDefinition definition,
+            JsonNode parameters) {
+        String explicit = parameters != null && parameters.isObject()
+                ? normalize(parameters.path("materializedRuleId").asText(null))
+                : null;
+        return normalizeOrDefault(explicit, definition.getRuleKey());
     }
 
     private ObjectNode buildReactiveDeterminationMaterializedPayload(
@@ -2449,6 +2514,23 @@ public class DomainRuleService {
                     environment,
                     materializationOutcomes);
         }
+        if ("form_config".equals(targetLayer)
+                && "praxis-dynamic-form".equals(targetArtifactType)
+                && isVisualGuidanceRuleType(definition.getRuleType())
+                && hasExplicitMaterializationTarget(
+                        definition,
+                        targetLayer,
+                        targetArtifactType,
+                        targetArtifactKey)) {
+            return createVisualGuidanceMaterialization(
+                    definition,
+                    targetLayer,
+                    targetArtifactType,
+                    targetArtifactKey,
+                    tenantId,
+                    environment,
+                    materializationOutcomes);
+        }
         if (isReactiveDeterminationCoordinate(targetLayer, targetArtifactType)) {
             requireReactiveDeterminationTargetContract(
                     definition,
@@ -2465,6 +2547,28 @@ public class DomainRuleService {
                     materializationOutcomes);
         }
         return null;
+    }
+
+    private boolean hasExplicitMaterializationTarget(
+            DomainRuleDefinition definition,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey) {
+        JsonNode authoredDefinition = read(definition.getDefinition());
+        JsonNode targets = authoredDefinition != null && authoredDefinition.isObject()
+                ? authoredDefinition.path("materializationTargets")
+                : null;
+        if (targets == null || !targets.isArray()) {
+            return false;
+        }
+        for (JsonNode candidate : targets) {
+            if (targetLayer.equals(normalize(candidate.path("targetLayer").asText(null)))
+                    && targetArtifactType.equals(normalize(candidate.path("targetArtifactType").asText(null)))
+                    && targetArtifactKey.equals(normalize(candidate.path("targetArtifactKey").asText(null)))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private DomainRuleMaterialization createOptionSourceMaterialization(
@@ -2557,6 +2661,28 @@ public class DomainRuleService {
                 targetArtifactKey,
                 "/approvalPolicy",
                 "approval-policy",
+                payload,
+                tenantId,
+                environment,
+                materializationOutcomes);
+    }
+
+    private DomainRuleMaterialization createVisualGuidanceMaterialization(
+            DomainRuleDefinition definition,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey,
+            String tenantId,
+            String environment,
+            ArrayNode materializationOutcomes) {
+        ObjectNode payload = buildVisualGuidanceMaterializedPayload(definition);
+        return createOrReuseDerivedMaterialization(
+                definition,
+                targetLayer,
+                targetArtifactType,
+                targetArtifactKey,
+                "/formRules/-",
+                deriveVisualGuidanceRuleId(definition, read(definition.getParameters())),
                 payload,
                 tenantId,
                 environment,
@@ -2727,6 +2853,10 @@ public class DomainRuleService {
 
     private boolean isApprovalPolicyRuleType(String ruleType) {
         return "approval_policy".equals(ruleType);
+    }
+
+    private boolean isVisualGuidanceRuleType(String ruleType) {
+        return "visual_guidance".equals(ruleType);
     }
 
     private String deriveActionApprovalKey(String resourceKey, JsonNode parameters) {

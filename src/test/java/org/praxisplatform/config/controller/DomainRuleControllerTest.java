@@ -430,7 +430,9 @@ class DomainRuleControllerTest {
     @Test
     void simulatesRuleWithTenantAndEnvironmentHeaders() {
         DomainRuleService service = mock(DomainRuleService.class);
-        DomainRuleController controller = controller(service);
+        DomainRuleGovernancePrincipalResolver resolver = mock(DomainRuleGovernancePrincipalResolver.class);
+        DomainRuleController controller = new DomainRuleController(service, resolver);
+        HttpServletRequest servletRequest = servletRequest();
         DomainRuleSimulationRequest request = new DomainRuleSimulationRequest(
                 null,
                 "procurement.suppliers.rule.selection-eligibility",
@@ -462,10 +464,21 @@ class DomainRuleControllerTest {
                 null,
                 java.time.Instant.now());
         when(service.simulate(request, "tenant-a", "dev")).thenReturn(response);
+        when(resolver.resolveAnyRole(
+                servletRequest,
+                "tenant-a",
+                "dev",
+                List.of("RULE_DEFINITION_AUTHOR", "RULE_DEFINITION_APPROVER")))
+                .thenReturn(PRINCIPAL);
 
-        var entity = controller.simulate(request, "tenant-a", "dev", servletRequest());
+        var entity = controller.simulate(request, "tenant-a", "dev", servletRequest);
 
         assertThat(entity.getBody()).isSameAs(response);
+        verify(resolver).resolveAnyRole(
+                servletRequest,
+                "tenant-a",
+                "dev",
+                List.of("RULE_DEFINITION_AUTHOR", "RULE_DEFINITION_APPROVER"));
         verify(service).simulate(request, "tenant-a", "dev");
     }
 
@@ -672,6 +685,11 @@ class DomainRuleControllerTest {
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString())).thenReturn(PRINCIPAL);
+        when(resolver.resolveAnyRole(
+                org.mockito.ArgumentMatchers.any(HttpServletRequest.class),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyList())).thenReturn(PRINCIPAL);
         return new DomainRuleController(service, resolver);
     }
 
