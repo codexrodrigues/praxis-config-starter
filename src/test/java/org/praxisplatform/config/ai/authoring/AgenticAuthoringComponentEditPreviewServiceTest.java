@@ -114,7 +114,7 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
                     "resourcePath": "/api/human-resources/funcionarios",
                     "tableId": "funcionarios-table",
                     "config": {
-                      "title": "Funcionários",
+                      "toolbar": { "visible": true, "title": "Funcionários" },
                       "columns": [{ "field": "salario", "type": "number", "order": 0 }]
                     }
                   }
@@ -144,6 +144,83 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
     }
 
     @Test
+    void refinesAndRecompilesThePersistedCompositionPlanForComponentManifestEdits() throws Exception {
+        JsonNode operationPlan = objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-component-edit-plan.v1",
+                  "componentId": "praxis-table",
+                  "operations": [{
+                    "operationId": "column.order.set",
+                    "target": { "kind": "column", "field": "salario" },
+                    "input": { "order": 0 }
+                  }]
+                }
+                """);
+        JsonNode compiled = objectMapper.readTree("""
+                {
+                  "manifestVersion": "2.0.0",
+                  "proposedConfig": {
+                    "resourcePath": "/api/human-resources/funcionarios",
+                    "tableId": "funcionarios-table",
+                    "config": {
+                      "toolbar": { "visible": true, "title": "Funcionários" },
+                      "columns": [{ "field": "salario", "type": "number", "order": 0 }]
+                    }
+                  }
+                }
+                """);
+        JsonNode persistedCompositionPlan = objectMapper.readTree("""
+                {
+                  "kind": "praxis.ui-composition-plan",
+                  "version": "1.0",
+                  "layoutPreset": "single-table-page",
+                  "widgets": [{
+                    "key": "funcionarios-table",
+                    "componentId": "praxis-table",
+                    "inputs": {
+                      "resourcePath": "/api/human-resources/funcionarios",
+                      "tableId": "funcionarios-table",
+                      "config": {
+                        "toolbar": { "visible": true, "title": "Funcionários" },
+                        "columns": [{ "field": "salario", "type": "number" }]
+                      }
+                    }
+                  }]
+                }
+                """);
+        when(componentEditPlanService.generateAndCompile(
+                any(), eq("praxis-table"), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringComponentEditPlanResult(
+                        true,
+                        List.of(),
+                        List.of("component-edit-plan-config-input-bound:config"),
+                        operationPlan,
+                        compiled));
+
+        AgenticAuthoringPreviewResult result = previewService().previewWithPersistedUiCompositionPlan(
+                tableRequest(),
+                "tenant",
+                "user",
+                "local",
+                null,
+                persistedCompositionPlan);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.uiCompositionPlan().at("/widgets/0/inputs/config/columns/0/order").asInt())
+                .isZero();
+        assertThat(result.uiCompositionPlan().at("/widgets/0/inputs/config/toolbar/title").asText())
+                .isEqualTo("Funcionários");
+        assertThat(result.compiledFormPatch().at(
+                "/patch/page/widgets/0/definition/inputs/config/columns/0/order").asInt())
+                .isZero();
+        assertThat(result.warnings()).contains(
+                "persisted-ui-composition-refined-by-component-manifest",
+                "ui-composition-plan-compiled-by-config");
+        assertThat(persistedCompositionPlan.at("/widgets/0/inputs/config/columns/0/order").isMissingNode())
+                .isTrue();
+    }
+
+    @Test
     void derivesComponentEditContextFromResolvedSemanticTargetWhenWidgetIsNotPinned() throws Exception {
         JsonNode plan = objectMapper.readTree("""
                 {
@@ -166,7 +243,7 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
                     "resourcePath": "/api/human-resources/funcionarios",
                     "tableId": "funcionarios-table",
                     "config": {
-                      "title": "Funcionários",
+                      "toolbar": { "visible": true, "title": "Funcionários" },
                       "behavior": {
                         "filtering": {
                           "enabled": true,
@@ -419,7 +496,7 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
                         "resourcePath": "/api/human-resources/funcionarios",
                         "tableId": "funcionarios-table",
                         "config": {
-                          "title": "Funcionários",
+                          "toolbar": { "visible": true, "title": "Funcionários" },
                           "columns": [{ "field": "salario", "type": "number" }]
                         }
                       }
@@ -483,7 +560,7 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
                         "resourcePath": "/api/human-resources/funcionarios",
                         "tableId": "funcionarios-table",
                         "config": {
-                          "title": "Funcionários",
+                          "toolbar": { "visible": true, "title": "Funcionários" },
                           "behavior": {
                             "filtering": {
                               "advancedFilters": {

@@ -612,6 +612,285 @@ class AgenticAuthoringEffectCompilerRegistryTest {
     }
 
     @Test
+    void shouldMaterializeCurrencyFormatWithCanonicalVisualTypeAndPreserveColumnState() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "columns": [{
+                    "field": "salarioLiquido",
+                    "header": "Salário Líquido",
+                    "type": "number",
+                    "visible": false,
+                    "sortable": true,
+                    "renderer": { "type": "badge", "badge": { "labelPath": "salarioLiquido" } }
+                  }]
+                }
+                """);
+        JsonNode operation = objectMapper.readTree("""
+                {
+                  "operationId": "column.format.set",
+                  "target": {
+                    "kind": "column",
+                    "resolver": "column-by-field",
+                    "ambiguityPolicy": "fail",
+                    "required": true
+                  },
+                  "effects": [{
+                    "kind": "compile-domain-patch",
+                    "handler": "table-column-format-set",
+                    "path": "columns[].format"
+                  }],
+                  "affectedPaths": ["columns[].format", "columns[].type"],
+                  "submissionImpact": "visual-only"
+                }
+                """);
+        JsonNode planOperation = objectMapper.readTree("""
+                {
+                  "operationId": "column.format.set",
+                  "target": "salarioLiquido",
+                  "input": { "format": "BRL|symbol|2" }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                planOperation,
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        JsonNode column = proposedConfig.at("/columns/0");
+        assertThat(failures).isEmpty();
+        assertThat(registry.supportsDomainPatchHandler("table-column-format-set")).isTrue();
+        assertThat(column.path("format").asText()).isEqualTo("BRL|symbol|2");
+        assertThat(column.path("type").asText()).isEqualTo("currency");
+        assertThat(column.path("header").asText()).isEqualTo("Salário Líquido");
+        assertThat(column.path("visible").asBoolean()).isFalse();
+        assertThat(column.path("sortable").asBoolean()).isTrue();
+        assertThat(column.at("/renderer/type").asText()).isEqualTo("badge");
+        assertThat(patchOperations).singleElement().satisfies(compiled -> {
+            assertThat(compiled.path("op").asText()).isEqualTo("set-table-column-format");
+            assertThat(compiled.path("domainHandler").asText()).isEqualTo("table-column-format-set");
+            assertThat(compiled.path("previousValue").path("visible").asBoolean()).isFalse();
+            assertThat(compiled.path("value").path("sortable").asBoolean()).isTrue();
+            assertThat(compiled.path("value").path("type").asText()).isEqualTo("currency");
+        });
+    }
+
+    @Test
+    void shouldDistinguishPublishedNumericFormatFromAFreeFormMask() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "amount", "type": "string" },
+                    { "field": "document", "type": "string" }
+                  ]
+                }
+                """);
+        JsonNode operation = objectMapper.readTree("""
+                {
+                  "operationId": "column.format.set",
+                  "target": {
+                    "kind": "column",
+                    "resolver": "column-by-field",
+                    "ambiguityPolicy": "fail",
+                    "required": true
+                  },
+                  "effects": [{
+                    "kind": "compile-domain-patch",
+                    "handler": "table-column-format-set",
+                    "path": "columns[].format"
+                  }]
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                objectMapper.readTree("""
+                        { "operationId": "column.format.set", "target": "amount", "input": { "format": "1.2-2" } }
+                        """),
+                proposedConfig,
+                objectMapper.createArrayNode(),
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                objectMapper.readTree("""
+                        { "operationId": "column.format.set", "target": "document", "input": { "format": "000.000.000-00" } }
+                        """),
+                proposedConfig,
+                objectMapper.createArrayNode(),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(proposedConfig.at("/columns/0/type").asText()).isEqualTo("number");
+        assertThat(proposedConfig.at("/columns/1/type").asText()).isEqualTo("string");
+    }
+
+    @Test
+    void shouldMaterializeACompleteVisualOrderWhenMovingAColumnToTheBeginning() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "id", "header": "ID" },
+                    { "field": "nome", "header": "Nome" },
+                    {
+                      "field": "salarioLiquido",
+                      "header": "Salário Líquido",
+                      "type": "currency",
+                      "format": "BRL|symbol|2"
+                    },
+                    { "field": "departamento", "header": "Departamento" }
+                  ]
+                }
+                """);
+        JsonNode operation = objectMapper.readTree("""
+                {
+                  "operationId": "column.order.set",
+                  "target": {
+                    "kind": "column",
+                    "resolver": "column-by-field",
+                    "ambiguityPolicy": "fail",
+                    "required": true
+                  },
+                  "effects": [{
+                    "kind": "compile-domain-patch",
+                    "handler": "table-column-order-set",
+                    "path": "columns[]"
+                  }],
+                  "affectedPaths": ["columns[].order"],
+                  "submissionImpact": "visual-only"
+                }
+                """);
+        JsonNode planOperation = objectMapper.readTree("""
+                {
+                  "operationId": "column.order.set",
+                  "target": "salarioLiquido",
+                  "input": { "order": 0 }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                planOperation,
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(registry.supportsDomainPatchHandler("table-column-order-set")).isTrue();
+        assertThat(proposedConfig.path("columns"))
+                .extracting(column -> column.path("field").asText() + ":" + column.path("order").asInt())
+                .containsExactly("salarioLiquido:0", "id:1", "nome:2", "departamento:3");
+        assertThat(proposedConfig.at("/columns/0/format").asText()).isEqualTo("BRL|symbol|2");
+        assertThat(proposedConfig.at("/columns/0/type").asText()).isEqualTo("currency");
+        assertThat(patchOperations).singleElement().satisfies(compiled -> {
+            assertThat(compiled.path("op").asText()).isEqualTo("reorder-table-columns");
+            assertThat(compiled.path("domainHandler").asText()).isEqualTo("table-column-order-set");
+            assertThat(compiled.path("fromIndex").asInt()).isEqualTo(2);
+            assertThat(compiled.path("toIndex").asInt()).isZero();
+            assertThat(compiled.path("value"))
+                    .extracting(entry -> entry.path("field").asText() + ":" + entry.path("order").asInt())
+                    .containsExactly("salarioLiquido:0", "id:1", "nome:2", "departamento:3");
+        });
+    }
+
+    @Test
+    void shouldBoundLargeTableColumnOrderToTheVisualEnd() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                { "columns": [{ "field": "id" }, { "field": "nome" }, { "field": "salario" }] }
+                """);
+        JsonNode operation = objectMapper.readTree("""
+                {
+                  "operationId": "column.order.set",
+                  "target": {
+                    "kind": "column",
+                    "resolver": "column-by-field",
+                    "ambiguityPolicy": "fail",
+                    "required": true
+                  },
+                  "effects": [{
+                    "kind": "compile-domain-patch",
+                    "handler": "table-column-order-set",
+                    "path": "columns[]"
+                  }]
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                objectMapper.readTree("""
+                        { "operationId": "column.order.set", "target": "nome", "input": { "order": 99 } }
+                        """),
+                proposedConfig,
+                objectMapper.createArrayNode(),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(proposedConfig.path("columns"))
+                .extracting(column -> column.path("field").asText() + ":" + column.path("order").asInt())
+                .containsExactly("id:0", "salario:1", "nome:2");
+    }
+
+    @Test
+    void shouldRejectFractionalTableColumnOrder() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                { "columns": [{ "field": "id" }, { "field": "nome" }] }
+                """);
+        JsonNode operation = objectMapper.readTree("""
+                {
+                  "operationId": "column.order.set",
+                  "target": {
+                    "kind": "column",
+                    "resolver": "column-by-field",
+                    "ambiguityPolicy": "fail",
+                    "required": true
+                  },
+                  "effects": [{
+                    "kind": "compile-domain-patch",
+                    "handler": "table-column-order-set",
+                    "path": "columns[]"
+                  }]
+                }
+                """);
+        JsonNode planOperation = objectMapper.readTree("""
+                {
+                  "operationId": "column.order.set",
+                  "target": "nome",
+                  "input": { "order": 0.5 }
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                planOperation,
+                proposedConfig,
+                objectMapper.createArrayNode(),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).containsExactly("table-column-order-set requires a non-negative integer order");
+        assertThat(proposedConfig.at("/columns/0/order").isMissingNode()).isTrue();
+        assertThat(proposedConfig.at("/columns/1/order").isMissingNode()).isTrue();
+    }
+
+    @Test
     void shouldRefineOnlyTheComposeLayoutAndPreserveEveryItem() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {

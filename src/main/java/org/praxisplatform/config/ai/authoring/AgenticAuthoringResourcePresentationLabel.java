@@ -16,6 +16,8 @@ final class AgenticAuthoringResourcePresentationLabel {
             "(?iu)\\b(?:llm|authored|governed\\s+resource|resource\\s+focus|semantic\\s+retrieval|api[_\\s-]*metadata|retrieved[_\\s-]*candidate|canonical\\s+filtered\\s+schema|selected\\s+operation|candidate\\s+operation|materialization\\s+endpoint)\\b");
     private static final Pattern GENERIC_OPERATION_LABEL_PATTERN = Pattern.compile(
             "(?iu)^(?:registro|registros|dados|informa[cç][oõ]es|lista|listagem|consulta|resultado|resultados|recurso|recursos)$");
+    private static final Pattern PAYMENT_COMPOUND_PATTERN = Pattern.compile(
+            "(?iu)\\b(folhas?|datas?|formas?|meios?|condi[cç][oõ]es?)\\s+pagamento\\b");
 
     private AgenticAuthoringResourcePresentationLabel() {
     }
@@ -41,8 +43,9 @@ final class AgenticAuthoringResourcePresentationLabel {
         if (lastSegment.isBlank()) {
             return "o recurso selecionado";
         }
-        return AgenticAuthoringPresentationText.display(
-                Character.toUpperCase(lastSegment.charAt(0)) + lastSegment.substring(1));
+        String label = Character.toUpperCase(lastSegment.charAt(0)) + lastSegment.substring(1);
+        label = PAYMENT_COMPOUND_PATTERN.matcher(label).replaceAll("$1 de pagamento");
+        return AgenticAuthoringPresentationText.display(label);
     }
 
     private static String fromEvidenceSummary(AgenticAuthoringCandidate candidate, String fallbackLabel) {

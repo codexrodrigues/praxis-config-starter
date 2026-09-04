@@ -2,6 +2,7 @@ package org.praxisplatform.config.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.same;
@@ -38,6 +39,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPersistedUiCompositionSourceResolver;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceCandidatesRequest;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceCandidatesResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryService;
@@ -94,6 +96,9 @@ class AgenticAuthoringControllerTest {
 
     @Mock
     private AiStreamAccessTokenService streamAccessTokenService;
+
+    @Mock
+    private AgenticAuthoringPersistedUiCompositionSourceResolver persistedUiCompositionSourceResolver;
 
     @Test
     void componentCapabilitiesReturnsDeclarativeCatalogs() {
@@ -276,6 +281,69 @@ class AgenticAuthoringControllerTest {
     }
 
     @Test
+    void intentResolutionStripsPersistenceAndBrowserAuthorityBeforePlanning() {
+        var objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var contextHints = objectMapper.createObjectNode();
+        contextHints.put("safeContext", "kept");
+        contextHints.putObject("agenticApplyTarget").put("componentId", "browser-controlled");
+        contextHints.putObject("uiCompositionAuthoringSource").put("kind", "browser-controlled");
+        contextHints.putObject("authoringEvidence").put("source", "browser-controlled");
+        contextHints.putArray("verifiedDomainOperations").add("browser-controlled");
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "Refine o dashboard",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                "risk-chart",
+                "openai",
+                "gpt-5.4-mini",
+                null,
+                "session",
+                UUID.randomUUID().toString(),
+                null,
+                null,
+                null,
+                contextHints,
+                null);
+        AgenticAuthoringIntentResolutionResult expected = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "dashboard",
+                "set_chart_type",
+                "modify-dashboard",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new org.praxisplatform.config.ai.authoring.AgenticAuthoringGateResult(
+                        "candidate-eligibility@0.1.0",
+                        "eligible",
+                        List.of()),
+                List.of(),
+                List.of(),
+                List.of(),
+                com.fasterxml.jackson.databind.node.MissingNode.getInstance());
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(expected);
+
+        ResponseEntity<?> response = controller().resolveIntent(request, "tenant", "user", "local");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isSameAs(expected);
+        verify(intentResolverService).resolve(
+                argThat(candidate -> "kept".equals(candidate.contextHints().path("safeContext").asText())
+                        && !candidate.contextHints().has("agenticApplyTarget")
+                        && !candidate.contextHints().has("uiCompositionAuthoringSource")
+                        && !candidate.contextHints().has("authoringEvidence")
+                        && !candidate.contextHints().has("verifiedDomainOperations")),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+    }
+
+    @Test
     void compiledFormPatchReturnsCompiledPatch() throws Exception {
         AgenticAuthoringCompileRequest request = new AgenticAuthoringCompileRequest(
                 com.fasterxml.jackson.databind.node.MissingNode.getInstance());
@@ -314,6 +382,87 @@ class AgenticAuthoringControllerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).isSameAs(expected);
+    }
+
+    @Test
+    void pagePreviewUsesOnlyTheServerReconciledCompositionPlan() throws Exception {
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        when(principalContextResolver.resolve(servletRequest, "tenant", "user", "local"))
+                .thenReturn(principalContext);
+        var objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var currentPage = objectMapper.createObjectNode();
+        currentPage.putArray("widgets");
+        var contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("agenticApplyTarget")
+                .put("schemaVersion", "praxis-agentic-authoring-apply-target.v1")
+                .put("componentType", "praxis-dynamic-page")
+                .put("componentId", "page-builder-ia")
+                .put("scope", "user")
+                .put("mode", "update")
+                .put("baseEtag", "05cfab00-bc0c-4f73-b343-b52c14dc1b8f");
+        contextHints.putObject("uiCompositionAuthoringSource").put("kind", "forged-browser-source");
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Refine o gráfico",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                currentPage,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints);
+        var persistedPlan = objectMapper.createObjectNode()
+                .put("kind", "praxis.ui-composition-plan")
+                .put("version", "1.0");
+        persistedPlan.putArray("widgets");
+        AgenticAuthoringPreviewResult expected = new AgenticAuthoringPreviewResult(
+                true,
+                List.of(),
+                List.of(),
+                persistedPlan,
+                objectMapper.createObjectNode());
+        when(persistedUiCompositionSourceResolver.resolvePlanForPreview(any(), same(principalContext)))
+                .thenReturn(persistedPlan);
+        when(previewService.previewWithPersistedUiCompositionPlan(
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"),
+                nullable(String.class),
+                same(persistedPlan)))
+                .thenReturn(expected);
+
+        ResponseEntity<?> response = controller().previewPage(
+                request,
+                servletRequest,
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isSameAs(expected);
+        verify(persistedUiCompositionSourceResolver).resolvePlanForPreview(
+                argThat(candidate -> candidate.contextHints().has("agenticApplyTarget")
+                        && !candidate.contextHints().has("uiCompositionAuthoringSource")),
+                same(principalContext));
+        verify(intentResolverService).resolve(
+                argThat(candidate -> candidate.contextHints() == null
+                        || !candidate.contextHints().has("agenticApplyTarget")),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        verify(previewService).previewWithPersistedUiCompositionPlan(
+                argThat(candidate -> candidate.contextHints() == null
+                        || !candidate.contextHints().has("agenticApplyTarget")),
+                eq("tenant"),
+                eq("user"),
+                eq("local"),
+                nullable(String.class),
+                same(persistedPlan));
     }
 
     @Test
@@ -473,7 +622,10 @@ class AgenticAuthoringControllerTest {
                 resourceDiscoveryService,
                 turnStreamService,
                 principalContextResolver,
-                streamAccessTokenService);
+                streamAccessTokenService,
+                null,
+                persistedUiCompositionSourceResolver,
+                true);
     }
 
     private AgenticAuthoringSemanticDecision validSemanticDecision() {

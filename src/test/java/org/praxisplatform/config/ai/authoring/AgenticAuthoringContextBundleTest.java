@@ -72,13 +72,15 @@ class AgenticAuthoringContextBundleTest {
     }
 
     @Test
-    void keepsReorderingAsLlMDecidedOperationInsteadOfGuaranteeingLexicalRank() {
+    void exposesCanonicalReorderingCandidateWhileKeepingTheLlmAsIntentAuthority() {
         JsonNode componentContext = tableComponentContext(
                 "Mova a coluna salário líquido para a primeira posição da tabela.");
         JsonNode tableCatalog = componentContext.path("componentCapabilities").path("catalogs").get(0);
 
         assertThat(tableCatalog.path("componentId").asText()).isEqualTo("praxis-table");
-        assertThat(tableCatalog.path("capabilities")).isNotEmpty();
+        assertThat(tableCatalog.path("capabilities"))
+                .extracting(capability -> capability.path("changeKind").asText())
+                .contains("column.order.set");
         assertThat(componentContext.path("componentCapabilities").path("detailPolicy").asText())
                 .contains("Capability scoring only ranks governed candidates", "LLM still decides semantic intent");
     }

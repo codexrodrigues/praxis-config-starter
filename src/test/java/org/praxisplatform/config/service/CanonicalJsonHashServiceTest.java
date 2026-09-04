@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+@Tag("unit")
 class CanonicalJsonHashServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final CanonicalJsonHashService service = new CanonicalJsonHashService(objectMapper);

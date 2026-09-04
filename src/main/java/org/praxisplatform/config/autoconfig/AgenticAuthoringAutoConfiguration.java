@@ -23,6 +23,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringGenericUiCompositi
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractValidator;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPersistedUiCompositionSourceResolver;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPresentationAffordanceCatalogService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPresentationAffordanceDiscoveryService;
@@ -623,6 +624,18 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    @ConditionalOnBean(UserConfigService.class)
+    public AgenticAuthoringPersistedUiCompositionSourceResolver agenticAuthoringPersistedUiCompositionSourceResolver(
+            UserConfigService userConfigService,
+            ObjectMapper objectMapper) {
+        return new AgenticAuthoringPersistedUiCompositionSourceResolver(
+                userConfigService,
+                objectMapper,
+                new CanonicalJsonHashService(objectMapper));
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     @ConditionalOnBean({
             AgenticAuthoringIntentResolverService.class,
             AgenticAuthoringPreviewService.class
@@ -636,6 +649,7 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectProvider<SchemaRetrievalService> schemaRetrievalService,
             ObjectProvider<AgenticAuthoringConsultativeAnswerService> consultativeAnswerService,
             ObjectProvider<AgenticAuthoringPreIntentToolPlanningService> preIntentToolPlanningService,
+            ObjectProvider<AgenticAuthoringPersistedUiCompositionSourceResolver> persistedUiCompositionSourceResolver,
             AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
             AgenticAuthoringComponentCapabilitiesProperties componentCapabilitiesProperties,
             ObjectMapper objectMapper) {
@@ -651,7 +665,8 @@ public class AgenticAuthoringAutoConfiguration {
                 componentCapabilitiesService,
                 consultativeAnswerService.getIfAvailable(),
                 preIntentToolPlanningService.getIfAvailable(),
-                componentCapabilitiesProperties.effectivePreloadTimeoutMs());
+                componentCapabilitiesProperties.effectivePreloadTimeoutMs(),
+                persistedUiCompositionSourceResolver.getIfAvailable());
     }
 
     @Bean

@@ -76,9 +76,9 @@
         {
           "id": "canonical-json-hash-service",
           "sourcePath": "src/main/java/org/praxisplatform/config/service/CanonicalJsonHashService.java",
-          "sourceGitBlob": "112389a9ff70fb61d0ee80efdd1639863155c476",
+          "sourceGitBlob": "f3f57675f3b67613d4150cbcebff48dcdd39b99a",
           "artifacts": [
-            { "path": "target/classes/org/praxisplatform/config/service/CanonicalJsonHashService.class", "sha256": "5edfb2013007c75a7ef416db56adb4e0480b057bf0cc78cdaed644d8a6290040" }
+            { "path": "target/classes/org/praxisplatform/config/service/CanonicalJsonHashService.class", "sha256": "67f0b37564c0a1a207eb961f7817977c422a0fa6b6fcb4125eb37e42d44dc5da" }
           ]
         },
         {

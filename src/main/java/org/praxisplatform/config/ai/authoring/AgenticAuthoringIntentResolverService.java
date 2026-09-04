@@ -8709,15 +8709,16 @@ public class AgenticAuthoringIntentResolverService {
                 score += normalizedTerm.contains(" ") ? 2 : 1;
             }
         }
+        Set<String> matchedExampleTokens = new LinkedHashSet<>();
         for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample example : nullToEmpty(capability.examples())) {
             String exampleText = normalize(valueOrDefault(example.prompt(), "") + " " + valueOrDefault(example.intent(), ""));
             for (String token : normalizedPrompt.split("\\s+")) {
                 if (token.length() >= 5 && exampleText.contains(token)) {
-                    score++;
+                    matchedExampleTokens.add(token);
                 }
             }
         }
-        return score;
+        return score + matchedExampleTokens.size();
     }
 
     private String componentCapabilityAssistantMessage(ComponentCapabilityMatch match) {
