@@ -80,6 +80,27 @@ template e linhagem ficam em `provenance`, fora da identidade funcional do
 plano. O hash de `materialization` permite ao consumidor provar que fonte e
 payload continuam alinhados.
 
+### Serializacao canonica compartilhada
+
+Os dois hashes usam SHA-256 sobre UTF-8 de uma serializacao JSON canonica, e
+nao sobre o texto recebido nem sobre a formatacao padrao de cada runtime:
+
+- propriedades de objetos sao ordenadas pelo nome; valores nulos de objetos
+  nao participam da identidade, preservando a semantica do cliente;
+- arrays preservam ordem e posicao, inclusive valores nulos;
+- strings e nomes de propriedades usam escaping JSON;
+- numeros usam a representacao finita IEEE-754 compativel com
+  `JSON.stringify`: zero e `-0` materializam `0`, notacao exponencial e usada
+  para expoentes menores ou iguais a `-7` e maiores ou iguais a `21`, e o
+  expoente positivo inclui `+`;
+- `NaN` e infinitos sao rejeitados, porque nao possuem representacao canonica
+  no contrato.
+
+Angular e Config devem conservar os mesmos vetores dourados para os limites
+decimal/exponencial, fracoes, `-0`, UTF-8, arrays e objetos aninhados. Uma
+mudanca unilateral no algoritmo e breaking change de integridade, mesmo que o
+wire format do envelope continue igual.
+
 ## Invariantes de integridade
 
 - Um plano terminal presente com `kind` ou `version` invalidos falha fechado;
@@ -126,12 +147,13 @@ O gate focal deve cobrir:
 7. invalidacao da fonte em escrita generica que muda o payload;
 8. round-trip de `authoringSource` pelo endpoint de leitura.
 9. migration idempotente e constraint de objeto em PostgreSQL real.
+10. os mesmos vetores SHA-256 no runtime Java e no verificador Angular.
 
 ## Proximo corte obrigatorio
 
-Este documento fecha o owner de persistencia, nao certifica ainda o fluxo de
-fabrica. O corte seguinte deve atualizar o contrato Angular para carregar a
-fonte, abrir o Page Builder diretamente a partir de `authoringSource.source`,
-verificar os dois hashes, editar semanticamente, obter novo resultado terminal
-e reaplicar com `If-Match`. Depois, o quickstart deve provar o mesmo ciclo por
-HTTP real. Somente essa prova permite voltar a integrar novas telas no Ergon.
+Este documento fecha o owner de persistencia e o contrato Angular ja carrega a
+fonte, verifica os dois hashes, abre o Page Builder a partir do envelope real e
+exibe divergencias bloqueantes. O corte seguinte ainda deve editar
+semanticamente a composicao reaberta, obter novo resultado terminal e reaplicar
+com o `If-Match` recebido no GET, tudo na mesma jornada HTTP real do Quickstart.
+Somente essa prova permite voltar a integrar novas telas no Ergon.
