@@ -19,9 +19,9 @@ import org.springframework.core.io.ClassPathResource;
 class AiRegistrySnapshotContractTest {
 
     private static final String EXPECTED_SNAPSHOT_HASH =
-            "d55925f537acd70ec0b4aa10debeeea28d4632a414267d2872dc75ed64c6ca3e";
+            "dc481d295feb330f04500bc718b6aada2a0ef14aaaf902e8d3fb2f620e87d6ab";
     private static final String EXPECTED_VERSION = "1.0.0";
-    private static final String EXPECTED_GENERATED_AT = "2026-09-04T11:14:13.285Z";
+    private static final String EXPECTED_GENERATED_AT = "2026-09-04T15:05:13.581Z";
     private static final int EXPECTED_COMPONENT_COUNT = 106;
     private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 99;
     private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 106;
