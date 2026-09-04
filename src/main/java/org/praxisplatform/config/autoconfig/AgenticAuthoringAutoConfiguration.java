@@ -54,6 +54,7 @@ import org.praxisplatform.config.service.AiStreamAccessTokenService;
 import org.praxisplatform.config.service.AiThreadService;
 import org.praxisplatform.config.service.AiTurnEventService;
 import org.praxisplatform.config.service.AiTurnService;
+import org.praxisplatform.config.service.CanonicalJsonHashService;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
@@ -596,7 +597,8 @@ public class AgenticAuthoringAutoConfiguration {
                 userConfigService,
                 apiKeyProtectionService,
                 turnEventService,
-                objectMapper);
+                objectMapper,
+                new CanonicalJsonHashService(objectMapper));
     }
 
     @Bean

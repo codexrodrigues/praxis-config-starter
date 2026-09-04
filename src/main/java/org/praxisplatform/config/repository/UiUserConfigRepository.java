@@ -19,6 +19,7 @@ public interface UiUserConfigRepository extends JpaRepository<UiUserConfig, UUID
   @Query(value = """
       UPDATE ui_user_config
          SET payload = CAST(:payload AS jsonb),
+             authoring_source = CAST(:authoringSource AS jsonb),
              tags = CAST(:tags AS jsonb),
              version = :nextVersion,
              etag = :nextEtag,
@@ -30,6 +31,7 @@ public interface UiUserConfigRepository extends JpaRepository<UiUserConfig, UUID
   int updateIfCurrent(
       @Param("id") UUID id,
       @Param("payload") String payload,
+      @Param("authoringSource") String authoringSource,
       @Param("tags") String tags,
       @Param("nextVersion") long nextVersion,
       @Param("expectedEtag") UUID expectedEtag,

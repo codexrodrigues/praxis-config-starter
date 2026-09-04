@@ -3570,6 +3570,14 @@ components:
         etag:
           type: string
           nullable: true
+        authoringSource:
+          type: object
+          nullable: true
+          description: >
+            Fonte semantica server-attested persistida na mesma revisao do payload executavel.
+            Quando presente, contem UiCompositionPlan sem diagnostics, hashes canonicos de fonte
+            e materializacao e proveniencia do resultado terminal. O cliente nao envia esta fonte.
+          additionalProperties: true
       additionalProperties: true
 
     AiOrchestratorRequest:

@@ -50,6 +50,7 @@ class UserConfigControllerTest {
     when(apiKeyProtectionService.sanitizeForResponse(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
     UiUserConfig config = buildConfig("tenant-a", "user-1", "praxis-table", "table-config:employees", "{\"columns\":[]}");
+    config.setAuthoringSource("{\"schemaVersion\":\"praxis.ui-authoring-source/v1\",\"kind\":\"ui-composition-plan\"}");
 
     when(service.getResolved("tenant-a", "user-1", "praxis-table", "table-config:employees", "local"))
         .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(config, UserConfigService.Scope.USER)));
@@ -69,6 +70,8 @@ class UserConfigControllerTest {
     assertThat(response.getBody()).isNotNull();
     assertThat(response.getBody().getScope()).isEqualTo("user");
     assertThat(response.getBody().getPayload().get("columns").isArray()).isTrue();
+    assertThat(response.getBody().getAuthoringSource().path("schemaVersion").asText())
+        .isEqualTo("praxis.ui-authoring-source/v1");
 
     verify(service).getResolved("tenant-a", "user-1", "praxis-table", "table-config:employees", "local");
   }

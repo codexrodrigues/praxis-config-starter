@@ -57,8 +57,8 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                 eq("user"),
                 eq("local"));
         assertThat(promptCaptor.getValue())
-                .contains("\"label\" : \"Resumo missoes\"")
-                .contains("\"sourceLabel\" : \"Resumo missoes\"")
+                .contains("\"label\" : \"Resumo missões\"")
+                .contains("\"sourceLabel\" : \"Resumo missões\"")
                 .doesNotContain("/api/operations/vw-resumo-missoes")
                 .doesNotContain("/schemas/filtered")
                 .doesNotContain("\"submitMethod\"")
@@ -118,7 +118,7 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
         assertThat(result)
                 .contains("pré-visualização governada")
                 .contains("\n\n- Fonte governada")
-                .contains("Fonte governada: Resumo missoes")
+                .contains("Fonte governada: Resumo missões")
                 .contains("Materialização: tabela")
                 .contains("Validação: usei a decisão semântica")
                 .contains("Próximo passo: revise a pré-visualização")
@@ -160,7 +160,7 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
         assertThat(result.message())
                 .contains("pré-visualização governada")
                 .contains("Materialização: formulário")
-                .contains("Fonte governada: Resumo missoes");
+                .contains("Fonte governada: Resumo missões");
         assertThat(result.providerInvocations()).isEmpty();
         org.mockito.Mockito.verify(providerManagementService, org.mockito.Mockito.never()).generateText(
                 any(String.class),
@@ -304,7 +304,7 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
 
         assertThat(result)
                 .contains("pré-visualização governada")
-                .contains("Fonte governada: Resumo missoes")
+                .contains("Fonte governada: Resumo missões")
                 .contains("Materialização: tabela")
                 .doesNotContain("/api/")
                 .doesNotContain("/schemas/");
@@ -339,7 +339,7 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                 "local");
 
         assertThat(result)
-                .contains("Resumo missoes")
+                .contains("Resumo missões")
                 .doesNotContain("/api/")
                 .doesNotContain("/schemas/")
                 .doesNotContain("operação POST")

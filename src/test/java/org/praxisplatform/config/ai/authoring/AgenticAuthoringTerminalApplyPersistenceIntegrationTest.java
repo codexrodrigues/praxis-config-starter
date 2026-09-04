@@ -22,6 +22,7 @@ import org.praxisplatform.config.repository.AiTurnRepository;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiTurnEventService;
+import org.praxisplatform.config.service.CanonicalJsonHashService;
 import org.praxisplatform.config.service.DomainFederationQueryService;
 import org.praxisplatform.config.service.DomainKnowledgeChangeSetService;
 import org.praxisplatform.config.service.DomainRuleChangeWorkspaceService;
@@ -150,7 +151,8 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 userConfigService,
                 apiKeyProtectionService,
                 turnEventService,
-                objectMapper);
+                objectMapper,
+                new CanonicalJsonHashService(objectMapper));
 
         AgenticAuthoringApplyResult applied = applyService.apply(request, principal, USER, null);
 
@@ -167,6 +169,14 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 .orElseThrow();
         assertThat(objectMapper.readTree(persisted.config().getPayload()))
                 .isEqualTo(compiledPatch.path("patch").path("page"));
+        JsonNode persistedAuthoringSource = objectMapper.readTree(
+                persisted.config().getAuthoringSource());
+        assertThat(persistedAuthoringSource.path("schemaVersion").asText())
+                .isEqualTo("praxis.ui-authoring-source/v1");
+        assertThat(persistedAuthoringSource.path("source").has("diagnostics")).isFalse();
+        assertThat(persistedAuthoringSource.path("sourceSha256").asText()).hasSize(64);
+        assertThat(persistedAuthoringSource.at("/materialization/sha256").asText()).hasSize(64);
+        assertThat(applied.authoringSource()).isEqualTo(persistedAuthoringSource);
         JsonNode persistedPage = objectMapper.readTree(persisted.config().getPayload());
         assertThat(persistedPage.path("widgets").findValuesAsText("id"))
                 .contains("praxis-table", "praxis-dynamic-form");
@@ -284,7 +294,15 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
             String baseEtag) {
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("canApply", true);
-        payload.putObject("preview").set("compiledFormPatch", compiledPatch);
+        ObjectNode preview = payload.putObject("preview");
+        preview.set("compiledFormPatch", compiledPatch);
+        ObjectNode authoringPlan = preview.putObject("uiCompositionPlan");
+        authoringPlan.put("version", "1.0");
+        authoringPlan.put("kind", "praxis.ui-composition-plan");
+        authoringPlan.put("layoutPreset", "resource-master-detail");
+        authoringPlan.putArray("widgets");
+        authoringPlan.withObject("/diagnostics/resourceWorkspaceGrounding")
+                .put("status", "verified");
         payload.putObject("intentResolution")
                 .set("semanticDecision", objectMapper.valueToTree(semanticDecision));
         ObjectNode target = payload.putObject("applyTarget");

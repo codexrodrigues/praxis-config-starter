@@ -935,11 +935,18 @@ Regra de aplicacao:
 - O evento terminal so pode publicar `canApply=true` quando a preview possuir
   `compiledFormPatch.patch.page`. Quando a materializacao partir de um
   `uiCompositionPlan`, o Config deve compilar o plano antes do resultado
-  terminal e preservar ambos no mesmo payload auditavel; a ausencia do plano
+  terminal e preservar ambos no mesmo resultado auditavel. No `page-apply`, o
+  plano emitido pelo backend e persistido como `authoringSource` ao lado do
+  `payload` executavel, sob a mesma versao e ETag de `ui_user_config`.
+  `diagnostics` e removido da fonte e da identidade hash; linhagem e template
+  resolvido permanecem como proveniencia server-attested. A ausencia do plano
   nao invalida, por si so, um patch de pagina completo produzido por outro
-  fluxo governado. O diagnostico `terminalPreviewApplyEligible=false` deve
-  expor `terminalPreviewApplyBlockReason` quando o patch terminal estiver
-  incompleto.
+  fluxo governado, mas esse apply deve declarar
+  `ui-composition-authoring-source-not-issued` e nao pode prometer reopen
+  semantico. Um PUT generico que altere o payload invalida a fonte anterior;
+  somente payload materialmente identico pode preserva-la. O diagnostico
+  `terminalPreviewApplyEligible=false` deve expor
+  `terminalPreviewApplyBlockReason` quando o patch terminal estiver incompleto.
 - O consumidor pode projetar localmente uma preview incompleta para revisao,
   mas nao pode regenera-la e reutilizar `resultEventId` do resultado anterior.
   Uma materializacao diferente exige um novo evento terminal backend-owned.

@@ -20,6 +20,7 @@ import org.praxisplatform.config.dto.AiTurnEventEnvelope;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiTurnEventService;
+import org.praxisplatform.config.service.CanonicalJsonHashService;
 import org.praxisplatform.config.service.UserConfigService;
 
 @Tag("unit")
@@ -148,7 +149,7 @@ class AgenticAuthoringApplyServiceTest {
                 .version(1L)
                 .etag(UUID.fromString("00000000-0000-0000-0000-000000000457"))
                 .build();
-        when(userConfigService.create(
+        when(userConfigService.createAuthored(
                 eq(UserConfigService.Scope.TENANT),
                 eq("tenant"),
                 eq("user"),
@@ -157,8 +158,11 @@ class AgenticAuthoringApplyServiceTest {
                 eq("local"),
                 org.mockito.ArgumentMatchers.any(JsonNode.class),
                 org.mockito.ArgumentMatchers.any(JsonNode.class),
+                org.mockito.ArgumentMatchers.any(JsonNode.class),
                 eq("author"))).thenReturn(saved);
         when(apiKeyProtectionService.sanitizeForResponse(savedPayload)).thenReturn(savedPayload);
+        when(apiKeyProtectionService.sanitizeForResponse(org.mockito.ArgumentMatchers.any(JsonNode.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
 
         AgenticAuthoringApplyRequest request = applicableRequest(
                 compiledPatch,
@@ -170,9 +174,16 @@ class AgenticAuthoringApplyServiceTest {
         authorize(request, principalContext);
         AiTurnEventEnvelope terminal = terminalResult(request, true);
         ObjectNode terminalPlan = objectMapper.createObjectNode();
+        terminalPlan.put("version", "1.0");
+        terminalPlan.put("kind", "praxis.ui-composition-plan");
         terminalPlan.put("layoutPreset", "master-detail-dashboard");
         terminalPlan.withObject("/diagnostics/resourceWorkspaceGrounding")
                 .put("status", "verified");
+        terminalPlan.withObject("/diagnostics/templateResolution")
+                .put("registryKey", "ui-composition-template:master-detail-tabs")
+                .put("configSha256", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                .put("version", 7L)
+                .put("etag", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
         ((ObjectNode) terminal.getPayload().path("preview"))
                 .set("uiCompositionPlan", terminalPlan);
         when(turnEventService.findLastEvent(STREAM_ID)).thenReturn(Optional.of(terminal));
@@ -185,6 +196,51 @@ class AgenticAuthoringApplyServiceTest {
 
         assertThat(result.applied()).isTrue();
         assertThat(savedPayload.toString()).doesNotContain("resourceWorkspaceGrounding");
+        ArgumentCaptor<JsonNode> authoringSourceCaptor = ArgumentCaptor.forClass(JsonNode.class);
+        verify(userConfigService).createAuthored(
+                eq(UserConfigService.Scope.TENANT),
+                eq("tenant"),
+                eq("user"),
+                eq("praxis-dynamic-page"),
+                eq("page"),
+                eq("local"),
+                org.mockito.ArgumentMatchers.any(JsonNode.class),
+                authoringSourceCaptor.capture(),
+                org.mockito.ArgumentMatchers.any(JsonNode.class),
+                eq("author"));
+        JsonNode authoringSource = authoringSourceCaptor.getValue();
+        assertThat(authoringSource.path("schemaVersion").asText())
+                .isEqualTo("praxis.ui-authoring-source/v1");
+        assertThat(authoringSource.path("source").has("diagnostics")).isFalse();
+        assertThat(authoringSource.path("sourceSha256").asText()).hasSize(64);
+        assertThat(authoringSource.at("/materialization/sha256").asText()).hasSize(64);
+        assertThat(authoringSource.at("/provenance/resultEventId").asText())
+                .isEqualTo(RESULT_EVENT_ID.toString());
+        assertThat(authoringSource.at("/provenance/templateRef/registryKey").asText())
+                .isEqualTo("ui-composition-template:master-detail-tabs");
+        assertThat(authoringSource.at("/provenance/templateRef/version").asLong()).isEqualTo(7L);
+    }
+
+    @Test
+    void applyRejectsMalformedTerminalCompositionPlanInsteadOfPersistingUnattestedSource() throws Exception {
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "tenant",
+                validSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+        AiTurnEventEnvelope terminal = terminalResult(request, true);
+        ((ObjectNode) terminal.getPayload().path("preview"))
+                .set("uiCompositionPlan", objectMapper.createObjectNode()
+                        .put("version", "1.0")
+                        .put("kind", "untrusted-local-plan"));
+        when(turnEventService.findLastEvent(STREAM_ID)).thenReturn(Optional.of(terminal));
+
+        assertThatThrownBy(() -> service().apply(request, principalContext, "author", null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("agentic-turn-result-ui-composition-plan-invalid");
     }
 
     @Test
@@ -527,7 +583,8 @@ class AgenticAuthoringApplyServiceTest {
                 userConfigService,
                 apiKeyProtectionService,
                 turnEventService,
-                objectMapper);
+                objectMapper,
+                new CanonicalJsonHashService(objectMapper));
     }
 
     private AgenticAuthoringApplyRequest applicableRequest(

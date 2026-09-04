@@ -119,6 +119,7 @@ public class UserConfigController {
             .version(cfg.getVersion())
             .etag(etag)
             .payload(readJsonPayload(cfg.getPayload()))
+            .authoringSource(readJsonPayload(cfg.getAuthoringSource()))
             .tags(readJson(cfg.getTags()))
             .build();
 
@@ -219,6 +220,7 @@ public class UserConfigController {
             .version(saved.getVersion())
             .etag(etag)
             .payload(readJsonPayload(saved.getPayload()))
+            .authoringSource(readJsonPayload(saved.getAuthoringSource()))
             .tags(readJson(saved.getTags()))
             .build();
 

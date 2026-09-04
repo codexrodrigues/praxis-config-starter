@@ -119,6 +119,14 @@ class AiApiContractOpenApiTest {
                 "DomainRuleTimelineResponse",
                 "DomainRuleTimelineEventResponse");
 
+        Map<String, Object> applyResult =
+                (Map<String, Object>) schemas.get("AgenticAuthoringApplyResult");
+        Map<String, Object> applyResultProperties =
+                (Map<String, Object>) applyResult.get("properties");
+        assertThat(applyResultProperties).containsKey("authoringSource");
+        assertThat(((Map<String, Object>) applyResultProperties.get("authoringSource")).get("type"))
+                .isEqualTo("object");
+
         Map<String, Object> clientAction =
                 (Map<String, Object>) schemas.get("AgenticAuthoringClientAction");
         Map<String, Object> clientActionProperties =

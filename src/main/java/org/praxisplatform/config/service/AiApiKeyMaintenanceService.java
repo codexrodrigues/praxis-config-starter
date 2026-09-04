@@ -141,6 +141,9 @@ public class AiApiKeyMaintenanceService {
         } catch (Exception e) {
             throw new IllegalArgumentException("Unable to serialize JSON", e);
         }
+        // This path changes the executable payload without a new governed authoring result.
+        // Its previous semantic source and materialization hash are therefore no longer attested.
+        cfg.setAuthoringSource(null);
         cfg.setVersion(cfg.getVersion() + 1);
         cfg.setEtag(UUID.randomUUID());
         cfg.setUpdatedBy(updatedBy);

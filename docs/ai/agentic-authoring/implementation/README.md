@@ -125,10 +125,11 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 42. [38-page-builder-browser-gate-baseline-evidence.md](./38-page-builder-browser-gate-baseline-evidence.md)
 43. [39-openai-56-model-cost-quality-evidence.md](./39-openai-56-model-cost-quality-evidence.md)
 44. [40-openai-56-terra-extended-consistency-evidence.md](./40-openai-56-terra-extended-consistency-evidence.md)
-45. [01-current-state-and-target.md](./01-current-state-and-target.md)
-46. [02-implementation-backlog.md](./02-implementation-backlog.md)
-47. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
-48. [44-table-column-format-order-domain-compilers.md](./44-table-column-format-order-domain-compilers.md)
+45. [44-ui-composition-authoring-source-persistence.md](./44-ui-composition-authoring-source-persistence.md)
+46. [44-table-column-format-order-domain-compilers.md](./44-table-column-format-order-domain-compilers.md)
+47. [01-current-state-and-target.md](./01-current-state-and-target.md)
+48. [02-implementation-backlog.md](./02-implementation-backlog.md)
+49. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e

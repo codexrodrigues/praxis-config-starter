@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 public class UserConfigService {
 
   private static final int MAX_PAYLOAD_BYTES = 256 * 1024; // 256 KB safeguard
+  private static final int MAX_AUTHORING_SOURCE_BYTES = 256 * 1024;
   private static final int MAX_SCOPE_ID_LENGTH = 255;
   private static final int MAX_COMPONENT_TYPE_LENGTH = 64;
   private static final int MAX_COMPONENT_ID_LENGTH = 255;
@@ -102,6 +103,60 @@ public class UserConfigService {
       JsonNode payload,
       JsonNode tags,
       String updatedBy) {
+    return createInternal(
+        scope,
+        tenantId,
+        userId,
+        componentType,
+        componentId,
+        environment,
+        payload,
+        null,
+        tags,
+        updatedBy);
+  }
+
+  /**
+   * Creates an executable configuration and its server-attested semantic source atomically.
+   */
+  public UiUserConfig createAuthored(
+      Scope scope,
+      String tenantId,
+      String userId,
+      String componentType,
+      String componentId,
+      String environment,
+      JsonNode payload,
+      JsonNode authoringSource,
+      JsonNode tags,
+      String updatedBy) {
+    if (authoringSource == null || !authoringSource.isObject()) {
+      throw new IllegalArgumentException("authoringSource must be a JSON object");
+    }
+    return createInternal(
+        scope,
+        tenantId,
+        userId,
+        componentType,
+        componentId,
+        environment,
+        payload,
+        authoringSource,
+        tags,
+        updatedBy);
+  }
+
+  private UiUserConfig createInternal(
+      Scope scope,
+      String tenantId,
+      String userId,
+      String componentType,
+      String componentId,
+      String environment,
+      JsonNode payload,
+      JsonNode authoringSource,
+      JsonNode tags,
+      String updatedBy) {
     ConfigIdentity identity = normalizeIdentity(tenantId, userId, componentType, componentId, environment);
     String normalizedUpdatedBy = optionalIdentityValue(updatedBy, "updatedBy", MAX_SCOPE_ID_LENGTH);
     if (scope == Scope.USER && identity.userId() == null) {
@@ -114,6 +169,7 @@ public class UserConfigService {
 
     JsonNode sanitizedPayload = apiKeyProtectionService.sanitizeForStorage(payload, null);
     validatePayloadSize(sanitizedPayload);
+    JsonNode sanitizedAuthoringSource = sanitizeAuthoringSource(authoringSource, null);
     UiUserConfig created =
         UiUserConfig.builder()
             .tenantId(effectiveIdentity.tenantId())
@@ -122,6 +178,7 @@ public class UserConfigService {
             .componentId(effectiveIdentity.componentId())
             .environment(effectiveIdentity.environment())
             .payload(writeJson(sanitizedPayload))
+            .authoringSource(writeNullableJson(sanitizedAuthoringSource))
             .tags(tags != null ? writeJson(tags) : null)
             .version(1L)
             .etag(UUID.randomUUID())
@@ -145,6 +202,67 @@ public class UserConfigService {
       JsonNode tags,
       String ifMatch,
       String updatedBy) {
+    return upsertInternal(
+        scope,
+        tenantId,
+        userId,
+        componentType,
+        componentId,
+        environment,
+        payload,
+        null,
+        false,
+        tags,
+        ifMatch,
+        updatedBy);
+  }
+
+  /**
+   * Upserts an executable configuration and replaces its semantic source in the same revision.
+   */
+  public UiUserConfig upsertAuthored(
+      Scope scope,
+      String tenantId,
+      String userId,
+      String componentType,
+      String componentId,
+      String environment,
+      JsonNode payload,
+      JsonNode authoringSource,
+      JsonNode tags,
+      String ifMatch,
+      String updatedBy) {
+    if (authoringSource == null || !authoringSource.isObject()) {
+      throw new IllegalArgumentException("authoringSource must be a JSON object");
+    }
+    return upsertInternal(
+        scope,
+        tenantId,
+        userId,
+        componentType,
+        componentId,
+        environment,
+        payload,
+        authoringSource,
+        true,
+        tags,
+        ifMatch,
+        updatedBy);
+  }
+
+  private UiUserConfig upsertInternal(
+      Scope scope,
+      String tenantId,
+      String userId,
+      String componentType,
+      String componentId,
+      String environment,
+      JsonNode payload,
+      JsonNode authoringSource,
+      boolean replaceAuthoringSource,
+      JsonNode tags,
+      String ifMatch,
+      String updatedBy) {
     ConfigIdentity identity = normalizeIdentity(tenantId, userId, componentType, componentId, environment);
     String normalizedUpdatedBy = optionalIdentityValue(updatedBy, "updatedBy", MAX_SCOPE_ID_LENGTH);
     if (scope == Scope.USER && identity.userId() == null) {
@@ -159,14 +277,21 @@ public class UserConfigService {
     JsonNode existingPayload = existing.map(cfg -> readJson(cfg.getPayload())).orElse(null);
     JsonNode sanitizedPayload = apiKeyProtectionService.sanitizeForStorage(payload, existingPayload);
     validatePayloadSize(sanitizedPayload);
+    JsonNode resolvedAuthoringSource = replaceAuthoringSource
+        ? sanitizeAuthoringSource(
+            authoringSource,
+            existing.map(cfg -> readJson(cfg.getAuthoringSource())).orElse(null))
+        : authoringSourceForGenericWrite(existing, existingPayload, sanitizedPayload);
 
     String payloadJson = writeJson(sanitizedPayload);
+    String authoringSourceJson = writeNullableJson(resolvedAuthoringSource);
     String tagsJson = tags != null ? writeJson(tags) : null;
 
     if (ifMatch == null || ifMatch.isBlank()) {
       return upsertWithoutPrecondition(
           effectiveIdentity,
           payloadJson,
+          authoringSourceJson,
           tagsJson,
           normalizedUpdatedBy);
     }
@@ -180,6 +305,7 @@ public class UserConfigService {
               .componentId(effectiveIdentity.componentId())
               .environment(effectiveIdentity.environment())
               .payload(payloadJson)
+              .authoringSource(authoringSourceJson)
               .tags(tagsJson)
               .version(1L)
               .etag(UUID.randomUUID())
@@ -191,18 +317,21 @@ public class UserConfigService {
         return recoverConcurrentCreate(
             effectiveIdentity,
             payloadJson,
+            authoringSourceJson,
             tagsJson,
             normalizedUpdatedBy,
             ex);
       }
     }
 
-    return updateExisting(existing.get(), payloadJson, tagsJson, normalizedUpdatedBy);
+    return updateExisting(
+        existing.get(), payloadJson, authoringSourceJson, tagsJson, normalizedUpdatedBy);
   }
 
   private UiUserConfig upsertWithoutPrecondition(
       ConfigIdentity identity,
       String payloadJson,
+      String authoringSourceJson,
       String tagsJson,
       String updatedBy) {
     String conflictTarget = conflictTarget(identity.userId(), identity.environment());
@@ -214,15 +343,16 @@ public class UserConfigService {
         """
         INSERT INTO ui_user_config (
           id, tenant_id, user_id, component_type, component_id, environment,
-          payload, tags, version, etag, created_at, updated_at, updated_by
+          payload, authoring_source, tags, version, etag, created_at, updated_at, updated_by
         )
         VALUES (
           CAST(:id AS uuid), :tenantId, :userId, :componentType, :componentId, :environment,
-          CAST(:payload AS jsonb), CAST(:tags AS jsonb), 1, CAST(:insertEtag AS uuid),
+          CAST(:payload AS jsonb), CAST(:authoringSource AS jsonb), CAST(:tags AS jsonb), 1, CAST(:insertEtag AS uuid),
           now(), now(), :updatedBy
         )
         ON CONFLICT %s DO UPDATE SET
           payload = EXCLUDED.payload,
+          authoring_source = EXCLUDED.authoring_source,
           tags = EXCLUDED.tags,
           version = ui_user_config.version + 1,
           etag = CAST(:updateEtag AS uuid),
@@ -230,7 +360,8 @@ public class UserConfigService {
           updated_by = EXCLUDED.updated_by
         RETURNING
           id, tenant_id, user_id, component_type, component_id, environment,
-          payload::text AS payload, tags::text AS tags, version, etag, created_at, updated_at, updated_by
+          payload::text AS payload, authoring_source::text AS authoring_source,
+          tags::text AS tags, version, etag, created_at, updated_at, updated_by
         """
             .formatted(conflictTarget);
 
@@ -243,6 +374,7 @@ public class UserConfigService {
             .addValue("componentId", identity.componentId())
             .addValue("environment", identity.environment())
             .addValue("payload", payloadJson)
+            .addValue("authoringSource", authoringSourceJson)
             .addValue("tags", tagsJson)
             .addValue("insertEtag", insertEtag.toString())
             .addValue("updateEtag", updateEtag.toString())
@@ -281,6 +413,7 @@ public class UserConfigService {
         .componentId(rs.getString("component_id"))
         .environment(rs.getString("environment"))
         .payload(rs.getString("payload"))
+        .authoringSource(rs.getString("authoring_source"))
         .tags(rs.getString("tags"))
         .version(rs.getLong("version"))
         .etag(rs.getObject("etag", UUID.class))
@@ -297,17 +430,22 @@ public class UserConfigService {
   private UiUserConfig recoverConcurrentCreate(
       ConfigIdentity identity,
       String payloadJson,
+      String authoringSourceJson,
       String tagsJson,
       String updatedBy,
       DataIntegrityViolationException cause) {
     UiUserConfig current =
         findConfig(identity)
             .orElseThrow(() -> cause);
-    return updateExisting(current, payloadJson, tagsJson, updatedBy);
+    return updateExisting(current, payloadJson, authoringSourceJson, tagsJson, updatedBy);
   }
 
   private UiUserConfig updateExisting(
-      UiUserConfig current, String payloadJson, String tagsJson, String updatedBy) {
+      UiUserConfig current,
+      String payloadJson,
+      String authoringSourceJson,
+      String tagsJson,
+      String updatedBy) {
     UUID expectedEtag = current.getEtag();
     UUID nextEtag = UUID.randomUUID();
     long nextVersion = current.getVersion() + 1;
@@ -315,6 +453,7 @@ public class UserConfigService {
     int updated = repository.updateIfCurrent(
         current.getId(),
         payloadJson,
+        authoringSourceJson,
         tagsJson,
         nextVersion,
         expectedEtag,
@@ -326,6 +465,7 @@ public class UserConfigService {
           "If-Match precondition failed: configuration changed concurrently");
     }
     current.setPayload(payloadJson);
+    current.setAuthoringSource(authoringSourceJson);
     current.setTags(tagsJson);
     current.setVersion(nextVersion);
     current.setEtag(nextEtag);
@@ -460,12 +600,59 @@ public class UserConfigService {
     }
   }
 
+  private JsonNode sanitizeAuthoringSource(JsonNode authoringSource, JsonNode existingAuthoringSource) {
+    if (authoringSource == null || authoringSource.isNull()) {
+      return null;
+    }
+    JsonNode sanitized = apiKeyProtectionService.sanitizeForStorage(
+        authoringSource,
+        existingAuthoringSource);
+    validateAuthoringSourceSize(sanitized);
+    return sanitized;
+  }
+
+  /**
+   * A generic UI write cannot attest a new semantic source. Preserve the existing source only
+   * when the executable payload is materially unchanged; otherwise clear it so reopen never
+   * presents stale semantics as the source of the current runtime page.
+   */
+  private JsonNode authoringSourceForGenericWrite(
+      Optional<UiUserConfig> existing,
+      JsonNode existingPayload,
+      JsonNode nextPayload) {
+    if (existing.isEmpty() || existingPayload == null || !existingPayload.equals(nextPayload)) {
+      return null;
+    }
+    return readJson(existing.get().getAuthoringSource());
+  }
+
+  private void validateAuthoringSourceSize(JsonNode authoringSource) {
+    if (authoringSource == null) {
+      return;
+    }
+    try {
+      int size = objectMapper.writeValueAsBytes(authoringSource).length;
+      if (size > MAX_AUTHORING_SOURCE_BYTES) {
+        throw new PayloadTooLargeException(
+            "Authoring source exceeds " + MAX_AUTHORING_SOURCE_BYTES + " bytes");
+      }
+    } catch (PayloadTooLargeException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IllegalArgumentException("Invalid authoring source JSON", e);
+    }
+  }
+
   private String writeJson(JsonNode node) {
     try {
       return objectMapper.writeValueAsString(node);
     } catch (Exception e) {
       throw new IllegalArgumentException("Unable to serialize JSON", e);
     }
+  }
+
+  private String writeNullableJson(JsonNode node) {
+    return node == null || node.isNull() ? null : writeJson(node);
   }
 
   private JsonNode readJson(String raw) {

@@ -337,6 +337,7 @@ class AgenticAuthoringControllerTest {
                 "00000000-0000-0000-0000-000000000123",
                 com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
                 com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
+                com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
                 List.of("persisted-page-payload-from-compiled-form-patch"));
         when(principalContextResolver.resolve(servletRequest, "tenant", "user", "local"))
                 .thenReturn(principalContext);
