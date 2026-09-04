@@ -19,13 +19,13 @@ import org.springframework.core.io.ClassPathResource;
 class AiRegistrySnapshotContractTest {
 
     private static final String EXPECTED_SNAPSHOT_HASH =
-            "50d3852c540fba13ff98a7b0539efb6d38eb4be02876993db9b0b9ff534ed4bc";
+            "868e364fe78d21baeecc588e22a5c7b47b2992a3ffbd3ab24da008b49b63f195";
     private static final String EXPECTED_VERSION = "1.0.0";
-    private static final String EXPECTED_GENERATED_AT = "2026-08-13T02:15:44.830Z";
-    private static final int EXPECTED_COMPONENT_COUNT = 105;
-    private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 95;
-    private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 105;
-    private static final int EXPECTED_CHUNK_COUNT = 2467;
+    private static final String EXPECTED_GENERATED_AT = "2026-09-04T10:54:24.761Z";
+    private static final int EXPECTED_COMPONENT_COUNT = 106;
+    private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 99;
+    private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 106;
+    private static final int EXPECTED_CHUNK_COUNT = 2548;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
