@@ -794,6 +794,7 @@ export interface AgenticAuthoringApplyRequestContract {
 export interface AgenticAuthoringApplyResultContract {
   applied?: boolean;
   etag?: string | null;
+  authoringSource?: AiJsonObject | null;
   [key: string]: AiJsonValue | undefined;
 }
 
