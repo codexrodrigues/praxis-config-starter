@@ -936,7 +936,12 @@ Regra de aplicacao:
   `compiledFormPatch.patch.page`. Quando a materializacao partir de um
   `uiCompositionPlan`, o Config deve compilar o plano antes do resultado
   terminal e preservar ambos no mesmo resultado auditavel. No `page-apply`, o
-  plano emitido pelo backend e persistido como `authoringSource` ao lado do
+  Config recompila deterministicamente o plano terminal e exige igualdade
+  estrutural exata com o `compiledFormPatch` emitido. Hashes validos isoladamente
+  nao bastam: plano e materializacao divergentes falham com
+  `agentic-turn-result-ui-composition-materialization-mismatch` antes de qualquer
+  escrita. Essa verificacao tambem vale para refinamentos de uma fonte reaberta.
+  O plano emitido pelo backend e persistido como `authoringSource` ao lado do
   `payload` executavel, sob a mesma versao e ETag de `ui_user_config`.
   `diagnostics` e removido da fonte e da identidade hash; linhagem e template
   resolvido permanecem como proveniencia server-attested. A ausencia do plano

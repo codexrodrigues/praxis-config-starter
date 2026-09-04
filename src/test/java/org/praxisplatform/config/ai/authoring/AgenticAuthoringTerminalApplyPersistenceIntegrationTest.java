@@ -114,16 +114,22 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
     }
 
     @Test
-    void shouldPersistResourceWorkspaceAndKeepTheWinningVersionAfterStaleApply() throws Exception {
+    void shouldPersistReopenRefineAndKeepTheWinningVersionAfterStaleApply() throws Exception {
         UUID streamId = UUID.randomUUID();
         UUID threadId = UUID.randomUUID();
         UUID turnId = UUID.randomUUID();
         AiPrincipalContext principal = new AiPrincipalContext(TENANT, USER, ENVIRONMENT, true);
         persistTurn(threadId, turnId);
 
-        JsonNode compiledPatch = compiledPatch();
+        JsonNode firstPlan = compositionPlan();
+        JsonNode compiledPatch = compiledPatch(firstPlan);
         AgenticAuthoringSemanticDecision semanticDecision = semanticDecision();
-        ObjectNode resultPayload = terminalPayload(compiledPatch, semanticDecision, "create", null);
+        ObjectNode resultPayload = terminalPayload(
+                compiledPatch,
+                firstPlan,
+                semanticDecision,
+                "create",
+                null);
         AiTurnEventEnvelope terminal = turnEventService.appendEvent(
                 principal,
                 streamId,
@@ -196,9 +202,10 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 .isInstanceOf(UserConfigService.PreconditionFailedException.class)
                 .hasMessageContaining("configuration already exists");
 
-        JsonNode updatedPatch = compiledPatch.deepCopy();
-        ((ObjectNode) updatedPatch.path("patch").path("page"))
-                .put("title", "Absences by department");
+        ObjectNode reopenedPlan = (ObjectNode) persistedAuthoringSource.path("source").deepCopy();
+        ((ObjectNode) reopenedPlan.at("/widgets/1/inputs"))
+                .put("formId", "missions-detail-reviewed");
+        JsonNode updatedPatch = compiledPatch(reopenedPlan);
         UUID updateStreamId = UUID.randomUUID();
         UUID updateThreadId = UUID.randomUUID();
         UUID updateTurnId = UUID.randomUUID();
@@ -209,7 +216,12 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 updateThreadId,
                 updateTurnId,
                 "result",
-                terminalPayload(updatedPatch, semanticDecision, "update", applied.etag()));
+                terminalPayload(
+                        updatedPatch,
+                        reopenedPlan,
+                        semanticDecision,
+                        "update",
+                        applied.etag()));
         AgenticAuthoringApplyRequest updateRequest = new AgenticAuthoringApplyRequest(
                 updatedPatch,
                 "praxis-dynamic-page",
@@ -229,6 +241,12 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
         assertThat(updated.version()).isEqualTo(2L);
         assertThat(updated.etag()).isNotEqualTo(applied.etag());
         assertThat(updated.payload()).isEqualTo(updatedPatch.path("patch").path("page"));
+        assertThat(updated.authoringSource().path("sourceSha256").asText())
+                .isNotEqualTo(applied.authoringSource().path("sourceSha256").asText());
+        assertThat(updated.authoringSource().at("/materialization/sha256").asText())
+                .isNotEqualTo(applied.authoringSource().at("/materialization/sha256").asText());
+        assertThat(updated.authoringSource().at("/provenance/resultEventId").asText())
+                .isEqualTo(updateTerminal.getEventId().toString());
         assertThatThrownBy(() -> applyService.apply(
                         updateRequest,
                         principal,
@@ -257,7 +275,8 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 .orElseThrow()
                 .config()
                 .getPayload());
-        assertThat(winningPayload.path("title").asText()).isEqualTo("Absences by department");
+        assertThat(winningPayload.at("/widgets/1/definition/inputs/formId").asText())
+                .isEqualTo("missions-detail-reviewed");
         assertThat(winningPayload.at("/composition/links/0/from/ref/port").asText())
                 .isEqualTo("selectionChange");
     }
@@ -289,6 +308,7 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
 
     private ObjectNode terminalPayload(
             JsonNode compiledPatch,
+            JsonNode uiCompositionPlan,
             AgenticAuthoringSemanticDecision semanticDecision,
             String mode,
             String baseEtag) {
@@ -296,13 +316,10 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
         payload.put("canApply", true);
         ObjectNode preview = payload.putObject("preview");
         preview.set("compiledFormPatch", compiledPatch);
-        ObjectNode authoringPlan = preview.putObject("uiCompositionPlan");
-        authoringPlan.put("version", "1.0");
-        authoringPlan.put("kind", "praxis.ui-composition-plan");
-        authoringPlan.put("layoutPreset", "resource-master-detail");
-        authoringPlan.putArray("widgets");
+        ObjectNode authoringPlan = (ObjectNode) uiCompositionPlan.deepCopy();
         authoringPlan.withObject("/diagnostics/resourceWorkspaceGrounding")
                 .put("status", "verified");
+        preview.set("uiCompositionPlan", authoringPlan);
         payload.putObject("intentResolution")
                 .set("semanticDecision", objectMapper.valueToTree(semanticDecision));
         ObjectNode target = payload.putObject("applyTarget");
@@ -318,8 +335,8 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
         return payload;
     }
 
-    private JsonNode compiledPatch() throws Exception {
-        JsonNode plan = objectMapper.readTree("""
+    private JsonNode compositionPlan() throws Exception {
+        return objectMapper.readTree("""
                 {
                   "version": "1.0",
                   "kind": "praxis.ui-composition-plan",
@@ -384,6 +401,9 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                   ]
                 }
                 """);
+    }
+
+    private JsonNode compiledPatch(JsonNode plan) {
         ObjectNode basePatch = objectMapper.createObjectNode();
         basePatch.put("profileId", "ui-composition-plan@0.1.0");
         basePatch.put("catalogReleaseId", "catalog-terminal-apply-test");

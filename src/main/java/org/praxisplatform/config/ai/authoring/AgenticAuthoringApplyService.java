@@ -337,6 +337,7 @@ public class AgenticAuthoringApplyService {
                 || !UI_COMPOSITION_PLAN_VERSION.equals(issuedPlan.path("version").asText())) {
             throw new IllegalStateException("agentic-turn-result-ui-composition-plan-invalid");
         }
+        validateIssuedPlanMaterialization(issuedPlan, request.compiledFormPatch());
 
         ObjectNode semanticSource = ((ObjectNode) issuedPlan).deepCopy();
         JsonNode diagnostics = semanticSource.remove("diagnostics");
@@ -368,6 +369,21 @@ public class AgenticAuthoringApplyService {
         }
         copyTemplateProvenance(diagnostics, provenance);
         return authoringSource;
+    }
+
+    private void validateIssuedPlanMaterialization(
+            JsonNode issuedPlan,
+            JsonNode issuedCompiledFormPatch) {
+        AgenticAuthoringUiCompositionPlanCompiler.CompileResult compiled =
+                new AgenticAuthoringUiCompositionPlanCompiler(objectMapper)
+                        .compile(issuedPlan, issuedCompiledFormPatch);
+        if (!compiled.valid()) {
+            throw new IllegalStateException("agentic-turn-result-ui-composition-plan-invalid");
+        }
+        if (!compiled.compiledFormPatch().equals(issuedCompiledFormPatch)) {
+            throw new IllegalStateException(
+                    "agentic-turn-result-ui-composition-materialization-mismatch");
+        }
     }
 
     private void copyTemplateProvenance(JsonNode diagnostics, ObjectNode provenance) {

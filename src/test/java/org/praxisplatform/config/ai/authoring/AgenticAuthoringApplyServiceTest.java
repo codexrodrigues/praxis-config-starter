@@ -136,9 +136,8 @@ class AgenticAuthoringApplyServiceTest {
 
     @Test
     void applyUsesGovernedTerminalPlanEvidenceWithoutPersistingDiagnosticsInTheCompiledPage() throws Exception {
-        ObjectNode compiledPatch = (ObjectNode) compiledPatch();
-        ObjectNode page = (ObjectNode) compiledPatch.path("patch").path("page");
-        page.put("layoutPreset", "master-detail-dashboard");
+        ObjectNode terminalPlan = masterDetailCompositionPlan();
+        ObjectNode compiledPatch = compileCompositionPlan(terminalPlan);
         JsonNode savedPayload = compiledPatch.path("patch").path("page");
         UiUserConfig saved = UiUserConfig.builder()
                 .componentType("praxis-dynamic-page")
@@ -173,10 +172,6 @@ class AgenticAuthoringApplyServiceTest {
         AiPrincipalContext principalContext = principal("user");
         authorize(request, principalContext);
         AiTurnEventEnvelope terminal = terminalResult(request, true);
-        ObjectNode terminalPlan = objectMapper.createObjectNode();
-        terminalPlan.put("version", "1.0");
-        terminalPlan.put("kind", "praxis.ui-composition-plan");
-        terminalPlan.put("layoutPreset", "master-detail-dashboard");
         terminalPlan.withObject("/diagnostics/resourceWorkspaceGrounding")
                 .put("status", "verified");
         terminalPlan.withObject("/diagnostics/templateResolution")
@@ -219,6 +214,32 @@ class AgenticAuthoringApplyServiceTest {
         assertThat(authoringSource.at("/provenance/templateRef/registryKey").asText())
                 .isEqualTo("ui-composition-template:master-detail-tabs");
         assertThat(authoringSource.at("/provenance/templateRef/version").asLong()).isEqualTo(7L);
+    }
+
+    @Test
+    void applyRejectsCompositionPlanThatDoesNotMaterializeTheIssuedPatch() throws Exception {
+        ObjectNode terminalPlan = masterDetailCompositionPlan();
+        ObjectNode compiledPatch = compileCompositionPlan(terminalPlan);
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch,
+                "praxis-dynamic-page",
+                "page",
+                "tenant",
+                masterDetailSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+        AiTurnEventEnvelope terminal = terminalResult(request, true);
+        ((ObjectNode) terminalPlan.at("/widgets/1/inputs"))
+                .put("formId", "different-semantic-source");
+        terminalPlan.withObject("/diagnostics/resourceWorkspaceGrounding")
+                .put("status", "verified");
+        ((ObjectNode) terminal.getPayload().path("preview"))
+                .set("uiCompositionPlan", terminalPlan);
+        when(turnEventService.findLastEvent(STREAM_ID)).thenReturn(Optional.of(terminal));
+
+        assertThatThrownBy(() -> service().apply(request, principalContext, "author", null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("agentic-turn-result-ui-composition-materialization-mismatch");
     }
 
     @Test
@@ -700,6 +721,67 @@ class AgenticAuthoringApplyServiceTest {
                   }
                 }
                 """);
+    }
+
+    private ObjectNode masterDetailCompositionPlan() throws Exception {
+        return (ObjectNode) objectMapper.readTree("""
+                {
+                  "version": "1.0",
+                  "kind": "praxis.ui-composition-plan",
+                  "layoutPreset": "master-detail-dashboard",
+                  "state": { "values": { "selectedItem": null } },
+                  "widgets": [
+                    {
+                      "key": "missions-master",
+                      "componentId": "praxis-table",
+                      "role": "master",
+                      "inputs": {
+                        "resourcePath": "/api/operations/missoes",
+                        "tableId": "missions-master",
+                        "config": { "behavior": { "selection": { "enabled": true, "type": "single" } } }
+                      },
+                      "outputs": { "selectionChange": "emit" }
+                    },
+                    {
+                      "key": "missions-detail",
+                      "componentId": "praxis-dynamic-form",
+                      "role": "detail",
+                      "inputs": {
+                        "resourcePath": "/api/operations/missoes",
+                        "schemaSource": "resource",
+                        "mode": "view",
+                        "formId": "missions-detail"
+                      }
+                    }
+                  ],
+                  "bindings": [
+                    {
+                      "id": "missions-master.selectionChange->state.selectedItem",
+                      "intent": "state-write",
+                      "from": { "kind": "component-port", "widget": "missions-master", "port": "selectionChange", "direction": "output" },
+                      "to": { "kind": "state", "path": "selectedItem" },
+                      "transform": { "kind": "pick-path", "id": "pick-selected-row", "path": "payload.row" }
+                    },
+                    {
+                      "id": "state.selectedItem->missions-detail.initialValue",
+                      "intent": "state-read",
+                      "from": { "kind": "state", "path": "selectedItem" },
+                      "to": { "kind": "component-port", "widget": "missions-detail", "port": "initialValue", "direction": "input" },
+                      "condition": { "!!": [{ "var": "state.selectedItem" }] }
+                    }
+                  ]
+                }
+                """);
+    }
+
+    private ObjectNode compileCompositionPlan(JsonNode plan) {
+        ObjectNode basePatch = objectMapper.createObjectNode();
+        basePatch.put("profileId", "ui-composition-plan@0.1.0");
+        basePatch.put("catalogReleaseId", "catalog-apply-service-test");
+        AgenticAuthoringUiCompositionPlanCompiler.CompileResult result =
+                new AgenticAuthoringUiCompositionPlanCompiler(objectMapper).compile(plan, basePatch);
+        assertThat(result.valid()).withFailMessage("Compilation failures: %s", result.failureCodes()).isTrue();
+        return (ObjectNode) result.compiledFormPatch();
     }
 
     private JsonNode compiledPatchWithSchemaGrounding() throws Exception {
