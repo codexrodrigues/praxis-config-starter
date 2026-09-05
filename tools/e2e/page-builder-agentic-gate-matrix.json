@@ -290,7 +290,8 @@
         "Guard live rejeita interceptacao de endpoint critico antes do registro",
         "Auditoria live: capabilities reais possuem proveniência governada e não degradada",
         "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload"
-      ]
+      ],
+      "humanTurnLimit": 3
     },
     "single-table": {
       "description": "Focal live LLM proof for canonical single-table creation and semantic refinement plus the invariant critical-endpoint interception guard, without Playwright retries.",
