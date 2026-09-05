@@ -1,0 +1,135 @@
+{
+  "recordedAt": "2026-09-05T22:41:05.287064+00:00",
+  "workflowUrl": "https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33995681951",
+  "workflowResult": "failure",
+  "spendingControl": "user-attested-provider-account-limit",
+  "budgetUsd": null,
+  "providerLimitIndependentlyVerified": false,
+  "provider": "openai",
+  "configuredModel": "gpt-5-mini",
+  "observedModels": [
+    "gpt-5-mini-2025-08-07"
+  ],
+  "humanTurns": 3,
+  "humanTurnLimit": 3,
+  "playwrightRetries": 0,
+  "cleanupVerified": true,
+  "productionLikePassed": false,
+  "playwright": {
+    "discovered": 3,
+    "executed": 3,
+    "passed": 2,
+    "skipped": 0,
+    "failed": 1,
+    "flaky": 0,
+    "attempts": 3,
+    "retryAttempts": 0,
+    "tests": [
+      {
+        "title": "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      },
+      {
+        "title": "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
+        "status": "unexpected",
+        "attempts": 1,
+        "retryAttempts": 0
+      },
+      {
+        "title": "Auditoria live: capabilities reais possuem proveniência governada e não degradada",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      }
+    ],
+    "durationMs": 149267
+  },
+  "sources": [
+    {
+      "name": "praxis-config-starter",
+      "sha": "7558227300b17a1f976070753df4dcca499f9b1f",
+      "treeSha": "9b6618bb4aababe01043ea7c0f0181c470aef8fd",
+      "materialization": "working-tree",
+      "dirty": false
+    },
+    {
+      "name": "praxis-metadata-starter",
+      "sha": "f43d3c384fbcc209c6264b64bf6e5ebbe3c0ea6d",
+      "treeSha": "0ba753f6f05a8a05e409e309fe0e2c43a2faf9a0",
+      "materialization": "git-archive",
+      "dirty": true
+    },
+    {
+      "name": "praxis-api-quickstart",
+      "sha": "2b6b50fdc2a8f1c66862a66ac4df848d986bbab3",
+      "treeSha": "333b5405fe64a4135846ece7a7ad1608c5abdd0a",
+      "materialization": "working-tree",
+      "dirty": false
+    },
+    {
+      "name": "praxis-ui-angular",
+      "sha": "460d1ae172e7f58bd3da6da503141c9380ee5204",
+      "treeSha": "b3ec66a0537c20ead7fa3ba4c9d8429890bd3dd7",
+      "materialization": "working-tree",
+      "dirty": false
+    }
+  ],
+  "dependencyAttestation": {
+    "configStarter": {
+      "artifactId": "praxis-config-starter",
+      "version": "0.1.0-rc.148",
+      "source": "source-checkout",
+      "referenceJarSha256": "06134dd6b650fac1ea0cc86116c24f1e86ecad8ccf0af7b1c0513e742fddd6f6",
+      "quickstartNestedJarSha256": "06134dd6b650fac1ea0cc86116c24f1e86ecad8ccf0af7b1c0513e742fddd6f6",
+      "quickstartEntry": "BOOT-INF/lib/praxis-config-starter-0.1.0-rc.148.jar",
+      "byteIdentical": true
+    }
+  },
+  "confirmedResponsesWithUsage": 3,
+  "knownUsage": {
+    "inputTokens": 47341,
+    "outputTokens": 4010
+  },
+  "usageComplete": false,
+  "totalCostUsd": null,
+  "costLimitation": "Some invocation telemetry has unknown model and null token counters; embedding cost is not attributed in this receipt.",
+  "turns": [
+    {
+      "turn": 1,
+      "state": "review",
+      "layoutKind": "resource-master-detail",
+      "reviewReason": "weak-lexical-evidence",
+      "groundingStatus": "verified",
+      "operationCount": 9,
+      "groundingFailureCode": null,
+      "previewFailureCodes": []
+    },
+    {
+      "turn": 2,
+      "state": "review",
+      "layoutKind": null,
+      "reviewReason": "semantic-preview-materialization-mismatch",
+      "groundingStatus": "unavailable",
+      "operationCount": 0,
+      "groundingFailureCode": "verified-domain-operations-missing",
+      "previewFailureCodes": [
+        "semantic-preview-resource-workspace-grounding-required"
+      ]
+    },
+    {
+      "turn": 3,
+      "state": "review",
+      "layoutKind": null,
+      "reviewReason": "semantic-preview-materialization-mismatch",
+      "groundingStatus": "unavailable",
+      "operationCount": 0,
+      "groundingFailureCode": "verified-domain-operations-missing",
+      "previewFailureCodes": [
+        "semantic-preview-resource-workspace-grounding-required"
+      ]
+    }
+  ],
+  "paidJourneyRepeated": false
+}

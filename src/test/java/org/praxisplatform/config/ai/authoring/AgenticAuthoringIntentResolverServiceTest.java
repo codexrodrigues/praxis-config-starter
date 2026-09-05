@@ -734,6 +734,62 @@ class AgenticAuthoringIntentResolverServiceTest {
         Mockito.verifyNoInteractions(llmIntentResolver);
     }
 
+    @Test
+    void governedReviewContinuationPreservesIssuedLayoutAndQueryConstraints() {
+        AgenticAuthoringLlmIntentResolverService llm =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
+                objectMapper, quickstartCandidateCatalog(), llm,
+                new AgenticAuthoringComponentCapabilitiesService());
+        String resource = "/api/operations/missoes";
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                resource, "get", "/schemas/filtered?path=" + resource,
+                resource, "get", 0.9, "Resolved resource", List.of("schema-available"));
+        AgenticAuthoringVisualizationDecision visual = new AgenticAuthoringVisualizationDecision(
+                "praxis.ui-visualization-decision.v1", "Mission workspace",
+                "resource-master-detail", "praxis-table", List.of(), false, true,
+                List.of("praxis-chart"), false, false, "llm", resource);
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("source", "server-issued-quick-reply");
+        constraints.put("quickReplyId", "governed-review-revise");
+        constraints.put("continuationOf", "governed_review");
+        constraints.putArray("conceptKeys");
+        constraints.put("appliesToDataSelection", true);
+        constraints.putArray("filters").addObject()
+                .put("field", "status").put("operator", "eq").put("value", "PLANNED");
+        AgenticAuthoringSemanticDecision issued = AgenticAuthoringSemanticDecision.from(
+                "create", "page", "create_artifact", candidate, List.of(candidate), visual,
+                List.of(), null, null, null, "repair-session", "issued-turn",
+                "Create mission workspace", "Create mission workspace", "Governed review")
+                .withConstraints(constraints);
+        ObjectNode hints = objectMapper.createObjectNode();
+        hints.put("source", "governed-review-gate");
+        hints.put("kind", "governed-review-repair");
+        hints.put("resourcePath", resource);
+        hints.put("operationKind", "create");
+        hints.put("artifactKind", "page");
+        hints.put("changeKind", "create_artifact");
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "Revise a previa bloqueada.", "praxis-ui-angular", "praxis-dynamic-page-builder",
+                "/page-builder-ia", objectMapper.createObjectNode(), null,
+                "openai", "gpt-5-mini", "test-key", "repair-session", "repair-turn",
+                List.of(), null, List.of(), hints, issued);
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(request, "tenant", "user", "local");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.visualizationDecision()).isEqualTo(visual);
+        assertThat(result.semanticDecision().visualizationDecision()).isEqualTo(visual);
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo(resource);
+        assertThat(result.semanticDecision().constraints().path("filters")).isEqualTo(constraints.path("filters"));
+        assertThat(result.semanticDecision().constraints().path("appliesToDataSelection").asBoolean()).isTrue();
+        assertThat(result.semanticDecision().constraints().path("source").asText())
+                .isEqualTo("resolved-quick-reply-continuation");
+        assertThat(result.semanticDecision().previousDecisionId()).isEqualTo(issued.decisionId());
+        assertThat(constraints.path("source").asText()).isEqualTo("server-issued-quick-reply");
+        Mockito.verifyNoInteractions(llm);
+    }
+
     private AgenticAuthoringApiMetadataCandidateCatalog quickstartCandidateCatalog() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
