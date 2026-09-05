@@ -54,6 +54,7 @@ public class AgenticAuthoringTurnEngine {
             new AgenticAuthoringComponentDiscoveryService();
     private final AgenticAuthoringConsultativeAnswerService consultativeAnswerService;
     private final AgenticAuthoringPreIntentToolPlanningService preIntentToolPlanningService;
+    private final AgenticAuthoringPersistedUiCompositionSourceResolver persistedUiCompositionSourceResolver;
     private final long componentCapabilitiesPreloadTimeoutMs;
     private final AgenticAuthoringRuntimeComponentGroundingService runtimeComponentGroundingService;
     private final AgenticAuthoringTurnRouteClassifier routeClassifier = new AgenticAuthoringTurnRouteClassifier();
@@ -227,6 +228,36 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringConsultativeAnswerService consultativeAnswerService,
             AgenticAuthoringPreIntentToolPlanningService preIntentToolPlanningService,
             long componentCapabilitiesPreloadTimeoutMs) {
+        this(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                currentPageAnalyzer,
+                toolRegistry,
+                projectKnowledgeService,
+                orchestrator,
+                schemaRetrievalService,
+                componentCapabilitiesService,
+                consultativeAnswerService,
+                preIntentToolPlanningService,
+                componentCapabilitiesPreloadTimeoutMs,
+                null);
+    }
+
+    public AgenticAuthoringTurnEngine(
+            AgenticAuthoringIntentResolverService intentResolverService,
+            AgenticAuthoringPreviewService previewService,
+            ObjectMapper objectMapper,
+            AgenticAuthoringCurrentPageAnalyzer currentPageAnalyzer,
+            AgenticAuthoringToolRegistry toolRegistry,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            AgenticAuthoringOrchestrator orchestrator,
+            SchemaRetrievalService schemaRetrievalService,
+            AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
+            AgenticAuthoringConsultativeAnswerService consultativeAnswerService,
+            AgenticAuthoringPreIntentToolPlanningService preIntentToolPlanningService,
+            long componentCapabilitiesPreloadTimeoutMs,
+            AgenticAuthoringPersistedUiCompositionSourceResolver persistedUiCompositionSourceResolver) {
         this.intentResolverService = intentResolverService;
         this.previewService = previewService;
         this.objectMapper = objectMapper;
@@ -238,6 +269,7 @@ public class AgenticAuthoringTurnEngine {
         this.componentCapabilitiesService = componentCapabilitiesService;
         this.consultativeAnswerService = consultativeAnswerService;
         this.preIntentToolPlanningService = preIntentToolPlanningService;
+        this.persistedUiCompositionSourceResolver = persistedUiCompositionSourceResolver;
         this.componentCapabilitiesPreloadTimeoutMs = Math.max(1L, componentCapabilitiesPreloadTimeoutMs);
         this.runtimeComponentGroundingService = new AgenticAuthoringRuntimeComponentGroundingService(objectMapper);
     }
@@ -256,6 +288,13 @@ public class AgenticAuthoringTurnEngine {
             String schemaBaseUrl) {
         AgenticAuthoringApplyTarget.Resolution terminalApplyTargetResolution =
                 AgenticAuthoringApplyTarget.resolve(request, principalContext);
+        AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution persistedSourceResolution =
+                persistedUiCompositionSourceResolver == null
+                        ? AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution.notRequired()
+                        : persistedUiCompositionSourceResolver.resolve(
+                                request,
+                                principalContext,
+                                terminalApplyTargetResolution);
         request = withoutAgenticApplyTargetContext(request);
         request = withoutClientAuthoringEvidenceContext(request);
         request = withoutClientVerifiedDomainOperations(request);
@@ -727,18 +766,26 @@ public class AgenticAuthoringTurnEngine {
                                 "artifactKind", safeText(intentResolution.artifactKind()),
                                 "operationKind", safeText(intentResolution.operationKind()))));
                 AgenticAuthoringPlanRequest planRequest = toPlanRequest(previewRequest, intentResolution);
-                preview = StringUtils.hasText(schemaBaseUrl)
-                        ? previewService.preview(
+                preview = persistedSourceResolution.plan() != null
+                        ? previewService.previewWithPersistedUiCompositionPlan(
                                 planRequest,
                                 principalContext.tenantId(),
                                 principalContext.userId(),
                                 principalContext.environment(),
-                                schemaBaseUrl)
-                        : previewService.preview(
-                                planRequest,
-                                principalContext.tenantId(),
-                                principalContext.userId(),
-                                principalContext.environment());
+                                schemaBaseUrl,
+                                persistedSourceResolution.plan())
+                        : StringUtils.hasText(schemaBaseUrl)
+                                ? previewService.preview(
+                                        planRequest,
+                                        principalContext.tenantId(),
+                                        principalContext.userId(),
+                                        principalContext.environment(),
+                                        schemaBaseUrl)
+                                : previewService.preview(
+                                        planRequest,
+                                        principalContext.tenantId(),
+                                        principalContext.userId(),
+                                        principalContext.environment());
                 turnProviderInvocations.addAll(preview.providerInvocations());
                 if (!compactGovernedFastPath) {
                     emitStatus(
@@ -762,7 +809,8 @@ public class AgenticAuthoringTurnEngine {
                         eventSink,
                         intentResolution,
                         preview,
-                        schemaBaseUrl);
+                        schemaBaseUrl,
+                        persistedSourceResolution.plan());
                 if (preview != previewBeforeRepair && preview != null) {
                     turnProviderInvocations.addAll(preview.providerInvocations());
                 }
@@ -790,7 +838,8 @@ public class AgenticAuthoringTurnEngine {
             String terminalPreviewApplyBlockReason = terminalPreviewApplyBlockReason(
                     request,
                     preview,
-                    terminalApplyTargetResolution);
+                    terminalApplyTargetResolution,
+                    persistedSourceResolution);
             decisionDiagnostics.put("terminalPreviewApplyEligible", terminalPreviewApplyBlockReason.isBlank());
             decisionDiagnostics.put("terminalApplyTargetEligible", terminalApplyTargetResolution.valid());
             if (!terminalPreviewApplyBlockReason.isBlank()) {
@@ -862,13 +911,17 @@ public class AgenticAuthoringTurnEngine {
     private String terminalPreviewApplyBlockReason(
             AgenticAuthoringTurnStreamRequest request,
             AgenticAuthoringPreviewResult preview,
-            AgenticAuthoringApplyTarget.Resolution applyTargetResolution) {
+            AgenticAuthoringApplyTarget.Resolution applyTargetResolution,
+            AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution persistedSourceResolution) {
         if (preview == null || !preview.valid()) {
             return "preview-invalid";
         }
         if (preview.warnings() != null
                 && preview.warnings().contains("component-edit-plan-no-op")) {
             return "component-edit-no-op";
+        }
+        if (persistedSourceResolution != null && !persistedSourceResolution.valid()) {
+            return persistedSourceResolution.failureCode();
         }
         if (isLocalComponentEditPreview(request, preview)) {
             return "";
@@ -881,6 +934,17 @@ public class AgenticAuthoringTurnEngine {
         return applyTargetResolution == null || !applyTargetResolution.valid()
                 ? applyTargetResolution == null ? "apply-target-missing" : applyTargetResolution.failureCode()
                 : "";
+    }
+
+    private String terminalPreviewApplyBlockReason(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringPreviewResult preview,
+            AgenticAuthoringApplyTarget.Resolution applyTargetResolution) {
+        return terminalPreviewApplyBlockReason(
+                request,
+                preview,
+                applyTargetResolution,
+                AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution.notRequired());
     }
 
     private boolean isLocalComponentEditPreview(
@@ -6386,6 +6450,7 @@ public class AgenticAuthoringTurnEngine {
         }
         ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
         sanitized.remove("authoringEvidence");
+        sanitized.remove("uiCompositionAuthoringSource");
         return copyWithContextHints(request, sanitized.isEmpty() ? null : sanitized);
     }
 
@@ -7080,7 +7145,8 @@ public class AgenticAuthoringTurnEngine {
             AgenticAuthoringTurnEventSink eventSink,
             AgenticAuthoringIntentResolutionResult intentResolution,
             AgenticAuthoringPreviewResult preview,
-            String schemaBaseUrl) throws Exception {
+            String schemaBaseUrl,
+            JsonNode persistedUiCompositionPlan) throws Exception {
         String repairClassification = AgenticAuthoringRepairClassificationPolicy.classify(intentResolution, preview);
         if (!AgenticAuthoringRepairClassificationPolicy.RETRYABLE.equals(repairClassification)
                 || eventSink.terminalReached()) {
@@ -7098,18 +7164,26 @@ public class AgenticAuthoringTurnEngine {
                         "warningCount", preview.warnings() == null ? 0 : preview.warnings().size())));
         AgenticAuthoringPlanRequest repairRequest =
                 toRepairPlanRequest(request, intentResolution, preview, repairClassification);
-        AgenticAuthoringPreviewResult repairedPreview = StringUtils.hasText(schemaBaseUrl)
-                ? previewService.preview(
+        AgenticAuthoringPreviewResult repairedPreview = persistedUiCompositionPlan != null
+                ? previewService.previewWithPersistedUiCompositionPlan(
                         repairRequest,
                         principalContext.tenantId(),
                         principalContext.userId(),
                         principalContext.environment(),
-                        schemaBaseUrl)
-                : previewService.preview(
-                        repairRequest,
-                        principalContext.tenantId(),
-                        principalContext.userId(),
-                        principalContext.environment());
+                        schemaBaseUrl,
+                        persistedUiCompositionPlan)
+                : StringUtils.hasText(schemaBaseUrl)
+                        ? previewService.preview(
+                                repairRequest,
+                                principalContext.tenantId(),
+                                principalContext.userId(),
+                                principalContext.environment(),
+                                schemaBaseUrl)
+                        : previewService.preview(
+                                repairRequest,
+                                principalContext.tenantId(),
+                                principalContext.userId(),
+                                principalContext.environment());
         eventSink.append("thought.step", thoughtStepPayload(
                 "preview.compile",
                 repairedPreview.valid()

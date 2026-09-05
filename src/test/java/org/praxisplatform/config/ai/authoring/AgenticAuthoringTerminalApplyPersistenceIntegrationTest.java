@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -22,6 +23,7 @@ import org.praxisplatform.config.repository.AiTurnRepository;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiTurnEventService;
+import org.praxisplatform.config.service.CanonicalJsonHashService;
 import org.praxisplatform.config.service.DomainFederationQueryService;
 import org.praxisplatform.config.service.DomainKnowledgeChangeSetService;
 import org.praxisplatform.config.service.DomainRuleChangeWorkspaceService;
@@ -113,16 +115,22 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
     }
 
     @Test
-    void shouldPersistResourceWorkspaceAndKeepTheWinningVersionAfterStaleApply() throws Exception {
+    void shouldPersistReopenRefineAndKeepTheWinningVersionAfterStaleApply() throws Exception {
         UUID streamId = UUID.randomUUID();
         UUID threadId = UUID.randomUUID();
         UUID turnId = UUID.randomUUID();
         AiPrincipalContext principal = new AiPrincipalContext(TENANT, USER, ENVIRONMENT, true);
         persistTurn(threadId, turnId);
 
-        JsonNode compiledPatch = compiledPatch();
+        JsonNode firstPlan = compositionPlan();
+        JsonNode compiledPatch = compiledPatch(firstPlan);
         AgenticAuthoringSemanticDecision semanticDecision = semanticDecision();
-        ObjectNode resultPayload = terminalPayload(compiledPatch, semanticDecision, "create", null);
+        ObjectNode resultPayload = terminalPayload(
+                compiledPatch,
+                firstPlan,
+                semanticDecision,
+                "create",
+                null);
         AiTurnEventEnvelope terminal = turnEventService.appendEvent(
                 principal,
                 streamId,
@@ -150,7 +158,8 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 userConfigService,
                 apiKeyProtectionService,
                 turnEventService,
-                objectMapper);
+                objectMapper,
+                new CanonicalJsonHashService(objectMapper));
 
         AgenticAuthoringApplyResult applied = applyService.apply(request, principal, USER, null);
 
@@ -167,6 +176,14 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 .orElseThrow();
         assertThat(objectMapper.readTree(persisted.config().getPayload()))
                 .isEqualTo(compiledPatch.path("patch").path("page"));
+        JsonNode persistedAuthoringSource = objectMapper.readTree(
+                persisted.config().getAuthoringSource());
+        assertThat(persistedAuthoringSource.path("schemaVersion").asText())
+                .isEqualTo("praxis.ui-authoring-source/v1");
+        assertThat(persistedAuthoringSource.path("source").has("diagnostics")).isFalse();
+        assertThat(persistedAuthoringSource.path("sourceSha256").asText()).hasSize(64);
+        assertThat(persistedAuthoringSource.at("/materialization/sha256").asText()).hasSize(64);
+        assertThat(applied.authoringSource()).isEqualTo(persistedAuthoringSource);
         JsonNode persistedPage = objectMapper.readTree(persisted.config().getPayload());
         assertThat(persistedPage.path("widgets").findValuesAsText("id"))
                 .contains("praxis-table", "praxis-dynamic-form");
@@ -186,12 +203,75 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 .isInstanceOf(UserConfigService.PreconditionFailedException.class)
                 .hasMessageContaining("configuration already exists");
 
-        JsonNode updatedPatch = compiledPatch.deepCopy();
-        ((ObjectNode) updatedPatch.path("patch").path("page"))
-                .put("title", "Absences by department");
+        ObjectNode reopenContext = objectMapper.createObjectNode();
+        ObjectNode reopenTarget = reopenContext.putObject("agenticApplyTarget");
+        reopenTarget.put("schemaVersion", AgenticAuthoringApplyTarget.SCHEMA_VERSION);
+        reopenTarget.put("componentType", "praxis-dynamic-page");
+        reopenTarget.put("componentId", COMPONENT_ID);
+        reopenTarget.put("scope", "user");
+        reopenTarget.put("mode", "update");
+        reopenTarget.put("baseEtag", applied.etag());
+        reopenContext.set("uiCompositionAuthoringSource", persistedAuthoringSource.deepCopy());
+        AgenticAuthoringTurnStreamRequest reopenRequest = new AgenticAuthoringTurnStreamRequest(
+                "Altere o gráfico selecionado para linhas",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                persistedPage,
+                "missions-chart",
+                "openai",
+                "gpt-5.4-mini",
+                null,
+                "session",
+                UUID.randomUUID().toString(),
+                null,
+                null,
+                null,
+                reopenContext,
+                null,
+                null);
+        AgenticAuthoringPersistedUiCompositionSourceResolver sourceResolver =
+                new AgenticAuthoringPersistedUiCompositionSourceResolver(
+                        userConfigService,
+                        objectMapper,
+                        new CanonicalJsonHashService(objectMapper),
+                        apiKeyProtectionService);
+        AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution sourceResolution = sourceResolver.resolve(
+                reopenRequest,
+                principal,
+                AgenticAuthoringApplyTarget.resolve(reopenRequest, principal));
+        assertThat(sourceResolution.valid()).isTrue();
+        assertThat(sourceResolution.plan()).isEqualTo(persistedAuthoringSource.path("source"));
+
+        AgenticAuthoringPlanRequest refinementRequest = new AgenticAuthoringPlanRequest(
+                "Altere o gráfico selecionado para linhas",
+                "openai",
+                "gpt-5.4-mini",
+                null,
+                persistedPage,
+                chartModificationIntent(),
+                "session",
+                UUID.randomUUID().toString(),
+                null,
+                null,
+                null,
+                objectMapper.createObjectNode().put("selectedWidgetKey", "missions-chart"));
+        AgenticAuthoringUiCompositionPlanResult refinement =
+                new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)
+                        .plan(refinementRequest, sourceResolution.plan())
+                        .orElseThrow();
+        ObjectNode reopenedPlan = (ObjectNode) refinement.uiCompositionPlan();
+        assertThat(reopenedPlan).isNotNull();
+        assertThat(reopenedPlan.at("/widgets/2/inputs/chartDocument/kind").asText()).isEqualTo("line");
+        assertThat(reopenedPlan.path("state")).isEqualTo(firstPlan.path("state"));
+        assertThat(reopenedPlan.path("canvas")).isEqualTo(firstPlan.path("canvas"));
+        assertThat(reopenedPlan.path("bindings")).isEqualTo(firstPlan.path("bindings"));
+        assertThat(reopenedPlan.path("widgets")).hasSize(firstPlan.path("widgets").size());
+        JsonNode updatedPatch = compiledPatch(reopenedPlan);
         UUID updateStreamId = UUID.randomUUID();
         UUID updateThreadId = UUID.randomUUID();
         UUID updateTurnId = UUID.randomUUID();
+        AgenticAuthoringSemanticDecision refinementSemanticDecision = refinementSemanticDecision();
         persistTurn(updateThreadId, updateTurnId);
         AiTurnEventEnvelope updateTerminal = turnEventService.appendEvent(
                 principal,
@@ -199,14 +279,19 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 updateThreadId,
                 updateTurnId,
                 "result",
-                terminalPayload(updatedPatch, semanticDecision, "update", applied.etag()));
+                terminalPayload(
+                        updatedPatch,
+                        reopenedPlan,
+                        refinementSemanticDecision,
+                        "update",
+                        applied.etag()));
         AgenticAuthoringApplyRequest updateRequest = new AgenticAuthoringApplyRequest(
                 updatedPatch,
                 "praxis-dynamic-page",
                 COMPONENT_ID,
                 "user",
                 null,
-                semanticDecision,
+                refinementSemanticDecision,
                 updateStreamId,
                 updateTerminal.getEventId());
 
@@ -219,6 +304,12 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
         assertThat(updated.version()).isEqualTo(2L);
         assertThat(updated.etag()).isNotEqualTo(applied.etag());
         assertThat(updated.payload()).isEqualTo(updatedPatch.path("patch").path("page"));
+        assertThat(updated.authoringSource().path("sourceSha256").asText())
+                .isNotEqualTo(applied.authoringSource().path("sourceSha256").asText());
+        assertThat(updated.authoringSource().at("/materialization/sha256").asText())
+                .isNotEqualTo(applied.authoringSource().at("/materialization/sha256").asText());
+        assertThat(updated.authoringSource().at("/provenance/resultEventId").asText())
+                .isEqualTo(updateTerminal.getEventId().toString());
         assertThatThrownBy(() -> applyService.apply(
                         updateRequest,
                         principal,
@@ -247,7 +338,10 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 .orElseThrow()
                 .config()
                 .getPayload());
-        assertThat(winningPayload.path("title").asText()).isEqualTo("Absences by department");
+        assertThat(winningPayload.at("/widgets/1/definition/inputs/formId").asText())
+                .isEqualTo("missions-detail");
+        assertThat(winningPayload.at("/widgets/2/definition/inputs/chartDocument/kind").asText())
+                .isEqualTo("line");
         assertThat(winningPayload.at("/composition/links/0/from/ref/port").asText())
                 .isEqualTo("selectionChange");
     }
@@ -279,12 +373,18 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
 
     private ObjectNode terminalPayload(
             JsonNode compiledPatch,
+            JsonNode uiCompositionPlan,
             AgenticAuthoringSemanticDecision semanticDecision,
             String mode,
             String baseEtag) {
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("canApply", true);
-        payload.putObject("preview").set("compiledFormPatch", compiledPatch);
+        ObjectNode preview = payload.putObject("preview");
+        preview.set("compiledFormPatch", compiledPatch);
+        ObjectNode authoringPlan = (ObjectNode) uiCompositionPlan.deepCopy();
+        authoringPlan.withObject("/diagnostics/resourceWorkspaceGrounding")
+                .put("status", "verified");
+        preview.set("uiCompositionPlan", authoringPlan);
         payload.putObject("intentResolution")
                 .set("semanticDecision", objectMapper.valueToTree(semanticDecision));
         ObjectNode target = payload.putObject("applyTarget");
@@ -300,8 +400,8 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
         return payload;
     }
 
-    private JsonNode compiledPatch() throws Exception {
-        JsonNode plan = objectMapper.readTree("""
+    private JsonNode compositionPlan() throws Exception {
+        return objectMapper.readTree("""
                 {
                   "version": "1.0",
                   "kind": "praxis.ui-composition-plan",
@@ -315,7 +415,8 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                     "autoRows": "fixed",
                     "items": {
                       "missions-master": { "col": 1, "row": 1, "colSpan": 7, "rowSpan": 8 },
-                      "missions-detail": { "col": 8, "row": 1, "colSpan": 5, "rowSpan": 8 }
+                      "missions-detail": { "col": 8, "row": 1, "colSpan": 5, "rowSpan": 8 },
+                      "missions-chart": { "col": 1, "row": 9, "colSpan": 12, "rowSpan": 5 }
                     }
                   },
                   "widgets": [
@@ -344,6 +445,21 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                         "mode": "view",
                         "formId": "missions-detail"
                       }
+                    },
+                    {
+                      "key": "missions-chart",
+                      "componentId": "praxis-chart",
+                      "inputs": {
+                        "resourcePath": "/api/operations/missoes",
+                        "chartDocument": {
+                          "kind": "bar",
+                          "data": {
+                            "source": { "kind": "resource", "resourcePath": "/api/operations/missoes" },
+                            "categoryField": "status",
+                            "valueField": "total"
+                          }
+                        }
+                      }
                     }
                   ],
                   "bindings": [
@@ -366,6 +482,9 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                   ]
                 }
                 """);
+    }
+
+    private JsonNode compiledPatch(JsonNode plan) {
         ObjectNode basePatch = objectMapper.createObjectNode();
         basePatch.put("profileId", "ui-composition-plan@0.1.0");
         basePatch.put("catalogReleaseId", "catalog-terminal-apply-test");
@@ -376,6 +495,46 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
         return result.compiledFormPatch();
     }
 
+    private AgenticAuthoringIntentResolutionResult chartModificationIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "dashboard",
+                "set_chart_type",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget(
+                        "missions-chart",
+                        "praxis-chart",
+                        "/api/operations/missoes",
+                        "",
+                        "",
+                        "post"),
+                new AgenticAuthoringCandidate(
+                        "/api/operations/missoes",
+                        "post",
+                        "/schemas/filtered?path=/api/operations/missoes/filter&operation=post&schemaType=response",
+                        "/api/operations/missoes/filter",
+                        "POST",
+                        0.97d,
+                        "server-grounded current page resource",
+                        List.of("api-metadata", "current-page-target-resource")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
+    }
+
     private AgenticAuthoringSemanticDecision semanticDecision() {
         return new AgenticAuthoringSemanticDecision(
                 "praxis-agentic-authoring-semantic-decision.v1",
@@ -383,6 +542,22 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 "create",
                 "page",
                 "create_artifact",
+                null,
+                null,
+                null,
+                false,
+                "",
+                "",
+                "");
+    }
+
+    private AgenticAuthoringSemanticDecision refinementSemanticDecision() {
+        return new AgenticAuthoringSemanticDecision(
+                "praxis-agentic-authoring-semantic-decision.v1",
+                "decision-absence-dashboard-chart-refinement",
+                "modify",
+                "dashboard",
+                "set_chart_type",
                 null,
                 null,
                 null,

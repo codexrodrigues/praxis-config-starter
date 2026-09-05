@@ -23,6 +23,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringGenericUiCompositi
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractValidator;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPersistedUiCompositionSourceResolver;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPresentationAffordanceCatalogService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPresentationAffordanceDiscoveryService;
@@ -54,6 +55,7 @@ import org.praxisplatform.config.service.AiStreamAccessTokenService;
 import org.praxisplatform.config.service.AiThreadService;
 import org.praxisplatform.config.service.AiTurnEventService;
 import org.praxisplatform.config.service.AiTurnService;
+import org.praxisplatform.config.service.CanonicalJsonHashService;
 import org.praxisplatform.config.service.ContextRetrievalService;
 import org.praxisplatform.config.service.DomainCatalogIngestionService;
 import org.praxisplatform.config.service.DomainCatalogPromptContextService;
@@ -596,7 +598,8 @@ public class AgenticAuthoringAutoConfiguration {
                 userConfigService,
                 apiKeyProtectionService,
                 turnEventService,
-                objectMapper);
+                objectMapper,
+                new CanonicalJsonHashService(objectMapper));
     }
 
     @Bean
@@ -621,6 +624,20 @@ public class AgenticAuthoringAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    @ConditionalOnBean(UserConfigService.class)
+    public AgenticAuthoringPersistedUiCompositionSourceResolver agenticAuthoringPersistedUiCompositionSourceResolver(
+            UserConfigService userConfigService,
+            ObjectMapper objectMapper,
+            AiApiKeyProtectionService apiKeyProtectionService) {
+        return new AgenticAuthoringPersistedUiCompositionSourceResolver(
+                userConfigService,
+                objectMapper,
+                new CanonicalJsonHashService(objectMapper),
+                apiKeyProtectionService);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     @ConditionalOnBean({
             AgenticAuthoringIntentResolverService.class,
             AgenticAuthoringPreviewService.class
@@ -634,6 +651,7 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectProvider<SchemaRetrievalService> schemaRetrievalService,
             ObjectProvider<AgenticAuthoringConsultativeAnswerService> consultativeAnswerService,
             ObjectProvider<AgenticAuthoringPreIntentToolPlanningService> preIntentToolPlanningService,
+            ObjectProvider<AgenticAuthoringPersistedUiCompositionSourceResolver> persistedUiCompositionSourceResolver,
             AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
             AgenticAuthoringComponentCapabilitiesProperties componentCapabilitiesProperties,
             ObjectMapper objectMapper) {
@@ -649,7 +667,8 @@ public class AgenticAuthoringAutoConfiguration {
                 componentCapabilitiesService,
                 consultativeAnswerService.getIfAvailable(),
                 preIntentToolPlanningService.getIfAvailable(),
-                componentCapabilitiesProperties.effectivePreloadTimeoutMs());
+                componentCapabilitiesProperties.effectivePreloadTimeoutMs(),
+                persistedUiCompositionSourceResolver.getIfAvailable());
     }
 
     @Bean

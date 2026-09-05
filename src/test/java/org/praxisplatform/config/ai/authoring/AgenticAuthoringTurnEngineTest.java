@@ -9710,6 +9710,101 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(result.path("applyTarget").isMissingNode()).isTrue();
     }
 
+    @Test
+    void passesOnlyBackendReconciledCompositionPlanIntoPreview() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringPersistedUiCompositionSourceResolver sourceResolver =
+                Mockito.mock(AgenticAuthoringPersistedUiCompositionSourceResolver.class);
+        ObjectNode persistedPlan = objectMapper.createObjectNode()
+                .put("kind", "praxis.ui-composition-plan")
+                .put("version", "1.0");
+        persistedPlan.putArray("widgets");
+        when(sourceResolver.resolve(any(), eq(principalContext), any()))
+                .thenReturn(AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution.resolved(persistedPlan));
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.previewWithPersistedUiCompositionPlan(
+                any(), eq("tenant"), eq("user"), eq("local"), eq(null), eq(persistedPlan)))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        compiledPagePatch(),
+                        null,
+                        null,
+                        "Preview ready."));
+        AgenticAuthoringTurnStreamRequest base = request("Refine o dashboard");
+        ObjectNode contextHints = ((ObjectNode) base.contextHints()).deepCopy();
+        contextHints.putObject("uiCompositionAuthoringSource")
+                .put("sourceSha256", "forged-browser-value");
+        AgenticAuthoringTurnStreamRequest request = new AgenticAuthoringTurnStreamRequest(
+                base.userPrompt(),
+                base.targetApp(),
+                base.targetComponentId(),
+                base.currentRoute(),
+                base.currentPage(),
+                base.selectedWidgetKey(),
+                base.provider(),
+                base.model(),
+                base.apiKey(),
+                base.sessionId(),
+                base.clientTurnId(),
+                base.conversationMessages(),
+                base.pendingClarification(),
+                base.attachmentSummaries(),
+                contextHints,
+                base.componentCapabilities(),
+                base.activeSemanticDecision());
+
+        engine(null, null, null, null, sourceResolver).execute(request, principalContext, sink);
+
+        ArgumentCaptor<AgenticAuthoringPlanRequest> previewRequest =
+                ArgumentCaptor.forClass(AgenticAuthoringPlanRequest.class);
+        verify(previewService).previewWithPersistedUiCompositionPlan(
+                previewRequest.capture(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"),
+                eq(null),
+                eq(persistedPlan));
+        assertThat(previewRequest.getValue().contextHints().has("uiCompositionAuthoringSource")).isFalse();
+    }
+
+    @Test
+    void blocksApplyWhenPersistedCompositionCannotBeReconciled() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        AgenticAuthoringPersistedUiCompositionSourceResolver sourceResolver =
+                Mockito.mock(AgenticAuthoringPersistedUiCompositionSourceResolver.class);
+        when(sourceResolver.resolve(any(), eq(principalContext), any()))
+                .thenReturn(AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution.blocked(
+                        "persisted-ui-composition-etag-mismatch"));
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntentWithSelectedCandidate());
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        compiledPagePatch(),
+                        null,
+                        null,
+                        "Preview ready."));
+
+        engine(null, null, null, null, sourceResolver).execute(
+                request("Refine o dashboard"),
+                principalContext,
+                sink);
+
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        assertThat(result.path("canApply").asBoolean()).isFalse();
+        assertThat(result.path("decisionDiagnostics").path("terminalPreviewApplyBlockReason").asText())
+                .isEqualTo("persisted-ui-composition-etag-mismatch");
+    }
+
     private void assertTerminalPreviewApplyBlocked(
             JsonNode compiledFormPatch,
             String expectedReason) throws Exception {
@@ -13220,6 +13315,20 @@ class AgenticAuthoringTurnEngineTest {
             AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
             SchemaRetrievalService schemaRetrievalService,
             AgenticAuthoringPreIntentToolPlanningService preIntentToolPlanningService) {
+        return engine(
+                repository,
+                projectKnowledgeService,
+                schemaRetrievalService,
+                preIntentToolPlanningService,
+                null);
+    }
+
+    private AgenticAuthoringTurnEngine engine(
+            ApiMetadataRepository repository,
+            AgenticAuthoringProjectKnowledgeService projectKnowledgeService,
+            SchemaRetrievalService schemaRetrievalService,
+            AgenticAuthoringPreIntentToolPlanningService preIntentToolPlanningService,
+            AgenticAuthoringPersistedUiCompositionSourceResolver persistedUiCompositionSourceResolver) {
         AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(new AgenticAuthoringResourceDiscoveryService(
                 repository != null ? new AgenticAuthoringApiMetadataCandidateCatalog(repository) : null,
                 objectMapper));
@@ -13236,7 +13345,9 @@ class AgenticAuthoringTurnEngineTest {
                 schemaRetrievalService,
                 new AgenticAuthoringComponentCapabilitiesService(),
                 null,
-                preIntentToolPlanningService);
+                preIntentToolPlanningService,
+                35_000L,
+                persistedUiCompositionSourceResolver);
     }
 
     private AgenticAuthoringTurnStreamRequest request() {

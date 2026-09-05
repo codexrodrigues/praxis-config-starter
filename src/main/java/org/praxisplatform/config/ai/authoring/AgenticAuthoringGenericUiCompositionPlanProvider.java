@@ -23,7 +23,9 @@ import java.util.regex.Pattern;
  * <p>This provider materializes only generic component skeletons from the selected candidate and
  * resolved artifact kind. Business-specific layouts remain host-owned providers.</p>
  */
-public class AgenticAuthoringGenericUiCompositionPlanProvider implements AgenticAuthoringUiCompositionPlanProvider {
+public class AgenticAuthoringGenericUiCompositionPlanProvider implements
+        AgenticAuthoringUiCompositionPlanProvider,
+        AgenticAuthoringPersistedUiCompositionPlanProvider {
 
     private final ObjectMapper objectMapper;
     private final AgenticAuthoringChartCapabilityCatalog chartCapabilityCatalog =
@@ -38,17 +40,25 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
 
     @Override
     public Optional<AgenticAuthoringUiCompositionPlanResult> plan(AgenticAuthoringPlanRequest request) {
+        return plan(request, null);
+    }
+
+    @Override
+    public Optional<AgenticAuthoringUiCompositionPlanResult> plan(
+            AgenticAuthoringPlanRequest request,
+            JsonNode persistedUiCompositionPlan) {
         Optional<AgenticAuthoringUiCompositionPlanResult> tableExportModification =
-                tableExportModification(request);
+                tableExportModification(request, persistedUiCompositionPlan);
         if (tableExportModification.isPresent()) {
             return tableExportModification;
         }
         Optional<AgenticAuthoringUiCompositionPlanResult> tableColumnModification =
-                tableColumnModification(request);
+                tableColumnModification(request, persistedUiCompositionPlan);
         if (tableColumnModification.isPresent()) {
             return tableColumnModification;
         }
-        Optional<AgenticAuthoringUiCompositionPlanResult> chartModification = chartModification(request);
+        Optional<AgenticAuthoringUiCompositionPlanResult> chartModification =
+                chartModification(request, persistedUiCompositionPlan);
         if (chartModification.isPresent()) {
             return chartModification;
         }
@@ -2125,9 +2135,32 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             return;
         }
         String chartKey = widgetKey(candidate, "chart-" + dimension.field());
+        addSurfaceOpenDrilldownBinding(plan, chartKey, candidate, dimension);
+    }
+
+    private void addSurfaceOpenDrilldownBinding(
+            ObjectNode plan,
+            String chartKey,
+            AgenticAuthoringCandidate candidate,
+            DashboardDimension dimension) {
+        if (!allowsChartInteraction(dimension, "drillDown")) {
+            return;
+        }
         ArrayNode bindings = plan.withArray("bindings");
-        ObjectNode binding = bindings.addObject();
-        binding.put("id", chartKey + ".pointClick->surface.open");
+        String bindingId = chartKey + ".pointClick->surface.open";
+        ObjectNode binding = null;
+        for (JsonNode candidateBinding : bindings) {
+            if (candidateBinding instanceof ObjectNode object
+                    && bindingId.equals(object.path("id").asText(""))) {
+                binding = object;
+                binding.removeAll();
+                break;
+            }
+        }
+        if (binding == null) {
+            binding = bindings.addObject();
+        }
+        binding.put("id", bindingId);
         binding.put("intent", "command-dispatch");
         ObjectNode from = binding.putObject("from");
         from.put("kind", "component-port");
@@ -2152,10 +2185,28 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         if (!allowsChartInteraction(dimension, "drillDown")) {
             return;
         }
-        ObjectNode composition = plan.putObject("composition");
-        ArrayNode links = composition.putArray("links");
-        ObjectNode link = links.addObject();
-        link.put("id", chartKey + ".pointClick->surface.open");
+        JsonNode existingComposition = plan.get("composition");
+        ObjectNode composition = existingComposition instanceof ObjectNode existing
+                ? existing
+                : plan.putObject("composition");
+        JsonNode existingLinks = composition.get("links");
+        ArrayNode links = existingLinks instanceof ArrayNode existing
+                ? existing
+                : composition.putArray("links");
+        String linkId = chartKey + ".pointClick->surface.open";
+        ObjectNode link = null;
+        for (JsonNode candidateLink : links) {
+            if (candidateLink instanceof ObjectNode object
+                    && linkId.equals(object.path("id").asText(""))) {
+                link = object;
+                link.removeAll();
+                break;
+            }
+        }
+        if (link == null) {
+            link = links.addObject();
+        }
+        link.put("id", linkId);
         link.put("intent", "command-dispatch");
         ObjectNode from = link.putObject("from");
         from.put("kind", "component-port");
@@ -2833,11 +2884,12 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     }
 
     private Optional<AgenticAuthoringUiCompositionPlanResult> tableExportModification(
-            AgenticAuthoringPlanRequest request) {
-        if (!supportsTableExportModification(request)) {
+            AgenticAuthoringPlanRequest request,
+            JsonNode persistedUiCompositionPlan) {
+        if (!supportsTableExportModification(request, persistedUiCompositionPlan)) {
             return Optional.empty();
         }
-        ObjectNode page = chartActionPage(request);
+        ObjectNode page = chartActionPage(request, persistedUiCompositionPlan);
         ObjectNode tableWidget = findWidget(page, targetWidgetKey(request));
         if (tableWidget == null) {
             tableWidget = findSingleWidgetByComponent(page, "praxis-table");
@@ -2875,11 +2927,14 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 compiledPagePatch(page, "modify-existing-table-export-selected")));
     }
 
-    private boolean supportsTableExportModification(AgenticAuthoringPlanRequest request) {
+    private boolean supportsTableExportModification(
+            AgenticAuthoringPlanRequest request,
+            JsonNode persistedUiCompositionPlan) {
         if (request == null || request.intentResolution() == null) {
             return false;
         }
-        if (!isMaterializedPage(request.currentPage())
+        if (!isUiCompositionPlan(persistedUiCompositionPlan)
+                && !isMaterializedPage(request.currentPage())
                 && !isMaterializedPage(contextPreviewPage(request))
                 && !isWidgetSnapshot(contextTargetWidgetSnapshot(request))) {
             return false;
@@ -2898,11 +2953,12 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
     }
 
     private Optional<AgenticAuthoringUiCompositionPlanResult> tableColumnModification(
-            AgenticAuthoringPlanRequest request) {
-        if (!supportsTableColumnAddition(request)) {
+            AgenticAuthoringPlanRequest request,
+            JsonNode persistedUiCompositionPlan) {
+        if (!supportsTableColumnAddition(request, persistedUiCompositionPlan)) {
             return Optional.empty();
         }
-        ObjectNode page = chartActionPage(request);
+        ObjectNode page = chartActionPage(request, persistedUiCompositionPlan);
         ObjectNode tableWidget = findWidget(page, targetWidgetKey(request));
         if (tableWidget == null) {
             tableWidget = findSingleWidgetByComponent(page, "praxis-table");
@@ -2937,12 +2993,15 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 compiledPagePatch(page, "modify-existing-table-column-addition")));
     }
 
-    private boolean supportsTableColumnAddition(AgenticAuthoringPlanRequest request) {
+    private boolean supportsTableColumnAddition(
+            AgenticAuthoringPlanRequest request,
+            JsonNode persistedUiCompositionPlan) {
         if (request == null || request.intentResolution() == null) {
             return false;
         }
         AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
-        if (!isMaterializedPage(request.currentPage())
+        if (!isUiCompositionPlan(persistedUiCompositionPlan)
+                && !isMaterializedPage(request.currentPage())
                 && !isMaterializedPage(contextPreviewPage(request))
                 && !isWidgetSnapshot(contextTargetWidgetSnapshot(request))) {
             return false;
@@ -3059,11 +3118,13 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 && (" " + text + " ").contains(" " + phrase + " ");
     }
 
-    private Optional<AgenticAuthoringUiCompositionPlanResult> chartModification(AgenticAuthoringPlanRequest request) {
-        if (!supportsChartModification(request)) {
+    private Optional<AgenticAuthoringUiCompositionPlanResult> chartModification(
+            AgenticAuthoringPlanRequest request,
+            JsonNode persistedUiCompositionPlan) {
+        if (!supportsChartModification(request, persistedUiCompositionPlan)) {
             return Optional.empty();
         }
-        ObjectNode page = chartActionPage(request);
+        ObjectNode page = chartActionPage(request, persistedUiCompositionPlan);
         ObjectNode chartWidget = findWidget(page, targetWidgetKey(request));
         if (chartWidget == null) {
             chartWidget = findSingleWidgetByComponent(page, "praxis-chart");
@@ -3077,6 +3138,15 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             DashboardDimension dimension = dimensionFromChartWidget(chartWidget);
             String chartKey = widgetKeyFromWidget(chartWidget, candidate, dimension);
             enableChartDrilldownInteraction(chartWidget);
+            if (isUiCompositionPlan(page)) {
+                addSurfaceOpenDrilldownBinding(page, chartKey, candidate, dimension);
+                return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                        true,
+                        List.of(),
+                        List.of("ui-composition-plan-provider:generic-chart-surface-open-modification"),
+                        page,
+                        emptyCompiledFormPatch()));
+            }
             enableChartSurfaceOpenOutput(chartWidget, candidate, dimension);
             addSurfaceOpenDrilldownComposition(page, chartKey, candidate, dimension);
             return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
@@ -3093,6 +3163,14 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 : false;
         if (!changed) {
             return Optional.empty();
+        }
+        if (isUiCompositionPlan(page)) {
+            return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                    true,
+                    List.of(),
+                    List.of("ui-composition-plan-provider:generic-chart-modification"),
+                    page,
+                    emptyCompiledFormPatch()));
         }
         return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
                 true,
@@ -3123,12 +3201,15 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
         outputs.put("selectionChange", "emit");
     }
 
-    private boolean supportsChartModification(AgenticAuthoringPlanRequest request) {
+    private boolean supportsChartModification(
+            AgenticAuthoringPlanRequest request,
+            JsonNode persistedUiCompositionPlan) {
         if (request == null
                 || request.intentResolution() == null) {
             return false;
         }
-        if (!isMaterializedPage(request.currentPage())
+        if (!isUiCompositionPlan(persistedUiCompositionPlan)
+                && !isMaterializedPage(request.currentPage())
                 && !isMaterializedPage(contextPreviewPage(request))
                 && !isWidgetSnapshot(contextTargetWidgetSnapshot(request))) {
             return false;
@@ -3149,7 +3230,12 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
                 || chartCapabilityCatalog.supports(changeKind, prompt));
     }
 
-    private ObjectNode chartActionPage(AgenticAuthoringPlanRequest request) {
+    private ObjectNode chartActionPage(
+            AgenticAuthoringPlanRequest request,
+            JsonNode persistedUiCompositionPlan) {
+        if (isUiCompositionPlan(persistedUiCompositionPlan) && persistedUiCompositionPlan.isObject()) {
+            return persistedUiCompositionPlan.deepCopy();
+        }
         JsonNode currentPage = request.currentPage();
         if (isMaterializedPage(currentPage) && currentPage.isObject()) {
             return currentPage.deepCopy();
@@ -3165,6 +3251,13 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements Agentic
             return page;
         }
         return objectMapper.createObjectNode();
+    }
+
+    private boolean isUiCompositionPlan(JsonNode candidate) {
+        return candidate != null
+                && candidate.isObject()
+                && "praxis.ui-composition-plan".equals(candidate.path("kind").asText(""))
+                && "1.0".equals(candidate.path("version").asText(""));
     }
 
     private JsonNode contextPreviewPage(AgenticAuthoringPlanRequest request) {

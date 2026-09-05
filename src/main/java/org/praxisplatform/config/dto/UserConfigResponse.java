@@ -23,6 +23,6 @@ public class UserConfigResponse {
   long version;
   String etag;
   JsonNode payload;
+  JsonNode authoringSource;
   JsonNode tags;
 }
-

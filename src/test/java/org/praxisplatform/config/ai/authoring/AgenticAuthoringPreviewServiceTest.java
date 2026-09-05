@@ -68,6 +68,49 @@ class AgenticAuthoringPreviewServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void rejectsAProviderThatDegradesPersistedSemanticSourceToMaterializedPatch() throws Exception {
+        AgenticAuthoringPreviewService service = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new DegradingPersistedPlanProvider()));
+        ObjectNode currentPage = objectMapper.createObjectNode();
+        ObjectNode currentWidget = currentPage.putArray("widgets").addObject();
+        currentWidget.put("key", "risk-chart");
+        currentWidget.putObject("definition").put("id", "praxis-chart");
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Troque o gráfico para linhas",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                currentPage,
+                selectedMasterDetailIntent(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+        ObjectNode persistedPlan = objectMapper.createObjectNode()
+                .put("kind", "praxis.ui-composition-plan")
+                .put("version", "1.0");
+        persistedPlan.putArray("widgets");
+
+        AgenticAuthoringPreviewResult result = service.previewWithPersistedUiCompositionPlan(
+                request,
+                "tenant",
+                "user",
+                "local",
+                null,
+                persistedPlan);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("persisted-ui-composition-refinement-plan-required");
+        assertThat(result.warnings())
+                .contains("ui-composition-plan-post-processing-skipped-invalid-provider-result");
+    }
+
+    @Test
     void previewReturnsConsultativeAnswerWithoutMaterializingPlan() throws Exception {
         AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
                 true,
@@ -7393,5 +7436,29 @@ class AgenticAuthoringPreviewServiceTest {
             }
         }
         return com.fasterxml.jackson.databind.node.MissingNode.getInstance();
+    }
+
+    private final class DegradingPersistedPlanProvider implements
+            AgenticAuthoringUiCompositionPlanProvider,
+            AgenticAuthoringPersistedUiCompositionPlanProvider {
+
+        @Override
+        public Optional<AgenticAuthoringUiCompositionPlanResult> plan(AgenticAuthoringPlanRequest request) {
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<AgenticAuthoringUiCompositionPlanResult> plan(
+                AgenticAuthoringPlanRequest request,
+                JsonNode persistedUiCompositionPlan) {
+            ObjectNode compiledPatch = objectMapper.createObjectNode();
+            compiledPatch.put("kind", "page-document");
+            return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                    true,
+                    List.of(),
+                    List.of("degrading-provider"),
+                    null,
+                    compiledPatch));
+        }
     }
 }

@@ -61,6 +61,17 @@ public class UiUserConfig {
   @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
   private String payload;
 
+  /**
+   * Server-attested semantic source that produced {@link #payload}.
+   *
+   * <p>This document is deliberately stored beside, rather than inside, the executable runtime
+   * payload. It is nullable because configurations authored outside the governed agentic path do
+   * not necessarily have a lossless semantic source.</p>
+   */
+  @Column(name = "authoring_source", columnDefinition = "jsonb")
+  @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
+  private String authoringSource;
+
   @Column(name = "version", nullable = false)
   private long version;
 
@@ -98,4 +109,3 @@ public class UiUserConfig {
     this.updatedAt = Instant.now();
   }
 }
-

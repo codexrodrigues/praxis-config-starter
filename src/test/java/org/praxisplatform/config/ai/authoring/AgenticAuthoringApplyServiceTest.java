@@ -20,6 +20,7 @@ import org.praxisplatform.config.dto.AiTurnEventEnvelope;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiTurnEventService;
+import org.praxisplatform.config.service.CanonicalJsonHashService;
 import org.praxisplatform.config.service.UserConfigService;
 
 @Tag("unit")
@@ -135,9 +136,8 @@ class AgenticAuthoringApplyServiceTest {
 
     @Test
     void applyUsesGovernedTerminalPlanEvidenceWithoutPersistingDiagnosticsInTheCompiledPage() throws Exception {
-        ObjectNode compiledPatch = (ObjectNode) compiledPatch();
-        ObjectNode page = (ObjectNode) compiledPatch.path("patch").path("page");
-        page.put("layoutPreset", "master-detail-dashboard");
+        ObjectNode terminalPlan = masterDetailCompositionPlan();
+        ObjectNode compiledPatch = compileCompositionPlan(terminalPlan);
         JsonNode savedPayload = compiledPatch.path("patch").path("page");
         UiUserConfig saved = UiUserConfig.builder()
                 .componentType("praxis-dynamic-page")
@@ -148,7 +148,7 @@ class AgenticAuthoringApplyServiceTest {
                 .version(1L)
                 .etag(UUID.fromString("00000000-0000-0000-0000-000000000457"))
                 .build();
-        when(userConfigService.create(
+        when(userConfigService.createAuthored(
                 eq(UserConfigService.Scope.TENANT),
                 eq("tenant"),
                 eq("user"),
@@ -157,8 +157,11 @@ class AgenticAuthoringApplyServiceTest {
                 eq("local"),
                 org.mockito.ArgumentMatchers.any(JsonNode.class),
                 org.mockito.ArgumentMatchers.any(JsonNode.class),
+                org.mockito.ArgumentMatchers.any(JsonNode.class),
                 eq("author"))).thenReturn(saved);
         when(apiKeyProtectionService.sanitizeForResponse(savedPayload)).thenReturn(savedPayload);
+        when(apiKeyProtectionService.sanitizeForResponse(org.mockito.ArgumentMatchers.any(JsonNode.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
 
         AgenticAuthoringApplyRequest request = applicableRequest(
                 compiledPatch,
@@ -169,10 +172,13 @@ class AgenticAuthoringApplyServiceTest {
         AiPrincipalContext principalContext = principal("user");
         authorize(request, principalContext);
         AiTurnEventEnvelope terminal = terminalResult(request, true);
-        ObjectNode terminalPlan = objectMapper.createObjectNode();
-        terminalPlan.put("layoutPreset", "master-detail-dashboard");
         terminalPlan.withObject("/diagnostics/resourceWorkspaceGrounding")
                 .put("status", "verified");
+        terminalPlan.withObject("/diagnostics/templateResolution")
+                .put("registryKey", "ui-composition-template:master-detail-tabs")
+                .put("configSha256", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                .put("version", 7L)
+                .put("etag", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
         ((ObjectNode) terminal.getPayload().path("preview"))
                 .set("uiCompositionPlan", terminalPlan);
         when(turnEventService.findLastEvent(STREAM_ID)).thenReturn(Optional.of(terminal));
@@ -185,6 +191,77 @@ class AgenticAuthoringApplyServiceTest {
 
         assertThat(result.applied()).isTrue();
         assertThat(savedPayload.toString()).doesNotContain("resourceWorkspaceGrounding");
+        ArgumentCaptor<JsonNode> authoringSourceCaptor = ArgumentCaptor.forClass(JsonNode.class);
+        verify(userConfigService).createAuthored(
+                eq(UserConfigService.Scope.TENANT),
+                eq("tenant"),
+                eq("user"),
+                eq("praxis-dynamic-page"),
+                eq("page"),
+                eq("local"),
+                org.mockito.ArgumentMatchers.any(JsonNode.class),
+                authoringSourceCaptor.capture(),
+                org.mockito.ArgumentMatchers.any(JsonNode.class),
+                eq("author"));
+        JsonNode authoringSource = authoringSourceCaptor.getValue();
+        assertThat(authoringSource.path("schemaVersion").asText())
+                .isEqualTo("praxis.ui-authoring-source/v1");
+        assertThat(authoringSource.path("source").has("diagnostics")).isFalse();
+        assertThat(authoringSource.path("sourceSha256").asText()).hasSize(64);
+        assertThat(authoringSource.at("/materialization/sha256").asText()).hasSize(64);
+        assertThat(authoringSource.at("/provenance/resultEventId").asText())
+                .isEqualTo(RESULT_EVENT_ID.toString());
+        assertThat(authoringSource.at("/provenance/templateRef/registryKey").asText())
+                .isEqualTo("ui-composition-template:master-detail-tabs");
+        assertThat(authoringSource.at("/provenance/templateRef/version").asLong()).isEqualTo(7L);
+    }
+
+    @Test
+    void applyRejectsCompositionPlanThatDoesNotMaterializeTheIssuedPatch() throws Exception {
+        ObjectNode terminalPlan = masterDetailCompositionPlan();
+        ObjectNode compiledPatch = compileCompositionPlan(terminalPlan);
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch,
+                "praxis-dynamic-page",
+                "page",
+                "tenant",
+                masterDetailSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+        AiTurnEventEnvelope terminal = terminalResult(request, true);
+        ((ObjectNode) terminalPlan.at("/widgets/1/inputs"))
+                .put("formId", "different-semantic-source");
+        terminalPlan.withObject("/diagnostics/resourceWorkspaceGrounding")
+                .put("status", "verified");
+        ((ObjectNode) terminal.getPayload().path("preview"))
+                .set("uiCompositionPlan", terminalPlan);
+        when(turnEventService.findLastEvent(STREAM_ID)).thenReturn(Optional.of(terminal));
+
+        assertThatThrownBy(() -> service().apply(request, principalContext, "author", null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("agentic-turn-result-ui-composition-materialization-mismatch");
+    }
+
+    @Test
+    void applyRejectsMalformedTerminalCompositionPlanInsteadOfPersistingUnattestedSource() throws Exception {
+        AgenticAuthoringApplyRequest request = applicableRequest(
+                compiledPatch(),
+                "praxis-dynamic-page",
+                "page",
+                "tenant",
+                validSemanticDecision());
+        AiPrincipalContext principalContext = principal("user");
+        authorize(request, principalContext);
+        AiTurnEventEnvelope terminal = terminalResult(request, true);
+        ((ObjectNode) terminal.getPayload().path("preview"))
+                .set("uiCompositionPlan", objectMapper.createObjectNode()
+                        .put("version", "1.0")
+                        .put("kind", "untrusted-local-plan"));
+        when(turnEventService.findLastEvent(STREAM_ID)).thenReturn(Optional.of(terminal));
+
+        assertThatThrownBy(() -> service().apply(request, principalContext, "author", null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("agentic-turn-result-ui-composition-plan-invalid");
     }
 
     @Test
@@ -527,7 +604,8 @@ class AgenticAuthoringApplyServiceTest {
                 userConfigService,
                 apiKeyProtectionService,
                 turnEventService,
-                objectMapper);
+                objectMapper,
+                new CanonicalJsonHashService(objectMapper));
     }
 
     private AgenticAuthoringApplyRequest applicableRequest(
@@ -643,6 +721,67 @@ class AgenticAuthoringApplyServiceTest {
                   }
                 }
                 """);
+    }
+
+    private ObjectNode masterDetailCompositionPlan() throws Exception {
+        return (ObjectNode) objectMapper.readTree("""
+                {
+                  "version": "1.0",
+                  "kind": "praxis.ui-composition-plan",
+                  "layoutPreset": "master-detail-dashboard",
+                  "state": { "values": { "selectedItem": null } },
+                  "widgets": [
+                    {
+                      "key": "missions-master",
+                      "componentId": "praxis-table",
+                      "role": "master",
+                      "inputs": {
+                        "resourcePath": "/api/operations/missoes",
+                        "tableId": "missions-master",
+                        "config": { "behavior": { "selection": { "enabled": true, "type": "single" } } }
+                      },
+                      "outputs": { "selectionChange": "emit" }
+                    },
+                    {
+                      "key": "missions-detail",
+                      "componentId": "praxis-dynamic-form",
+                      "role": "detail",
+                      "inputs": {
+                        "resourcePath": "/api/operations/missoes",
+                        "schemaSource": "resource",
+                        "mode": "view",
+                        "formId": "missions-detail"
+                      }
+                    }
+                  ],
+                  "bindings": [
+                    {
+                      "id": "missions-master.selectionChange->state.selectedItem",
+                      "intent": "state-write",
+                      "from": { "kind": "component-port", "widget": "missions-master", "port": "selectionChange", "direction": "output" },
+                      "to": { "kind": "state", "path": "selectedItem" },
+                      "transform": { "kind": "pick-path", "id": "pick-selected-row", "path": "payload.row" }
+                    },
+                    {
+                      "id": "state.selectedItem->missions-detail.initialValue",
+                      "intent": "state-read",
+                      "from": { "kind": "state", "path": "selectedItem" },
+                      "to": { "kind": "component-port", "widget": "missions-detail", "port": "initialValue", "direction": "input" },
+                      "condition": { "!!": [{ "var": "state.selectedItem" }] }
+                    }
+                  ]
+                }
+                """);
+    }
+
+    private ObjectNode compileCompositionPlan(JsonNode plan) {
+        ObjectNode basePatch = objectMapper.createObjectNode();
+        basePatch.put("profileId", "ui-composition-plan@0.1.0");
+        basePatch.put("catalogReleaseId", "catalog-apply-service-test");
+        AgenticAuthoringUiCompositionPlanCompiler.CompileResult result =
+                new AgenticAuthoringUiCompositionPlanCompiler(objectMapper).compile(plan, basePatch);
+        assertThat(result.valid()).withFailMessage("Compilation failures: %s", result.failureCodes()).isTrue();
+        return (ObjectNode) result.compiledFormPatch();
     }
 
     private JsonNode compiledPatchWithSchemaGrounding() throws Exception {

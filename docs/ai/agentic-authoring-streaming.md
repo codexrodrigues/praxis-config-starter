@@ -935,11 +935,23 @@ Regra de aplicacao:
 - O evento terminal so pode publicar `canApply=true` quando a preview possuir
   `compiledFormPatch.patch.page`. Quando a materializacao partir de um
   `uiCompositionPlan`, o Config deve compilar o plano antes do resultado
-  terminal e preservar ambos no mesmo payload auditavel; a ausencia do plano
+  terminal e preservar ambos no mesmo resultado auditavel. No `page-apply`, o
+  Config recompila deterministicamente o plano terminal e exige igualdade
+  estrutural exata com o `compiledFormPatch` emitido. Hashes validos isoladamente
+  nao bastam: plano e materializacao divergentes falham com
+  `agentic-turn-result-ui-composition-materialization-mismatch` antes de qualquer
+  escrita. Essa verificacao tambem vale para refinamentos de uma fonte reaberta.
+  O plano emitido pelo backend e persistido como `authoringSource` ao lado do
+  `payload` executavel, sob a mesma versao e ETag de `ui_user_config`.
+  `diagnostics` e removido da fonte e da identidade hash; linhagem e template
+  resolvido permanecem como proveniencia server-attested. A ausencia do plano
   nao invalida, por si so, um patch de pagina completo produzido por outro
-  fluxo governado. O diagnostico `terminalPreviewApplyEligible=false` deve
-  expor `terminalPreviewApplyBlockReason` quando o patch terminal estiver
-  incompleto.
+  fluxo governado, mas esse apply deve declarar
+  `ui-composition-authoring-source-not-issued` e nao pode prometer reopen
+  semantico. Um PUT generico que altere o payload invalida a fonte anterior;
+  somente payload materialmente identico pode preserva-la. O diagnostico
+  `terminalPreviewApplyEligible=false` deve expor
+  `terminalPreviewApplyBlockReason` quando o patch terminal estiver incompleto.
 - O consumidor pode projetar localmente uma preview incompleta para revisao,
   mas nao pode regenera-la e reutilizar `resultEventId` do resultado anterior.
   Uma materializacao diferente exige um novo evento terminal backend-owned.
@@ -949,10 +961,41 @@ Regra de aplicacao:
   exige que o `If-Match` coincida com o `baseEtag` atestado. `page-apply`
   rejeita destino, escopo, ambiente ou ETag diferentes, e um segundo uso do
   mesmo evento falha pela precondicao ja consumida.
-- `contextHints.agenticApplyTarget` pertence exclusivamente ao request do turn
-  stream e nao faz parte dos hints compartilhados por intent/plan/preview. Ele e
-  metadado de transporte: o engine o
-  remove antes de discovery, planejamento ou qualquer chamada a LLM.
+- `contextHints.agenticApplyTarget` e metadado de transporte do turn stream e
+  do `page-preview` sincrono quando ele regenera uma preview iniciada pelo
+  stream. O host remove qualquer alvo vindo do prompt/contexto arbitrario e
+  injeta somente a identidade atual de persistencia. Em ambos os endpoints o
+  backend o remove antes de discovery, planejamento, provider de composicao ou
+  qualquer chamada a LLM.
+- O endpoint `/intent-resolution` nao recebe contexto de persistencia como
+  grounding: o host omite `agenticApplyTarget` e
+  `uiCompositionAuthoringSource`, e o backend remove esses campos, junto com
+  `authoringEvidence` e `verifiedDomainOperations`, caso um caller arbitrario
+  tente envia-los diretamente.
+- Em `mode=update`, quando o registro persistido possui `authoringSource`, o
+  Config recarrega o registro pela identidade exata do alvo e pelo principal
+  resolvido no servidor. O envelope enviado pelo browser e apenas evidencia de
+  UX e nunca e a fonte usada pelo planner. Antes de expor o plano internamente,
+  o backend exige ETag corrente, schema/kind/version da fonte, hashes canonicos
+  do plano e da materializacao, identidade de componente e igualdade entre a
+  pagina aberta e o payload persistido. Fonte malformada, hash divergente,
+  pagina stale, registro ausente ou falha de leitura bloqueiam o apply; uma
+  configuracao legada realmente sem fonte continua na trilha legada.
+- Uma vez reconciliado um `UiCompositionPlan`, qualquer refinamento aplicavel
+  deve devolver outro plano e recompila-lo deterministicamente. Providers nao
+  podem degradar silenciosamente para patch materializado; o bloqueio canonico
+  e `persisted-ui-composition-refinement-plan-required`. Edicoes governadas por
+  manifest de componente substituem somente os `inputs` do widget alvo no plano
+  persistido, preservando widgets, bindings e layout restantes antes da nova
+  compilacao. Refinamentos genericos de Table e Chart seguem a mesma regra.
+- Refinamentos de Table devem materializar a semantica completa, nao apenas um
+  campo que parece correto no JSON. O titulo global pertence a `toolbar.title`;
+  formato monetario atualiza `columns[].format` e o tipo visual compativel; e
+  `column.order.set` recompila uma ordem absoluta, inteira e sem colisoes para
+  todas as colunas. Persistir somente `order=0` no alvo e insuficiente quando
+  irmas ainda usam ordem implicita, pois um sort estavel pode manter a coluna no
+  lugar. `column.sticky.set` continua restrito a fixacao durante rolagem e nao
+  pode ser selecionado para pedidos de mover/reordenar.
 - `page-apply` deve rejeitar `semanticDecision.reviewRequired=true`, mesmo que
   a materializacao seja estruturalmente valida, exceto pelo caso estrito
   `reviewReason=weak-lexical-evidence` quando o `compiledFormPatch` carrega
@@ -1052,7 +1095,9 @@ e deixa ambos os scopes desabilitados.
 Preview e compilacao seguem o endpoint existente de `page-preview`. Persistencia
 segue `page-apply`, o resultado terminal emitido pelo servidor e `If-Match`; uma
 tentativa com ETag obsoleto falha antes de alterar a configuracao vencedora. Nao
-existe DTO ou endpoint paralelo de workspace neste slice.
+existe DTO ou endpoint paralelo de workspace neste slice. A continuidade
+semantica usa o mesmo `agenticApplyTarget` ja emitido pelo resultado terminal e
+o mesmo envelope `ConfigDocument`; nao cria um segundo contrato de identidade.
 
 ## Regras para o Page Builder
 
@@ -1099,6 +1144,36 @@ Resultado:
 - o Playwright executou a config de validacao disponivel naquele momento;
 - os fluxos de dashboard de pagamentos e formulario de funcionarios passaram usando browser real, backend SSE real e provider OpenAI real;
 - total: `3 passed`.
+
+Em 2026-09-04, o slice focal de continuidade semantica de Table foi repetido
+com o contrato atual: OpenAI `gpt-5.6-terra`, embeddings OpenAI
+`text-embedding-3-large`, PostgreSQL 17.10/Neon e PGVector reais. A jornada
+criou a pagina, persistiu e reabriu o `UiCompositionPlan`, e depois executou
+quatro refinamentos naturais com selecao semantica exata:
+`toolbar.configure`, `column.format.set`, `column.visibility.set` e
+`column.order.set`. Cada turno produziu preview, apply condicional, GET e
+reabertura antes do proximo. O resultado foi `1 passed` em 5,1 minutos.
+
+Esse gate deixou de aceitar somente igualdade de JSON como prova visual. O
+browser tambem verificou no DOM o titulo da toolbar, o prefixo monetario `R$`,
+a ausencia do cabecalho oculto e a coluna movida como primeiro cabecalho antes
+e depois da reabertura. O compiler `table-column-order-set` materializou ordem
+inteira, completa e sem colisoes para todas as colunas. O registry sincronizado
+expos 106 componentes, 99 manifests e 2.580 chunks, com hash canonico
+`c5437adeb817c05aa4f1ad92052e88be513f92259ee13f12c86db70a0f25f396`; catalogo
+passou sem erros ou warnings e o gate de authoring passou `20/20`. Nao houve
+fallback para Gemini. Essa evidencia certifica o slice focal e nao substitui a
+matriz production-like completa dos demais arquetipos.
+
+Na revisao ampla posterior, o recibo dessa execucao foi mantido associado ao
+hash que realmente passou pelo browser. O ranking secundario de capabilities
+deixou de somar o mesmo termo uma vez por exemplo, e o manifesto passou a
+distinguir explicitamente `export.configure` de apresentacao da toolbar. O
+registry derivado atual tem 106 componentes, 99 manifests e 2.581 chunks, com
+`canonicalSha256=e00ee911e9bad2f855c07ebb0cfcd89173b7d44a7c0e3439725b49acd15074c8`;
+catalogo e authoring continuam verdes. A suite completa do Config passou com
+2.844 testes, zero falhas, zero erros e cinco skips. Essa revisao posterior nao
+e apresentada como nova prova visual, pois nao alterou o runtime renderizado.
 
 Essa contagem e historica e nao descreve a matriz atual. Desde o gate
 `praxis.page-builder-agentic-gate-matrix/v1`, evidencia production-like exige a

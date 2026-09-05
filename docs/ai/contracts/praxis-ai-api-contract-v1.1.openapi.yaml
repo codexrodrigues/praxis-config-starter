@@ -1647,7 +1647,7 @@ components:
       required: false
       schema:
         type: string
-        default: 9e62b19418d44ea2ddb7e65b63bc71c65b1a559258192b61fc6977ea6353d473
+        default: 02468e16f49c5be27ac584dd0592014fd4612f141d1a8ab2e9a5a153fe9c1757
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1677,7 +1677,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 9e62b19418d44ea2ddb7e65b63bc71c65b1a559258192b61fc6977ea6353d473
+        example: 02468e16f49c5be27ac584dd0592014fd4612f141d1a8ab2e9a5a153fe9c1757
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -3570,6 +3570,14 @@ components:
         etag:
           type: string
           nullable: true
+        authoringSource:
+          type: object
+          nullable: true
+          description: >
+            Fonte semantica server-attested persistida na mesma revisao do payload executavel.
+            Quando presente, contem UiCompositionPlan sem diagnostics, hashes canonicos de fonte
+            e materializacao e proveniencia do resultado terminal. O cliente nao envia esta fonte.
+          additionalProperties: true
       additionalProperties: true
 
     AiOrchestratorRequest:

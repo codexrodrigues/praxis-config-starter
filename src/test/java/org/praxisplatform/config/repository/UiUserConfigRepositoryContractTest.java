@@ -19,6 +19,7 @@ class UiUserConfigRepositoryContractTest {
         UUID.class,
         String.class,
         String.class,
+        String.class,
         long.class,
         UUID.class,
         UUID.class,
@@ -31,6 +32,7 @@ class UiUserConfigRepositoryContractTest {
     assertThat(query.nativeQuery()).isTrue();
     assertThat(query.value())
         .contains("payload = CAST(:payload AS jsonb)")
+        .contains("authoring_source = CAST(:authoringSource AS jsonb)")
         .contains("tags = CAST(:tags AS jsonb)")
         .contains("AND etag = :expectedEtag");
   }

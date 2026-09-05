@@ -207,6 +207,71 @@ class AgenticAuthoringComponentOperationSelectionServiceTest {
     }
 
     @Test
+    void restoresGlobalTableTitleOperationFromCanonicalManifestExample() throws Exception {
+        when(provider.generateJson(anyString(), any(), any(), anyString(), anyString(), anyString()))
+                .thenReturn(selection("toolbar.configure"));
+        var service = new AgenticAuthoringComponentOperationSelectionService(provider, objectMapper, 9);
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "operations": [
+                    {
+                      "operationId": "column.header.set",
+                      "title": "Renomear cabeçalho de coluna",
+                      "description": "Altera o cabeçalho estrutural de uma coluna.",
+                      "targetKind": "column",
+                      "affectedPaths": ["columns[].header"]
+                    },
+                    {
+                      "operationId": "toolbar.configure",
+                      "title": "Configurar barra e título global da tabela",
+                      "description": "Configura o título global em toolbar.title, não o cabeçalho de coluna.",
+                      "targetKind": "toolbar",
+                      "inputSchema": {
+                        "properties": { "title": { "type": "string" } }
+                      },
+                      "affectedPaths": ["toolbar.title"]
+                    }
+                  ],
+                  "examples": [
+                    {
+                      "request": "Altere o titulo da tabela para Folha operacional revisada",
+                      "operationId": "toolbar.configure",
+                      "isPositive": true
+                    },
+                    {
+                      "request": "Altere o título da coluna Salário Líquido para Valor líquido",
+                      "operationId": "toolbar.configure",
+                      "target": "salarioLiquido",
+                      "isPositive": false
+                    }
+                  ]
+                }
+                """);
+
+        var result = service.select(
+                new AgenticAuthoringPlanRequest(
+                        "Altere o titulo da tabela para Folha operacional revisada",
+                        "openai",
+                        "gpt",
+                        "key"),
+                "praxis-table",
+                objectMapper.createObjectNode(),
+                manifest,
+                "t",
+                "u",
+                "e");
+
+        assertThat(result.operationIds()).containsExactly("toolbar.configure");
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(provider).generateJson(prompt.capture(), any(), any(), anyString(), anyString(), anyString());
+        assertThat(prompt.getValue()).contains(
+                "\"operationId\":\"toolbar.configure\"",
+                "\"semanticEffect\":\"Configura o título global em toolbar.title, não o cabeçalho de coluna.\"",
+                "\"semanticExamples\":[{\"request\":\"Altere o titulo da tabela para Folha operacional revisada\"",
+                "\"semanticCounterExamples\":[{\"request\":\"Altere o título da coluna Salário Líquido para Valor líquido\"");
+    }
+
+    @Test
     void keepsPromptGroundedAlternativesWhenTheResolvedRefinementRequiresMissingState() throws Exception {
         when(provider.generateJson(anyString(), any(), any(), anyString(), anyString(), anyString()))
                 .thenReturn(selection("column.renderer.set", "column.visibility.set"));
