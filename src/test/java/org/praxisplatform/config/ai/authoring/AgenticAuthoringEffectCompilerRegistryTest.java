@@ -229,6 +229,237 @@ class AgenticAuthoringEffectCompilerRegistryTest {
     }
 
     @Test
+    void shouldCompileCanonicalTableColumnFormatAndInferCompatibleVisualType() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "columns": [
+                    {
+                      "field": "total",
+                      "header": "Total contratado",
+                      "type": "number",
+                      "visible": false,
+                      "renderer": { "type": "text" }
+                    }
+                  ]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operationWithHandler(
+                        "column.format.set",
+                        "column",
+                        "column-by-field",
+                        true,
+                        "compile-domain-patch",
+                        "table-column-format-set",
+                        "columns[].format",
+                        "columns[].type"),
+                plan("\"total\"", "{ \"format\": \"BRL|symbol|2\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        JsonNode column = proposedConfig.path("columns").get(0);
+        assertThat(failures).isEmpty();
+        assertThat(registry.supportsDomainPatchHandler("table-column-format-set")).isTrue();
+        assertThat(patchOperations).singleElement().satisfies(compiled -> {
+            assertThat(compiled.path("op").asText()).isEqualTo("set-column-format");
+            assertThat(compiled.path("resolvedPath").asText()).isEqualTo("columns[]/0");
+            assertThat(compiled.path("previousValue").path("type").asText()).isEqualTo("number");
+        });
+        assertThat(column.path("format").asText()).isEqualTo("BRL|symbol|2");
+        assertThat(column.path("type").asText()).isEqualTo("currency");
+        assertThat(column.path("header").asText()).isEqualTo("Total contratado");
+        assertThat(column.path("visible").asBoolean()).isFalse();
+        assertThat(column.path("renderer").path("type").asText()).isEqualTo("text");
+    }
+
+    @Test
+    void shouldPreserveColumnTypeWhenCanonicalFormatDoesNotImplyOne() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "cpf", "header": "CPF", "type": "string", "sortable": false }
+                  ]
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operationWithHandler(
+                        "column.format.set",
+                        "column",
+                        "column-by-field",
+                        true,
+                        "compile-domain-patch",
+                        "table-column-format-set",
+                        "columns[].format",
+                        "columns[].type"),
+                plan("\"cpf\"", "{ \"format\": \"000.000.000-00\" }"),
+                proposedConfig,
+                objectMapper.createArrayNode(),
+                failures,
+                new ArrayList<>());
+
+        JsonNode column = proposedConfig.path("columns").get(0);
+        assertThat(failures).isEmpty();
+        assertThat(column.path("format").asText()).isEqualTo("000.000.000-00");
+        assertThat(column.path("type").asText()).isEqualTo("string");
+        assertThat(column.path("sortable").asBoolean()).isFalse();
+    }
+
+    @Test
+    void shouldRejectEmptyCanonicalTableColumnFormatWithoutMutatingTheColumn() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                { "columns": [{ "field": "cpf", "header": "CPF", "type": "string" }] }
+                """);
+        JsonNode previousConfig = proposedConfig.deepCopy();
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operationWithHandler(
+                        "column.format.set",
+                        "column",
+                        "column-by-field",
+                        true,
+                        "compile-domain-patch",
+                        "table-column-format-set",
+                        "columns[].format",
+                        "columns[].type"),
+                plan("\"cpf\"", "{ \"format\": \"\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).containsExactly("table-column-format-set requires a non-empty format");
+        assertThat(patchOperations).isEmpty();
+        assertThat(proposedConfig).isEqualTo(previousConfig);
+    }
+
+    @Test
+    void shouldCompileCanonicalTableColumnOrderAsCompleteDeterministicVisualSequence() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "a", "header": "A", "order": 2, "visible": false },
+                    { "field": "b", "header": "B" },
+                    { "field": "c", "header": "C", "order": 0, "width": "120px" },
+                    { "field": "d", "header": "D", "sortable": false }
+                  ]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        JsonNode operation = operationWithHandler(
+                "column.order.set",
+                "column",
+                "column-by-field",
+                true,
+                "compile-domain-patch",
+                "table-column-order-set",
+                "columns[].order");
+        JsonNode plan = plan("\"d\"", "{ \"order\": 0 }");
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                plan,
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        JsonNode columns = proposedConfig.path("columns");
+        assertThat(failures).isEmpty();
+        assertThat(registry.supportsDomainPatchHandler("table-column-order-set")).isTrue();
+        assertThat(columns).extracting(column -> column.path("field").asText())
+                .containsExactly("d", "c", "b", "a");
+        assertThat(columns).extracting(column -> column.path("order").asInt())
+                .containsExactly(0, 1, 2, 3);
+        assertThat(columns.get(0).path("sortable").asBoolean()).isFalse();
+        assertThat(columns.get(1).path("width").asText()).isEqualTo("120px");
+        assertThat(columns.get(3).path("visible").asBoolean()).isFalse();
+        assertThat(patchOperations).singleElement().satisfies(compiled -> {
+            assertThat(compiled.path("op").asText()).isEqualTo("reorder-columns");
+            assertThat(compiled.path("resolvedPath").asText()).isEqualTo("columns");
+            assertThat(compiled.path("fromIndex").asInt()).isEqualTo(3);
+            assertThat(compiled.path("toIndex").asInt()).isZero();
+            assertThat(compiled.path("value")).hasSize(4);
+        });
+        JsonNode firstMaterialization = proposedConfig.path("columns").deepCopy();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                plan,
+                proposedConfig,
+                objectMapper.createArrayNode(),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(proposedConfig.path("columns")).isEqualTo(firstMaterialization);
+    }
+
+    @Test
+    void shouldBoundCanonicalTableColumnOrderAndRejectInvalidOrderWithoutMutation() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "columns": [
+                    { "field": "a", "header": "A" },
+                    { "field": "b", "header": "B" },
+                    { "field": "c", "header": "C" }
+                  ]
+                }
+                """);
+        JsonNode operation = operationWithHandler(
+                "column.order.set",
+                "column",
+                "column-by-field",
+                true,
+                "compile-domain-patch",
+                "table-column-order-set",
+                "columns[].order");
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                plan("\"a\"", "{ \"order\": 99 }"),
+                proposedConfig,
+                objectMapper.createArrayNode(),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(proposedConfig.path("columns")).extracting(column -> column.path("field").asText())
+                .containsExactly("b", "c", "a");
+        JsonNode boundedConfig = proposedConfig.deepCopy();
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+
+        registry.appendCompiledEffects(
+                "praxis-table",
+                operation,
+                plan("\"a\"", "{ \"order\": -1 }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).containsExactly("table-column-order-set requires a non-negative integer order");
+        assertThat(patchOperations).isEmpty();
+        assertThat(proposedConfig).isEqualTo(boundedConfig);
+    }
+
+    @Test
     void shouldCompileSetValueIntoResolvedNestedTarget() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {

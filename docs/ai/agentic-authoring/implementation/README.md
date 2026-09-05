@@ -128,6 +128,7 @@ revert/supersede sem deletar evidencia ou expor payload bruto.
 45. [01-current-state-and-target.md](./01-current-state-and-target.md)
 46. [02-implementation-backlog.md](./02-implementation-backlog.md)
 47. [03-browser-e2e-definition-of-done.md](./03-browser-e2e-definition-of-done.md)
+48. [44-table-column-format-order-domain-compilers.md](./44-table-column-format-order-domain-compilers.md)
 
 `04-implementation-ready-plan.md` e a fonte ativa para preparar novos PRs,
 `05-governed-project-knowledge-plan.md` detalha a Phase 7, e
