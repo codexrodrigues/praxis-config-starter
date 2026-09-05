@@ -29,7 +29,7 @@ do corte. Essa instalação não substitui a atualização do consumidor para ar
 - Quickstart: **10 testes em cinco classes**, zero falhas/erros. Incluem HTTP/PostgreSQL real de
   reabertura/refinamento, SSE, schemas de patch, templates governados e política de acesso.
   O provider e o domínio/RAG usam seams determinísticos conforme o teste canônico do host.
-- Browser: **11 cenários aprovados**, com fixtures recompiladas pelo Java reconciliado, incluindo
+- Browser: **14 cenários aprovados** (11 de regressão livre e três smokes existentes atualizados), com fixtures recompiladas pelo Java reconciliado, incluindo
   dois domínios, três turnos, apply, reload, edição, required, dashboards e foco responsivo.
 - Runner: **9 testes aprovados**, TypeScript sem erros; canary em `https://praxisui.dev`
   permanece **skipped sem opt-in**, antes de navegação ou chamadas.
@@ -80,3 +80,14 @@ limite duro de cobrança ou custo de embeddings. O modelo do backend permanece `
 
 O teto USD foi solicitado ao usuário e continua pendente. A preparação documental e técnica não
 equivale a uma autorização paga. Nenhum workflow pago ou release foi disparado nesta preparação.
+
+## PRs preparados
+
+- [Config #450](https://github.com/codexrodrigues/praxis-config-starter/pull/450)
+- [Core #502](https://github.com/codexrodrigues/praxis-ui-angular/pull/502)
+- [Landing #214](https://github.com/codexrodrigues/praxis-ui-landing-page/pull/214)
+
+Os PRs foram abertos como draft para revisão do corte coordenado. Os checks automáticos de PR
+não equivalem a publicação nem a gate pago. A referência canônica da skill de authoring generativo
+recebeu a distinção entre preflight CORS e leitura protegida do Config; a cópia instalada idêntica
+foi sincronizada no menor escopo. Nenhum script de sync estava disponível neste checkout.
