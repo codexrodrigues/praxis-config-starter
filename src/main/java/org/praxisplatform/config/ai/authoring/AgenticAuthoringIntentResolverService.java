@@ -1466,8 +1466,13 @@ public class AgenticAuthoringIntentResolverService {
         warnings = sanitizeConsultativeWarnings(warnings, operationKind, artifactKind, changeKind);
         List<AgenticAuthoringCandidate> presentationCandidates =
                 presentationCandidates(selectedCandidate, candidates);
+        // A server-issued continuation already owns its visual decision. Preserve
+        // it so the turn engine can re-verify operations for the same layout;
+        // the generic repair label must not become a new visualization intent.
         AgenticAuthoringVisualizationDecision visualizationDecision =
-                governedVisualizationDecision(
+                serverIssuedQuickReplyContinuation && activeDecision.visualizationDecision() != null
+                        ? activeDecision.visualizationDecision()
+                        : governedVisualizationDecision(
                         llmIntent,
                         operationKind,
                         artifactKind,
@@ -1894,10 +1899,12 @@ public class AgenticAuthoringIntentResolverService {
 
     private ObjectNode resolvedQuickReplyContinuationConstraints(
             AgenticAuthoringSemanticDecision activeDecision) {
-        ObjectNode constraints = objectMapper.createObjectNode();
+        JsonNode issuedConstraints = activeDecision.constraints();
+        ObjectNode constraints = issuedConstraints.isObject()
+                ? issuedConstraints.deepCopy()
+                : objectMapper.createObjectNode();
         constraints.put("source", "resolved-quick-reply-continuation");
         constraints.put("continuationDecisionId", valueOrDefault(activeDecision.decisionId(), ""));
-        JsonNode issuedConstraints = activeDecision.constraints();
         constraints.put("quickReplyId", issuedConstraints.path("quickReplyId").asText(""));
         constraints.put("continuationOf", issuedConstraints.path("continuationOf").asText(""));
         constraints.set("conceptKeys", issuedConstraints.path("conceptKeys").deepCopy());
