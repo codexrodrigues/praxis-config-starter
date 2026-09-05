@@ -142,6 +142,91 @@ class AgenticAuthoringPersistedUiCompositionSourceResolverTest {
     }
 
     @Test
+    void blocksWhenThePersistedMaterializationHashWasTampered() throws Exception {
+        UUID etag = UUID.randomUUID();
+        ObjectNode page = materializedPage("bar");
+        ObjectNode envelope = authoringSource(compositionPlan("bar"), page);
+        envelope.withObject("/materialization").put("sha256", "0".repeat(64));
+        UiUserConfig config = persistedConfig(etag, page, envelope);
+        when(userConfigService.getByScope(
+                UserConfigService.Scope.USER,
+                TENANT,
+                USER,
+                COMPONENT_TYPE,
+                COMPONENT_ID,
+                ENVIRONMENT))
+                .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(config, UserConfigService.Scope.USER)));
+
+        AgenticAuthoringTurnStreamRequest request = updateRequest(page, etag, null);
+        AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution resolution = resolver.resolve(
+                request,
+                principal,
+                AgenticAuthoringApplyTarget.resolve(request, principal));
+
+        assertThat(resolution.valid()).isFalse();
+        assertThat(resolution.failureCode())
+                .isEqualTo("persisted-ui-composition-materialization-hash-mismatch");
+    }
+
+    @Test
+    void blocksWhenThePersistedMaterializationIdentityDoesNotMatchTheApplyTarget() throws Exception {
+        UUID etag = UUID.randomUUID();
+        ObjectNode page = materializedPage("bar");
+        ObjectNode envelope = authoringSource(compositionPlan("bar"), page);
+        envelope.withObject("/materialization").put("componentId", "another-dashboard");
+        UiUserConfig config = persistedConfig(etag, page, envelope);
+        when(userConfigService.getByScope(
+                UserConfigService.Scope.USER,
+                TENANT,
+                USER,
+                COMPONENT_TYPE,
+                COMPONENT_ID,
+                ENVIRONMENT))
+                .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(config, UserConfigService.Scope.USER)));
+
+        AgenticAuthoringTurnStreamRequest request = updateRequest(page, etag, null);
+        AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution resolution = resolver.resolve(
+                request,
+                principal,
+                AgenticAuthoringApplyTarget.resolve(request, principal));
+
+        assertThat(resolution.valid()).isFalse();
+        assertThat(resolution.failureCode())
+                .isEqualTo("persisted-ui-composition-materialization-identity-mismatch");
+    }
+
+    @Test
+    void cannotResolveAnotherUsersPersistedSourceFromTheBrowserTarget() {
+        UUID etag = UUID.randomUUID();
+        ObjectNode page = materializedPage("bar");
+        AiPrincipalContext anotherPrincipal = new AiPrincipalContext(TENANT, "another-user", ENVIRONMENT, true);
+        when(userConfigService.getByScope(
+                UserConfigService.Scope.USER,
+                TENANT,
+                "another-user",
+                COMPONENT_TYPE,
+                COMPONENT_ID,
+                ENVIRONMENT))
+                .thenReturn(Optional.empty());
+
+        AgenticAuthoringTurnStreamRequest request = updateRequest(page, etag, null);
+        AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution resolution = resolver.resolve(
+                request,
+                anotherPrincipal,
+                AgenticAuthoringApplyTarget.resolve(request, anotherPrincipal));
+
+        assertThat(resolution.valid()).isFalse();
+        assertThat(resolution.failureCode()).isEqualTo("persisted-ui-composition-config-not-found");
+        verify(userConfigService).getByScope(
+                UserConfigService.Scope.USER,
+                TENANT,
+                "another-user",
+                COMPONENT_TYPE,
+                COMPONENT_ID,
+                ENVIRONMENT);
+    }
+
+    @Test
     void blocksAStoredSourceWhoseCanonicalHashWasTampered() throws Exception {
         UUID etag = UUID.randomUUID();
         ObjectNode page = materializedPage("bar");

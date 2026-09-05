@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -202,13 +203,74 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 .isInstanceOf(UserConfigService.PreconditionFailedException.class)
                 .hasMessageContaining("configuration already exists");
 
-        ObjectNode reopenedPlan = (ObjectNode) persistedAuthoringSource.path("source").deepCopy();
-        ((ObjectNode) reopenedPlan.at("/widgets/1/inputs"))
-                .put("formId", "missions-detail-reviewed");
+        ObjectNode reopenContext = objectMapper.createObjectNode();
+        ObjectNode reopenTarget = reopenContext.putObject("agenticApplyTarget");
+        reopenTarget.put("schemaVersion", AgenticAuthoringApplyTarget.SCHEMA_VERSION);
+        reopenTarget.put("componentType", "praxis-dynamic-page");
+        reopenTarget.put("componentId", COMPONENT_ID);
+        reopenTarget.put("scope", "user");
+        reopenTarget.put("mode", "update");
+        reopenTarget.put("baseEtag", applied.etag());
+        reopenContext.set("uiCompositionAuthoringSource", persistedAuthoringSource.deepCopy());
+        AgenticAuthoringTurnStreamRequest reopenRequest = new AgenticAuthoringTurnStreamRequest(
+                "Altere o gráfico selecionado para linhas",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                persistedPage,
+                "missions-chart",
+                "openai",
+                "gpt-5.4-mini",
+                null,
+                "session",
+                UUID.randomUUID().toString(),
+                null,
+                null,
+                null,
+                reopenContext,
+                null,
+                null);
+        AgenticAuthoringPersistedUiCompositionSourceResolver sourceResolver =
+                new AgenticAuthoringPersistedUiCompositionSourceResolver(
+                        userConfigService,
+                        objectMapper,
+                        new CanonicalJsonHashService(objectMapper));
+        AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution sourceResolution = sourceResolver.resolve(
+                reopenRequest,
+                principal,
+                AgenticAuthoringApplyTarget.resolve(reopenRequest, principal));
+        assertThat(sourceResolution.valid()).isTrue();
+        assertThat(sourceResolution.plan()).isEqualTo(persistedAuthoringSource.path("source"));
+
+        AgenticAuthoringPlanRequest refinementRequest = new AgenticAuthoringPlanRequest(
+                "Altere o gráfico selecionado para linhas",
+                "openai",
+                "gpt-5.4-mini",
+                null,
+                persistedPage,
+                chartModificationIntent(),
+                "session",
+                UUID.randomUUID().toString(),
+                null,
+                null,
+                null,
+                objectMapper.createObjectNode().put("selectedWidgetKey", "missions-chart"));
+        AgenticAuthoringUiCompositionPlanResult refinement =
+                new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)
+                        .plan(refinementRequest, sourceResolution.plan())
+                        .orElseThrow();
+        ObjectNode reopenedPlan = (ObjectNode) refinement.uiCompositionPlan();
+        assertThat(reopenedPlan).isNotNull();
+        assertThat(reopenedPlan.at("/widgets/2/inputs/chartDocument/kind").asText()).isEqualTo("line");
+        assertThat(reopenedPlan.path("state")).isEqualTo(firstPlan.path("state"));
+        assertThat(reopenedPlan.path("canvas")).isEqualTo(firstPlan.path("canvas"));
+        assertThat(reopenedPlan.path("bindings")).isEqualTo(firstPlan.path("bindings"));
+        assertThat(reopenedPlan.path("widgets")).hasSize(firstPlan.path("widgets").size());
         JsonNode updatedPatch = compiledPatch(reopenedPlan);
         UUID updateStreamId = UUID.randomUUID();
         UUID updateThreadId = UUID.randomUUID();
         UUID updateTurnId = UUID.randomUUID();
+        AgenticAuthoringSemanticDecision refinementSemanticDecision = refinementSemanticDecision();
         persistTurn(updateThreadId, updateTurnId);
         AiTurnEventEnvelope updateTerminal = turnEventService.appendEvent(
                 principal,
@@ -219,7 +281,7 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 terminalPayload(
                         updatedPatch,
                         reopenedPlan,
-                        semanticDecision,
+                        refinementSemanticDecision,
                         "update",
                         applied.etag()));
         AgenticAuthoringApplyRequest updateRequest = new AgenticAuthoringApplyRequest(
@@ -228,7 +290,7 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 COMPONENT_ID,
                 "user",
                 null,
-                semanticDecision,
+                refinementSemanticDecision,
                 updateStreamId,
                 updateTerminal.getEventId());
 
@@ -276,7 +338,9 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 .config()
                 .getPayload());
         assertThat(winningPayload.at("/widgets/1/definition/inputs/formId").asText())
-                .isEqualTo("missions-detail-reviewed");
+                .isEqualTo("missions-detail");
+        assertThat(winningPayload.at("/widgets/2/definition/inputs/chartDocument/kind").asText())
+                .isEqualTo("line");
         assertThat(winningPayload.at("/composition/links/0/from/ref/port").asText())
                 .isEqualTo("selectionChange");
     }
@@ -350,7 +414,8 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                     "autoRows": "fixed",
                     "items": {
                       "missions-master": { "col": 1, "row": 1, "colSpan": 7, "rowSpan": 8 },
-                      "missions-detail": { "col": 8, "row": 1, "colSpan": 5, "rowSpan": 8 }
+                      "missions-detail": { "col": 8, "row": 1, "colSpan": 5, "rowSpan": 8 },
+                      "missions-chart": { "col": 1, "row": 9, "colSpan": 12, "rowSpan": 5 }
                     }
                   },
                   "widgets": [
@@ -378,6 +443,21 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                         "schemaSource": "resource",
                         "mode": "view",
                         "formId": "missions-detail"
+                      }
+                    },
+                    {
+                      "key": "missions-chart",
+                      "componentId": "praxis-chart",
+                      "inputs": {
+                        "resourcePath": "/api/operations/missoes",
+                        "chartDocument": {
+                          "kind": "bar",
+                          "data": {
+                            "source": { "kind": "resource", "resourcePath": "/api/operations/missoes" },
+                            "categoryField": "status",
+                            "valueField": "total"
+                          }
+                        }
                       }
                     }
                   ],
@@ -414,6 +494,46 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
         return result.compiledFormPatch();
     }
 
+    private AgenticAuthoringIntentResolutionResult chartModificationIntent() {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "dashboard",
+                "set_chart_type",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget(
+                        "missions-chart",
+                        "praxis-chart",
+                        "/api/operations/missoes",
+                        "",
+                        "",
+                        "post"),
+                new AgenticAuthoringCandidate(
+                        "/api/operations/missoes",
+                        "post",
+                        "/schemas/filtered?path=/api/operations/missoes/filter&operation=post&schemaType=response",
+                        "/api/operations/missoes/filter",
+                        "POST",
+                        0.97d,
+                        "server-grounded current page resource",
+                        List.of("api-metadata", "current-page-target-resource")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                null,
+                null,
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
+    }
+
     private AgenticAuthoringSemanticDecision semanticDecision() {
         return new AgenticAuthoringSemanticDecision(
                 "praxis-agentic-authoring-semantic-decision.v1",
@@ -421,6 +541,22 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 "create",
                 "page",
                 "create_artifact",
+                null,
+                null,
+                null,
+                false,
+                "",
+                "",
+                "");
+    }
+
+    private AgenticAuthoringSemanticDecision refinementSemanticDecision() {
+        return new AgenticAuthoringSemanticDecision(
+                "praxis-agentic-authoring-semantic-decision.v1",
+                "decision-absence-dashboard-chart-refinement",
+                "modify",
+                "dashboard",
+                "set_chart_type",
                 null,
                 null,
                 null,

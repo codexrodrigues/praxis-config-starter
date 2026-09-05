@@ -672,7 +672,7 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(column.path("sortable").asBoolean()).isTrue();
         assertThat(column.at("/renderer/type").asText()).isEqualTo("badge");
         assertThat(patchOperations).singleElement().satisfies(compiled -> {
-            assertThat(compiled.path("op").asText()).isEqualTo("set-table-column-format");
+            assertThat(compiled.path("op").asText()).isEqualTo("set-column-format");
             assertThat(compiled.path("domainHandler").asText()).isEqualTo("table-column-format-set");
             assertThat(compiled.path("previousValue").path("visible").asBoolean()).isFalse();
             assertThat(compiled.path("value").path("sortable").asBoolean()).isTrue();
@@ -796,7 +796,7 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(proposedConfig.at("/columns/0/format").asText()).isEqualTo("BRL|symbol|2");
         assertThat(proposedConfig.at("/columns/0/type").asText()).isEqualTo("currency");
         assertThat(patchOperations).singleElement().satisfies(compiled -> {
-            assertThat(compiled.path("op").asText()).isEqualTo("reorder-table-columns");
+            assertThat(compiled.path("op").asText()).isEqualTo("reorder-columns");
             assertThat(compiled.path("domainHandler").asText()).isEqualTo("table-column-order-set");
             assertThat(compiled.path("fromIndex").asInt()).isEqualTo(2);
             assertThat(compiled.path("toIndex").asInt()).isZero();
