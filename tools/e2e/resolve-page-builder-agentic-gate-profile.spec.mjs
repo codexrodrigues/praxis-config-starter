@@ -20,6 +20,8 @@ const windowsRunnerSource = readFileSync(
 test('resolves the smoke release gate with the governed mission scope required by its master-detail receipt', () => {
   const profile = resolveGateProfile(loadGateMatrix(), 'smoke');
 
+  assert.equal(profile.humanTurnLimit, 3);
+  assert.equal(profile.retries, 0);
   assert.equal(profile.domainCatalogRagRequired, true);
   assert.equal(profile.domainCatalogResourceKey, 'operations.missoes');
   assert.equal(profile.apiCatalogGroup, 'operations');
