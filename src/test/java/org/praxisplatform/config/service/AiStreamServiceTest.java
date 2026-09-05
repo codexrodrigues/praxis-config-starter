@@ -278,7 +278,7 @@ class AiStreamServiceTest {
                 Instant.now(),
                 Instant.now().plusSeconds(900),
                 "different-request-hash",
-                "status");
+                "status", null);
         when(threadService.resolveThread(request, "tenant-a", "user-a", "prod", "Atualizar tabela"))
                 .thenReturn(thread);
         when(turnEventService.findStartMetadata(threadId, turnId)).thenReturn(Optional.of(metadata));
@@ -320,7 +320,7 @@ class AiStreamServiceTest {
                 Instant.now().minusSeconds(5),
                 Instant.now().plusSeconds(900),
                 legacyRequestHash(request),
-                "status");
+                "status", null);
         AiTurnEventEnvelope terminal = AiTurnEventEnvelope.builder()
                 .eventId(UUID.randomUUID())
                 .streamId(streamId)
@@ -543,7 +543,7 @@ class AiStreamServiceTest {
                 Instant.now().minusSeconds(2),
                 Instant.now().plusSeconds(900),
                 null,
-                "status");
+                "status", null);
         when(threadService.resolveThread(request, "tenant-a", "user-a", "prod", "Atualizar tabela"))
                 .thenReturn(thread);
         when(turnEventService.findStartMetadata(threadId, turnId)).thenReturn(Optional.of(metadata));
@@ -601,7 +601,7 @@ class AiStreamServiceTest {
                 Instant.now().minusSeconds(2),
                 Instant.now().plusSeconds(900),
                 null,
-                "status");
+                "status", null);
         AiTurnEventEnvelope envelope = AiTurnEventEnvelope.builder()
                 .eventId(UUID.randomUUID())
                 .streamId(streamId)
@@ -674,7 +674,7 @@ class AiStreamServiceTest {
                 Instant.now().minusSeconds(2),
                 Instant.now().plusSeconds(900),
                 null,
-                "status");
+                "status", null);
         AiTurnEventEnvelope nonTerminalTail = AiTurnEventEnvelope.builder()
                 .eventId(UUID.randomUUID())
                 .streamId(streamId)
@@ -759,7 +759,7 @@ class AiStreamServiceTest {
                 Instant.now().minusSeconds(2),
                 Instant.now().plusSeconds(900),
                 null,
-                "status");
+                "status", null);
         AiTurnEventEnvelope nonTerminalTail = AiTurnEventEnvelope.builder()
                 .eventId(UUID.randomUUID())
                 .streamId(streamId)

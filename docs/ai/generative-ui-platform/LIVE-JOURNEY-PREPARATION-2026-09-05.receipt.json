@@ -1,0 +1,231 @@
+{
+  "recordedAt": "2026-09-05T20:40:33.642843+00:00",
+  "classification": "transversal",
+  "cutDirectory": "/Users/rodrigo/Dev/pessoal/praxis-plataform/.worktrees/free-authoring-live-20260905",
+  "repositories": {
+    "praxis-config-starter": {
+      "head": "5c6cd02b13bbbaac4a25ed0121f4b72516c6ccf6",
+      "changedFiles": {
+        "docs/ai/agentic-authoring-streaming.md": "fc02afd5b62c96d4bdc9d59868db084ce0ede3423cd262291db5d717f0429bdd",
+        "docs/ai/generative-ui-platform/LIVE-JOURNEY-PREPARATION-2026-09-05.md": "209780d226f69de8143f99b1ee5ef3a1e80736061093bf201638407a053b8a1d",
+        "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringGenericUiCompositionPlanProvider.java": "b8267f72e5198ae79197fcb8612c235daf622120812288d7a1ee9b52bed25e87",
+        "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringIntentResolverService.java": "cbc613b095c338817ff0aca230a1342bffcddda9751f02b96e4f837dd2c0bb16",
+        "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringPreviewService.java": "8ca78087a716643db92b7ef70ed1ec81adc065f2ed751619bd76d1d8389ed9ba",
+        "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringSemanticDecision.java": "7354072365b4e3e1e6060c84e3a6681859cce61dc6466858d00da096b8f3b185",
+        "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnEngine.java": "a7013752930b7db9a539dc64f5764fd15b3cfb9d15d74ce7927b21695539d445",
+        "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamService.java": "e86c03e5ff9e0481432e48909d8ad0d9d65d7dae97deec309371a9d1d8c321fa",
+        "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.java": "3b31601d51360d71251f6981c11df657e50aad29bc2eab50ce960530ae297d5b",
+        "src/main/java/org/praxisplatform/config/repository/AiThreadRepository.java": "3063e07eb26a36f63a5e72edffbd15cb3adc7f45846d3e7e545808bac967e5c2",
+        "src/main/java/org/praxisplatform/config/service/AiTurnEventService.java": "1147cd43f7fca2dd8fcf80cf3f4460587153d45f949aedae840a12a35c488c67",
+        "src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringConsultativePersistenceFixture.java": "9f21c38a79992bc6ce23378aebf8fb6ff6fe96c9806f4313e01a598101b19a9c",
+        "src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringDryRunPersistenceIntegrationTest.java": "af8a524214fedad37fe857c4019dba91c6f589e816d6e04ebeaf5a30a05fbb81",
+        "src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringFreeComposerVerticalTest.java": "be6bd706d26c45223ee898eb013a6e58ed5f70520c2e6940e0d5ed54e70a50d4",
+        "src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringFreeIntentContinuityTest.java": "8fe733d3ce78ffd91f0cd15a0a057e697bf80f0dbbfe9f7a7e9c3dc45384068b",
+        "src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringFreePortfolioForwardTest.java": "877938d5f817db1badccced7b5e29b056e4623acf13d71460b04273e2e4c5f45",
+        "src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringIntentResolverServiceTest.java": "2aaf06940f7695cedaaa78484a51ccd9a0048392705a2c61731cd1cccb88285a",
+        "src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java": "b8b3fe7482d9f8d7e8bb0510b95687e43a3417c43e0177b8c5cf69a698c8aa00",
+        "src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java": "c55d18c768349cdebe2160864b75f7131a656e4eefa6e4c58a5d461fc4d64743",
+        "src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamServiceTest.java": "e1c8885912b0156c8a3a44a18c0a783da04c32514ab0b3f253087f4cd08a637f",
+        "src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompilerTest.java": "435dab176455b747232dd119223fd6d902e800d521e310f64d8367745e39c9ea",
+        "src/test/java/org/praxisplatform/config/repository/AiAuthoringDecisionAdmissionConcurrencyTest.java": "bab460624de8d5e6b8d8ad9d1f12633d7cb78f2570710be096fb50b36ff6c2f2",
+        "src/test/java/org/praxisplatform/config/service/AiStreamServiceTest.java": "18b5f8b4c98c07528c7e3f12a3bf87089b1ec0e547439d1c046cb3196a60e511",
+        "src/test/java/org/praxisplatform/config/service/AiTurnEventServiceTest.java": "4b24e3376782c8e6e0d179e6508616a661f48ddfdacd32702967368c2f9f18f9"
+      }
+    },
+    "praxis-ui-angular": {
+      "head": "87fd2f257df61f08c6edfc1d326b9ff442f724d2",
+      "changedFiles": {
+        "projects/praxis-core/docs/schema-flow.md": "074025fa808f08049479937cdff88e2a33b8d7856e8ec518e9ae051c20b79c3f",
+        "projects/praxis-core/src/lib/services/schema-normalizer.service.spec.ts": "87fd6e22eabafab015d704bcc081109da60b926cf916d87dfb85c991ba141573",
+        "projects/praxis-core/src/lib/services/schema-normalizer.service.ts": "3a393a9cce06ae40edcb70d2543dc3610d2a9bb9d791d3f60dd2940c01bc86b9"
+      }
+    },
+    "praxis-ui-landing-page": {
+      "head": "c4440e5ec15fdbf60216b3757425f169e8bf424c",
+      "changedFiles": {
+        "docs/decision-playground-live-journey.md": "75959b2d6dabfeb93a656988855f359dbd34c820dff6751462e3e7aab3a24b0f",
+        "e2e/decision-playground-free-canary.spec.ts": "7502d297bb2b30c76a0cdca3b10bad2d2e643585afc4adaf9840ddc985cf8503",
+        "e2e/decision-playground-free-composer.spec.ts": "360be1128a611bbdb82059b6648f806943c3326217c2a20732288a64d9dc0172",
+        "e2e/decision-playground-free-portfolio.spec.ts": "1b1048d1dc6dfd7da4a3800f925db05324c42c83feb0d9d75aa1d0557b077554",
+        "e2e/decision-playground-free-runtime.spec.ts": "5ec64a9322b10b94144484f3ee27309cfd1207fe48e646151774fd68e77c49be",
+        "e2e/support/free-authoring-live.mjs": "90955fcdbe6514978552b533b2be17579b50346dc84f6b848d994cd3589d93ee",
+        "src/app/pages/decision-playground-page.component.ts": "fce636ce5f4538f63cca5c65eb5e8d6f72c1b4d04c60588cf017c535a95e4f01",
+        "tools/free-authoring-live.test.mjs": "c1bfa4d0843a3a30b51b686fb7f61445f8120911f39f3a1193e8d7e877c5e25c"
+      }
+    },
+    "praxis-api-quickstart": {
+      "head": "0361e6cd698bda033a8a57816afe1200f2332634",
+      "changedFiles": {}
+    }
+  },
+  "originalPreservation": {
+    "praxis-config-starter": [],
+    "praxis-ui-angular": [],
+    "praxis-ui-landing-page": []
+  },
+  "validation": {
+    "javaClasses": [
+      {
+        "name": "org.praxisplatform.config.service.AiTurnEventServiceTest",
+        "tests": "16",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewServiceTest",
+        "tests": "93",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamHttpSseIntegrationTest",
+        "tests": "9",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamServiceTest",
+        "tests": "40",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.ai.authoring.AgenticAuthoringSemanticDecisionPolicyTest",
+        "tests": "15",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngineTest",
+        "tests": "200",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.service.AiStreamServiceTest",
+        "tests": "17",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverServiceTest",
+        "tests": "263",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.repository.AiAuthoringDecisionAdmissionConcurrencyTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.ai.authoring.AgenticAuthoringGenericUiCompositionPlanProviderTest",
+        "tests": "63",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.ai.authoring.AgenticAuthoringFreePortfolioForwardTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.ai.authoring.AgenticAuthoringFreeComposerVerticalTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanCompilerTest",
+        "tests": "16",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.ai.authoring.AgenticAuthoringFreeIntentContinuityTest",
+        "tests": "12",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      },
+      {
+        "name": "org.praxisplatform.config.ai.authoring.AgenticAuthoringTerminalApplyPersistenceIntegrationTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0"
+      }
+    ],
+    "coreTestsPassed": 23,
+    "browserUniqueScenariosPassed": 11,
+    "runnerUnitTestsPassed": 8,
+    "canaryTypecheck": "passed",
+    "paidCanary": "skipped without opt-in",
+    "sourceAudit": {
+      "schemaVersion": "praxis.agentic-source-audit/v1",
+      "passed": true,
+      "auditedFiles": [
+        "projects/praxis-ai/src/lib/core/services/praxis-ai.service.ts",
+        "projects/praxis-ai/src/lib/core/services/assistant-turn-orchestrator.service.ts",
+        "projects/praxis-page-builder/src/lib/ai/page-builder-agentic-authoring.service.ts",
+        "projects/praxis-page-builder/src/lib/ai/page-builder-ui-composition-plan.ts",
+        "tools/e2e/playwright/praxis-page-builder-agentic-production-like.playwright.config.ts",
+        "projects/praxis-page-builder/test-dev/e2e/page-builder-agentic-validation.playwright.spec.ts",
+        "projects/praxis-page-builder/test-dev/e2e/page-builder-table-human-authoring.playwright.spec.ts",
+        "scripts/run-page-builder-agentic-authoring-e2e.js"
+      ],
+      "prohibitedBypasses": [
+        "getMockPatch",
+        "extractUserIntent"
+      ]
+    },
+    "buildsPassed": [
+      "Core",
+      "Dynamic Form",
+      "Page Builder",
+      "Landing",
+      "Config install",
+      "Quickstart package"
+    ],
+    "packageProof": {
+      "hostJar": ".worktrees/free-authoring-live-20260905/praxis-api-quickstart/target/praxis-api-quickstart-2.0.0-rc.46.jar",
+      "nestedJar": "BOOT-INF/lib/praxis-config-starter-0.1.0-rc.147.jar",
+      "configSha256": "60c49aebed1e0ca5f8a32c2f551d50e59dd7846396086ec5513ecb89afb19cea",
+      "nestedSha256": "60c49aebed1e0ca5f8a32c2f551d50e59dd7846396086ec5513ecb89afb19cea",
+      "identical": true,
+      "runtimeStarted": false
+    },
+    "javaTestsPassed": 755
+  },
+  "render": {
+    "serviceId": "srv-d3qjqcemcj7s73bpluv0",
+    "loginStatus": 500,
+    "error": "java.lang.OutOfMemoryError: Metaspace",
+    "errorAtUtc": "2026-09-05T20:13:30.509Z",
+    "observedMetaspaceCap": "160m",
+    "proposedJavaOpts": "-XX:+UseContainerSupport -XX:MaxRAMPercentage=60.0 -XX:InitialRAMPercentage=25.0 -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8",
+    "changeApplied": false
+  },
+  "liveProviderCertified": false,
+  "modelChanged": false,
+  "paidInferenceExecuted": false,
+  "domainRecordsWritten": false,
+  "commitPushReleaseDeployExecuted": false,
+  "fullSuiteExecuted": false,
+  "packagedHostStarted": false
+}

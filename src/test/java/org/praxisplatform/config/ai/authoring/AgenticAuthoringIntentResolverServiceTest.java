@@ -189,7 +189,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void constrainedCompactPageDecisionPreservesTheExistingNoSecondPassPolicy() {
+    void constrainedCompactPageDecisionHonorsTheRequestedFullPass() {
         ObjectNode constraints = objectMapper.createObjectNode();
         constraints.put("appliesToDataSelection", true);
         constraints.putArray("filters").addObject()
@@ -213,7 +213,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 "requiresAdditionalIntentResolution",
                 orientation);
 
-        assertThat(requiresAdditionalResolution).isFalse();
+        assertThat(requiresAdditionalResolution).isTrue();
         AgenticAuthoringVisualizationDecision visualizationDecision = ReflectionTestUtils.invokeMethod(
                 service,
                 "preIntentVisualizationDecision",
@@ -11494,7 +11494,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void canonicalTabsPageUsesVerifiedGovernedResourceWithoutFullProviderPass() {
+    void canonicalTabsPageUsesVerifiedGovernedResourceWhenPlannerDeclaresResolutionComplete() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
@@ -11564,7 +11564,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 List.of(),
                 "authoring_or_other",
                 "",
-                true,
+                false,
                 constraints,
                 "page",
                 "praxis-tabs",
@@ -11725,7 +11725,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void canonicalSingleTableIgnoresRedundantFullPassFlagWhenSemanticCompositionIsComplete() {
+    void canonicalSingleTableUsesCompactCompositionWhenPlannerDeclaresResolutionComplete() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
@@ -11763,7 +11763,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 List.of(),
                 "authoring_or_other",
                 "",
-                true,
+                false,
                 constraints,
                 "table",
                 "praxis-table",

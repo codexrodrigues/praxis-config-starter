@@ -1188,3 +1188,24 @@ Testes deterministas da config `mocked` nao entram nessa contagem.
 Esta decisao nao muda os endpoints sincronos existentes. Integracao do Page Builder
 Angular com SSE, UI de progresso e retry/cancelamento no cliente permanecem fora
 deste primeiro incremento de backend.
+
+
+### Continuidade, admissão e tipo semântico das projeções
+
+O registro do primeiro evento de authoring e a publicação de um resultado usam o mesmo lock
+transacional da conversa. A decisão ativa precisa ser a atual ou um filho emitido pelo backend
+no resultado atual. O replay exato recupera a decisão originalmente admitida, inclusive sua ausência
+no primeiro pedido livre, e preserva o fingerprint que inclui o principal.
+
+`requiresFullIntentResolution=true` exige a resolução semântica completa mesmo com um plano compacto
+ou filtros conhecidos. O requisito adicional de escolha de surface de recurso relacionado continua
+vigente. A resolução não pode perder predicados nem substituir lineage por hints do browser.
+
+Transformações que produzem `queryContext` devem declarar o contrato existente
+`output: { semanticKind: "query-context", stableShape: true }`. O compilador preserva essa declaração
+na transformação e em seu step; a normalização de filtros não pode apagá-la. Sem essa informação,
+a validação de portas do Core corretamente rejeita uma ligação de evento para contexto de consulta.
+
+A admissão serializa início/publicação; não equivale a serializar todo o trabalho de dois turnos já
+admitidos. A confirmação de cancelamento do stream também não comprova estorno ou interrupção
+instantânea de uma requisição já em processamento no provider.

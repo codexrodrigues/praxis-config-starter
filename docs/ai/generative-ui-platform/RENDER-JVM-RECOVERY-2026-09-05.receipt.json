@@ -1,0 +1,66 @@
+{
+  "recordedAtUtc": "2026-09-05T21:27:16.124851+00:00",
+  "authorization": "User authorized aligning JAVA_OPTS to the deployed Dockerfile and restarting Render.",
+  "serviceId": "srv-d3qjqcemcj7s73bpluv0",
+  "deployment": {
+    "id": "dep-dae8fkv40ujc73e8c5ig",
+    "status": "live",
+    "commit": "0361e6cd698bda033a8a57816afe1200f2332634",
+    "buildVersion": "2.0.0-rc.46",
+    "rebuild": false,
+    "startedAtUtc": "2026-09-05T21:22:49.643Z",
+    "operationalMigrationsExecuted": 0,
+    "initialUnchangedDeployment": "dep-dae8efon74is73cq2060"
+  },
+  "javaOpts": {
+    "before": "-XX:+UseContainerSupport -XX:MaxRAMPercentage=60.0 -XX:InitialRAMPercentage=25.0 -XX:MaxMetaspaceSize=160m -Dfile.encoding=UTF-8",
+    "after": "-XX:+UseContainerSupport -XX:MaxRAMPercentage=60.0 -XX:InitialRAMPercentage=25.0 -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8",
+    "persistedValueVerified": true
+  },
+  "http": {
+    "recordedAtUtc": "2026-09-05T21:23:50.911793+00:00",
+    "health": {
+      "httpStatus": 200,
+      "transportSuccess": true,
+      "status": "UP"
+    },
+    "readiness": {
+      "httpStatus": 200,
+      "transportSuccess": true,
+      "status": "UP"
+    },
+    "loginStatus": 204,
+    "authenticatedSessionStatus": 204,
+    "logoutStatus": 204,
+    "sessionAfterLogoutStatus": 401,
+    "authenticationPassed": true
+  },
+  "providerStatus": {
+    "origin": "https://praxisui.dev",
+    "httpStatus": 200,
+    "provider": "openai",
+    "model": "gpt-5-mini",
+    "hasApiKey": true,
+    "source": "env",
+    "success": true
+  },
+  "localOriginProbe": {
+    "origin": "http://127.0.0.1:4301",
+    "httpStatus": 403,
+    "message": "Config origin not allowed",
+    "allowlistChanged": false
+  },
+  "logs": {
+    "startUtc": "2026-09-05T21:21:45Z",
+    "endUtc": "2026-09-05T21:24:35Z",
+    "filter": "ERROR",
+    "result": "No matching logs"
+  },
+  "paidInferenceExecuted": false,
+  "modelChanged": false,
+  "keysChanged": false,
+  "domainRecordsWritten": false,
+  "localCutPublished": false,
+  "securityPolicyChanged": false,
+  "temporaryCredentialsRemoved": true
+}

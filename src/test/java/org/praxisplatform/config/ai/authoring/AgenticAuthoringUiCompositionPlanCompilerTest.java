@@ -795,7 +795,7 @@ class AgenticAuthoringUiCompositionPlanCompilerTest {
                       "from": { "kind": "component-port", "widget": "source", "port": "selection", "direction": "output" },
                       "to": { "kind": "component-port", "widget": "target", "port": "query", "direction": "input" },
                       "intent": "data-projection",
-                      "transform": { "kind": "template", "id": "object", "template": { "id": "${payload.id}" } }
+                      "transform": { "kind": "template", "id": "object", "template": { "filters": { "id": "${payload.id}" } }, "output": { "semanticKind": "query-context", "stableShape": true } }
                     },
                     {
                       "id": "scalar-template",
@@ -817,6 +817,11 @@ class AgenticAuthoringUiCompositionPlanCompilerTest {
         assertThat(links.at("/0/transform/steps/0/kind").asText()).isEqualTo("array-template");
         assertThat(links.at("/1/transform/mode").asText()).isEqualTo("object-fragment");
         assertThat(links.at("/1/transform/steps/0/kind").asText()).isEqualTo("object-template");
+        assertThat(links.at("/1/transform/output/semanticKind").asText()).isEqualTo("query-context");
+        assertThat(links.at("/1/transform/steps/0/output")).isEqualTo(links.at("/1/transform/output"));
+        ((ObjectNode) plan.at("/bindings/1/transform/output")).put("semanticKind", "unregistered-kind");
+        assertThat(compiler.compile(plan, objectMapper.createObjectNode()).failureCodes())
+                .contains("ui-composition-plan-transform-output-semantic-kind-invalid");
         assertThat(links.at("/2/transform/mode").asText()).isEqualTo("single-value");
         assertThat(links.at("/2/transform/steps/0/kind").asText()).isEqualTo("template");
     }

@@ -623,7 +623,7 @@ class AgenticAuthoringTurnStreamServiceTest {
                         createdAt,
                         expiresAt,
                         requestHash(request, threadId),
-                        "status")));
+                        "status", null)));
         when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
 
         AgenticAuthoringTurnStreamService service = new AgenticAuthoringTurnStreamService(
@@ -682,7 +682,7 @@ class AgenticAuthoringTurnStreamServiceTest {
                         createdAt,
                         expiresAt,
                         requestHash(originalRequest, threadId, principalContext),
-                        "status")));
+                        "status", null)));
 
         AgenticAuthoringTurnStreamService service = new AgenticAuthoringTurnStreamService(
                 turnEngine,
@@ -737,7 +737,7 @@ class AgenticAuthoringTurnStreamServiceTest {
                         createdAt,
                         expiresAt,
                         requestHash(request, threadId, originalPrincipal),
-                        "status")));
+                        "status", null)));
 
         AgenticAuthoringTurnStreamService service = new AgenticAuthoringTurnStreamService(
                 turnEngine,
@@ -792,7 +792,7 @@ class AgenticAuthoringTurnStreamServiceTest {
                                 withSemanticDecision(originalRequest, "decision-a"),
                                 threadId,
                                 principalContext),
-                        "status")));
+                        "status", null)));
 
         AgenticAuthoringTurnStreamService service = new AgenticAuthoringTurnStreamService(
                 turnEngine,
@@ -1083,7 +1083,7 @@ class AgenticAuthoringTurnStreamServiceTest {
                         createdAt,
                         expiresAt,
                         requestHash(request, threadId),
-                        "status")));
+                        "status", null)));
         when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
 
         AgenticAuthoringTurnStreamService service = service(turnEngine);

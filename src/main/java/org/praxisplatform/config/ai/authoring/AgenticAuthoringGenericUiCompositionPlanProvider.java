@@ -2009,6 +2009,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
                     ObjectNode crossFilterTransform = crossFilterBinding.putObject("transform");
                     crossFilterTransform.put("kind", "template");
                     crossFilterTransform.put("id", chartKey + "-cross-filter-query-context");
+                    crossFilterTransform.putObject("output").put("semanticKind", "query-context").put("stableShape", true);
                     ObjectNode template = crossFilterTransform.putObject("template");
                     putCrossFilterQueryContext(template, dimension);
 
@@ -2021,6 +2022,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
                     ObjectNode listTransform = listDrilldownBinding.putObject("transform");
                     listTransform.put("kind", "template");
                     listTransform.put("id", chartKey + "-cross-filter-list-query-context");
+                    listTransform.putObject("output").put("semanticKind", "query-context").put("stableShape", true);
                     ObjectNode listTemplate = listTransform.putObject("template");
                     putCrossFilterQueryContext(listTemplate, dimension);
                 }
@@ -2045,6 +2047,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
         ObjectNode transform = binding.putObject("transform");
         transform.put("kind", "template");
         transform.put("id", chartKey + "-point-query-context");
+        transform.putObject("output").put("semanticKind", "query-context").put("stableShape", true);
         ObjectNode template = transform.putObject("template");
         ObjectNode filters = template.putObject("filters");
         filters.put(dimension.filterField(), "${" + chartPointRawValuePath(dimension) + "}");
@@ -2076,6 +2079,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
             ObjectNode transform = binding.putObject("transform");
             transform.put("kind", "template");
             transform.put("id", filterKey + "-" + eventPort + "-" + targetKey + "-query-context");
+            transform.putObject("output").put("semanticKind", "query-context").put("stableShape", true);
             ObjectNode template = transform.putObject("template");
             template.put("filters", "${payload}");
         }
