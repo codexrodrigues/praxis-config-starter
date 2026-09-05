@@ -234,7 +234,8 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 new AgenticAuthoringPersistedUiCompositionSourceResolver(
                         userConfigService,
                         objectMapper,
-                        new CanonicalJsonHashService(objectMapper));
+                        new CanonicalJsonHashService(objectMapper),
+                        apiKeyProtectionService);
         AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution sourceResolution = sourceResolver.resolve(
                 reopenRequest,
                 principal,

@@ -2,6 +2,7 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -35,21 +36,29 @@ public class UserConfigService {
   private static final int MAX_COMPONENT_TYPE_LENGTH = 64;
   private static final int MAX_COMPONENT_ID_LENGTH = 255;
   private static final int MAX_ENVIRONMENT_LENGTH = 64;
+  private static final String AUTHORING_SOURCE_SCHEMA_VERSION = "praxis.ui-authoring-source/v1";
+  private static final String AUTHORING_SOURCE_KIND = "ui-composition-plan";
+  private static final String UI_COMPOSITION_PLAN_KIND = "praxis.ui-composition-plan";
+  private static final String UI_COMPOSITION_PLAN_VERSION = "1.0";
+  private static final String MATERIALIZATION_KIND = "widget-page-definition";
 
   private final UiUserConfigRepository repository;
   private final ObjectMapper objectMapper;
   private final AiApiKeyProtectionService apiKeyProtectionService;
   private final ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider;
+  private final CanonicalJsonHashService canonicalJsonHashService;
 
   public UserConfigService(
       UiUserConfigRepository repository,
       ObjectMapper objectMapper,
       AiApiKeyProtectionService apiKeyProtectionService,
-      @Qualifier("configNamedParameterJdbcTemplate") ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider) {
+      @Qualifier("configNamedParameterJdbcTemplate") ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider,
+      CanonicalJsonHashService canonicalJsonHashService) {
     this.repository = repository;
     this.objectMapper = objectMapper;
     this.apiKeyProtectionService = apiKeyProtectionService;
     this.jdbcTemplateProvider = jdbcTemplateProvider;
+    this.canonicalJsonHashService = canonicalJsonHashService;
   }
 
   public enum Scope {
@@ -170,6 +179,10 @@ public class UserConfigService {
     JsonNode sanitizedPayload = apiKeyProtectionService.sanitizeForStorage(payload, null);
     validatePayloadSize(sanitizedPayload);
     JsonNode sanitizedAuthoringSource = sanitizeAuthoringSource(authoringSource, null);
+    if (sanitizedAuthoringSource != null) {
+      sanitizedAuthoringSource = attestAuthoringSource(
+          sanitizedAuthoringSource, sanitizedPayload, effectiveIdentity);
+    }
     UiUserConfig created =
         UiUserConfig.builder()
             .tenantId(effectiveIdentity.tenantId())
@@ -282,6 +295,10 @@ public class UserConfigService {
             authoringSource,
             existing.map(cfg -> readJson(cfg.getAuthoringSource())).orElse(null))
         : authoringSourceForGenericWrite(existing, existingPayload, sanitizedPayload);
+    if (replaceAuthoringSource) {
+      resolvedAuthoringSource = attestAuthoringSource(
+          resolvedAuthoringSource, sanitizedPayload, effectiveIdentity);
+    }
 
     String payloadJson = writeJson(sanitizedPayload);
     String authoringSourceJson = writeNullableJson(resolvedAuthoringSource);
@@ -609,6 +626,42 @@ public class UserConfigService {
         existingAuthoringSource);
     validateAuthoringSourceSize(sanitized);
     return sanitized;
+  }
+
+  /**
+   * Recomputes the server-owned integrity fields from the public materialization returned to
+   * runtime consumers. This must happen after secret protection because encryption and response
+   * redaction may materially change the payload supplied by the authoring boundary.
+   */
+  private JsonNode attestAuthoringSource(
+      JsonNode authoringSource,
+      JsonNode persistedPayload,
+      ConfigIdentity identity) {
+    if (!(authoringSource instanceof ObjectNode sourceEnvelope)
+        || !AUTHORING_SOURCE_SCHEMA_VERSION.equals(sourceEnvelope.path("schemaVersion").asText())
+        || !AUTHORING_SOURCE_KIND.equals(sourceEnvelope.path("kind").asText())) {
+      throw new IllegalArgumentException("Invalid ui composition authoring source envelope");
+    }
+    JsonNode source = sourceEnvelope.path("source");
+    if (!source.isObject()
+        || !UI_COMPOSITION_PLAN_KIND.equals(source.path("kind").asText())
+        || !UI_COMPOSITION_PLAN_VERSION.equals(source.path("version").asText())) {
+      throw new IllegalArgumentException("Invalid ui composition plan authoring source");
+    }
+    JsonNode materializationNode = sourceEnvelope.path("materialization");
+    if (!(materializationNode instanceof ObjectNode materialization)
+        || !MATERIALIZATION_KIND.equals(materialization.path("kind").asText())
+        || !identity.componentType().equals(materialization.path("componentType").asText())
+        || !identity.componentId().equals(materialization.path("componentId").asText())) {
+      throw new IllegalArgumentException("Invalid ui composition materialization identity");
+    }
+    ObjectNode attested = sourceEnvelope.deepCopy();
+    attested.put("sourceSha256", canonicalJsonHashService.sha256(attested.path("source")));
+    JsonNode publicMaterialization = apiKeyProtectionService.sanitizeForResponse(persistedPayload);
+    attested.withObject("/materialization")
+        .put("sha256", canonicalJsonHashService.sha256(publicMaterialization));
+    validateAuthoringSourceSize(attested);
+    return attested;
   }
 
   /**

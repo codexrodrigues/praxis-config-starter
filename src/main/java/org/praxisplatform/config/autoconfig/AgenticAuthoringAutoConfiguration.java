@@ -627,11 +627,13 @@ public class AgenticAuthoringAutoConfiguration {
     @ConditionalOnBean(UserConfigService.class)
     public AgenticAuthoringPersistedUiCompositionSourceResolver agenticAuthoringPersistedUiCompositionSourceResolver(
             UserConfigService userConfigService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            AiApiKeyProtectionService apiKeyProtectionService) {
         return new AgenticAuthoringPersistedUiCompositionSourceResolver(
                 userConfigService,
                 objectMapper,
-                new CanonicalJsonHashService(objectMapper));
+                new CanonicalJsonHashService(objectMapper),
+                apiKeyProtectionService);
     }
 
     @Bean

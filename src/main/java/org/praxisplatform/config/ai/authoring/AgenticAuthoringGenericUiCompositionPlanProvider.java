@@ -782,10 +782,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
         parentInputs.put("configPersistenceStrategy", "input-first");
         parentInputs.put("enableCustomization", true);
         ObjectNode parentConfig = parentInputs.putObject("config");
+        parentConfig.put("title", resourceTitle(candidate));
         parentConfig.putArray("columns");
-        parentConfig.putObject("toolbar")
-                .put("visible", true)
-                .put("title", resourceTitle(candidate));
         parentConfig.putObject("behavior")
                 .putObject("selection")
                 .put("enabled", true)
@@ -1248,10 +1246,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
         inputs.put("resourcePath", businessResourcePath(candidate.resourcePath()));
         inputs.put("tableId", key);
         ObjectNode config = inputs.putObject("config");
+        config.put("title", resourceTitle(candidate));
         config.putArray("columns");
-        config.putObject("toolbar")
-                .put("visible", true)
-                .put("title", resourceTitle(candidate));
     }
 
     private void addWorkspaceTable(
@@ -1279,10 +1275,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
         inputs.put("configPersistenceStrategy", "input-first");
         inputs.put("enableCustomization", true);
         ObjectNode config = inputs.putObject("config");
+        config.put("title", resourceTitle(candidate));
         config.putArray("columns");
-        config.putObject("toolbar")
-                .put("visible", true)
-                .put("title", resourceTitle(candidate));
         config.putObject("behavior")
                 .putObject("selection")
                 .put("enabled", true)
@@ -2260,10 +2254,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
         inputs.put("componentInstanceId", key);
         inputs.putObject("queryContext").putObject("filters");
         ObjectNode config = inputs.putObject("config");
+        config.put("title", "Registros de " + titleFromResourcePath(resourcePath));
         addSurfaceOpenTableColumns(config.putArray("columns"), dimension);
-        config.putObject("toolbar")
-                .put("visible", true)
-                .put("title", "Registros de " + titleFromResourcePath(resourcePath));
         ArrayNode bindings = payload.putArray("bindings");
         ObjectNode binding = bindings.addObject();
         binding.put("from", chartPointRawValuePath(dimension));

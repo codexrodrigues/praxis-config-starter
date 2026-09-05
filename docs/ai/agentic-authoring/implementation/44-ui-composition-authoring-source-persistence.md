@@ -77,8 +77,11 @@ linha e na mesma operacao de persistencia.
 `diagnostics` e evidencia volatil do turno, nao semantica autorada. Ele e
 removido antes de persistir e antes de calcular `sourceSha256`. Referencia de
 template e linhagem ficam em `provenance`, fora da identidade funcional do
-plano. O hash de `materialization` permite ao consumidor provar que fonte e
-payload continuam alinhados.
+plano. O hash de `materialization` e calculado sobre a projecao publica segura
+do payload, exatamente como ela e devolvida ao Angular. Ciphertext e plaintext
+de credenciais nao entram no documento reaberto nem tornam o hash impossivel
+de validar. Isso permite ao consumidor provar que fonte e materializacao
+publica continuam alinhadas.
 
 ### Serializacao canonica compartilhada
 
@@ -117,6 +120,8 @@ wire format do envelope continue igual.
   de um novo resultado de authoring e, por isso, invalida a fonte anterior.
 - Payload e fonte possuem limites independentes de 256 KiB e passam pela mesma
   protecao de segredos antes da persistencia e da resposta.
+- A atestacao de `sourceSha256`, identidade e hash de materializacao e refeita
+  no owner de persistencia; um caller interno nao pode persistir hashes stale.
 - `GET /api/praxis/config/ui` e a leitura canonica e agora retorna o campo
   aditivo `authoringSource`; `payload`, versao e ETag permanecem inalterados.
 
@@ -148,12 +153,40 @@ O gate focal deve cobrir:
 8. round-trip de `authoringSource` pelo endpoint de leitura.
 9. migration idempotente e constraint de objeto em PostgreSQL real.
 10. os mesmos vetores SHA-256 no runtime Java e no verificador Angular.
+11. payload com credencial protegida continua reabrivel pela projecao publica,
+    sem expor ciphertext e sem gerar divergencia de hash.
 
-## Proximo corte obrigatorio
+## Continuidade semantica depois do reopen
 
-Este documento fecha o owner de persistencia e o contrato Angular ja carrega a
-fonte, verifica os dois hashes, abre o Page Builder a partir do envelope real e
-exibe divergencias bloqueantes. O corte seguinte ainda deve editar
-semanticamente a composicao reaberta, obter novo resultado terminal e reaplicar
-com o `If-Match` recebido no GET, tudo na mesma jornada HTTP real do Quickstart.
-Somente essa prova permite voltar a integrar novas telas no Ergon.
+O refinamento de uma configuracao `update` agora resolve a fonte no backend a
+partir da identidade exata de `agenticApplyTarget` e do principal autenticado.
+Antes de entregar o plano ao provider, o Config valida o ETag base, o escopo, o
+ambiente, a identidade do componente, `sourceSha256`, o hash do payload
+persistido e a igualdade entre esse payload e `currentPage`. O hint
+`uiCompositionAuthoringSource` do browser e removido do contexto e nunca e
+tratado como autoridade.
+
+Providers que recebem uma fonte persistida valida precisam devolver outro
+`UiCompositionPlan`. Retornar somente um patch de pagina nesse caminho falha
+com `persisted-ui-composition-refinement-plan-required`. Operacoes de
+componente que ainda nao possam ser projetadas no plano tambem falham
+explicitamente, em vez de remover a fonte semanticamente sem aviso.
+
+O piloto deterministico cobre `apply -> GET/reopen -> set_chart_type -> compile
+-> apply com If-Match -> GET`: o segundo plano preserva `widgets`, `bindings`,
+`state` e `canvas`, altera somente o chart selecionado, produz novos hashes e
+proveniencia e rejeita a reaplicacao com o ETag anterior sem substituir a
+versao vencedora. Casos de fonte forjada, identidade divergente, hash de fonte
+ou materializacao divergente, pagina corrente divergente, ETag stale e usuario
+diferente falham fechados.
+
+## Proximo gate obrigatorio
+
+O owner Java e o piloto deterministico nao equivalem a certificacao
+operacional publicada. O proximo gate e executar a mesma jornada por HTTP real
+no `praxis-api-quickstart`, com PostgreSQL compativel e o consumidor Angular
+real. O provider OpenAI entra somente como canario final, depois dos gates
+deterministicos; indisponibilidade de LLM nao bloqueia persistencia, reopen,
+integridade, compilacao nem concorrencia. Somente depois dessa prova e dos
+gates corporativos dos cinco arquetipos novas integracoes devem voltar ao
+Ergon.

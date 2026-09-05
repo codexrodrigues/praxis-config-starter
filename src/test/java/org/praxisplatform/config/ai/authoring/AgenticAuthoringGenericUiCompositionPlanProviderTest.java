@@ -624,8 +624,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         JsonNode tableInputs = findWidgetInputs(plan, "praxis-table");
         assertThat(tableInputs.path("resourcePath").asText()).isEqualTo("/api/operations/incidentes");
         assertThat(tableInputs.has("title")).isFalse();
-        assertThat(tableInputs.path("config").path("toolbar").path("visible").asBoolean()).isTrue();
-        assertThat(tableInputs.path("config").path("toolbar").path("title").asText()).isEqualTo("Incidentes");
+        assertThat(tableInputs.path("config").path("title").asText()).isEqualTo("Incidentes");
         assertThat(tableInputs.has("schemaUrl")).isFalse();
         assertThat(tableInputs.has("submitUrl")).isFalse();
         assertThat(tableInputs.has("submitMethod")).isFalse();
@@ -930,8 +929,8 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .isEqualTo("initialValue");
         assertThat(findWidget(plan, "praxis-table", "master").path("outputs")
                 .path("selectionChange").asText()).isEqualTo("emit");
-        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config")
-                .path("toolbar").path("title").asText()).isEqualTo("Funcionários");
+        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config").has("toolbar"))
+                .isFalse();
         assertThat(plan.path("diagnostics").path("resourceWorkspaceGrounding").path("status").asText())
                 .isEqualTo("unavailable");
         assertThat(plan.path("diagnostics").path("resourceWorkspaceGrounding").path("failureCode").asText())
@@ -978,8 +977,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .isTrue();
         assertThat(config.path("actions").path("collection").path("discovery").path("enabled").asBoolean())
                 .isFalse();
-        assertThat(config.path("toolbar").path("visible").asBoolean()).isTrue();
-        assertThat(config.path("toolbar").path("title").asText()).isEqualTo("Missões");
+        assertThat(config.has("toolbar")).isFalse();
         assertThat(grounding.path("commandDiscovery").path("source").asText())
                 .isEqualTo("schemas-actions+runtime-hateoas-capabilities");
         assertThat(grounding.path("commandDiscovery").path("item").asBoolean()).isTrue();
@@ -1033,8 +1031,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(config.path("actions").path("collection").path("discovery").path("enabled").asBoolean())
                 .isTrue();
         assertThat(config.path("actions").path("row").path("enabled").asBoolean()).isFalse();
-        assertThat(config.path("toolbar").path("visible").asBoolean()).isTrue();
-        assertThat(config.path("toolbar").path("title").asText()).isEqualTo("Missões");
+        assertThat(config.has("toolbar")).isFalse();
         JsonNode discovery = plan.path("diagnostics").path("resourceWorkspaceGrounding")
                 .path("commandDiscovery");
         assertThat(discovery.path("collection").asBoolean()).isTrue();
@@ -1060,8 +1057,8 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(grounding.path("status").asText()).isEqualTo("rejected");
         assertThat(grounding.path("failureCode").asText())
                 .isEqualTo("verified-domain-operations-envelope-untrusted");
-        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config")
-                .path("toolbar").path("title").asText()).isEqualTo("Missões");
+        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config").has("toolbar"))
+                .isFalse();
         assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config")
                 .path("actions").path("row").path("discovery").path("enabled").asBoolean())
                 .isFalse();
@@ -1087,8 +1084,8 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .isEqualTo("verified-domain-operations-resource-mismatch");
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
                 .containsExactly("praxis-table", "praxis-dynamic-form");
-        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config")
-                .path("toolbar").path("title").asText()).isEqualTo("Missões");
+        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config").has("toolbar"))
+                .isFalse();
         assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config")
                 .path("actions").path("collection").path("discovery").path("enabled").asBoolean())
                 .isFalse();
@@ -1111,8 +1108,8 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(grounding.path("commandOperationCount").asInt()).isZero();
         assertThat(grounding.path("failureCode").asText())
                 .isEqualTo("verified-command-operation-missing");
-        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config")
-                .path("toolbar").path("title").asText()).isEqualTo("Missões");
+        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config").has("toolbar"))
+                .isFalse();
     }
 
     @Test
@@ -1613,12 +1610,6 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
         assertThat(payload.path("widget").path("inputs").path("componentInstanceId").asText())
                 .isEqualTo(payload.path("widget").path("inputs").path("tableId").asText());
-        assertThat(payload.path("widget").path("inputs").has("title")).isFalse();
-        assertThat(payload.path("widget").path("inputs").path("config")
-                .path("toolbar").path("visible").asBoolean()).isTrue();
-        assertThat(payload.path("widget").path("inputs").path("config")
-                .path("toolbar").path("title").asText())
-                .isEqualTo("Registros de Indicadores incidentes");
         assertThat(payload.path("widget").path("inputs").path("queryContext").has("filters")).isTrue();
         assertThat(payload.path("widget").path("bindingOrder").toString())
                 .isEqualTo("[\"tableId\",\"componentInstanceId\",\"resourcePath\",\"config\",\"queryContext\"]");
@@ -1704,10 +1695,6 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .isEqualTo("canvas-device-layouts");
         assertThat(plan.path("widgets")).hasSize(1);
         assertThat(plan.path("widgets").path(0).path("componentId").asText()).isEqualTo("praxis-table");
-        assertThat(plan.at("/widgets/0/inputs").has("title")).isFalse();
-        assertThat(plan.at("/widgets/0/inputs/config/toolbar/visible").asBoolean()).isTrue();
-        assertThat(plan.at("/widgets/0/inputs/config/toolbar/title").asText())
-                .isEqualTo("Indicadores incidentes");
         assertThat(plan.path("canvas").path("columns").asInt()).isEqualTo(12);
         assertThat(plan.path("canvas").path("items").path("vw-indicadores-incidentes-table").path("colSpan").asInt())
                 .isEqualTo(12);

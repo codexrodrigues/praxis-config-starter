@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.ArgumentMatchers.any;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.domain.UiUserConfig;
+import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.CanonicalJsonHashService;
 import org.praxisplatform.config.service.UserConfigService;
@@ -34,6 +37,9 @@ class AgenticAuthoringPersistedUiCompositionSourceResolverTest {
     @Mock
     private UserConfigService userConfigService;
 
+    @Mock
+    private AiApiKeyProtectionService apiKeyProtectionService;
+
     private ObjectMapper objectMapper;
     private CanonicalJsonHashService canonicalJsonHashService;
     private AgenticAuthoringPersistedUiCompositionSourceResolver resolver;
@@ -46,7 +52,10 @@ class AgenticAuthoringPersistedUiCompositionSourceResolverTest {
         resolver = new AgenticAuthoringPersistedUiCompositionSourceResolver(
                 userConfigService,
                 objectMapper,
-                canonicalJsonHashService);
+                canonicalJsonHashService,
+                apiKeyProtectionService);
+        lenient().when(apiKeyProtectionService.sanitizeForResponse(any(JsonNode.class)))
+                .thenAnswer(invocation -> ((JsonNode) invocation.getArgument(0)).deepCopy());
         principal = new AiPrincipalContext(TENANT, USER, ENVIRONMENT, true);
     }
 
@@ -139,6 +148,39 @@ class AgenticAuthoringPersistedUiCompositionSourceResolverTest {
 
         assertThat(resolution.valid()).isFalse();
         assertThat(resolution.failureCode()).isEqualTo("persisted-ui-composition-current-page-mismatch");
+    }
+
+    @Test
+    void resolvesAgainstThePublicMaterializationWhenStoredCredentialsAreProtected() throws Exception {
+        UUID etag = UUID.randomUUID();
+        ObjectNode storedPage = materializedPage("bar");
+        storedPage.putObject("ai")
+                .put("apiKeyEncrypted", "ciphertext")
+                .put("apiKeyLast4", "1234");
+        ObjectNode publicPage = materializedPage("bar");
+        publicPage.putObject("ai")
+                .put("apiKeyLast4", "1234")
+                .put("hasApiKey", true);
+        ObjectNode envelope = authoringSource(compositionPlan("bar"), publicPage);
+        UiUserConfig config = persistedConfig(etag, storedPage, envelope);
+        when(apiKeyProtectionService.sanitizeForResponse(storedPage)).thenReturn(publicPage);
+        when(userConfigService.getByScope(
+                UserConfigService.Scope.USER,
+                TENANT,
+                USER,
+                COMPONENT_TYPE,
+                COMPONENT_ID,
+                ENVIRONMENT))
+                .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(config, UserConfigService.Scope.USER)));
+
+        AgenticAuthoringTurnStreamRequest request = updateRequest(publicPage, etag, null);
+        AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution resolution = resolver.resolve(
+                request,
+                principal,
+                AgenticAuthoringApplyTarget.resolve(request, principal));
+
+        assertThat(resolution.valid()).isTrue();
+        assertThat(resolution.plan()).isEqualTo(envelope.path("source"));
     }
 
     @Test

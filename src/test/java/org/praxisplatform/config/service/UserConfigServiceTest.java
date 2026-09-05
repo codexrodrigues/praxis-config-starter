@@ -46,7 +46,15 @@ class UserConfigServiceTest {
   @BeforeEach
   void setUp() {
     lenient().when(jdbcTemplateProvider.getIfAvailable()).thenReturn(jdbcTemplate);
-    service = new UserConfigService(repository, new ObjectMapper(), apiKeyProtectionService, jdbcTemplateProvider);
+    lenient().when(apiKeyProtectionService.sanitizeForResponse(any(JsonNode.class)))
+        .thenAnswer(invocation -> ((JsonNode) invocation.getArgument(0)).deepCopy());
+    ObjectMapper objectMapper = new ObjectMapper();
+    service = new UserConfigService(
+        repository,
+        objectMapper,
+        apiKeyProtectionService,
+        jdbcTemplateProvider,
+        new CanonicalJsonHashService(objectMapper));
   }
 
   @Test
@@ -96,7 +104,12 @@ class UserConfigServiceTest {
           "kind":"ui-composition-plan",
           "source":{"version":"1.0","kind":"praxis.ui-composition-plan","widgets":[]},
           "sourceSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "materialization":{"kind":"widget-page-definition","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+          "materialization":{
+            "kind":"widget-page-definition",
+            "componentType":"praxis-dynamic-page",
+            "componentId":"absence-dashboard",
+            "sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
           "provenance":{"resultEventId":"00000000-0000-0000-0000-000000000001"}
         }
         """);
@@ -122,9 +135,73 @@ class UserConfigServiceTest {
         null,
         "authoring-user");
 
-    assertThat(readJson(created.getAuthoringSource())).isEqualTo(authoringSource);
+    JsonNode persistedSource = readJson(created.getAuthoringSource());
+    CanonicalJsonHashService hashService = new CanonicalJsonHashService(new ObjectMapper());
+    assertThat(persistedSource.path("sourceSha256").asText())
+        .isEqualTo(hashService.sha256(authoringSource.path("source")));
+    assertThat(persistedSource.at("/materialization/sha256").asText())
+        .isEqualTo(hashService.sha256(payload));
     assertThat(readJson(created.getPayload())).isEqualTo(payload);
     assertThat(created.getVersion()).isEqualTo(1L);
+  }
+
+  @Test
+  void shouldAttestTheProtectedPayloadRatherThanTheUnpersistedPlaintext() throws Exception {
+    JsonNode plaintextPayload = readJson("""
+        {"ai":{"apiKey":"sk-plaintext"},"widgets":[]}
+        """);
+    JsonNode protectedPayload = readJson("""
+        {"ai":{"apiKeyEncrypted":"ciphertext","apiKeyLast4":"text"},"widgets":[]}
+        """);
+    JsonNode publicPayload = readJson("""
+        {"ai":{"apiKeyLast4":"text","hasApiKey":true},"widgets":[]}
+        """);
+    JsonNode authoringSource = readJson("""
+        {
+          "schemaVersion":"praxis.ui-authoring-source/v1",
+          "kind":"ui-composition-plan",
+          "source":{"version":"1.0","kind":"praxis.ui-composition-plan","widgets":[]},
+          "sourceSha256":"stale-source-hash",
+          "materialization":{
+            "kind":"widget-page-definition",
+            "componentType":"praxis-dynamic-page",
+            "componentId":"absence-dashboard",
+            "sha256":"stale-payload-hash"
+          }
+        }
+        """);
+
+    when(repository
+            .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentIsNullAndUserIdOrderByUpdatedAtDesc(
+                "tenant-a", "praxis-dynamic-page", "absence-dashboard", "user-1"))
+        .thenReturn(Optional.empty());
+    when(apiKeyProtectionService.sanitizeForStorage(plaintextPayload, null)).thenReturn(protectedPayload);
+    when(apiKeyProtectionService.sanitizeForStorage(authoringSource, null)).thenReturn(authoringSource);
+    when(apiKeyProtectionService.sanitizeForResponse(protectedPayload)).thenReturn(publicPayload);
+    when(repository.saveAndFlush(any(UiUserConfig.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    UiUserConfig created = service.createAuthored(
+        UserConfigService.Scope.USER,
+        "tenant-a",
+        "user-1",
+        "praxis-dynamic-page",
+        "absence-dashboard",
+        null,
+        plaintextPayload,
+        authoringSource,
+        null,
+        "authoring-user");
+
+    JsonNode persistedSource = readJson(created.getAuthoringSource());
+    CanonicalJsonHashService hashService = new CanonicalJsonHashService(new ObjectMapper());
+    assertThat(readJson(created.getPayload())).isEqualTo(protectedPayload);
+    assertThat(persistedSource.at("/materialization/sha256").asText())
+        .isEqualTo(hashService.sha256(publicPayload))
+        .isNotEqualTo(hashService.sha256(protectedPayload))
+        .isNotEqualTo(hashService.sha256(plaintextPayload));
+    assertThat(persistedSource.path("sourceSha256").asText())
+        .isEqualTo(hashService.sha256(authoringSource.path("source")));
   }
 
   @Test

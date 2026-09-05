@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Objects;
 import org.praxisplatform.config.domain.UiUserConfig;
+import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.CanonicalJsonHashService;
 import org.praxisplatform.config.service.UserConfigService;
@@ -27,16 +28,21 @@ public class AgenticAuthoringPersistedUiCompositionSourceResolver {
     private final UserConfigService userConfigService;
     private final ObjectMapper objectMapper;
     private final CanonicalJsonHashService canonicalJsonHashService;
+    private final AiApiKeyProtectionService apiKeyProtectionService;
 
     public AgenticAuthoringPersistedUiCompositionSourceResolver(
             UserConfigService userConfigService,
             ObjectMapper objectMapper,
-            CanonicalJsonHashService canonicalJsonHashService) {
+            CanonicalJsonHashService canonicalJsonHashService,
+            AiApiKeyProtectionService apiKeyProtectionService) {
         this.userConfigService = Objects.requireNonNull(userConfigService, "userConfigService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.canonicalJsonHashService = Objects.requireNonNull(
                 canonicalJsonHashService,
                 "canonicalJsonHashService must not be null");
+        this.apiKeyProtectionService = Objects.requireNonNull(
+                apiKeyProtectionService,
+                "apiKeyProtectionService must not be null");
     }
 
     Resolution resolve(
@@ -154,7 +160,8 @@ public class AgenticAuthoringPersistedUiCompositionSourceResolver {
             if (persistedPage == null || !persistedPage.isObject()) {
                 return Resolution.blocked("persisted-ui-composition-materialization-invalid");
             }
-            String persistedPageHash = canonicalJsonHashService.sha256(persistedPage);
+            JsonNode publicPersistedPage = apiKeyProtectionService.sanitizeForResponse(persistedPage);
+            String persistedPageHash = canonicalJsonHashService.sha256(publicPersistedPage);
             if (!persistedPageHash.equals(materialization.path("sha256").asText())) {
                 return Resolution.blocked("persisted-ui-composition-materialization-hash-mismatch");
             }

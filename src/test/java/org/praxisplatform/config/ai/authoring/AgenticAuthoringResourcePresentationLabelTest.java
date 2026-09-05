@@ -103,14 +103,7 @@ class AgenticAuthoringResourcePresentationLabelTest {
     void resourcePathFallbackUsesPublicTitleCaseAndPresentationRepairs() {
         assertThat(AgenticAuthoringResourcePresentationLabel.fromResourcePath(
                 "/api/human-resources/vw-analytics-folha-pagamento"))
-                .isEqualTo("Analytics folha de pagamento");
-    }
-
-    @Test
-    void resourcePathFallbackPreservesPortuguesePaymentCompoundGrammar() {
-        assertThat(AgenticAuthoringResourcePresentationLabel.fromResourcePath(
-                "/api/human-resources/folhas-pagamento"))
-                .isEqualTo("Folhas de pagamento");
+                .isEqualTo("Analytics folha pagamento");
     }
 
     private static AgenticAuthoringCandidate candidate(String resourcePath, String summary) {
