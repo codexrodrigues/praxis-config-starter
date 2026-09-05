@@ -1,0 +1,101 @@
+{
+  "workflowRunId": 33999199428,
+  "configSha": "66491255374553730a2ceee49bf30ec6afe9abc0",
+  "configuredModel": "gpt-5-mini",
+  "outcome": "failed",
+  "humanTurns": 3,
+  "playwright": {
+    "passed": 2,
+    "failed": 1,
+    "retries": 0
+  },
+  "cleanupVerified": true,
+  "applyPerformed": false,
+  "providerInvocations": [
+    {
+      "phase": "pre_intent_tool_plan",
+      "attempt": 1,
+      "provider": "openai",
+      "model": "unknown",
+      "status": "failure",
+      "failureKind": "unknown",
+      "latencyMs": 11513,
+      "inputTokens": null,
+      "outputTokens": null,
+      "cacheReadInputTokens": null,
+      "cacheWriteInputTokens": null,
+      "totalTokens": null
+    },
+    {
+      "phase": "declared_client_action_intent",
+      "attempt": 1,
+      "provider": "openai",
+      "model": "gpt-5-mini-2025-08-07",
+      "status": "success",
+      "failureKind": null,
+      "latencyMs": 1467,
+      "inputTokens": 309,
+      "outputTokens": 110,
+      "cacheReadInputTokens": 0,
+      "cacheWriteInputTokens": null,
+      "totalTokens": 419
+    },
+    {
+      "phase": "intent_fast",
+      "attempt": 1,
+      "provider": "openai",
+      "model": "unknown",
+      "status": "failure",
+      "failureKind": "unknown-error",
+      "latencyMs": 12068,
+      "inputTokens": null,
+      "outputTokens": null,
+      "cacheReadInputTokens": null,
+      "cacheWriteInputTokens": null,
+      "totalTokens": null
+    },
+    {
+      "phase": "intent_full",
+      "attempt": 1,
+      "provider": "openai",
+      "model": "unknown",
+      "status": "failure",
+      "failureKind": "unknown-error",
+      "latencyMs": 30032,
+      "inputTokens": null,
+      "outputTokens": null,
+      "cacheReadInputTokens": null,
+      "cacheWriteInputTokens": null,
+      "totalTokens": null
+    },
+    {
+      "phase": "preview_message",
+      "attempt": 1,
+      "provider": "openai",
+      "model": "unknown",
+      "status": "failure",
+      "failureKind": "unknown",
+      "latencyMs": 3232,
+      "inputTokens": null,
+      "outputTokens": null,
+      "cacheReadInputTokens": null,
+      "cacheWriteInputTokens": null,
+      "totalTokens": null
+    }
+  ],
+  "usage": {
+    "knownInputTokens": 309,
+    "knownOutputTokens": 110,
+    "totalCostUsd": null,
+    "complete": false,
+    "embeddingsIncluded": false
+  },
+  "firstFailure": "primary-semantic-resolution-provider-error",
+  "recoveryDefect": "Unresolved provider failure offered unrelated broad catalog resource choices; subsequent selection materialized a different artifact/resource.",
+  "actualPreviewLayout": "single-table-page",
+  "expectedLayout": "master-detail-dashboard",
+  "previousFixRevalidated": false,
+  "providerFailureRootCause": "unknown; published diagnostics do not distinguish transport, timeout, response parsing, or provider failure",
+  "spendingControl": "user-attested-provider-account-limit",
+  "providerLimitIndependentlyVerified": false
+}

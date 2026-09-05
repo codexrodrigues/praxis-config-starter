@@ -1325,6 +1325,14 @@ public class AgenticAuthoringIntentResolverService {
         if (clarificationQuickRepliesRecovered) {
             quickReplies = ensureClarificationQuickReplies(effectivePrompt, clarificationRequired, quickReplies);
         }
+        // A failed primary interpretation has no semantic authority for an
+        // executable continuation. Broad catalog candidates remain diagnostics;
+        // selecting one must not silently invent create/table intent next turn.
+        if (primaryLlmIntentProviderFailure) {
+            quickReplies = List.of();
+            llmAuthoredQuickRepliesUsed = false;
+            clarificationQuickRepliesRecovered = false;
+        }
         boolean governedDeterministicResolution = isGovernedDeterministicResolution(
                 deterministicFallbackApplied,
                 gate,
@@ -1453,7 +1461,7 @@ public class AgenticAuthoringIntentResolverService {
         }
         if (llmAuthoredQuickRepliesUsed) {
             warnings = withWarning(warnings, "llm-authored-quick-replies-used");
-        } else if (!fallbackQuickReplies.isEmpty()) {
+        } else if (!primaryLlmIntentProviderFailure && !fallbackQuickReplies.isEmpty()) {
             warnings = withWarning(warnings, "deterministic-quick-replies-fallback-applied");
         }
         if (explicitLocalUiComposition) {

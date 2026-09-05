@@ -9131,6 +9131,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.failureCodes())
                 .contains("llm-intent-resolution-provider-failed", "semantic-intent-confirmation-required");
         assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.quickReplies()).as("Provider failure has no resolved intent to authorize resource creation").isEmpty();
         assertThat(result.clarificationQuestions())
                 .containsExactly("Você quer consultar quais dados existem ou já quer criar uma visualização?");
         assertThat(result.assistantMessage())
@@ -9153,6 +9154,94 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.any(),
                 Mockito.any());
     }
+
+    @Test
+    void providerFailureDoesNotOfferUnrelatedResourceCreationAsClarification() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        false,
+                        "unknown",
+                        "unknown",
+                        "unknown",
+                        null,
+                        null,
+                        "provider_error",
+                        "Não consegui confirmar a intenção com segurança agora. Confirme se você quer consultar dados, criar tabela, formulário ou gráfico.",
+                        List.of(),
+                        List.of("Você quer consultar quais dados existem ou já quer criar uma visualização?"),
+                        List.of("llm-intent-resolution-failed", "llm-provider-timeout"))));
+        AgenticAuthoringApiMetadataCandidateCatalog catalog = Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        List<AgenticAuthoringCandidate> broadCandidates = java.util.stream.Stream.of("context", "tenants", "security-events", "navigation")
+                .map(name -> {
+                    String path = "/api/praxis/runtime/" + name;
+                    return new AgenticAuthoringCandidate(path, "post",
+                            "/schemas/filtered?path=" + path + "/filter/cursor&operation=post&schemaType=response",
+                            path + "/filter/cursor", "post", 0.42, "Broad discovery without resolved semantic intent",
+                            List.of("api-metadata", "broad-artifact-discovery", "schema-probe-pending", "actions-probe-pending", "semantic-role:operational-resource"));
+                }).toList();
+        Mockito.when(catalog.discover(Mockito.anyString(), Mockito.anyString(), Mockito.any(), Mockito.any(), Mockito.any()))
+                .thenReturn(broadCandidates);
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                catalog,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie uma página master-detail operacional para o recurso canônico operations.missoes. A tabela deve selecionar uma missão e mostrar seu detalhe.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "mock",
+                null,
+                null));
+
+        assertThat(result.candidates()).hasSize(4);
+        assertThat(result.valid()).isFalse();
+        assertThat(result.operationKind()).isEqualTo("unknown");
+        assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.changeKind()).isEqualTo("provider_error");
+        assertThat(result.gate().status()).isEqualTo("clarification_required");
+        assertThat(result.failureCodes())
+                .contains("llm-intent-resolution-provider-failed", "semantic-intent-confirmation-required");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.quickReplies()).as("Provider failure has no resolved intent to authorize resource creation").isEmpty();
+        assertThat(result.clarificationQuestions())
+                .containsExactly("Você quer consultar quais dados existem ou já quer criar uma visualização?");
+        assertThat(result.assistantMessage())
+                .contains("Não consegui confirmar a intenção com segurança");
+        assertThat(result.warnings())
+                .contains(
+                        "llm-intent-resolution-used",
+                        "llm-intent-resolution-provider-failed-clarification-required",
+                        "llm-intent-resolution-failed",
+                        "llm-provider-timeout")
+                .doesNotContain("keyword-fallback-applied", "keyword-fallback-fail-safe-applied");
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+    }
+
 
     @Test
     void explicitLocalTabbedAdjustmentKeepsPageCompositionWhenLlmClassifiesApiCatalog() {
