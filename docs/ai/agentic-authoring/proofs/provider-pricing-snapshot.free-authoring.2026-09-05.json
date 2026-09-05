@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "kind": "praxis.ai-provider-pricing-snapshot",
+  "capturedAt": "2026-09-05",
+  "currency": "USD",
+  "unit": "per-million-tokens",
+  "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5-mini",
+  "entries": [
+    {
+      "provider": "openai",
+      "model": "gpt-5-mini",
+      "modelPrefixes": ["gpt-5-mini-"],
+      "serviceTier": "standard",
+      "inputUsdPerMillion": 0.25,
+      "cachedInputUsdPerMillion": 0.025,
+      "outputUsdPerMillion": 2.0
+    }
+  ]
+}
