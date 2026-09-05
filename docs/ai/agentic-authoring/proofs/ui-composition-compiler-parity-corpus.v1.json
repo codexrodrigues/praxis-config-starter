@@ -182,7 +182,7 @@
         "org.praxisplatform.config.dto.AiRegistryTemplateRevision -> org.praxisplatform.config.dto.AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder",
         "org.praxisplatform.config.dto.AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder -> org.praxisplatform.config.dto.AiRegistryTemplateRevision"
       ],
-      "closureSha256": "a9a22bbd71d149095120034605351a825bc0027b478dd70849be895be247f941"
+      "closureSha256": "cc8132188e6927efc7a3d47f131c894e3f00ebfbbfdece2bdd9ad18975ba94b7"
     }
   },
   "targetProfiles": {

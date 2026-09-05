@@ -536,7 +536,7 @@ class AgenticAuthoringResourceDiscoveryServiceTest {
         assertThat(projection.assistantMessage())
                 .contains("fontes de dados confirmadas")
                 .contains("Funcionários")
-                .contains("Missões")
+                .contains("Missoes")
                 .contains("Analytics Folha Pagamento")
                 .doesNotContain("distribution")
                 .doesNotContain("group-by")
