@@ -46,6 +46,16 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
+// Policy Studio is outside this HTTP/SSE slice; do not bootstrap unrelated repositories.
+@MockBean(classes = {
+    org.praxisplatform.config.controller.DomainRuleChangeWorkspaceController.class,
+    org.praxisplatform.config.controller.DomainRuleRolloutController.class,
+    org.praxisplatform.config.controller.DomainRuleRolloutPolicyController.class,
+    org.praxisplatform.config.controller.DomainRuleSnapshotController.class,
+    org.praxisplatform.config.controller.DomainRuleHostStatusController.class,
+    org.praxisplatform.config.controller.DomainRuleExecutionObservationController.class,
+    org.praxisplatform.config.controller.DomainRuleController.class,
+})
 @SpringBootTest(
         classes = TestApplication.class,
         properties = {

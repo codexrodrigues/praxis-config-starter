@@ -2288,6 +2288,7 @@ public class AgenticAuthoringTurnEngine {
         if (primary != null) {
             replies.add(consultativeResourceQuickReply(
                     request,
+                    intentResolution == null ? null : intentResolution.semanticDecision(),
                     "consultative-show-fields:" + safeResourceId(primary),
                     "Ver campos",
                     "Quais campos confirmados existem em " + resourceLabel(primary) + "?",
@@ -2304,6 +2305,7 @@ public class AgenticAuthoringTurnEngine {
                             "Clique para explorar os campos dessa fonte.")));
             replies.add(consultativeResourceQuickReply(
                     request,
+                    intentResolution == null ? null : intentResolution.semanticDecision(),
                     "consultative-create-table:" + safeResourceId(primary),
                     "Criar tabela",
                     "Crie uma tabela filtrável usando " + resourceLabel(primary) + ".",
@@ -2323,6 +2325,7 @@ public class AgenticAuthoringTurnEngine {
         if (analytical != null) {
             replies.add(consultativeResourceQuickReply(
                     request,
+                    intentResolution == null ? null : intentResolution.semanticDecision(),
                     "consultative-create-chart:" + safeResourceId(analytical),
                     "Criar gráfico",
                     "Crie uma visão com gráficos usando " + resourceLabel(analytical) + ".",
@@ -2342,6 +2345,7 @@ public class AgenticAuthoringTurnEngine {
         if (writable != null) {
             replies.add(consultativeResourceQuickReply(
                     request,
+                    intentResolution == null ? null : intentResolution.semanticDecision(),
                     "consultative-create-form:" + safeResourceId(writable),
                     "Criar formulário",
                     "Crie um formulário governado usando " + resourceLabel(writable) + ".",
@@ -2365,6 +2369,7 @@ public class AgenticAuthoringTurnEngine {
 
     private AgenticAuthoringQuickReply consultativeResourceQuickReply(
             AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringSemanticDecision parentDecision,
             String id,
             String label,
             String prompt,
@@ -2400,6 +2405,7 @@ public class AgenticAuthoringTurnEngine {
                 contextHints,
                 consultativeResourceSemanticDecision(
                         request,
+                        parentDecision,
                         id,
                         operationKind,
                         artifactKind,
@@ -2411,6 +2417,7 @@ public class AgenticAuthoringTurnEngine {
 
     private JsonNode consultativeResourceSemanticDecision(
             AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringSemanticDecision parentDecision,
             String id,
             String operationKind,
             String artifactKind,
@@ -2434,7 +2441,7 @@ public class AgenticAuthoringTurnEngine {
                         List.of(),
                         null,
                         null,
-                        request == null ? null : request.activeSemanticDecision(),
+                        parentDecision,
                         request == null ? "" : request.sessionId(),
                         (request == null ? "" : request.clientTurnId()) + ":" + id,
                         prompt,

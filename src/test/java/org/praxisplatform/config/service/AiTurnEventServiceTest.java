@@ -46,6 +46,9 @@ class AiTurnEventServiceTest {
     @Mock
     private AiTurnRepository turnRepository;
 
+    @Mock
+    private org.praxisplatform.config.repository.AiThreadRepository threadRepository;
+
     private AiTurnEventService service;
     private ObjectMapper objectMapper;
 
@@ -55,8 +58,12 @@ class AiTurnEventServiceTest {
         service = new AiTurnEventService(
                 repository,
                 turnRepository,
+                threadRepository,
                 objectMapper,
                 new AiSensitiveDataRedactor());
+        org.mockito.Mockito.lenient().when(threadRepository.findByThreadIdForUpdate(any())).thenAnswer(invocation ->
+                Optional.of(org.praxisplatform.config.domain.AiThread.builder().threadId(invocation.getArgument(0))
+                        .tenantId("tenant-a").userId("user-a").environment("prod").build()));
         ReflectionTestUtils.setField(service, "eventSchemaVersion", "v1");
         ReflectionTestUtils.setField(service, "streamExpirySeconds", 900L);
     }

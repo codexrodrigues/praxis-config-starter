@@ -17,6 +17,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringSemanticDecision;
 import org.praxisplatform.config.domain.AiTurn;
 import org.praxisplatform.config.domain.AiTurnEvent;
 import org.praxisplatform.config.dto.AiTurnEventEnvelope;
+import org.praxisplatform.config.repository.AiThreadRepository;
 import org.praxisplatform.config.repository.AiTurnRepository;
 import org.praxisplatform.config.repository.AiTurnEventRepository;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
@@ -67,6 +68,7 @@ public class AiTurnEventService {
 
     private final AiTurnEventRepository turnEventRepository;
     private final AiTurnRepository turnRepository;
+    private final AiThreadRepository threadRepository;
     private final ObjectMapper objectMapper;
     private final AiSensitiveDataRedactor sensitiveDataRedactor;
     private final ConcurrentHashMap<String, ReentrantLock> turnLocks = new ConcurrentHashMap<>();
@@ -112,6 +114,12 @@ public class AiTurnEventService {
         }
         if (eventType == null || eventType.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "eventType is required.");
+        }
+
+        // Result publication and authoring admission share the persisted thread lock.
+        // Acquire it before any turn lock, and retain it until transaction commit.
+        if ("result".equalsIgnoreCase(normalize(eventType))) {
+            lockOwnedThread(threadId, principalContext);
         }
 
         String key = lockKey(threadId, turnId);
@@ -289,6 +297,8 @@ public class AiTurnEventService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "streamId/threadId/turnId are required.");
         }
 
+        lockOwnedThread(threadId, principalContext);
+
         String key = lockKey(threadId, turnId);
         ReentrantLock lock = turnLocks.computeIfAbsent(key, k -> new ReentrantLock());
         lock.lock();
@@ -303,6 +313,7 @@ public class AiTurnEventService {
                 return new StreamStartAppendResult(toEnvelope(existingStart), false);
             }
             JsonNode payloadNode = toPayloadNode(payload);
+            validateCurrentSemanticDecision(threadId, principalContext, payloadNode);
             AiTurnEvent entity = AiTurnEvent.builder()
                     .tenantId(principalContext.tenantId())
                     .userId(principalContext.userId())
@@ -328,6 +339,40 @@ public class AiTurnEventService {
                 turnLocks.remove(key, lock);
             }
         }
+    }
+
+    private void lockOwnedThread(UUID threadId, AiPrincipalContext principalContext) {
+        var thread = threadRepository.findByThreadIdForUpdate(threadId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Thread not found."));
+        if (!safeEquals(thread.getTenantId(), principalContext.tenantId())
+                || !safeEquals(thread.getUserId(), principalContext.userId())
+                || !safeEquals(thread.getEnvironment(), principalContext.environment())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Thread access denied.");
+        }
+    }
+
+    private void validateCurrentSemanticDecision(UUID threadId, AiPrincipalContext principalContext, JsonNode payload) {
+        // This field is emitted by the authoring start owner, including an empty
+        // value for a first turn. Legacy non-authoring events have no such field.
+        if (!payload.has("activeSemanticDecisionId")) {
+            return;
+        }
+        String decisionId = payload.path("activeSemanticDecisionId").asText("");
+        var latest = findLatestSemanticDecision(threadId, principalContext).orElse(null);
+        if (latest == null && decisionId.isBlank()) {
+            return;
+        }
+        if (latest != null && latest.decisionId().equals(decisionId)) {
+            return;
+        }
+        var decision = findPersistedSemanticDecision(threadId, decisionId, principalContext).orElse(null);
+        if (latest != null && decision != null
+                && decision.constraints() != null
+                && "server-issued-quick-reply".equals(decision.constraints().path("source").asText())
+                && latest.decisionId().equals(decision.previousDecisionId())) {
+            return;
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "active-semantic-decision-not-current-in-thread");
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -412,7 +457,8 @@ public class AiTurnEventService {
                         event.getCreatedAt(),
                         resolveExpiresAt(event),
                         extractRequestHash(event),
-                        event.getEventType()));
+                        event.getEventType(),
+                        parsePayload(event.getPayload()).path("activeSemanticDecisionId").asText(null)));
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -758,7 +804,8 @@ public class AiTurnEventService {
             Instant createdAt,
             Instant expiresAt,
             String requestHash,
-            String firstEventType) {
+            String firstEventType,
+            String activeSemanticDecisionId) {
     }
 
     public record StreamStartAppendResult(AiTurnEventEnvelope event, boolean appended) {

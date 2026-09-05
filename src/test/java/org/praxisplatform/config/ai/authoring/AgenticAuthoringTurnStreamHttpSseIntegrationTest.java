@@ -58,6 +58,16 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+// Policy Studio is outside this HTTP/SSE slice; do not bootstrap unrelated repositories.
+@MockBean(classes = {
+    org.praxisplatform.config.controller.DomainRuleChangeWorkspaceController.class,
+    org.praxisplatform.config.controller.DomainRuleRolloutController.class,
+    org.praxisplatform.config.controller.DomainRuleRolloutPolicyController.class,
+    org.praxisplatform.config.controller.DomainRuleSnapshotController.class,
+    org.praxisplatform.config.controller.DomainRuleHostStatusController.class,
+    org.praxisplatform.config.controller.DomainRuleExecutionObservationController.class,
+    org.praxisplatform.config.controller.DomainRuleController.class,
+})
 @SpringBootTest(
         classes = TestApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.MOCK,
@@ -381,6 +391,77 @@ class AgenticAuthoringTurnStreamHttpSseIntegrationTest {
         assertThat(terminalTypes).containsExactly("cancelled");
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"staff", "shipments"})
+    void consultativeParentAndChildSurvivePersistenceAndRejectStaleOrForeignContinuation(String domain) throws Exception {
+        var engine = AgenticAuthoringConsultativePersistenceFixture.engine(objectMapper, domain);
+        doAnswer(call -> engine.execute(call.getArgument(0), call.getArgument(1), call.getArgument(2), call.getArgument(3)))
+                .when(turnEngine).execute(any(), any(), any(), anyString());
+        var firstRequest = consultationRequest("consult-" + domain, null, null);
+        var first = startConsultation(firstRequest, USER, 201);
+        var events = readSseEvents(first.getStreamId(), null);
+        var result = events.stream().filter(event -> "result".equals(event.getType())).findFirst().orElseThrow().getPayload();
+        assertThat(result.path("canApply").asBoolean()).isFalse();
+        var parent = objectMapper.treeToValue(result.at("/intentResolution/semanticDecision"), AgenticAuthoringSemanticDecision.class);
+        var childNode = java.util.stream.StreamSupport.stream(result.path("quickReplies").spliterator(), false)
+                .filter(reply -> "create".equals(reply.at("/semanticDecision/operationKind").asText()))
+                .findFirst().orElseThrow().path("semanticDecision");
+        var child = objectMapper.treeToValue(childNode, AgenticAuthoringSemanticDecision.class);
+        var principal = new AiPrincipalContext(TENANT, USER, ENV, true);
+        assertThat(child.previousDecisionId()).isEqualTo(parent.decisionId());
+        assertThat(child.refinementOf()).isEqualTo(parent.decisionId());
+        assertThat(turnEventService.findLatestSemanticDecision(first.getThreadId(), principal)).contains(parent);
+        assertThat(turnEventService.findPersistedSemanticDecision(first.getThreadId(), child.decisionId(), principal)).contains(child);
+
+        // Stored content is authority. The browser cannot alter a child using its real id.
+        var forged = childNode.deepCopy();
+        ((com.fasterxml.jackson.databind.node.ObjectNode) forged.path("constraints")).put("resourcePath", "/api/forged");
+        var secondRequest = consultationRequest("selection-" + domain, first.getThreadId().toString(),
+                objectMapper.treeToValue(forged, AgenticAuthoringSemanticDecision.class));
+        var second = startConsultation(secondRequest, USER, 201);
+        var next = readSseEvents(second.getStreamId(), null).stream().filter(event -> "result".equals(event.getType()))
+                .findFirst().orElseThrow().getPayload();
+        assertThat(next.at("/intentResolution/selectedCandidate/resourcePath").asText()).isEqualTo("/api/synthetic/" + domain);
+        assertThat(next.at("/intentResolution/semanticDecision/previousDecisionId").asText()).isEqualTo(child.decisionId());
+        assertThat(next.path("canApply").asBoolean()).as(next.toString()).isTrue();
+        assertThat(next.at("/preview/compiledFormPatch/patch/page/widgets").size()).isGreaterThan(0);
+        var replay = startConsultation(secondRequest, USER, 200);
+        assertThat(replay.getStreamId()).isEqualTo(second.getStreamId());
+
+        // A free initial request had no active decision. Its exact retry must
+        // retain that admitted context even after later decisions were published.
+        var firstReplay = startConsultation(firstRequest, USER, 200);
+        assertThat(firstReplay.getStreamId()).isEqualTo(first.getStreamId());
+
+        // The next turn may not revive the consumed menu after the conversation advances.
+        startConsultation(consultationRequest("stale-" + domain, first.getThreadId().toString(), child), USER, 400);
+        startConsultation(consultationRequest("foreign-" + domain, first.getThreadId().toString(), child), "another-user", 403);
+        assertThat(turnEventService.findPersistedSemanticDecision(first.getThreadId(), child.decisionId(),
+                new AiPrincipalContext(TENANT, "another-user", ENV, true))).isEmpty();
+    }
+
+    private AgenticAuthoringTurnStreamRequest consultationRequest(String turn, String session,
+            AgenticAuthoringSemanticDecision decision) {
+        var hints = objectMapper.createObjectNode();
+        hints.putObject("agenticApplyTarget").put("schemaVersion", "praxis-agentic-authoring-apply-target.v1")
+                .put("componentType", "praxis-dynamic-page").put("componentId", "consultative-proof")
+                .put("scope", "user").put("mode", "create");
+        return new AgenticAuthoringTurnStreamRequest(decision == null ? "O que posso criar aqui?" : "Usar esta opção.",
+                "praxis-ui-angular", "praxis-dynamic-page-builder", "/decision-playground",
+                objectMapper.createObjectNode().set("widgets", objectMapper.createArrayNode()), null,
+                "openai", "gpt-test", null, session, turn, List.of(), null, List.of(), hints, null, decision);
+    }
+
+    private AgenticAuthoringTurnStreamStartResponse startConsultation(AgenticAuthoringTurnStreamRequest body,
+            String user, int expectedStatus) throws Exception {
+        var response = mockMvc.perform(post("/api/praxis/config/ai/authoring/turn/stream/start")
+                .requestAttr("tenantId", TENANT).requestAttr("userId", user).requestAttr("environment", ENV)
+                .contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsBytes(body)))
+                .andExpect(status().is(expectedStatus)).andReturn();
+        return expectedStatus >= 400 ? null : objectMapper.readValue(response.getResponse().getContentAsByteArray(),
+                AgenticAuthoringTurnStreamStartResponse.class);
+    }
+
     private AgenticAuthoringTurnStreamStartResponse startStream(String clientTurnId) throws Exception {
         return startStreamAs(clientTurnId, TENANT, USER, ENV);
     }
@@ -437,7 +518,7 @@ class AgenticAuthoringTurnStreamHttpSseIntegrationTest {
         MvcResult completed = mockMvc.perform(asyncDispatch(asyncResult))
                 .andExpect(status().isOk())
                 .andReturn();
-        return parseSseBody(completed.getResponse().getContentAsString());
+        return parseSseBody(completed.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private void awaitTerminalEvent(UUID streamId) throws InterruptedException {

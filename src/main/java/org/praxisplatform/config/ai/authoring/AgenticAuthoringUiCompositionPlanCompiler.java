@@ -401,6 +401,19 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
             failures.add("ui-composition-plan-transform-id-required");
         }
 
+        if (transform.has("output")) {
+            JsonNode output = transform.path("output");
+            // Same existing TransformOutputHint contract consumed by Core/Page Builder.
+            if (!output.isObject() || !Set.of("event", "value", "selection", "collection",
+                    "query-context", "view-context", "config-fragment", "status", "diagnostic")
+                    .contains(output.path("semanticKind").asText(""))) {
+                failures.add("ui-composition-plan-transform-output-semantic-kind-invalid");
+            }
+            if (output.has("stableShape") && !output.path("stableShape").isBoolean()) {
+                failures.add("ui-composition-plan-transform-output-stable-shape-invalid");
+            }
+        }
+
         String kind = transform.path("kind").isTextual() ? transform.path("kind").textValue() : "";
         switch (kind) {
             case "pick-path" -> {
@@ -1700,6 +1713,10 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
             String kind,
             boolean includeInput) {
         ObjectNode step = compiled.putArray("steps").addObject();
+        if (transform.path("output").isObject()) {
+            compiled.set("output", transform.path("output").deepCopy());
+            step.set("output", transform.path("output").deepCopy());
+        }
         step.put("id", transform.path("id").asText());
         step.put("kind", kind);
         step.put("phase", "link-propagation");

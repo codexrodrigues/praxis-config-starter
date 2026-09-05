@@ -116,6 +116,12 @@ public record AgenticAuthoringSemanticDecision(
     }
 
     AgenticAuthoringSemanticDecision withConstraints(JsonNode governedConstraints) {
+        // A server-issued option is a child of the current decision even when
+        // its operation changes from consultation to creation. This projection
+        // is backend-authored; browser hints never establish parentage.
+        boolean issuedContinuation = governedConstraints != null
+                && "server-issued-quick-reply".equals(governedConstraints.path("source").asText())
+                && !safe(previousDecisionId).isBlank();
         return new AgenticAuthoringSemanticDecision(
                 schemaVersion,
                 decisionId,
@@ -128,8 +134,8 @@ public record AgenticAuthoringSemanticDecision(
                 retrievedEvidence,
                 reviewRequired,
                 reviewReason,
-                previousDecisionRef,
-                refinementOf,
+                issuedContinuation ? previousDecisionId : previousDecisionRef,
+                issuedContinuation ? previousDecisionId : refinementOf,
                 conversationId,
                 turnId,
                 userGoal,

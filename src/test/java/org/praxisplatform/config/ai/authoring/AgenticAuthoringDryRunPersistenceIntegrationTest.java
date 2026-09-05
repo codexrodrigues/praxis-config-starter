@@ -114,6 +114,7 @@ class AgenticAuthoringDryRunPersistenceIntegrationTest {
         AiTurnEventService turnEventService = new AiTurnEventService(
                 turnEventRepository,
                 turnRepository,
+                threadRepository,
                 objectMapper,
                 new AiSensitiveDataRedactor());
         ReflectionTestUtils.setField(turnEventService, "eventSchemaVersion", "v1");

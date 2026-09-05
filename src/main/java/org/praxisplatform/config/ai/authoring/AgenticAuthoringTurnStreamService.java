@@ -168,10 +168,13 @@ public class AgenticAuthoringTurnStreamService {
                 request.userPrompt());
         UUID threadId = thread.getThreadId();
         request = withCanonicalSessionId(request, threadId);
+        AiTurnEventService.StreamStartMetadata existing = turnEventService.findStartMetadata(threadId, turnId)
+                .orElse(null);
         ResolvedActiveSemanticDecision resolvedActiveSemanticDecision = resolveActiveSemanticDecision(
                 request,
                 threadId,
-                principalContext);
+                principalContext,
+                existing);
         request = withPersistedResolvedCandidates(
                 request,
                 resolvedActiveSemanticDecision.issuedCandidateApis());
@@ -179,8 +182,6 @@ public class AgenticAuthoringTurnStreamService {
         AgenticAuthoringTurnStreamRequest effectiveRequest = withActiveSemanticDecision(request, activeSemanticDecision);
         String requestHash = requestHash(effectiveRequest, principalContext);
 
-        AiTurnEventService.StreamStartMetadata existing = turnEventService.findStartMetadata(threadId, turnId)
-                .orElse(null);
         if (existing != null) {
             validateIdempotentRequest(existing.requestHash(), requestHash);
             UUID observationId = captureObservation(
@@ -200,6 +201,8 @@ public class AgenticAuthoringTurnStreamService {
                     principalContext), false);
         }
 
+        // Freshness is checked by appendStartEventIfAbsent under the same database
+        // thread lock as result publication. Historical lookup above permits exact replay.
         UUID streamId = UUID.randomUUID();
         UUID observationId = captureObservation(
                 threadRequest,
@@ -320,16 +323,22 @@ public class AgenticAuthoringTurnStreamService {
     private ResolvedActiveSemanticDecision resolveActiveSemanticDecision(
             AgenticAuthoringTurnStreamRequest request,
             UUID threadId,
-            AiPrincipalContext principalContext) {
+            AiPrincipalContext principalContext,
+            AiTurnEventService.StreamStartMetadata existing) {
         AgenticAuthoringSemanticDecision clientDecision = request == null
                 ? null
                 : request.activeSemanticDecision();
-        if (clientDecision == null) {
+        if (clientDecision == null && existing == null) {
             return new ResolvedActiveSemanticDecision(
                     turnEventService.findLatestSemanticDecision(threadId, principalContext).orElse(null),
                     objectMapper.createArrayNode());
         }
-        String decisionId = clientDecision.decisionId();
+        // Exact retries reuse the context admitted with this turn, not a newer
+        // decision published since then. The initial free turn stores an empty id.
+        String decisionId = clientDecision != null ? clientDecision.decisionId() : existing.activeSemanticDecisionId();
+        if (clientDecision == null && (decisionId == null || decisionId.isBlank())) {
+            return new ResolvedActiveSemanticDecision(null, objectMapper.createArrayNode());
+        }
         return turnEventService.findPersistedSemanticDecisionContext(threadId, decisionId, principalContext)
                 .map(context -> new ResolvedActiveSemanticDecision(
                         context.decision(),

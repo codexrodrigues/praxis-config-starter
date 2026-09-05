@@ -2245,7 +2245,19 @@ public class AgenticAuthoringPreviewService {
                 if ("timeseries".equalsIgnoreCase(operation)) {
                     options.put("fillGaps", query.path("statsRequest").path("fillGaps").asBoolean(false));
                 }
-                if (query.path("metrics").isArray()) document.set("metrics", query.path("metrics").deepCopy());
+                if (query.path("metrics").isArray()) {
+                    ArrayNode documentMetrics = query.path("metrics").deepCopy();
+                    for (JsonNode metric : documentMetrics) {
+                        if (metric instanceof ObjectNode outputMetric
+                                && "count".equals(normalize(outputMetric.path("aggregation").asText("")))) {
+                            // COUNT is field-free in the HTTP request. The chart
+                            // document still needs the returned measure identity.
+                            outputMetric.put("field", outputMetric.path("alias").asText("total"));
+                            outputMetric.remove("alias");
+                        }
+                    }
+                    document.set("metrics", documentMetrics);
+                }
             }
             JsonNode actions = config.path("interactions").path("eventActions");
             if (actions.isObject()) document.set("events", actions.deepCopy());
@@ -4615,6 +4627,7 @@ public class AgenticAuthoringPreviewService {
             ObjectNode transform = bindingObject.putObject("transform");
             transform.put("kind", "template");
             transform.put("id", bindingObject.path("id").asText() + "-query-context");
+            transform.putObject("output").put("semanticKind", "query-context").put("stableShape", true);
             ObjectNode template = transform.putObject("template");
             template.put("filters", "${payload}");
             addWarningOnce(warnings, "ui-composition-plan-filter-query-context-normalized");

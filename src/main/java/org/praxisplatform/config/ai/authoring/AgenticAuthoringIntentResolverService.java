@@ -1865,6 +1865,16 @@ public class AgenticAuthoringIntentResolverService {
                 || activeDecision.constraints() == null) {
             return List.of();
         }
+        String resourcePath = activeDecision.constraints().path("resourcePath").asText("").trim();
+        if (!resourcePath.isBlank()) {
+            // Intent and resource scope were already selected by a server-issued
+            // semantic decision. Exact matching only grounds that canonical
+            // candidate again; it never routes the user's text or trusts a label.
+            return apiMetadataCandidateCatalog.discover(resourcePath, artifactKind, tenantId, environment, null)
+                    .stream().filter(Objects::nonNull)
+                    .filter(candidate -> resourcePath.equals(candidate.resourcePath()))
+                    .toList();
+        }
         List<String> conceptKeys = new ArrayList<>();
         JsonNode concepts = activeDecision.constraints().path("conceptKeys");
         if (concepts.isArray()) {
@@ -2918,27 +2928,11 @@ public class AgenticAuthoringIntentResolverService {
 
     private boolean requiresAdditionalIntentResolution(
             AgenticAuthoringPreIntentToolPlan semanticOrientation) {
-        if (semanticOrientation == null) {
-            return false;
-        }
-        if (requiresGovernedRelatedResourceTargetSelection(semanticOrientation)) {
-            return true;
-        }
-        if (!semanticOrientation.requiresFullIntentResolution()) {
-            return false;
-        }
-        if (hasCompleteCompactResourceComposition(semanticOrientation)) {
-            return false;
-        }
-        JsonNode constraints = semanticOrientation.queryConstraints();
-        // A governed page/table selection with explicit semantic filters is already a complete
-        // authoring decision. Other cases (notably forms and workflow actions) still need the
-        // full semantic pass even when pre-intent also recommends a component.
-        return !"authoring_or_other".equals(semanticOrientation.semanticIntentClass())
-                || constraints == null
-                || !constraints.path("filters").isArray()
-                || constraints.path("filters").isEmpty()
-                || !List.of("page", "table").contains(semanticOrientation.artifactKind());
+        // Preserve the governed related-resource target requirement. A predicate or
+        // compact layout does not override the LLM's request for full resolution.
+        return semanticOrientation != null
+                && (requiresGovernedRelatedResourceTargetSelection(semanticOrientation)
+                    || semanticOrientation.requiresFullIntentResolution());
     }
 
     private boolean requiresGovernedRelatedResourceTargetSelection(
@@ -3033,26 +3027,38 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringLlmIntentResolution resolution,
             AgenticAuthoringPreIntentToolPlan semanticOrientation,
             List<AgenticAuthoringCandidate> candidates) {
-        JsonNode orientedConstraints = semanticOrientation == null ? null : semanticOrientation.queryConstraints();
-        JsonNode governedConstraints = orientedConstraints != null
-                        && orientedConstraints.path("filters").isArray()
-                        && !orientedConstraints.path("filters").isEmpty()
-                ? orientedConstraints
-                : resolution == null ? null : resolution.queryConstraints();
+        JsonNode governedConstraints = resolution == null ? null : resolution.queryConstraints();
         String governedArtifactKind = constrainedOrientationArtifactKind(semanticOrientation, resolution);
         if (resolution == null
+                || !resolution.resolved()
+                || !"component_authoring".equals(resolution.semanticIntentClass())
+                || !"create".equals(resolution.operationKind())
+                || resolution.requiresGovernedAuthoring()
+                || (resolution.clarificationQuestions() != null && !resolution.clarificationQuestions().isEmpty())
                 || semanticOrientation == null
                 || !semanticOrientation.requiresFullIntentResolution()
                 || !"authoring_or_other".equals(semanticOrientation.semanticIntentClass())
-                || governedConstraints == null
-                || !governedConstraints.path("filters").isArray()
-                || governedConstraints.path("filters").isEmpty()
                 || candidates == null
                 || candidates.size() != 1
+                || !normalizePath(candidates.get(0).resourcePath()).equals(normalizePath(resolution.selectedResourcePath()))
                 || !List.of("table", "page", "dashboard", "chart").contains(governedArtifactKind)) {
             return resolution;
         }
         List<String> warnings = new ArrayList<>(resolution.warnings() == null ? List.of() : resolution.warnings());
+        if (!preservesPreIntentQueryConstraints(semanticOrientation.queryConstraints(), governedConstraints)) {
+            warnings.add("llm-pre-intent-query-constraints-not-preserved");
+            return new AgenticAuthoringLlmIntentResolution(
+                    false, "unknown", "unknown", "needs_clarification", null,
+                    resolution.resourceSearchQuery(), resolution.followUpKind(),
+                    "Não consegui preservar todos os filtros solicitados. A prévia permanece bloqueada para revisão.",
+                    List.of(), List.of(), List.copyOf(warnings), resolution.consultativeRetrievalPlan(),
+                    resolution.visualizationDecision(), false, "unknown", governedConstraints,
+                    resolution.providerInvocations());
+        }
+        if (governedConstraints == null || !governedConstraints.path("filters").isArray()
+                || governedConstraints.path("filters").isEmpty()) {
+            return resolution;
+        }
         if (!warnings.contains("llm-constrained-authoring-resource-confirmation-normalized")) {
             warnings.add("llm-constrained-authoring-resource-confirmation-normalized");
         }
@@ -3063,23 +3069,52 @@ public class AgenticAuthoringIntentResolverService {
             warnings.add("llm-pre-intent-primary-component-reconciled");
         }
         return new AgenticAuthoringLlmIntentResolution(
-                true,
-                "create",
-                governedArtifactKind,
-                "create_artifact",
-                candidates.get(0).resourcePath(),
+                resolution.resolved(),
+                resolution.operationKind(),
+                resolution.artifactKind(),
+                resolution.changeKind(),
+                resolution.selectedResourcePath(),
                 resolution.resourceSearchQuery(),
-                "none",
+                resolution.followUpKind(),
                 resolution.assistantMessage(),
                 resolution.quickReplies(),
-                List.of(),
+                resolution.clarificationQuestions(),
                 List.copyOf(warnings),
                 resolution.consultativeRetrievalPlan(),
                 visualizationDecision,
-                false,
-                "component_authoring",
+                resolution.requiresGovernedAuthoring(),
+                resolution.semanticIntentClass(),
                 governedConstraints,
                 resolution.providerInvocations());
+    }
+
+    private boolean preservesPreIntentQueryConstraints(JsonNode planned, JsonNode resolved) {
+        if (planned == null || !planned.path("filters").isArray() || planned.path("filters").isEmpty()) {
+            return true;
+        }
+        if (resolved == null || !resolved.path("filters").isArray()
+                || (planned.path("appliesToDataSelection").asBoolean(false)
+                        && !resolved.path("appliesToDataSelection").asBoolean(false))) {
+            return false;
+        }
+        // Both sides are AI-authored predicates in the same semantic pass. This is
+        // structural continuity, never prompt routing or field/value grounding.
+        // Live option/schema remapping occurs later, with its own governed evidence.
+        for (JsonNode predicate : planned.path("filters")) {
+            boolean retained = false;
+            for (JsonNode candidate : resolved.path("filters")) {
+                boolean sameIdentity = List.of("field", "concept", "fieldSemantic").stream()
+                        .anyMatch(key -> !predicate.path(key).asText("").isBlank()
+                                && predicate.path(key).equals(candidate.path(key)));
+                if (sameIdentity && predicate.path("operator").equals(candidate.path("operator"))
+                        && predicate.path("value").equals(candidate.path("value"))) {
+                    retained = true;
+                    break;
+                }
+            }
+            if (!retained) return false;
+        }
+        return true;
     }
 
     private AgenticAuthoringVisualizationDecision reconcileConstrainedPrimaryComponent(
