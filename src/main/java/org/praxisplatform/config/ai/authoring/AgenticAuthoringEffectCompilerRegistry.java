@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -216,7 +218,9 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     }
 
     boolean supportsDomainPatchHandler(String handler) {
-        return "table-renderer-compose-layout-merge".equals(handler)
+        return "table-column-format-set".equals(handler)
+                || "table-column-order-set".equals(handler)
+                || "table-renderer-compose-layout-merge".equals(handler)
                 || "table-renderer-compose-item-merge".equals(handler)
                 || "stepper-step-reorder".equals(handler)
                 || "stepper-step-remove".equals(handler)
@@ -397,6 +401,22 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             List<String> failures) {
         String handler = text(effect, "handler");
         return switch (handler) {
+            case "table-column-format-set" -> compileTableColumnFormatSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
+            case "table-column-order-set" -> compileTableColumnOrderSet(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    resolved,
+                    proposedConfig,
+                    failures);
             case "table-renderer-compose-layout-merge" -> compileTableRendererComposeLayoutMerge(
                     componentId,
                     operation,
@@ -1037,6 +1057,182 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 yield null;
             }
         };
+    }
+
+    private ObjectNode compileTableColumnFormatSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        if (!"praxis-table".equals(componentId)) {
+            failures.add("table-column-format-set only supports praxis-table");
+            return null;
+        }
+        if (resolved == null || !resolved.path().matches("^columns\\[\\]/\\d+$")) {
+            failures.add("table-column-format-set target column path is invalid");
+            return null;
+        }
+        JsonNode resolvedNode = nodeAtResolvedPath(proposedConfig, resolved.path());
+        if (!(resolvedNode instanceof ObjectNode column)) {
+            failures.add("table-column-format-set target column not found");
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        JsonNode formatNode = input.path("format");
+        String format = formatNode.isTextual() ? formatNode.asText().trim() : "";
+        if (format.isBlank()) {
+            failures.add("table-column-format-set requires a non-empty format");
+            return null;
+        }
+
+        JsonNode previousValue = column.deepCopy();
+        column.put("format", format);
+        String inferredType = inferTableColumnTypeFromFormat(format);
+        if (!inferredType.isBlank()) {
+            column.put("type", inferredType);
+        }
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "set-column-format");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "columns[]");
+        compiled.put("resolvedPath", resolved.path());
+        compiled.set("previousValue", previousValue);
+        compiled.set("value", column.deepCopy());
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", input.deepCopy());
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private ObjectNode compileTableColumnOrderSet(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        if (!"praxis-table".equals(componentId)) {
+            failures.add("table-column-order-set only supports praxis-table");
+            return null;
+        }
+        if (resolved == null || !resolved.path().matches("^columns\\[\\]/\\d+$")) {
+            failures.add("table-column-order-set target column path is invalid");
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        JsonNode requestedOrder = input.path("order");
+        if (!requestedOrder.isIntegralNumber()
+                || !requestedOrder.canConvertToInt()
+                || requestedOrder.asInt() < 0) {
+            failures.add("table-column-order-set requires a non-negative integer order");
+            return null;
+        }
+        ArrayNode columns = arrayAt(proposedConfig, "columns", false);
+        int targetIndex = indexOfResolvedArrayTarget(resolved);
+        if (columns == null || targetIndex < 0 || targetIndex >= columns.size()) {
+            failures.add("table-column-order-set target column not found");
+            return null;
+        }
+        for (JsonNode column : columns) {
+            if (!(column instanceof ObjectNode)) {
+                failures.add("table-column-order-set requires every column to be an object");
+                return null;
+            }
+        }
+
+        JsonNode targetColumn = columns.get(targetIndex);
+        ArrayNode previousValue = columns.deepCopy();
+        List<IndexedTableColumn> visualOrder = new ArrayList<>();
+        for (int index = 0; index < columns.size(); index++) {
+            JsonNode column = columns.get(index);
+            JsonNode explicitOrder = column.path("order");
+            boolean explicit = explicitOrder.isNumber()
+                    && Double.isFinite(explicitOrder.asDouble());
+            double order = explicit ? Math.floor(explicitOrder.asDouble()) : index;
+            visualOrder.add(new IndexedTableColumn(column, index, explicit, order));
+        }
+        visualOrder.sort(Comparator
+                .comparingDouble(IndexedTableColumn::order)
+                .thenComparing(IndexedTableColumn::explicit, Comparator.reverseOrder())
+                .thenComparingInt(IndexedTableColumn::originalIndex));
+        int visualTargetIndex = -1;
+        for (int index = 0; index < visualOrder.size(); index++) {
+            if (visualOrder.get(index).column() == targetColumn) {
+                visualTargetIndex = index;
+                break;
+            }
+        }
+        if (visualTargetIndex < 0) {
+            failures.add("table-column-order-set could not resolve the target in visual order");
+            return null;
+        }
+
+        IndexedTableColumn target = visualOrder.remove(visualTargetIndex);
+        int boundedOrder = Math.min(requestedOrder.asInt(), visualOrder.size());
+        visualOrder.add(boundedOrder, target);
+        columns.removeAll();
+        for (int order = 0; order < visualOrder.size(); order++) {
+            ObjectNode column = (ObjectNode) visualOrder.get(order).column();
+            column.put("order", order);
+            columns.add(column);
+        }
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("componentId", componentId);
+        compiled.put("operationId", text(operation, "operationId"));
+        compiled.put("op", "reorder-columns");
+        compiled.put("effectKind", "compile-domain-patch");
+        compiled.put("domainHandler", text(effect, "handler"));
+        compiled.put("path", "columns[]");
+        compiled.put("resolvedPath", "columns");
+        compiled.put("fromIndex", visualTargetIndex);
+        compiled.put("toIndex", boundedOrder);
+        compiled.set("previousValue", previousValue);
+        compiled.set("value", columns.deepCopy());
+        compiled.set("target", planOperation.path("target"));
+        compiled.set("input", input.deepCopy());
+        compiled.set("affectedPaths", operation.path("affectedPaths"));
+        compiled.set("submissionImpact", operation.path("submissionImpact"));
+        return compiled;
+    }
+
+    private String inferTableColumnTypeFromFormat(String format) {
+        if (format.matches("^[A-Z]{3}(\\|.*)?$")) {
+            return "currency";
+        }
+        if (format.contains("|x100")) {
+            return "percentage";
+        }
+        if (Set.of("true-false", "yes-no", "active-inactive", "on-off", "enabled-disabled")
+                .contains(format)
+                || format.startsWith("custom|")) {
+            return "boolean";
+        }
+        if (format.matches("^\\d+\\.\\d+-\\d+(\\|nosep)?$")) {
+            return "number";
+        }
+        if (format.matches("(?i)^[0#9X.\\-/()\\s]+$")
+                && format.matches("(?i).*[0#9X].*")) {
+            return "";
+        }
+        if (format.matches("(?i).*(d|M|y){2,}.*")
+                || format.contains("/")
+                || format.contains("-")) {
+            return "date";
+        }
+        return "";
+    }
+
+    private record IndexedTableColumn(JsonNode column, int originalIndex, boolean explicit, double order) {
     }
 
     private ObjectNode compileTableRendererComposeLayoutMerge(
