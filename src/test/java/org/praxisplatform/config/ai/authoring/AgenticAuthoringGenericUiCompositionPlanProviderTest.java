@@ -2434,6 +2434,110 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void refinesPersistedUiCompositionPlanInsteadOfDegradingToMaterializedPatch() {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("kind", "praxis.ui-composition-plan");
+        plan.put("version", "1.0");
+        ObjectNode plannedWidget = plan.putArray("widgets").addObject();
+        plannedWidget.put("key", "incidentes-chart-severidade");
+        plannedWidget.put("componentId", "praxis-chart");
+        canonicalChartDocument(plannedWidget, "severidade", "Severidade");
+
+        ObjectNode currentPage = objectMapper.createObjectNode();
+        ObjectNode runtimeWidget = currentPage.putArray("widgets").addObject();
+        runtimeWidget.put("key", "incidentes-chart-severidade");
+        ObjectNode definition = runtimeWidget.putObject("definition");
+        definition.put("id", "praxis-chart");
+        canonicalChartDocument(definition, "severidade", "Severidade");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Altere o gráfico selecionado para linhas",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                currentPage,
+                chartModificationIntent(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null), plan).orElseThrow();
+
+        assertThat(result.uiCompositionPlan()).isNotNull();
+        assertThat(result.uiCompositionPlan().at("/widgets/0/inputs/chartDocument/kind").asText())
+                .isEqualTo("line");
+        assertThat(result.compiledFormPatch().path("patch").isEmpty()).isTrue();
+        assertThat(currentPage.at("/widgets/0/definition/inputs/chartDocument/kind").asText())
+                .isEqualTo("bar");
+    }
+
+    @Test
+    void addsDrilldownToPersistedPlanWithoutReplacingExistingBindingsOrDuplicatingTheNewBinding() {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("kind", "praxis.ui-composition-plan");
+        plan.put("version", "1.0");
+        ObjectNode plannedWidget = plan.putArray("widgets").addObject();
+        plannedWidget.put("key", "incidentes-chart-severidade");
+        plannedWidget.put("componentId", "praxis-chart");
+        canonicalChartDocument(plannedWidget, "severidade", "Severidade");
+        ObjectNode existingBinding = plan.putArray("bindings").addObject();
+        existingBinding.put("id", "existing-binding");
+        existingBinding.put("intent", "state-read");
+        existingBinding.putObject("from").put("kind", "state").put("path", "filters");
+        existingBinding.putObject("to")
+                .put("kind", "component-port")
+                .put("widget", "incidentes-chart-severidade")
+                .put("port", "filters")
+                .put("direction", "input");
+
+        ObjectNode currentPage = objectMapper.createObjectNode();
+        ObjectNode runtimeWidget = currentPage.putArray("widgets").addObject();
+        runtimeWidget.put("key", "incidentes-chart-severidade");
+        ObjectNode definition = runtimeWidget.putObject("definition");
+        definition.put("id", "praxis-chart");
+        canonicalChartDocument(definition, "severidade", "Severidade");
+
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Abra os registros da categoria selecionada do gráfico em um modal de detalhes.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                currentPage,
+                chartModificationIntent("chart", "praxis-chart", "enable_chart_drilldown"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+
+        AgenticAuthoringUiCompositionPlanResult first = provider.plan(request, plan).orElseThrow();
+        AgenticAuthoringPlanRequest repeatedRequest = new AgenticAuthoringPlanRequest(
+                request.userPrompt(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                currentPage,
+                request.intentResolution(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+        AgenticAuthoringUiCompositionPlanResult repeated =
+                provider.plan(repeatedRequest, first.uiCompositionPlan()).orElseThrow();
+
+        assertThat(first.uiCompositionPlan().path("bindings").findValuesAsText("id"))
+                .contains("existing-binding", "incidentes-chart-severidade.pointClick->surface.open");
+        assertThat(repeated.uiCompositionPlan().path("bindings")).hasSize(2);
+        assertThat(repeated.uiCompositionPlan().at("/widgets/0/inputs/chartDocument/events/pointClick/action").asText())
+                .isEqualTo("emit");
+        assertThat(repeated.compiledFormPatch().path("patch").isEmpty()).isTrue();
+    }
+
+    @Test
     void modifiesOnlyExistingChartWhenTargetKeyDiffersFromRuntimeWidgetKey() {
         ObjectNode page = objectMapper.createObjectNode();
         ObjectNode widget = page.putArray("widgets").addObject();
@@ -2531,6 +2635,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         ObjectNode definition = widget.putObject("definition");
         definition.put("id", "praxis-chart");
         canonicalChartDocument(definition, "severidade", "Severidade");
+        ObjectNode existingLink = page.putObject("composition").putArray("links").addObject();
+        existingLink.put("id", "existing-link");
+        existingLink.put("intent", "state-read");
         ObjectNode contextHints = objectMapper.createObjectNode();
         contextHints.put("kind", "contextual-preview-action");
         contextHints.put("surfaceActionId", "surface.open");
@@ -2554,7 +2661,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         JsonNode patchedPage = result.compiledFormPatch().path("patch").path("page");
         JsonNode chartDocument = patchedPage.path("widgets").get(0)
                 .path("definition").path("inputs").path("chartDocument");
-        JsonNode link = patchedPage.path("composition").path("links").get(0);
+        JsonNode link = patchedPage.path("composition").path("links").get(1);
 
         assertThat(result.warnings()).contains("ui-composition-plan-provider:generic-chart-surface-open-modification");
         assertThat(chartDocument.path("events").path("pointClick").path("action").asText()).isEqualTo("emit");
@@ -2569,6 +2676,10 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(link.path("from").path("ref").path("port").asText()).isEqualTo("pointClick");
         assertThat(link.path("to").path("ref").path("actionId").asText()).isEqualTo("surface.open");
         assertThat(link.path("to").path("ref").path("payload").path("presentation").asText()).isEqualTo("modal");
+        assertThat(patchedPage.path("composition").path("links")).hasSize(2);
+        assertThat(patchedPage.at("/composition/links/0/id").asText()).isEqualTo("existing-link");
+        assertThat(patchedPage.at("/composition/links/1/id").asText())
+                .isEqualTo("incidentes-chart-severidade.pointClick->surface.open");
     }
 
     @Test

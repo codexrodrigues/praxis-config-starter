@@ -234,6 +234,22 @@ public class AgenticAuthoringPreviewService {
             String userId,
             String environment,
             String schemaBaseUrl) throws IOException {
+        return previewWithPersistedUiCompositionPlan(
+                request,
+                tenantId,
+                userId,
+                environment,
+                schemaBaseUrl,
+                null);
+    }
+
+    public AgenticAuthoringPreviewResult previewWithPersistedUiCompositionPlan(
+            AgenticAuthoringPlanRequest request,
+            String tenantId,
+            String userId,
+            String environment,
+            String schemaBaseUrl,
+            JsonNode persistedUiCompositionPlan) throws IOException {
         AgenticAuthoringPlanRequest effectiveRequest = enrichRequest(request);
         AgenticAuthoringIntentResolutionResult intentResolution =
                 effectiveRequest == null ? null : effectiveRequest.intentResolution();
@@ -259,12 +275,24 @@ public class AgenticAuthoringPreviewService {
             return consultativeAnswer.get();
         }
         Optional<AgenticAuthoringPreviewResult> componentEditPreview =
-                previewComponentEditPlan(effectiveRequest, tenantId, userId, environment, schemaBaseUrl);
+                previewComponentEditPlan(
+                        effectiveRequest,
+                        tenantId,
+                        userId,
+                        environment,
+                        schemaBaseUrl,
+                        persistedUiCompositionPlan);
         if (componentEditPreview.isPresent()) {
             return componentEditPreview.get();
         }
         Optional<AgenticAuthoringPreviewResult> uiCompositionPreview =
-                previewUiCompositionPlan(effectiveRequest, tenantId, userId, environment, schemaBaseUrl);
+                previewUiCompositionPlan(
+                        effectiveRequest,
+                        tenantId,
+                        userId,
+                        environment,
+                        schemaBaseUrl,
+                        persistedUiCompositionPlan);
         if (uiCompositionPreview.isPresent()) {
             return uiCompositionPreview.get();
         }
@@ -497,7 +525,8 @@ public class AgenticAuthoringPreviewService {
             String tenantId,
             String userId,
             String environment,
-            String schemaBaseUrl) {
+            String schemaBaseUrl,
+            JsonNode persistedUiCompositionPlan) {
         AgenticAuthoringIntentResolutionResult intent = request == null ? null : request.intentResolution();
         if (intent == null || !intent.valid()) {
             return Optional.empty();
@@ -617,6 +646,43 @@ public class AgenticAuthoringPreviewService {
                 && !validationContext.path("schemaFields").isEmpty()) {
             warnings.add("component-edit-plan-schema-fields-grounded");
         }
+        JsonNode refinedUiCompositionPlan = null;
+        if (persistedUiCompositionPlan != null) {
+            if (directComponentEdit) {
+                return Optional.of(componentEditFailure(
+                        request,
+                        List.of("persisted-ui-composition-direct-component-edit-unsupported"),
+                        List.of("persisted-ui-composition-refinement-failed-closed"),
+                        result.plan(),
+                        result.providerInvocations()));
+            }
+            refinedUiCompositionPlan = replacePersistedPlanWidgetInputs(
+                    persistedUiCompositionPlan,
+                    selectedWidgetKey,
+                    componentId,
+                    proposedConfig);
+            if (refinedUiCompositionPlan == null) {
+                return Optional.of(componentEditFailure(
+                        request,
+                        List.of("persisted-ui-composition-target-widget-missing"),
+                        List.of("persisted-ui-composition-refinement-failed-closed"),
+                        result.plan(),
+                        result.providerInvocations()));
+            }
+            AgenticAuthoringUiCompositionPlanCompiler.CompileResult compilation =
+                    uiCompositionPlanCompiler.compile(refinedUiCompositionPlan, compiledFormPatch);
+            if (!compilation.valid()) {
+                return Optional.of(componentEditFailure(
+                        request,
+                        compilation.failureCodes(),
+                        List.of("persisted-ui-composition-refinement-failed-closed"),
+                        result.plan(),
+                        result.providerInvocations()));
+            }
+            compiledFormPatch = compilation.compiledFormPatch();
+            addWarningOnce(warnings, "persisted-ui-composition-refined-by-component-manifest");
+            addWarningOnce(warnings, "ui-composition-plan-compiled-by-config");
+        }
         boolean noOp = warnings.contains("component-edit-plan-no-op");
         return Optional.of(new AgenticAuthoringPreviewResult(
                 true,
@@ -631,12 +697,40 @@ public class AgenticAuthoringPreviewService {
                         List.copyOf(warnings),
                         result.plan(),
                         compiledFormPatch),
-                null,
+                refinedUiCompositionPlan,
                 noOp
                         ? AgenticAuthoringPresentationText.assistantReply(
                                 "A configuração solicitada já está aplicada. Não fiz nenhuma alteração.")
                         : componentEditAssistantMessage(result.plan()),
                 result.providerInvocations()));
+    }
+
+    private JsonNode replacePersistedPlanWidgetInputs(
+            JsonNode persistedUiCompositionPlan,
+            String selectedWidgetKey,
+            String componentId,
+            JsonNode proposedInputs) {
+        if (!(persistedUiCompositionPlan instanceof ObjectNode persistedPlan)
+                || !"praxis.ui-composition-plan".equals(persistedPlan.path("kind").asText(""))
+                || !"1.0".equals(persistedPlan.path("version").asText(""))
+                || proposedInputs == null
+                || !proposedInputs.isObject()) {
+            return null;
+        }
+        ObjectNode refinedPlan = persistedPlan.deepCopy();
+        JsonNode widgets = refinedPlan.path("widgets");
+        if (!widgets.isArray()) {
+            return null;
+        }
+        for (JsonNode widget : widgets) {
+            if (widget instanceof ObjectNode object
+                    && selectedWidgetKey.equals(object.path("key").asText(""))
+                    && componentId.equals(object.path("componentId").asText(""))) {
+                object.set("inputs", proposedInputs.deepCopy());
+                return refinedPlan;
+            }
+        }
+        return null;
     }
 
     private JsonNode selectedHostMaterialization(
@@ -913,7 +1007,8 @@ public class AgenticAuthoringPreviewService {
             String tenantId,
             String userId,
             String environment,
-            String schemaBaseUrl) {
+            String schemaBaseUrl,
+            JsonNode persistedUiCompositionPlan) {
         if (request == null) {
             return Optional.empty();
         }
@@ -935,7 +1030,11 @@ public class AgenticAuthoringPreviewService {
             request = withSchemaFieldContext(request, schemaBaseUrl, schemaFetchCache);
         }
         for (AgenticAuthoringUiCompositionPlanProvider provider : uiCompositionPlanProviders) {
-            Optional<AgenticAuthoringUiCompositionPlanResult> result = provider.plan(request);
+            Optional<AgenticAuthoringUiCompositionPlanResult> result =
+                    persistedUiCompositionPlan != null
+                            && provider instanceof AgenticAuthoringPersistedUiCompositionPlanProvider persistedProvider
+                            ? persistedProvider.plan(request, persistedUiCompositionPlan)
+                            : provider.plan(request);
             if (result.isEmpty()) {
                 continue;
             }
@@ -948,6 +1047,26 @@ public class AgenticAuthoringPreviewService {
                 return Optional.of(invalidUiCompositionPlanPreview(
                         request,
                         planResult,
+                        failureCodes,
+                        warnings,
+                        tenantId,
+                        userId,
+                        environment));
+            }
+            if (persistedUiCompositionPlan != null && planResult.uiCompositionPlan() == null) {
+                addAllOnce(
+                        failureCodes,
+                        List.of("persisted-ui-composition-refinement-plan-required"));
+                AgenticAuthoringUiCompositionPlanResult rejectedDegradation =
+                        new AgenticAuthoringUiCompositionPlanResult(
+                                false,
+                                List.copyOf(failureCodes),
+                                List.copyOf(warnings),
+                                null,
+                                planResult.compiledFormPatch());
+                return Optional.of(invalidUiCompositionPlanPreview(
+                        request,
+                        rejectedDegradation,
                         failureCodes,
                         warnings,
                         tenantId,
@@ -6709,6 +6828,7 @@ public class AgenticAuthoringPreviewService {
                 attachmentSummaries(request),
                 request.contextHints());
     }
+
 
     private AgenticAuthoringPlanRequest withEffectivePrompt(AgenticAuthoringPlanRequest request) {
         if (allowsSchemaSafeAxisRepair(request)) {

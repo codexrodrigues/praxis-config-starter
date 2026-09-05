@@ -1,9 +1,10 @@
 package org.praxisplatform.config.controller;
 
-import jakarta.servlet.http.HttpServletRequest;
-import io.swagger.v3.oas.annotations.Operation;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.swagger.v3.oas.annotations.Operation;
+import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
@@ -30,6 +31,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPersistedUiCompositionSourceResolver;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceCandidatesRequest;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceCandidatesResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringResourceDiscoveryService;
@@ -40,6 +42,7 @@ import org.praxisplatform.config.dto.AiPatchStreamCancelResponse;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.AiStreamAccessTokenService;
+import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -47,6 +50,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.lang.Nullable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -55,7 +59,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
@@ -80,6 +83,7 @@ public class AgenticAuthoringController {
     private final AiPrincipalContextResolver principalContextResolver;
     private final AiStreamAccessTokenService streamAccessTokenService;
     private final AgenticAuthoringConsultativeAnswerService consultativeAnswerService;
+    private final AgenticAuthoringPersistedUiCompositionSourceResolver persistedUiCompositionSourceResolver;
     private final boolean corporateMode;
 
     @Autowired
@@ -97,6 +101,7 @@ public class AgenticAuthoringController {
             AiPrincipalContextResolver principalContextResolver,
             AiStreamAccessTokenService streamAccessTokenService,
             AgenticAuthoringConsultativeAnswerService consultativeAnswerService,
+            @Nullable AgenticAuthoringPersistedUiCompositionSourceResolver persistedUiCompositionSourceResolver,
             @Value("${praxis.ai.security.corporate-mode:true}") boolean corporateMode) {
         this.dryRunService = dryRunService;
         this.artifactSource = artifactSource;
@@ -111,6 +116,7 @@ public class AgenticAuthoringController {
         this.principalContextResolver = principalContextResolver;
         this.streamAccessTokenService = streamAccessTokenService;
         this.consultativeAnswerService = consultativeAnswerService;
+        this.persistedUiCompositionSourceResolver = persistedUiCompositionSourceResolver;
         this.corporateMode = corporateMode;
     }
 
@@ -142,6 +148,7 @@ public class AgenticAuthoringController {
                 principalContextResolver,
                 streamAccessTokenService,
                 consultativeAnswerService,
+                null,
                 true);
     }
 
@@ -340,6 +347,7 @@ public class AgenticAuthoringController {
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         try {
+            request = withoutClientIntentPersistenceAuthority(request);
             AgenticAuthoringIntentResolutionResult result = intentResolverService.resolve(
                     request,
                     tenantId,
@@ -355,6 +363,35 @@ public class AgenticAuthoringController {
         return resolveIntent(request, null, null, null);
     }
 
+    private AgenticAuthoringIntentResolutionRequest withoutClientIntentPersistenceAuthority(
+            AgenticAuthoringIntentResolutionRequest request) {
+        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
+            return request;
+        }
+        ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
+        sanitized.remove("verifiedDomainOperations");
+        sanitized.remove("authoringEvidence");
+        sanitized.remove("uiCompositionAuthoringSource");
+        sanitized.remove("agenticApplyTarget");
+        return new AgenticAuthoringIntentResolutionRequest(
+                request.userPrompt(),
+                request.targetApp(),
+                request.targetComponentId(),
+                request.currentRoute(),
+                request.currentPage(),
+                request.selectedWidgetKey(),
+                request.provider(),
+                request.model(),
+                request.apiKey(),
+                request.sessionId(),
+                request.clientTurnId(),
+                request.conversationMessages(),
+                request.pendingClarification(),
+                request.attachmentSummaries(),
+                sanitized.isEmpty() ? null : sanitized,
+                request.activeSemanticDecision());
+    }
+
     @PostMapping("/compiled-form-patch")
     public ResponseEntity<?> compileFormPatch(@RequestBody AgenticAuthoringCompileRequest request) {
         try {
@@ -368,28 +405,77 @@ public class AgenticAuthoringController {
     @PostMapping("/page-preview")
     public ResponseEntity<?> previewPage(
             @RequestBody AgenticAuthoringPlanRequest request,
+            HttpServletRequest servletRequest,
             @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
             @RequestHeader(value = "X-User-ID", required = false) String userId,
             @RequestHeader(value = "X-Env", required = false) String environment) {
         try {
-            request = withoutClientVerifiedDomainOperations(request);
-            AgenticAuthoringPlanRequest effectiveRequest = withResolvedIntent(request, tenantId, userId, environment);
+            request = withoutClientPreviewAuthority(request);
+            AiPrincipalContext principalContext = resolveAuthoringPrincipalContext(
+                    servletRequest,
+                    tenantId,
+                    userId,
+                    environment);
+            if (principalContext == null) {
+                principalContext = new AiPrincipalContext(tenantId, userId, environment, false);
+            }
+            JsonNode persistedUiCompositionPlan = persistedUiCompositionSourceResolver == null
+                    ? null
+                    : persistedUiCompositionSourceResolver.resolvePlanForPreview(request, principalContext);
+            AgenticAuthoringPlanRequest previewRequest = withoutAgenticApplyTarget(request);
+            AgenticAuthoringPlanRequest effectiveRequest = withResolvedIntent(
+                    previewRequest,
+                    principalContext.tenantId(),
+                    principalContext.userId(),
+                    principalContext.environment());
             String baseUrl = currentContextBaseUrl();
             Optional<AgenticAuthoringPreviewResult> consultativePreview =
-                    previewConsultativeSemanticIntent(effectiveRequest, tenantId, userId, environment);
+                    previewConsultativeSemanticIntent(
+                            effectiveRequest,
+                            principalContext.tenantId(),
+                            principalContext.userId(),
+                            principalContext.environment());
             if (consultativePreview.isPresent()) {
                 return ResponseEntity.ok(consultativePreview.get());
             }
-            AgenticAuthoringPreviewResult result = previewService.preview(
-                    effectiveRequest,
-                    tenantId,
-                    userId,
-                    environment,
-                    baseUrl);
+            AgenticAuthoringPreviewResult result = persistedUiCompositionPlan == null
+                    ? previewService.preview(
+                            effectiveRequest,
+                            principalContext.tenantId(),
+                            principalContext.userId(),
+                            principalContext.environment(),
+                            baseUrl)
+                    : previewService.previewWithPersistedUiCompositionPlan(
+                            effectiveRequest,
+                            principalContext.tenantId(),
+                            principalContext.userId(),
+                            principalContext.environment(),
+                            baseUrl,
+                            persistedUiCompositionPlan);
             return ResponseEntity.ok(result);
         } catch (IllegalArgumentException | IllegalStateException | IOException ex) {
             return ResponseEntity.badRequest().body(AgenticAuthoringDryRunErrorResponse.configurationInvalid(ex.getMessage()));
         }
+    }
+
+    public ResponseEntity<?> previewPage(
+            AgenticAuthoringPlanRequest request,
+            String tenantId,
+            String userId,
+            String environment) {
+        return previewPage(request, null, tenantId, userId, environment);
+    }
+
+    private AgenticAuthoringPlanRequest withoutClientPreviewAuthority(
+            AgenticAuthoringPlanRequest request) {
+        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
+            return request;
+        }
+        ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
+        sanitized.remove("verifiedDomainOperations");
+        sanitized.remove("authoringEvidence");
+        sanitized.remove("uiCompositionAuthoringSource");
+        return copyWithContextHints(request, sanitized.isEmpty() ? null : sanitized);
     }
 
     private AgenticAuthoringPlanRequest withoutClientVerifiedDomainOperations(
@@ -399,6 +485,21 @@ public class AgenticAuthoringController {
         }
         ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
         sanitized.remove("verifiedDomainOperations");
+        return copyWithContextHints(request, sanitized.isEmpty() ? null : sanitized);
+    }
+
+    private AgenticAuthoringPlanRequest withoutAgenticApplyTarget(AgenticAuthoringPlanRequest request) {
+        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
+            return request;
+        }
+        ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
+        sanitized.remove("agenticApplyTarget");
+        return copyWithContextHints(request, sanitized.isEmpty() ? null : sanitized);
+    }
+
+    private AgenticAuthoringPlanRequest copyWithContextHints(
+            AgenticAuthoringPlanRequest request,
+            JsonNode contextHints) {
         return new AgenticAuthoringPlanRequest(
                 request.userPrompt(),
                 request.provider(),
@@ -411,7 +512,7 @@ public class AgenticAuthoringController {
                 request.conversationMessages(),
                 request.pendingClarification(),
                 request.attachmentSummaries(),
-                sanitized.isEmpty() ? null : sanitized);
+                contextHints);
     }
 
     private AgenticAuthoringTurnStreamRequest withoutClientVerifiedDomainOperations(

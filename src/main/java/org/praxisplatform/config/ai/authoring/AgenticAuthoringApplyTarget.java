@@ -32,6 +32,17 @@ public record AgenticAuthoringApplyTarget(
                 principalContext == null ? null : blankToNull(principalContext.environment()));
     }
 
+    static Resolution resolve(
+            AgenticAuthoringPlanRequest request,
+            AiPrincipalContext principalContext) {
+        JsonNode candidate = request == null || request.contextHints() == null
+                ? null
+                : request.contextHints().path("agenticApplyTarget");
+        return resolveCandidate(
+                candidate,
+                principalContext == null ? null : blankToNull(principalContext.environment()));
+    }
+
     private static Resolution resolveCandidate(JsonNode candidate, String environment) {
         if (candidate == null || !candidate.isObject()) {
             return Resolution.blocked("apply-target-missing");

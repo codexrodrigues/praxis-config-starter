@@ -619,6 +619,128 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void compilesGlobalTableTitleChangeFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-table",
+                payloadFromClasspathSnapshot("praxis-table"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [
+                      { "field": "salarioLiquido", "header": "Salário Líquido" }
+                    ],
+                    "toolbar": {
+                      "visible": true,
+                      "title": "Folhas de pagamento"
+                    }
+                  },
+                  "plan": {
+                    "operationId": "toolbar.configure",
+                    "input": { "title": "Folha operacional revisada" }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-table",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.patch().path("operations").get(0).path("operationId").asText())
+                .isEqualTo("toolbar.configure");
+        assertThat(result.patch().path("proposedConfig").path("toolbar").path("visible").asBoolean())
+                .isTrue();
+        assertThat(result.patch().path("proposedConfig").path("toolbar").path("title").asText())
+                .isEqualTo("Folha operacional revisada");
+        assertThat(result.patch().path("proposedConfig").path("columns").get(0).path("field").asText())
+                .isEqualTo("salarioLiquido");
+    }
+
+    @Test
+    void compilesCurrencyFormatAndVisualTypeFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-table",
+                payloadFromClasspathSnapshot("praxis-table"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [{
+                      "field": "salarioLiquido",
+                      "header": "Salário Líquido",
+                      "type": "number"
+                    }]
+                  },
+                  "plan": {
+                    "operationId": "column.format.set",
+                    "target": "salarioLiquido",
+                    "input": { "format": "BRL|symbol|2" }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-table",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.patch().path("operations").get(0).path("domainHandler").asText())
+                .isEqualTo("table-column-format-set");
+        assertThat(result.patch().path("proposedConfig").path("columns").get(0).path("format").asText())
+                .isEqualTo("BRL|symbol|2");
+        assertThat(result.patch().path("proposedConfig").path("columns").get(0).path("type").asText())
+                .isEqualTo("currency");
+        assertThat(result.patch().path("proposedConfig").path("columns").get(0).path("header").asText())
+                .isEqualTo("Salário Líquido");
+    }
+
+    @Test
+    void compilesCollisionFreeTableColumnOrderFromClasspathRegistrySnapshot() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-table",
+                payloadFromClasspathSnapshot("praxis-table"));
+        JsonNode request = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [
+                      { "field": "id", "header": "ID" },
+                      { "field": "nome", "header": "Nome" },
+                      {
+                        "field": "salarioLiquido",
+                        "header": "Salário Líquido",
+                        "format": "BRL|symbol|2",
+                        "type": "currency"
+                      },
+                      { "field": "departamento", "header": "Departamento" }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "column.order.set",
+                    "target": "salarioLiquido",
+                    "input": { "order": 0 }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult result = service.compilePatch(
+                "praxis-table",
+                objectMapper.treeToValue(request, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(result.compiled()).isTrue();
+        assertThat(result.failures()).isEmpty();
+        assertThat(result.patch().path("operations").get(0).path("domainHandler").asText())
+                .isEqualTo("table-column-order-set");
+        assertThat(result.patch().path("proposedConfig").path("columns"))
+                .extracting(column -> column.path("field").asText() + ":" + column.path("order").asInt())
+                .containsExactly("salarioLiquido:0", "id:1", "nome:2", "departamento:3");
+        assertThat(result.patch().path("proposedConfig").at("/columns/0/format").asText())
+                .isEqualTo("BRL|symbol|2");
+        assertThat(result.patch().path("proposedConfig").at("/columns/0/type").asText())
+                .isEqualTo("currency");
+    }
+
+    @Test
     void validatesTableRemoteBindingOperationFromClasspathRegistrySnapshot() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(
                 "praxis-table",

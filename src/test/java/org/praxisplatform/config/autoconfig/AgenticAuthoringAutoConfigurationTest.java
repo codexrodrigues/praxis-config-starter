@@ -20,6 +20,7 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringEffectCompilerRegi
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestContractValidator;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringManifestService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringPersistedUiCompositionSourceResolver;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringReplayAuditService;
@@ -367,7 +368,11 @@ class AgenticAuthoringAutoConfigurationTest {
                 .withBean(UserConfigService.class, () -> userConfigService)
                 .withBean(AiApiKeyProtectionService.class, () -> apiKeyProtectionService)
                 .withBean(AiTurnEventService.class, () -> turnEventService)
-                .run(context -> assertThat(context).hasSingleBean(AgenticAuthoringApplyService.class));
+                .run(context -> {
+                    assertThat(context).hasSingleBean(AgenticAuthoringApplyService.class);
+                    assertThat(context)
+                            .hasSingleBean(AgenticAuthoringPersistedUiCompositionSourceResolver.class);
+                });
     }
 
     private String runtimeToolPlannerPolicyRef(AgenticAuthoringConsultativeAnswerService service) {

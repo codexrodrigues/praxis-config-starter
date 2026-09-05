@@ -10,7 +10,8 @@
 
 It owns persistence and runtime semantics for:
 
-- `ui_user_config`: tenant, user, environment, version, ETag, and JSON configuration state.
+- `ui_user_config`: tenant, user, environment, version, ETag, executable JSON configuration state,
+  and an optional server-attested semantic authoring source aligned to that same revision.
 - `ai_registry`: governed component definitions, templates, and executable authoring manifests.
 - `api_metadata`: ingested API catalog metadata used for search and AI grounding.
 - `/api/praxis/config/**`: configuration, registry, AI context, authoring, stream, and domain-decision APIs.
@@ -326,6 +327,12 @@ atomic-upsert paths run: tenant, user, updater and component id are limited to 2
 component type and environment are limited to 64 characters. Invalid identity input returns a
 deterministic `400 Bad Request` response. `scope=user` still requires a nonblank `X-User-ID`; tenant
 scope ignores user identity for persistence.
+
+For governed page authoring, `page-apply` persists the executable page in `payload` and the terminal
+`UiCompositionPlan` in the sibling `authoringSource` response field, with canonical hashes and
+server-owned lineage. Generic PUT requests cannot supply a replacement source. When such a write
+changes the executable payload, the previous source is cleared in the same revision so editors never
+reopen stale semantics; an identical payload may retain its existing source.
 
 ## UI Config Conditional Requests
 

@@ -13,6 +13,7 @@ public record AgenticAuthoringApplyResult(
         String etag,
         JsonNode payload,
         JsonNode tags,
+        JsonNode authoringSource,
         List<String> warnings
 ) {
 }

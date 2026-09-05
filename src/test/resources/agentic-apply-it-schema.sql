@@ -15,6 +15,7 @@ CREATE TABLE ui_user_config (
     environment VARCHAR(64),
     component_id VARCHAR(255) NOT NULL,
     payload jsonb NOT NULL,
+    authoring_source jsonb,
     tags jsonb,
     tenant_id VARCHAR(255) NOT NULL,
     updated_by VARCHAR(255),
