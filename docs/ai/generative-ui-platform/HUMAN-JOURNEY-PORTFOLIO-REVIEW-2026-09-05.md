@@ -238,3 +238,12 @@ Seleção de pontos do gráfico por teclado e leitor de tela continuam sem certi
 As correções internas desta revisão não mudam endpoints, headers, public API, manifests, schemas ou exemplos.
 Não exige regeneração do corpus HTTP, `LLM_SURFACE.md` ou registry. A correção futura de seleção de
 campos exigirá sincronizar exemplos, provas do compiler e browser do formulário no mesmo corte.
+
+
+## Continuação: política de provider e primeira tentativa aprovada
+
+O corte seguinte corrigiu perfil/reasoning, preservação de modelo no timeout e cancelamento.
+O gate real 34005676687 passou 3/3 testes com um único pedido e todas as nove pós-condições funcionais.
+Há ainda uma resposta incompleta e dois timeouts em fases preliminares; custo total é desconhecido.
+Ver [política, inventário, validações e limitações](PROVIDER-PHASE-POLICY-2026-09-05.md).
+A prova é do workspace master/detail com comando, não de todo o portfólio de criação/edição livre.

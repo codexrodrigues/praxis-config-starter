@@ -102,3 +102,12 @@ O [recibo sanitizado](HUMAN-JOURNEY-LIVE-TIMEOUT-DIAGNOSIS-2026-09-05.receipt.js
 Nenhuma chamada adicional foi feita para recuperar o resultado antigo. A skill canônica recebeu o
 aprendizado e foi espelhada no ambiente local; os scripts sync/bootstrap não estão disponíveis neste
 workspace, por isso a sincronização desta referência foi direta.
+
+
+## Continuação: política de provider e primeira tentativa aprovada
+
+O corte seguinte corrigiu perfil/reasoning, preservação de modelo no timeout e cancelamento.
+O gate real 34005676687 passou 3/3 testes com um único pedido e todas as nove pós-condições funcionais.
+Há ainda uma resposta incompleta e dois timeouts em fases preliminares; custo total é desconhecido.
+Ver [política, inventário, validações e limitações](PROVIDER-PHASE-POLICY-2026-09-05.md).
+A prova é do workspace master/detail com comando, não de todo o portfólio de criação/edição livre.
