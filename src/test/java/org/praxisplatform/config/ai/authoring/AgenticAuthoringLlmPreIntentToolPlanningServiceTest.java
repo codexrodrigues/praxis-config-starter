@@ -224,6 +224,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                         .textNode("praxis-agentic-authoring-pre-intent-tool-plan.v3"));
         assertThat(structuredOutputSchema.path("properties").path("layoutKind").path("enum"))
                 .contains(objectMapper.getNodeFactory().textNode("single-table"));
+        assertThat(configCaptor.getValue().getExecutionProfile()).isEqualTo(org.praxisplatform.config.service.AiExecutionProfile.AGENTIC_AUTHORING);
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(7);
         assertThat(configCaptor.getValue().getModel()).isEqualTo("gpt-5.6-luna");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(640);

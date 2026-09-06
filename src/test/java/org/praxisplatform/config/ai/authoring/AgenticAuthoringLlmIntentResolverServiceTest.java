@@ -2642,6 +2642,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("contextBundle:")
                 .contains("semanticReconciliation")
                 .doesNotContain("praxis-agentic-authoring-fast-intent-context.v1");
+        assertThat(configCaptor.getValue().getExecutionProfile()).isEqualTo(org.praxisplatform.config.service.AiExecutionProfile.AGENTIC_AUTHORING);
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(4096);
         assertThat(result.artifactKind()).isEqualTo("table");
         assertThat(result.warnings()).doesNotContain("llm-fast-intent-resolution-used");
@@ -3272,6 +3273,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(result.visualizationDecision().primaryComponent()).isEqualTo("praxis-chart");
         assertThat(result.visualizationDecision().axes()).hasSize(1);
         assertThat(result.visualizationDecision().axes().get(0).field()).isEqualTo("status");
+        assertThat(configCaptor.getValue().getExecutionProfile()).isEqualTo(org.praxisplatform.config.service.AiExecutionProfile.AGENTIC_AUTHORING);
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(4096);
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(30);
     }

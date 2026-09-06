@@ -349,7 +349,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private AiCallConfig callConfig(
             AgenticAuthoringTurnStreamRequest request,
             int attemptTimeoutSeconds) {
-        return AiCallConfig.builder()
+        return AiCallConfig.agenticAuthoringBuilder()
                 .provider(request.provider())
                 .model(planningModel(request))
                 .apiKey(request.apiKey())

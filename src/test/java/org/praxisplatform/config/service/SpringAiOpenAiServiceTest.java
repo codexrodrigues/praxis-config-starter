@@ -384,6 +384,85 @@ class SpringAiOpenAiServiceTest {
     }
 
     @Test
+    void agenticReasoningPolicyDoesNotDisappearWhenOutputBudgetGrows() throws Exception {
+        List<JsonNode> captured = new ArrayList<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/responses", exchange -> {
+            captured.add(objectMapper.readTree(exchange.getRequestBody().readAllBytes()));
+            writeJson(exchange, 200, completedResponse("{}"));
+        });
+        SpringAiOpenAiService service = service(server, "gpt-5-mini");
+        server.start();
+        try {
+            for (int budget : List.of(640, 1800, 4096)) {
+                service.generateJson("classify governed intent", AiJsonSchema.ofSchema("{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false}"),
+                        AiCallConfig.agenticAuthoringBuilder().maxTokens(budget).build());
+            }
+            assertEquals(3, captured.size());
+            for (JsonNode request : captured) {
+                assertEquals("gpt-5-mini", request.path("model").asText());
+                assertEquals("low", request.path("reasoning").path("effort").asText());
+            }
+            assertEquals(4096, captured.get(2).path("max_output_tokens").asInt());
+        } finally { service.closeDefaultClient(); server.stop(0); }
+    }
+
+    @Test
+    void cancelledStructuredCallReleasesWorkerWithoutWaitingForItsDeadline() throws Exception {
+        var received = new java.util.concurrent.CountDownLatch(1);
+        var releaseResponse = new java.util.concurrent.CountDownLatch(1);
+        var cancelled = new AtomicBoolean(false);
+        var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        var streamId = java.util.UUID.randomUUID();
+        AtomicInteger calls = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/responses", exchange -> {
+            calls.incrementAndGet();
+            exchange.getRequestBody().readAllBytes();
+            received.countDown();
+            try { releaseResponse.await(8, java.util.concurrent.TimeUnit.SECONDS); }
+            catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+            exchange.close();
+        });
+        SpringAiOpenAiService service = service(server, "gpt-5-mini");
+        server.start();
+        try {
+            var worker = executor.submit(() -> AiStreamExecutionContextHolder.execute(streamId, null, null,
+                    cancelled::get, () -> service.generateJson("structured authoring transport",
+                            AiJsonSchema.ofSchema("{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false}"),
+                            AiCallConfig.agenticAuthoringBuilder().timeoutSeconds(5).build())));
+            assertTrue(received.await(2, java.util.concurrent.TimeUnit.SECONDS));
+            cancelled.set(true);
+            AiStreamExecutionContextHolder.abortStream(streamId);
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> worker.get(1, java.util.concurrent.TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof java.util.concurrent.CancellationException);
+            assertEquals(1, calls.get());
+        } finally {
+            releaseResponse.countDown(); executor.shutdownNow(); service.closeDefaultClient(); server.stop(0);
+        }
+    }
+
+    @Test
+    void cancelledTurnDoesNotAdmitAnotherStructuredProviderCall() throws Exception {
+        AtomicReference<JsonNode> captured = new AtomicReference<>();
+        HttpServer server = responseServer(completedResponse("{}"), captured);
+        SpringAiOpenAiService service = service(server, "gpt-5-mini");
+        server.start();
+        try {
+            assertThrows(java.util.concurrent.CancellationException.class,
+                    () -> AiStreamExecutionContextHolder.execute(java.util.UUID.randomUUID(), null, null,
+                            () -> true, () -> service.generateJson("cancelled authoring",
+                                    AiJsonSchema.ofSchema("{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false}"),
+                                    AiCallConfig.agenticAuthoringBuilder().build())));
+            assertNull(captured.get(), "A cancelled turn must stop before issuing HTTP");
+        } finally {
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
     void completedResponseWithNoTextIsNormalizedAsProviderFailure() throws Exception {
         HttpServer server = responseServer(completedResponse(""), new AtomicReference<>());
         SpringAiOpenAiService service = service(server, "gpt-4o-mini");
@@ -674,13 +753,18 @@ class SpringAiOpenAiServiceTest {
                 exchange.close();
             }
         });
-        SpringAiOpenAiService service = service(server, "gpt-4o-mini");
+        SpringAiOpenAiService service = service(server, "gpt-5-mini");
+        AiProviderInvocationTrace trace = new AiProviderInvocationTrace("intent_full", 1, "openai", null);
         ReflectionTestUtils.setField(service, "timeoutSeconds", 1);
         server.start();
         try {
             AiProviderCallException exception =
-                    assertThrows(AiProviderCallException.class, () -> service.generateText("ping"));
+                    assertThrows(AiProviderCallException.class, () -> service.generateText("ping",
+                            AiCallConfig.agenticAuthoringBuilder().invocationTrace(trace).build()));
 
+            assertEquals("gpt-5-mini", trace.snapshot().model());
+            assertNull(trace.snapshot().inputTokens());
+            assertNull(trace.snapshot().responseId());
             assertEquals(AiProviderCallException.Kind.TIMEOUT, exception.getKind());
             assertEquals(1, calls.get());
         } finally {
