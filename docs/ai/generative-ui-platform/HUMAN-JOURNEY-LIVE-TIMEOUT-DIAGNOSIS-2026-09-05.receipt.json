@@ -1,0 +1,209 @@
+{
+  "workflowRunId": 34003732255,
+  "workflowUrl": "https://github.com/codexrodrigues/praxis-config-starter/actions/runs/34003732255",
+  "configSha": "e00035f19c2ef43db2405e5096e859a8ff8f7c3f",
+  "uiSha": "a94360259e8342033a93b6d753ff9717f9bb5425",
+  "configuredModel": "gpt-5-mini",
+  "functionalOutcome": "failed-before-apply",
+  "releaseGateOutcome": "failed",
+  "humanTurns": 3,
+  "playwright": {
+    "discovered": 3,
+    "executed": 3,
+    "passed": 2,
+    "skipped": 0,
+    "failed": 1,
+    "flaky": 0,
+    "attempts": 3,
+    "retryAttempts": 0,
+    "tests": [
+      {
+        "title": "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      },
+      {
+        "title": "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
+        "status": "unexpected",
+        "attempts": 1,
+        "retryAttempts": 0
+      },
+      {
+        "title": "Auditoria live: capabilities reais possuem proveniência governada e não degradada",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      }
+    ],
+    "durationMs": 140535
+  },
+  "cleanupVerified": true,
+  "criticalEndpointMocks": 0,
+  "capabilities": {
+    "source": "registry",
+    "degraded": false,
+    "catalogCount": 24,
+    "chartResourceBinding": true
+  },
+  "dependencyAttestation": {
+    "configStarter": {
+      "artifactId": "praxis-config-starter",
+      "version": "0.1.0-rc.148",
+      "source": "source-checkout",
+      "referenceJarSha256": "19d1a15e0546238b8023a4247704b21bcd4a5ea76c64b16909002b0754fe8f34",
+      "quickstartNestedJarSha256": "19d1a15e0546238b8023a4247704b21bcd4a5ea76c64b16909002b0754fe8f34",
+      "quickstartEntry": "BOOT-INF/lib/praxis-config-starter-0.1.0-rc.148.jar",
+      "byteIdentical": true
+    }
+  },
+  "providerTelemetry": {
+    "scope": "authoring-turns-only",
+    "turns": [
+      {
+        "testOrdinal": 2,
+        "resultOrdinal": 0,
+        "retry": 0,
+        "turnNumber": 1,
+        "telemetry": {
+          "schemaVersion": "praxis-agentic-authoring-provider-telemetry.v1",
+          "invocationCount": 4,
+          "truncated": false,
+          "providerInvocations": [
+            {
+              "phase": "pre_intent_tool_plan",
+              "provider": "openai",
+              "model": "unknown",
+              "transport": null,
+              "status": "failure",
+              "failureKind": "timeout",
+              "responseId": null,
+              "finishReason": null,
+              "attempt": 1,
+              "latencyMs": 12396,
+              "inputTokens": null,
+              "outputTokens": null,
+              "cacheReadInputTokens": null,
+              "cacheWriteInputTokens": null,
+              "totalTokens": null
+            },
+            {
+              "phase": "declared_client_action_intent",
+              "provider": "openai",
+              "model": "gpt-5-mini-2025-08-07",
+              "transport": "openai-responses-sdk",
+              "status": "success",
+              "failureKind": null,
+              "responseId": "resp_0063d3ae69948b16016a9cc2ddb02887d192ec2abafd7ef851",
+              "finishReason": "completed",
+              "attempt": 1,
+              "latencyMs": 2289,
+              "inputTokens": 309,
+              "outputTokens": 138,
+              "cacheReadInputTokens": 0,
+              "cacheWriteInputTokens": null,
+              "totalTokens": 447
+            },
+            {
+              "phase": "intent_fast",
+              "provider": "openai",
+              "model": "unknown",
+              "transport": null,
+              "status": "failure",
+              "failureKind": "timeout",
+              "responseId": null,
+              "finishReason": null,
+              "attempt": 1,
+              "latencyMs": 12139,
+              "inputTokens": null,
+              "outputTokens": null,
+              "cacheReadInputTokens": null,
+              "cacheWriteInputTokens": null,
+              "totalTokens": null
+            },
+            {
+              "phase": "intent_full",
+              "provider": "openai",
+              "model": "unknown",
+              "transport": null,
+              "status": "failure",
+              "failureKind": "timeout",
+              "responseId": null,
+              "finishReason": null,
+              "attempt": 1,
+              "latencyMs": 30140,
+              "inputTokens": null,
+              "outputTokens": null,
+              "cacheReadInputTokens": null,
+              "cacheWriteInputTokens": null,
+              "totalTokens": null
+            }
+          ]
+        }
+      },
+      {
+        "testOrdinal": 2,
+        "resultOrdinal": 0,
+        "retry": 0,
+        "turnNumber": 2,
+        "telemetry": {
+          "schemaVersion": "praxis-agentic-authoring-provider-telemetry.v1",
+          "invocationCount": 2,
+          "truncated": false,
+          "providerInvocations": [
+            {
+              "phase": "declared_client_action_intent",
+              "provider": "openai",
+              "model": "gpt-5-mini-2025-08-07",
+              "transport": "openai-responses-sdk",
+              "status": "success",
+              "failureKind": null,
+              "responseId": "resp_0f0d958e31c764da016a9cc313f2b887d19068ea94c409b4f7",
+              "finishReason": "completed",
+              "attempt": 1,
+              "latencyMs": 2458,
+              "inputTokens": 331,
+              "outputTokens": 187,
+              "cacheReadInputTokens": 0,
+              "cacheWriteInputTokens": null,
+              "totalTokens": 518
+            },
+            {
+              "phase": "intent_full",
+              "provider": "openai",
+              "model": "unknown",
+              "transport": null,
+              "status": "failure",
+              "failureKind": "timeout",
+              "responseId": null,
+              "finishReason": null,
+              "attempt": 1,
+              "latencyMs": 30139,
+              "inputTokens": null,
+              "outputTokens": null,
+              "cacheReadInputTokens": null,
+              "cacheWriteInputTokens": null,
+              "totalTokens": null
+            }
+          ]
+        }
+      },
+      {
+        "testOrdinal": 2,
+        "resultOrdinal": 0,
+        "retry": 0,
+        "turnNumber": 3,
+        "telemetry": {
+          "schemaVersion": "praxis-agentic-authoring-provider-telemetry.v1",
+          "invocationCount": 0,
+          "truncated": false,
+          "providerInvocations": []
+        }
+      }
+    ]
+  },
+  "paidUsageComplete": false,
+  "actualUsd": null,
+  "accountLimitEvidence": "user-attested-not-independently-verified",
+  "failureSummary": "Four provider timeouts in pre_intent_tool_plan, intent_fast and intent_full; two smaller calls completed. Third turn yielded no provider invocations. No applicable preview; terminal assertion rejected non-governed repair reply identities."
+}
