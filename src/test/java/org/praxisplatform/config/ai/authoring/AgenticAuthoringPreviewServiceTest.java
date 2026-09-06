@@ -68,6 +68,22 @@ class AgenticAuthoringPreviewServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void invalidFormSelectionPublishesTheCanonicalClarificationWithoutCompiling() throws Exception {
+        var intent = createEmployeeFormIntent();
+        var plan = objectMapper.createObjectNode();
+        plan.putObject("clarificationNeed").put("needed", true).put("code", "policy-unsatisfied")
+                .put("question", "A operação exige nome. Deseja incluí-lo?");
+        when(planService.generateMinimalFormPlan(any(), any(), any(), any())).thenReturn(
+                new AgenticAuthoringPlanResult(false, List.of("form-field-selection-required-field-omitted"), List.of(), plan));
+        var result = new AgenticAuthoringPreviewService(planService, patchCompilerService, objectMapper)
+                .preview(new AgenticAuthoringPlanRequest("Somente email", "openai", "gpt-5-mini", null, intent),
+                        "tenant", "user", "local");
+        assertThat(result.valid()).isFalse();
+        assertThat(result.assistantMessage()).isEqualTo("A operação exige nome. Deseja incluí-lo?");
+        verifyNoInteractions(patchCompilerService);
+    }
+
+    @Test
     void rejectsAProviderThatDegradesPersistedSemanticSourceToMaterializedPatch() throws Exception {
         AgenticAuthoringPreviewService service = new AgenticAuthoringPreviewService(
                 planService,

@@ -339,7 +339,10 @@ public class AgenticAuthoringPreviewService {
                             planResult.minimalFormPlan(),
                             MissingNode.getInstance()),
                     null,
-                    null,
+                    planResult.minimalFormPlan() != null
+                            && planResult.minimalFormPlan().path("clarificationNeed").path("needed").asBoolean(false)
+                            ? planResult.minimalFormPlan().path("clarificationNeed").path("question").asText("")
+                            : null,
                     planResult.providerInvocations()
             );
         }
