@@ -27,3 +27,19 @@ A correção reutiliza o mesmo helper após a resposta do refinamento de campos,
 Regressão de execução do motor falhou antes da correção porque o preview não era chamado. Após a correção, 203 testes do motor, 46 do resolvedor e 12 de continuidade passaram (261 distintos). A prova é local e determinística: a correção ainda precisa do gate e da publicação próprios antes de nova certificação no Render.
 
 Consumidores: todos os clientes de authoring recebem a decisão original reconciliada pelos contratos existentes. Artefatos derivados: runbooks/evidências e guidance da skill. OpenAPI, tipos Angular, barrels, manifests e corpus HTTP não mudam. O recibo live permanece reprovado; os testes locais não o reescrevem como sucesso.
+
+## Gate pós-correção: reprovado, publicação pendente
+
+A execução [34014454238](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/34014454238) exercitou o merge #466 `45f57295c9f96ac7d2d5ce146e71b6f04cfd2bec`, source-checkout, API rc.48, Metadata `f43d3c3` e UI `a943602`. O JAR fonte e o aninhado foram idênticos (`4e78ffe2c067cab4b1cdd57afa670a86cbcad6fe56c01aebc5bb1f6339d1159e`); esse JAR não é o rc.150 publicado no Central. Não houve nova publicação.
+
+Resultado: 3 cenários executados, 2 aprovados, 1 reprovado, zero retries Playwright; cleanup verificado. Proveniência e proteção contra interceptação passaram. A jornada de missões não chegou a produzir recibo funcional aprovado. Dois turnos foram registrados; quatro invocações no primeiro e nenhuma no segundo. O planejamento com mini terminou incompleto (640 tokens de saída), e a segunda tentativa terminou em timeout. As fases de ação declarada e intenção rápida tiveram sucesso. Não houve invocação `live_option_refinement`, portanto este gate não comprova nem refuta a correção específica de linhagem.
+
+A falha visível foi um preview não aplicável com confirmações de descoberta de recursos fora do cenário, sem a ação de reparo esperada pelo teste. Isso não autoriza relaxar o gate, selecionar automaticamente um candidato ou contabilizar sucesso com continuação. Custo completo permanece desconhecido.
+
+### Investigação e próximo corte
+
+A auditoria de código encontrou que `planningModel` e `liveOptionRefinementModel` aplicam os modelos por fase somente quando o provider do pedido é explicitamente OpenAI. Já `AiProviderManagementService.generateJson` resolve depois o provider efetivo, incluindo configuração armazenada e default. Isso permite diferença de política entre um pedido explícito e um pedido que herda provider. A evidência sanitizada deste gate não inclui o request, portanto a omissão do provider nesta execução permanece hipótese a provar por regressão local; não é causa raiz comprovada pela telemetria.
+
+Antes de outro gate pago: reproduzir localmente provider explícito versus herdado, preservar a precedência canônica de configuração do gerenciador e garantir que seleção de modelo por fase use o mesmo provider efetivo. Classificar o ajuste e mapear consumidores antes de editar; não corrigir apenas o frontend ou aumentar retries/timeout para mascarar divergência. Depois, executar uma única prova delimitada, publicar Config rc.151/API rc.49 somente com gate aprovado, e repetir a jornada livre no Render.
+
+Landing #220 consolidou a política de conta e a comparação estrutural da limpeza, mantendo ETag e propriedade. Não alterou a UI publicada. Nenhum modelo configurado no Render foi alterado, inclusive para Astra.

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "praxis.agentic-source-audit/v1",
+  "passed": true,
+  "auditedFiles": [
+    "projects/praxis-ai/src/lib/core/services/praxis-ai.service.ts",
+    "projects/praxis-ai/src/lib/core/services/assistant-turn-orchestrator.service.ts",
+    "projects/praxis-page-builder/src/lib/ai/page-builder-agentic-authoring.service.ts",
+    "projects/praxis-page-builder/src/lib/ai/page-builder-ui-composition-plan.ts",
+    "tools/e2e/playwright/praxis-page-builder-agentic-production-like.playwright.config.ts",
+    "projects/praxis-page-builder/test-dev/e2e/page-builder-agentic-validation.playwright.spec.ts",
+    "projects/praxis-page-builder/test-dev/e2e/page-builder-table-human-authoring.playwright.spec.ts",
+    "scripts/run-page-builder-agentic-authoring-e2e.js"
+  ],
+  "prohibitedBypasses": [
+    "getMockPatch",
+    "extractUserIntent"
+  ]
+}
