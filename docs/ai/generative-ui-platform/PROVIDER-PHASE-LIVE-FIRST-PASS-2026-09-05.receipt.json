@@ -1,0 +1,228 @@
+{
+  "workflowRunId": 34005676687,
+  "workflowUrl": "https://github.com/codexrodrigues/praxis-config-starter/actions/runs/34005676687",
+  "configSha": "e80b93fd2bbd141c811f6ea00d91f212debb1582",
+  "uiSha": "a94360259e8342033a93b6d753ff9717f9bb5425",
+  "quickstartSha": "2b6b50fdc2a8f1c66862a66ac4df848d986bbab3",
+  "metadataSha": "f43d3c384fbcc209c6264b64bf6e5ebbe3c0ea6d",
+  "configuredModel": "gpt-5-mini",
+  "releaseGateOutcome": "passed",
+  "humanTurns": 1,
+  "playwright": {
+    "discovered": 3,
+    "executed": 3,
+    "passed": 3,
+    "skipped": 0,
+    "failed": 0,
+    "flaky": 0,
+    "attempts": 3,
+    "retryAttempts": 0,
+    "tests": [
+      {
+        "title": "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      },
+      {
+        "title": "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      },
+      {
+        "title": "Auditoria live: capabilities reais possuem proveniência governada e não degradada",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      }
+    ],
+    "durationMs": 143769
+  },
+  "cleanupVerified": true,
+  "criticalEndpointMocks": 0,
+  "capabilities": {
+    "source": "registry",
+    "degraded": false,
+    "catalogCount": 24,
+    "chartResourceBinding": true
+  },
+  "dependencyAttestation": {
+    "configStarter": {
+      "artifactId": "praxis-config-starter",
+      "version": "0.1.0-rc.148",
+      "source": "source-checkout",
+      "referenceJarSha256": "cd17bf195eab51631bbcc13f0dd8bb7e936905512aa108d3d342b750ee0de22f",
+      "quickstartNestedJarSha256": "cd17bf195eab51631bbcc13f0dd8bb7e936905512aa108d3d342b750ee0de22f",
+      "quickstartEntry": "BOOT-INF/lib/praxis-config-starter-0.1.0-rc.148.jar",
+      "byteIdentical": true
+    }
+  },
+  "scenarioEvidence": [
+    {
+      "schemaVersion": "praxis.page-builder-agentic-scenario-receipt/v1",
+      "scenarioId": "live-resource-workspace-command",
+      "archetype": "master-detail-command",
+      "outcome": "first-pass",
+      "firstPassFunctional": true,
+      "authoringFirstPass": true,
+      "playwrightRetryAttempts": 0,
+      "interaction": {
+        "initialPromptCount": 1,
+        "totalTurnCount": 1,
+        "clarificationQuickReplyCount": 0,
+        "governedRevisionCount": 0,
+        "correctiveTypedPromptCount": 0,
+        "deterministicRepairCount": 0
+      },
+      "terminal": {
+        "outcome": "applicable",
+        "transport": "stream",
+        "blockingDiagnosticCodes": [],
+        "referencePresent": true,
+        "backendPatchAuthority": true
+      },
+      "apply": {
+        "terminalReferenceMatched": true,
+        "streamIdMatched": true,
+        "resultEventIdMatched": true,
+        "payloadSha256": "cc4b7048f50b2f9ec970ccc6d15b8b75241e58af4dcbcfbdabf10917f8041310",
+        "matchesPersistedPayload": true
+      },
+      "persistence": {
+        "version": 1,
+        "etagPresent": true,
+        "persistedPayloadSha256": "cc4b7048f50b2f9ec970ccc6d15b8b75241e58af4dcbcfbdabf10917f8041310",
+        "reloadPayloadSha256": "cc4b7048f50b2f9ec970ccc6d15b8b75241e58af4dcbcfbdabf10917f8041310",
+        "reloadMatchesPersisted": true,
+        "reloadEtagMatches": true
+      },
+      "functionalAssertions": [
+        "composition.master-visible",
+        "composition.detail-visible",
+        "composition.selection-propagated",
+        "discovery.actions.http-200",
+        "discovery.capabilities.http-200",
+        "command.execute.http-200",
+        "command.duplicate.http-409",
+        "resource.refresh-observed",
+        "persistence.reload-rendered"
+      ],
+      "timingMs": {
+        "firstUsefulStatus": 83094,
+        "firstApplicableTerminal": 83653,
+        "applyCompleted": 86086,
+        "runtimeFunctional": 111173,
+        "reloadCompleted": 119376,
+        "total": 119376
+      }
+    }
+  ],
+  "providerTelemetry": {
+    "scope": "authoring-turns-only",
+    "turns": [
+      {
+        "testOrdinal": 2,
+        "resultOrdinal": 0,
+        "retry": 0,
+        "turnNumber": 1,
+        "telemetry": {
+          "schemaVersion": "praxis-agentic-authoring-provider-telemetry.v1",
+          "invocationCount": 5,
+          "truncated": false,
+          "providerInvocations": [
+            {
+              "phase": "pre_intent_tool_plan",
+              "provider": "openai",
+              "model": "gpt-5-mini-2025-08-07",
+              "transport": "openai-responses-sdk",
+              "status": "failure",
+              "failureKind": "unknown",
+              "responseId": "resp_02aa0501b6da41cf016a9ccd08a83487d2b91e5657b74c60bf",
+              "finishReason": "incomplete",
+              "attempt": 1,
+              "latencyMs": 9383,
+              "inputTokens": 7273,
+              "outputTokens": 640,
+              "cacheReadInputTokens": 6912,
+              "cacheWriteInputTokens": null,
+              "totalTokens": 7913
+            },
+            {
+              "phase": "pre_intent_tool_plan",
+              "provider": "openai",
+              "model": "gpt-5-mini",
+              "transport": null,
+              "status": "failure",
+              "failureKind": "timeout",
+              "responseId": null,
+              "finishReason": null,
+              "attempt": 2,
+              "latencyMs": 3024,
+              "inputTokens": null,
+              "outputTokens": null,
+              "cacheReadInputTokens": null,
+              "cacheWriteInputTokens": null,
+              "totalTokens": null
+            },
+            {
+              "phase": "declared_client_action_intent",
+              "provider": "openai",
+              "model": "gpt-5-mini-2025-08-07",
+              "transport": "openai-responses-sdk",
+              "status": "success",
+              "failureKind": null,
+              "responseId": "resp_0e32193805b0254a016a9ccd34c99887d293d307a628538c20",
+              "finishReason": "completed",
+              "attempt": 1,
+              "latencyMs": 4349,
+              "inputTokens": 309,
+              "outputTokens": 379,
+              "cacheReadInputTokens": 0,
+              "cacheWriteInputTokens": null,
+              "totalTokens": 688
+            },
+            {
+              "phase": "intent_fast",
+              "provider": "openai",
+              "model": "gpt-5-mini",
+              "transport": null,
+              "status": "failure",
+              "failureKind": "timeout",
+              "responseId": null,
+              "finishReason": null,
+              "attempt": 1,
+              "latencyMs": 12030,
+              "inputTokens": null,
+              "outputTokens": null,
+              "cacheReadInputTokens": null,
+              "cacheWriteInputTokens": null,
+              "totalTokens": null
+            },
+            {
+              "phase": "intent_full",
+              "provider": "openai",
+              "model": "gpt-5-mini-2025-08-07",
+              "transport": "openai-responses-sdk",
+              "status": "success",
+              "failureKind": null,
+              "responseId": "resp_07d0d5ea41d6d7da016a9ccd4544a887d2b2b71e81eae1e6f0",
+              "finishReason": "completed",
+              "attempt": 1,
+              "latencyMs": 13312,
+              "inputTokens": 31336,
+              "outputTokens": 1435,
+              "cacheReadInputTokens": 4864,
+              "cacheWriteInputTokens": null,
+              "totalTokens": 32771
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "paidUsageComplete": false,
+  "actualUsd": null,
+  "accountLimitEvidence": "user-attested-not-independently-verified",
+  "observation": "Functional first-pass with five authoring invocations: pre-intent incomplete at 640 output tokens, one internal retry timed out, fast timed out, full succeeded. Worker/lookup cancellation follow-ups are locally validated and are not part of this run SHA."
+}

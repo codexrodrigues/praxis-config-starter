@@ -52,7 +52,7 @@ e serialização de telemetria (1). São 199 testes distintos entre as duas bate
 foram reexecutados. Cobrem cancelamento antes de qualquer HTTP, início, terminal, replay e cancelamento
 do ciclo de stream. Transporte local controlado, sem credenciais ou chamadas pagas.
 
-O gate real permanece pendente nesta revisão inicial. Será uma jornada canônica Page Builder,
+O gate planejado para fechar esta revisão foi uma jornada canônica Page Builder,
 `gpt-5-mini`, no máximo três turnos humanos e zero retries de teste. Não se enfraquece o critério
 first-pass. Limite da conta atestado pelo usuário, sem verificação independente ou valor inventado.
 
@@ -93,3 +93,33 @@ Aderência: `suportado-parcialmente`, corrigida na fronteira de provider, sem co
 anteriores de HTTP/deadline também foram reexecutados nessa bateria. Config #461 foi integrado em
 `6d21f01d5c48d884b666aecd6c6911ce21f02915` e passou CI 34005970368; o complemento de lookup e a
 interrupção da worker não estão no SHA do gate pago 34005676687. Nenhum gate pago adicional foi aberto.
+
+
+## Resultado real: primeira tentativa funcional
+
+[Gate 34005676687](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/34005676687)
+**aprovado**, com 3/3 testes, um pedido humano, zero retries Playwright, zero clarificações/reparos e
+nenhuma interceptação crítica. Nove pós-condições passaram: master/detail visíveis, seleção propagada,
+actions/capabilities HTTP 200, comando HTTP 200, duplicação HTTP 409, refresh e reload. Payload e ETag
+persistidos coincidem com o reload. Cleanup confirmado. Registry 24, sem degradação, RAG 460/460 e pgvector prontos.
+
+A resolução full completou em 13.312 ms, dentro dos mesmos 30 s. Isso é compatível com a correção
+de reasoning, sem provar causalidade isolada a partir de uma única execução. Foram observadas cinco
+invocações: pre-intent incompleto em 9.383 ms com output 640/640; sua segunda tentativa interna expirou
+em 3.024 ms; declared action completou em 4.349 ms; fast expirou em 12.030 ms; full completou em 13.312 ms.
+Portanto zero retries de teste não significa zero repetição interna do provider. Os timeouts agora
+preservam o alias gpt-5-mini; respostas observadas informam gpt-5-mini-2025-08-07.
+
+O primeiro status útil levou 83.094 ms; terminal aplicável 83.653 ms; jornada com reload 119.376 ms.
+O sucesso funcional não encerra a melhoria de latência. Próximo ajuste de eficiência: confrontar o
+schema de orientação com sua capacidade de saída (640 incluindo reasoning) e evitar repetir uma
+resposta incompleta sem corrigir sua causa. Não aumentar timeout de browser ou remover grounding.
+São conhecidos 38.918 tokens de entrada, 2.454 de saída e 11.776 de cache-read das três respostas que
+informaram uso. Dois timeouts não retornaram contadores; custo total e tráfego de embeddings não são
+inferidos desses números.
+
+O [recibo sanitizado](PROVIDER-PHASE-LIVE-FIRST-PASS-2026-09-05.receipt.json) distingue as evidências.
+O JAR Config usado pelo Quickstart é byte-idêntico ao source-checkout e80b93fd, sob coordenada local
+148; isso não é prova do antigo artefato 148 do Maven Central. Os complementos de cancelamento
+#461/#462 exigem sua validação local/CI e entram no próximo artefato publicado. A prova contra esse
+artefato será uma fase pós-publicação separada, não uma repetição exploratória desta jornada.
