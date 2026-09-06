@@ -1,0 +1,14 @@
+{
+  ".jar": {
+    "sha256": "1cbcd54312c0db7cb45aa11ee589dd20e3d7261b20f1f91835df5cce02902242",
+    "sha512": "a5d7dabedbe890bd0a062ce73104a098e32c1140f80f69a5d291dad80f950876c6b0723c5472af0613e6d9e6eaec289168d8fec6c51fc4530d1885d40d3274f4",
+    "size": 6445185,
+    "verified": true
+  },
+  ".pom": {
+    "sha256": "9b47f4c478952c915c364d48bfa891d749ea294a05cfac01c8374adc947bea9a",
+    "sha512": "20ad42f4b45ae1a0f378d6e61b5b2041c3c55b3f86bcad6c4501d54c71d7203c11eb4c4c1b6f7d9a9bf28c4cb81dc5c5f0200e823f616253c35de0ebb7b48279",
+    "size": 5754,
+    "verified": true
+  }
+}

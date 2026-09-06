@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "praxis.page-builder-agentic-gate-evidence-summary/v1",
+  "mode": "smoke",
+  "expectedRuns": 1,
+  "passedRuns": 1,
+  "stable": true,
+  "totals": {
+    "discovered": 3,
+    "passed": 3,
+    "retries": 0,
+    "durationMs": 102217.71
+  },
+  "runs": [
+    {
+      "run": 1,
+      "reportSha256": "6ab1d1de1b8a304df23c0bafc5953d8c1f4e97f3780456e514478a85568d2966",
+      "reportPath": "D:\\a\\praxis-config-starter\\praxis-config-starter\\praxis-config-starter\\artifacts\\page-builder-agentic-e2e\\smoke\\20260906-132025\\playwright-results.json",
+      "durationMs": 102217.71,
+      "discovered": 3,
+      "passed": 3,
+      "retries": 0,
+      "receipts": [
+        {
+          "scenarioId": "live-resource-workspace-command",
+          "firstPassFunctional": true,
+          "totalMs": 87612,
+          "persistedPayloadSha256": "f7a28aff335904d4a5a706ed29fd7b586594b19874249ba8ca89e61fcc97dd17"
+        }
+      ],
+      "runtimeExcellenceReceipts": [],
+      "semanticRefinements": []
+    }
+  ]
+}
