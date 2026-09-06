@@ -1,0 +1,88 @@
+{
+  "workflowRunId": 34000631220,
+  "configSha": "1da64d20e93f40e566d9c9e53b839f90c853883d",
+  "uiSha": "460d1ae172e7f58bd3da6da503141c9380ee5204",
+  "configuredModel": "gpt-5-mini",
+  "outcome": "failed",
+  "humanTurns": null,
+  "maximumHumanTurns": 3,
+  "playwright": {
+    "discovered": 3,
+    "executed": 3,
+    "passed": 2,
+    "skipped": 0,
+    "failed": 1,
+    "flaky": 0,
+    "attempts": 3,
+    "retryAttempts": 0,
+    "tests": [
+      {
+        "title": "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      },
+      {
+        "title": "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
+        "status": "unexpected",
+        "attempts": 1,
+        "retryAttempts": 0
+      },
+      {
+        "title": "Auditoria live: capabilities reais possuem proveniência governada e não degradada",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      }
+    ],
+    "durationMs": 161686
+  },
+  "cleanupVerified": true,
+  "criticalEndpointMocks": 0,
+  "capabilities": {
+    "source": "registry",
+    "degraded": false,
+    "catalogCount": 24,
+    "chartResourceBinding": true
+  },
+  "dependencyAttestation": {
+    "configStarter": {
+      "artifactId": "praxis-config-starter",
+      "version": "0.1.0-rc.148",
+      "source": "source-checkout",
+      "referenceJarSha256": "668972e79079288dfab2fb593a21335170f5903a8de5e8d7af8671524abe8b42",
+      "quickstartNestedJarSha256": "668972e79079288dfab2fb593a21335170f5903a8de5e8d7af8671524abe8b42",
+      "quickstartEntry": "BOOT-INF/lib/praxis-config-starter-0.1.0-rc.148.jar",
+      "byteIdentical": true
+    }
+  },
+  "previewAssertionsPassed": {
+    "layoutPreset": "master-detail-dashboard",
+    "selectedResourcePath": "/api/operations/missoes",
+    "groundingStatus": "verified",
+    "commandDiscoveryItem": true,
+    "endpointMaterializedByAuthoring": false
+  },
+  "applyHttpStatus": 200,
+  "applyPerformed": true,
+  "completeJourneyCertified": false,
+  "firstFailure": "obsolete-save-confirmation-locator",
+  "missingLocator": "page-builder-agentic-status",
+  "canonicalConfirmationLocator": "page-builder-reset-feedback",
+  "notExecutedAfterFailure": [
+    "apply-lineage-and-payload-assertions",
+    "discovered-business-command",
+    "refresh",
+    "reload"
+  ],
+  "providerInvocations": null,
+  "usage": {
+    "complete": false,
+    "totalCostUsd": null,
+    "embeddingsIncluded": false
+  },
+  "evidenceLimitation": "Workflow did not export intermediate preview attachment or provider invocation telemetry because the terminal scenario receipt was absent after the UI assertion failed. Exact turn count and usage are unavailable; no counters reconstructed.",
+  "spendingControl": "user-attested-provider-account-limit",
+  "providerLimitIndependentlyVerified": false,
+  "persistenceReadbackVerified": false
+}

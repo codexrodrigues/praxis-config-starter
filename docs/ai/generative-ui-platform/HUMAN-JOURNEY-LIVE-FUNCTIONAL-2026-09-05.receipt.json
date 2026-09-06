@@ -1,0 +1,136 @@
+{
+  "workflowRunId": 34001578127,
+  "workflowUrl": "https://github.com/codexrodrigues/praxis-config-starter/actions/runs/34001578127",
+  "configSha": "1da64d20e93f40e566d9c9e53b839f90c853883d",
+  "uiSha": "2631efe58bed5f39a38e1bae603fdb4aa1a362a8",
+  "configuredModel": "gpt-5-mini",
+  "functionalOutcome": "eventual-pass",
+  "releaseGateOutcome": "failed",
+  "releaseGateFailure": "Receipt live-resource-workspace-command is not a zero-retry first-pass result.",
+  "humanTurns": 2,
+  "playwright": {
+    "discovered": 3,
+    "executed": 3,
+    "passed": 3,
+    "skipped": 0,
+    "failed": 0,
+    "flaky": 0,
+    "attempts": 3,
+    "retryAttempts": 0,
+    "tests": [
+      {
+        "title": "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      },
+      {
+        "title": "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      },
+      {
+        "title": "Auditoria live: capabilities reais possuem proveniência governada e não degradada",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      }
+    ],
+    "durationMs": 151116
+  },
+  "cleanupVerified": true,
+  "criticalEndpointMocks": 0,
+  "capabilities": {
+    "source": "registry",
+    "degraded": false,
+    "catalogCount": 24,
+    "chartResourceBinding": true
+  },
+  "dependencyAttestation": {
+    "configStarter": {
+      "artifactId": "praxis-config-starter",
+      "version": "0.1.0-rc.148",
+      "source": "source-checkout",
+      "referenceJarSha256": "eb0ffdbe42164996fc15ac6fa2bda46b5a1baa7f3f3a784da99e3e561f2d04e1",
+      "quickstartNestedJarSha256": "eb0ffdbe42164996fc15ac6fa2bda46b5a1baa7f3f3a784da99e3e561f2d04e1",
+      "quickstartEntry": "BOOT-INF/lib/praxis-config-starter-0.1.0-rc.148.jar",
+      "byteIdentical": true
+    }
+  },
+  "scenarioEvidence": [
+    {
+      "schemaVersion": "praxis.page-builder-agentic-scenario-receipt/v1",
+      "scenarioId": "live-resource-workspace-command",
+      "archetype": "master-detail-command",
+      "outcome": "eventual-pass",
+      "firstPassFunctional": false,
+      "authoringFirstPass": false,
+      "playwrightRetryAttempts": 0,
+      "interaction": {
+        "initialPromptCount": 1,
+        "totalTurnCount": 2,
+        "clarificationQuickReplyCount": 1,
+        "governedRevisionCount": 0,
+        "correctiveTypedPromptCount": 0,
+        "deterministicRepairCount": 0
+      },
+      "terminal": {
+        "outcome": "applicable",
+        "transport": "stream",
+        "blockingDiagnosticCodes": [
+          "intent-artifact-unknown",
+          "intent-operation-unknown",
+          "llm-intent-resolution-provider-failed",
+          "resource-candidate-ambiguous",
+          "semantic-intent-confirmation-required"
+        ],
+        "referencePresent": true,
+        "backendPatchAuthority": true
+      },
+      "apply": {
+        "terminalReferenceMatched": true,
+        "streamIdMatched": true,
+        "resultEventIdMatched": true,
+        "payloadSha256": "2f413553bc7f6072d5b815ade7e553d37cf91222d0f0380482af9f7c5a381d1a",
+        "matchesPersistedPayload": true
+      },
+      "persistence": {
+        "version": 1,
+        "etagPresent": true,
+        "persistedPayloadSha256": "2f413553bc7f6072d5b815ade7e553d37cf91222d0f0380482af9f7c5a381d1a",
+        "reloadPayloadSha256": "2f413553bc7f6072d5b815ade7e553d37cf91222d0f0380482af9f7c5a381d1a",
+        "reloadMatchesPersisted": true,
+        "reloadEtagMatches": true
+      },
+      "functionalAssertions": [
+        "composition.master-visible",
+        "composition.detail-visible",
+        "composition.selection-propagated",
+        "discovery.actions.http-200",
+        "discovery.capabilities.http-200",
+        "command.execute.http-200",
+        "command.duplicate.http-409",
+        "resource.refresh-observed",
+        "persistence.reload-rendered"
+      ],
+      "timingMs": {
+        "firstUsefulStatus": 63742,
+        "firstApplicableTerminal": 104648,
+        "applyCompleted": 107829,
+        "runtimeFunctional": 129287,
+        "reloadCompleted": 134976,
+        "total": 134976
+      }
+    }
+  ],
+  "providerInvocations": null,
+  "usage": {
+    "complete": false,
+    "totalCostUsd": null,
+    "embeddingsIncluded": false
+  },
+  "evidenceLimitation": "The scenario receipt records aggregate diagnostic codes across both turns but does not export per-invocation provider metadata or usage. Provider failure cause and exact paid invocation count remain unknown.",
+  "spendingControl": "user-attested-provider-account-limit",
+  "providerLimitIndependentlyVerified": false
+}

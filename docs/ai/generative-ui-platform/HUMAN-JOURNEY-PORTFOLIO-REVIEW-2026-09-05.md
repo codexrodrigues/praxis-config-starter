@@ -11,12 +11,35 @@ Este inventário não certifica “qualquer componente”. Manifesto disponível
 interação determinística no navegador e jornada com LLM real são quatro evidências distintas.
 As frases abaixo são roteiros de avaliação, nunca regras de roteamento de intenção.
 
+## Resultado verificável
+
+- **Seis jornadas browser determinísticas passaram**: criação de formulário, dashboard/drill-down
+  e edição de registro em dois domínios, com dados/fronteiras controlados e componentes reais.
+- **Uma jornada com LLM real completou as pós-condições**, no run `34001578127`: master-detail de
+  missões, apply com lineage, abertura da gaveta de comando por discovery, execução HTTP 200,
+  duplicação HTTP 409, refresh e reload com mesmo payload/ETag. Foram dois turnos, uma quick reply,
+  nenhum prompt corretivo digitado, nenhum reparo determinístico e zero retries Playwright.
+- **Release continua reprovado**: o fluxo real foi `eventual-pass`, não `first-pass`. O histórico
+  inclui falha do provider na resolução semântica inicial. Não remover essa evidência nem afrouxar
+  o validador para publicar. Primeiro status útil em 63,742 s; terminal aplicável em 104,648 s;
+  pós-condições e reload em 134,976 s, conforme o recibo.
+- Config #453/#454 e Angular #509 incorporados; CIs verdes. Landing #214 permanece draft, com CI
+  `34000081735` verde. Não houve release novo do Config nem deploy da Landing nesta revisão.
+- Render foi conferido: API `2.0.0-rc.46`, provider `openai`, modelo `gpt-5-mini`, chave presente,
+  status válido com Origin oficial. Nenhuma troca para Astra.
+
+Próximo corte técnico: preservar/exportar a telemetria sanitizada de cada invocação do primeiro
+turno, identificar a causa da instabilidade e validar a correção localmente antes de outro gate pago.
+O recibo atual não permite distinguir limite de saída, transporte, timeout ou parsing. O sucesso
+funcional já obtido deve ser reaproveitado como evidência, sem novo pagamento apenas para exportá-lo.
+Depois, fechar seleção exata de campos e ampliar as provas livres das operações/nesting do inventário.
+
 ## Plano e mapa de impacto
 
 1. Revalidar a correção de continuidade em `66491255374553730a2ceee49bf30ec6afe9abc0` no gate
    canônico com provider real, três interações humanas no máximo e zero retries Playwright.
 2. Mapear cada pedido ao contrato existente; rever testes, execução HTTP, renderização e negativos.
-3. Reproduzir formulário e dashboard em dois domínios sintéticos, teclado, desktop e narrow.
+3. Reproduzir formulário, dashboard e edição de registro em dois domínios sintéticos, teclado, desktop e narrow.
 4. Registrar as lacunas pelo primeiro owner que perde informação. Só promover release após o
    gate real, sem declarar cobertura universal a partir de uma jornada de missões.
 
@@ -28,7 +51,7 @@ As frases abaixo são roteiros de avaliação, nunca regras de roteamento de int
 | API Quickstart | Host real do gate; Render precisa consumir o artefato publicado correspondente |
 | Landing | Composer livre, preview/apply/readback e browser com libs públicas 9.0.64 |
 | Docs/corpus | Este inventário de evidência; não há novo DTO, endpoint, manifesto ou DSL |
-| Validação | Gate pago canônico separado de quatro testes browser determinísticos; análise de source focal |
+| Validação | Gate pago canônico separado de seis testes browser determinísticos; análise de source focal |
 | Breaking change | Nenhum neste registro de revisão |
 
 ## Inventário de aderência
@@ -106,6 +129,24 @@ público a regenerar. A evidência não identifica a causa do run `33999199428` 
 Validação focal: 31 testes passaram no adapter, classificador, métricas e integração
 de fallback/cancelamento; duas regressões vermelhas antes da correção ficaram verdes.
 
+### P1 — Gate live consultava confirmação de salvamento removida
+
+O run `34000631220`, Config `1da64d20e93f40e566d9c9e53b839f90c853883d`, passou nas asserções
+semânticas do preview master-detail de missões, grounding e command discovery; `page-apply`
+retornou HTTP 200. Depois falhou procurando `page-builder-agentic-status`, ausente no DOM.
+O host já renderiza a confirmação persistente em `page-builder-reset-feedback`, com teste próprio.
+O helper live foi corrigido para essa superfície. São 13 testes do host e 17 da auditoria de source
+passando, TypeScript e descoberta Playwright aprovados; as demais asserções não foram afrouxadas.
+
+Classificação: `local-pequena` no verificador Angular; `ja-suportado-mal-nomeado-ou-mal-materializado`.
+Nenhuma mudança de lib pública, npm, modelo ou endpoint. Nesse run, lineage/payload pós-save, comando, refresh e reload ficaram após a asserção falhada.
+O run posterior `34001578127` comprovou essas pós-condições, mas não passou no critério first-pass.
+O workflow publicou apenas result/source audit porque faltou o recibo terminal. Por isso, contagem
+exata de turnos, invocações e custo desse run continuam desconhecidos (máximo de três turnos e
+zero retries). Preservar a telemetria disponível quando um teste falha antes do recibo terminal é
+uma lacuna operacional do coletor a resolver; não reconstruir contadores nem publicar payloads crus.
+Recibo sanitizado: `HUMAN-JOURNEY-LIVE-SAVE-REVALIDATION-2026-09-05.receipt.json`.
+
 ### P1 — Seleção de campos perdida na criação de formulário
 
 Evidência de código:
@@ -125,8 +166,12 @@ A revisão não alterou esse fluxo nem certificou subset de campos.
 
 ### P1 — Prova de edição de entidade não equivale a formulário de criação
 
-O teste de formulário executado nesta revisão envia POST para criar um registro sintético.
-Ele não prova PUT/PATCH, identificação de pessoa por nome, controle de concorrência nem prefill.
+O teste de criação de formulário envia POST para criar um registro sintético. A suite adicional
+`decision-playground-free-runtime.spec.ts` passou em staff e shipments: preservação de três filtros
+após dois refinamentos e reload, abertura da gaveta pelo botão do registro, prefill, alteração de
+`pending`, PUT do mesmo id e nova leitura removendo a linha do recorte. As fronteiras semânticas,
+HTTP e de persistência são controladas; a UI e os planos compilados são reais. Essa prova não
+certifica identificação livre de pessoa por nome, alteração de salário por conversa nem concorrência.
 O prompt sistêmico já exige tratar seleção e escrita separadamente. A jornada deve observar a
 operação existente em Metadata/CRUD antes de dizer que alterou a pessoa ou seu salário.
 
@@ -141,7 +186,8 @@ de uma surface/rota com URL inventada ou handler local ad hoc.
 
 Capturas de 1280x720 e 390x844: formulário e modal são utilizáveis; controles de fechar e seleção
 ficam dentro da viewport. O modal de drill-down apresenta cartões com muito espaço vazio e
-paginação em inglês (`Items per page`) em uma jornada portuguesa. Classificação:
+paginação em inglês (`Items per page`) em uma jornada portuguesa. A gaveta de edição também
+exibe `Record being edited` em inglês; não confundir isso com labels sintéticos do domínio. Classificação:
 `ja-suportado-so-ux`; investigar owner de Table/list presentation/i18n, não CSS corretivo da landing.
 A navegação por Tab/Enter no composer e formulário passou; Tab permanece no modal e Escape fecha.
 Seleção de pontos do gráfico por teclado e leitor de tela continuam sem certificação.
@@ -151,17 +197,28 @@ Seleção de pontos do gráfico por teclado e leitor de tela continuam sem certi
 - Angular público 9.0.64 e Landing `78dde921f44377f1ee0b590ac6790a16dec39933`.
 - Browser oficial `http://127.0.0.1:4301/decision-playground`, uma worker, zero retries.
 - `decision-playground-free-portfolio.spec.ts`: **4/4 passaram**, 1,3 minuto.
+- `decision-playground-free-runtime.spec.ts`: **2/2 passaram**, 12,1 segundos; edição via gaveta,
+  prefill, mutation, readback e preservação de predicados após refinamentos e reload.
 - Dois domínios sintéticos: staff e shipments; formulários, opção remota, envio, dashboard,
   filtro pela categoria clicada, lista no modal, reload, teclado e narrow.
 - Provider, metadata, HTTP de domínio e persistência são controlados nessa suite; compilação Java
-  e componentes Angular são reais. Não são quatro jornadas live.
+  e componentes Angular são reais. Não são seis jornadas live.
 - Capturas e log locais em `../human-review-browser` e `../human-review-browser.log` relativos à
-  raiz do checkout Landing; dados sintéticos, sem secrets.
+  raiz do checkout Landing; dados sintéticos, sem secrets. Edição adicional em
+  `../human-review-runtime-browser` e `../human-review-runtime-browser.log`. Servidor local encerrado.
 - Revalidação live canônica: [33999199428](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/33999199428).
   **2/3 testes passaram, 1 falhou**, três turnos humanos e zero retries; apply não executado e
   cleanup verificado. Recibo sanitizado em `HUMAN-JOURNEY-LIVE-REVALIDATION-2026-09-05.receipt.json`.
   Tokens conhecidos: 309 de entrada e 110 de saída. Total/custo desconhecidos; outras chamadas
   falharam sem counters e embeddings não entram nesses números.
+
+- Revalidação com o seletor corrigido: [34001578127](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/34001578127).
+  **3/3 testes passaram**, duas interações, zero retries, cleanup verificado. As nove pós-condições
+  funcionais passaram; o gate de evidência reprovou `eventual-pass`. Recibo sanitizado em
+  `HUMAN-JOURNEY-LIVE-FUNCTIONAL-2026-09-05.receipt.json`. Invocações/usage/custo não exportados;
+  `blockingDiagnosticCodes` agrega o histórico dos dois turnos, não um bloqueio do terminal aplicável.
+- Snapshot de preços atualizado em UTC para `provider-pricing-snapshot.free-authoring.2026-09-06.json`,
+  consultando a fonte oficial já declarada no contrato; mesmos valores, validador do canary aprovado.
 
 ## Artefatos derivados
 
