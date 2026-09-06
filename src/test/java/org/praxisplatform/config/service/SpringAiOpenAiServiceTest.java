@@ -407,10 +407,22 @@ class SpringAiOpenAiServiceTest {
         SpringAiOpenAiService service = service(server, "gpt-4o-mini");
         server.start();
         try {
+            AiProviderInvocationTrace trace =
+                    new AiProviderInvocationTrace("intent_full", 1, "openai", "gpt-4o-mini");
             AiProviderCallException exception =
-                    assertThrows(AiProviderCallException.class, () -> service.generateText("ping"));
+                    assertThrows(AiProviderCallException.class, () -> service.generateText("ping", AiCallConfig.builder()
+                            .invocationTrace(trace)
+                            .build()));
 
             assertEquals(AiProviderCallException.Kind.UNKNOWN, exception.getKind());
+            AiProviderInvocationTelemetry telemetry = trace.snapshot();
+            assertEquals("incomplete", telemetry.finishReason());
+            assertEquals("resp-safe-123", telemetry.responseId());
+            assertEquals("gpt-5.4-mini-2026-06-01", telemetry.model());
+            assertEquals(120, telemetry.inputTokens());
+            assertEquals(18, telemetry.outputTokens());
+            assertEquals(80, telemetry.cacheReadInputTokens());
+            assertEquals(138, telemetry.totalTokens());
         } finally {
             service.closeDefaultClient();
             server.stop(0);
@@ -596,11 +608,23 @@ class SpringAiOpenAiServiceTest {
         SpringAiOpenAiService service = service(server, "gpt-4o-mini");
         server.start();
         try {
+            AiProviderInvocationTrace trace =
+                    new AiProviderInvocationTrace("turn_stream", 1, "openai", "gpt-4o-mini");
             AiProviderStreamException exception = assertThrows(
                     AiProviderStreamException.class,
-                    () -> service.generateTextStream("ping", null, ignored -> {}, () -> false));
+                    () -> service.generateTextStream("ping", AiCallConfig.builder()
+                            .invocationTrace(trace)
+                            .build(), ignored -> {}, () -> false));
 
             assertEquals(AiProviderStreamException.Kind.UNKNOWN, exception.getKind());
+            AiProviderInvocationTelemetry telemetry = trace.snapshot();
+            assertEquals("completed", telemetry.finishReason());
+            assertEquals("resp-safe-123", telemetry.responseId());
+            assertEquals("gpt-5.4-mini-2026-06-01", telemetry.model());
+            assertEquals(120, telemetry.inputTokens());
+            assertEquals(18, telemetry.outputTokens());
+            assertEquals(80, telemetry.cacheReadInputTokens());
+            assertEquals(138, telemetry.totalTokens());
         } finally {
             service.closeDefaultClient();
             server.stop(0);

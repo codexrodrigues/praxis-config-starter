@@ -88,6 +88,22 @@ identidade real na telemetria e modelo configurado na requisição. Sem inferir 
 modelo/provider diferente, correspondência ambígua e preço inválido continuam bloqueados.
 **12 testes Node passaram**, TypeScript do canary passou. O canary pago da Landing não foi executado.
 
+### P1 — Resposta rejeitada perdia telemetria já recebida
+
+Defeito independente reproduzido no adapter `SpringAiOpenAiService`: a validação de conteúdo
+precedia `captureInvocationMetadata` tanto em Responses quanto no terminal de streaming. Uma
+resposta incompleta ou um terminal sem conteúdo lançava a exceção esperada, mas descartava
+modelo, response ID, finish reason e usage já retornados pelo provider. Duas regressões negativas
+reproduziram `finishReason=null` antes da correção.
+
+Classificação da mudança: `local-pequena`, sem alteração pública. Aderência:
+`ja-suportado-mal-nomeado-ou-mal-materializado`; `AiProviderInvocationTrace.providerResponse`
+já preserva esses dados separadamente de sucesso/falha. A captura agora precede a rejeição,
+que continua obrigatória. Timeouts sem resposta permanecem sem usage; nenhum contador é estimado.
+Owner: Config provider adapter; consumidores: traces de authoring e seus verificadores operacionais.
+Sem mudança de modelo, timeout, retry, DTO, preços, manifest ou endpoint. Não há artefato derivado
+público a regenerar. A evidência não identifica a causa do run `33999199428` retroativamente.
+
 ### P1 — Seleção de campos perdida na criação de formulário
 
 Evidência de código:

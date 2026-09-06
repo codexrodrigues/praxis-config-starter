@@ -298,8 +298,9 @@ public class SpringAiOpenAiService implements AiProvider {
                         future.get(Math.max(1, resolvedTimeoutSeconds), TimeUnit.SECONDS)) {
                     response = projectResponse(rawResponse);
                 }
-                validateCompletedResponse(response);
+                // A rejected provider response may still carry billable usage and its actual model.
                 captureInvocationMetadata(config, response);
+                validateCompletedResponse(response);
                 return response;
             } catch (TimeoutException exception) {
                 future.cancel(true);
@@ -430,8 +431,9 @@ public class SpringAiOpenAiService implements AiProvider {
                         PROVIDER,
                         new IllegalStateException("OpenAI stream ended without a terminal response.", exception));
             }
-            validateCompletedStreamResponse(response);
+            // Preserve terminal evidence even when its content cannot be accepted as a result.
             captureInvocationMetadata(config, response);
+            validateCompletedStreamResponse(response);
             String accumulated = text.toString();
             return accumulated.isBlank() ? extractResponseText(response) : accumulated;
         } catch (CancellationException exception) {
