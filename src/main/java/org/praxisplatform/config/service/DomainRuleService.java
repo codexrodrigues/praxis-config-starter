@@ -16,6 +16,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -75,6 +76,9 @@ public class DomainRuleService {
     private static final String REACTIVE_DETERMINATION_RULE_ID = "backend-reactive-determination";
     private static final String REACTIVE_DETERMINATION_SCHEMA_VERSION =
             "praxis.backend-reactive-determination.v1";
+    private static final String COLOR_PALETTE_RULE_TYPE = "design_token_palette";
+    private static final String COLOR_PALETTE_TARGET_LAYER = "design_token_catalog";
+    private static final String COLOR_PALETTE_ARTIFACT_TYPE = "governed-color-palette";
     private static final int MAX_REACTIVE_DETERMINATION_BINDINGS = 64;
     private static final Pattern STABLE_OPERATION_ID =
             Pattern.compile("^[A-Za-z][A-Za-z0-9._:-]{0,254}$");
@@ -99,6 +103,7 @@ public class DomainRuleService {
     private final DomainRuleDefinitionFingerprint definitionFingerprint;
     private final ObjectMapper objectMapper;
     private final ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGateProvider;
+    private final GovernedColorPaletteContractValidator governedColorPaletteValidator;
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleIntakeResponse intake(
@@ -169,6 +174,7 @@ public class DomainRuleService {
                 persisted.ruleType(),
                 persisted.id(),
                 persisted.ruleKey(),
+                persisted.version(),
                 predictedMaterializations);
         ArrayNode requiredApprovals = buildRequiredApprovals(persisted.governance());
         ArrayNode warnings = buildWarnings(
@@ -507,6 +513,7 @@ public class DomainRuleService {
                 ruleType,
                 ruleDefinitionId,
                 ruleKey,
+                persistedDefinition != null ? persistedDefinition.getVersion() : null,
                 predictedMaterializations);
         ArrayNode requiredApprovals = buildRequiredApprovals(governance);
         if (persistedDefinition != null && isApprovalSatisfiedDefinitionStatus(persistedDefinition.getStatus())) {
@@ -731,6 +738,13 @@ public class DomainRuleService {
                 request.targetLayer(),
                 request.targetArtifactType(),
                 request.targetArtifactKey());
+        if (isGovernedColorPaletteTarget(
+                request.targetLayer(),
+                request.targetArtifactType())
+                && !COLOR_PALETTE_RULE_TYPE.equals(definition.getRuleType())) {
+            throw new ConfigurationIngestionException(
+                    "Governed color palette materialization requires ruleType=design_token_palette");
+        }
         String status = requireAllowedStatus(
                 normalizeOrDefault(request.status(), "draft"),
                 "status",
@@ -902,6 +916,7 @@ public class DomainRuleService {
             String ruleType,
             UUID currentDefinitionId,
             String currentRuleKey,
+            Integer currentVersion,
             ArrayNode predictedMaterializations) {
         ArrayNode coverage = objectMapper.createArrayNode();
         List<DomainRuleDefinition> candidates = findCoverageCandidates(tenantId, environment, resourceKey);
@@ -916,6 +931,35 @@ public class DomainRuleService {
                     && StringUtils.hasText(currentRuleKey)
                     && currentRuleKey.equals(candidate.getRuleKey())) {
                 continue;
+            }
+            // A reviewed higher version of the same palette replaces its previous head.
+            // Competing decisions and attempts to publish older versions still require coverage review.
+            if (COLOR_PALETTE_RULE_TYPE.equals(ruleType)
+                    && currentDefinitionId != null
+                    && Objects.equals(currentRuleKey, candidate.getRuleKey())
+                    && currentVersion != null && candidate.getVersion() != null
+                    && currentVersion > candidate.getVersion()
+                    && predictedMaterializations.size() == 1
+                    && isGovernedColorPaletteTarget(
+                            predictedMaterializations.get(0).path("targetLayer").asText(),
+                            predictedMaterializations.get(0).path("targetArtifactType").asText())
+                    && Objects.equals(
+                            predictedMaterializations.get(0).path("targetArtifactKey").asText(),
+                            deriveColorPaletteKey(candidate.getResourceKey(), read(candidate.getParameters())))) {
+                continue;
+            }
+            if (COLOR_PALETTE_RULE_TYPE.equals(ruleType)
+                    && predictedMaterializations.size() == 1
+                    && isGovernedColorPaletteTarget(
+                            predictedMaterializations.get(0).path("targetLayer").asText(),
+                            predictedMaterializations.get(0).path("targetArtifactType").asText())) {
+                String candidatePaletteKey = explicitColorPaletteKey(read(candidate.getParameters()));
+                if (StringUtils.hasText(candidatePaletteKey)
+                        && !Objects.equals(
+                                predictedMaterializations.get(0).path("targetArtifactKey").asText(),
+                                candidatePaletteKey)) {
+                    continue;
+                }
             }
             if (usesOnlyReactiveDeterminationTargets(predictedMaterializations)
                     && hasDisjointReactiveDeterminationTargets(
@@ -1070,6 +1114,25 @@ public class DomainRuleService {
             target.put("operation", recommendedOperation != null ? recommendedOperation : "rule.review");
         }
 
+        if (!containsMaterializationTarget(
+                targets,
+                COLOR_PALETTE_TARGET_LAYER,
+                COLOR_PALETTE_ARTIFACT_TYPE)
+                && COLOR_PALETTE_RULE_TYPE.equals(ruleType)) {
+            ObjectNode target = targets.addObject();
+            target.put("targetLayer", COLOR_PALETTE_TARGET_LAYER);
+            target.put("targetArtifactType", COLOR_PALETTE_ARTIFACT_TYPE);
+            String paletteKey = deriveColorPaletteKey(resourceKey, params);
+            target.put("targetArtifactKey", paletteKey);
+            target.put("operation", "palette.publish");
+            JsonNode authoredPalette = params != null && params.path("palette").isObject()
+                    ? params.path("palette")
+                    : params;
+            GovernedColorPaletteContractValidator.Result validation =
+                    governedColorPaletteValidator.validate(paletteKey, authoredPalette);
+            target.set("validation", objectMapper.valueToTree(validation.validation()));
+        }
+
         if (targets.isEmpty()) {
             ObjectNode target = targets.addObject();
             target.put("targetLayer", "shared_rule_review");
@@ -1155,6 +1218,7 @@ public class DomainRuleService {
             case "workflow_action" -> "workflow_action_policy.review";
             case "approval_policy" -> "approval_policy.review";
             case BACKEND_DETERMINATION_TARGET_LAYER -> "reactive_determination.review";
+            case COLOR_PALETTE_TARGET_LAYER -> "palette.publish";
             case "form_config" -> "rule.review";
             default -> "governance.review";
         };
@@ -1190,6 +1254,30 @@ public class DomainRuleService {
         return resourceKey;
     }
 
+    private String deriveColorPaletteKey(String resourceKey, JsonNode parameters) {
+        String paletteKey = explicitColorPaletteKey(parameters);
+        return StringUtils.hasText(paletteKey) ? paletteKey : resourceKey;
+    }
+
+    private String explicitColorPaletteKey(JsonNode parameters) {
+        String paletteKey = parameters != null && parameters.isObject()
+                ? normalize(parameters.path("paletteKey").asText(null))
+                : null;
+        if (!StringUtils.hasText(paletteKey)
+                && parameters != null
+                && parameters.path("palette").isObject()) {
+            paletteKey = normalize(parameters.path("palette").path("paletteKey").asText(null));
+        }
+        return paletteKey;
+    }
+
+    private boolean isGovernedColorPaletteTarget(
+            String targetLayer,
+            String targetArtifactType) {
+        return COLOR_PALETTE_TARGET_LAYER.equals(normalize(targetLayer))
+                && COLOR_PALETTE_ARTIFACT_TYPE.equals(normalize(targetArtifactType));
+    }
+
     private JsonNode deriveMaterializedPayload(
             DomainRuleDefinition definition,
             DomainRuleMaterializationRequest request) {
@@ -1201,7 +1289,23 @@ public class DomainRuleService {
             return buildReactiveDeterminationMaterializedPayload(definition, request.targetArtifactKey());
         }
         if (request.materializedPayload() != null && !request.materializedPayload().isNull()) {
+            if (isGovernedColorPaletteTarget(
+                    request.targetLayer(),
+                    request.targetArtifactType())) {
+                return validateGovernedColorPalettePayload(
+                        request.targetArtifactKey(),
+                        request.materializedPayload());
+            }
             return request.materializedPayload();
+        }
+        if (isGovernedColorPaletteTarget(
+                request.targetLayer(),
+                request.targetArtifactType())
+                && definition != null
+                && COLOR_PALETTE_RULE_TYPE.equals(definition.getRuleType())) {
+            return buildGovernedColorPaletteMaterializedPayload(
+                    definition,
+                    request.targetArtifactKey());
         }
         if ("option_source".equals(request.targetLayer())
                 && "resource-option-source".equals(request.targetArtifactType())
@@ -1234,6 +1338,37 @@ public class DomainRuleService {
             return buildVisualGuidanceMaterializedPayload(definition);
         }
         return objectMapper.createObjectNode();
+    }
+
+    private ObjectNode buildGovernedColorPaletteMaterializedPayload(
+            DomainRuleDefinition definition,
+            String targetArtifactKey) {
+        JsonNode parameters = read(definition.getParameters());
+        JsonNode authoredPalette = parameters != null && parameters.path("palette").isObject()
+                ? parameters.path("palette")
+                : parameters;
+        if (authoredPalette == null || !authoredPalette.isObject()) {
+            throw new ConfigurationIngestionException(
+                    "Design token palette materialization requires parameters.palette");
+        }
+        ObjectNode payload = authoredPalette.deepCopy();
+        if (!StringUtils.hasText(payload.path("paletteKey").asText(null))) {
+            payload.put("paletteKey", targetArtifactKey);
+        }
+        return validateGovernedColorPalettePayload(targetArtifactKey, payload);
+    }
+
+    private ObjectNode validateGovernedColorPalettePayload(
+            String targetArtifactKey,
+            JsonNode payload) {
+        GovernedColorPaletteContractValidator.Result result =
+                governedColorPaletteValidator.validate(targetArtifactKey, payload);
+        if (!result.validation().valid()) {
+            throw new ConfigurationIngestionException(
+                    "Governed color palette is invalid: "
+                            + String.join("; ", result.validation().errors()));
+        }
+        return payload.deepCopy();
     }
 
     private ObjectNode buildVisualGuidanceMaterializedPayload(DomainRuleDefinition definition) {
@@ -2026,6 +2161,7 @@ public class DomainRuleService {
         if (isBackendValidationRuleType(ruleType)
                 || isWorkflowActionRuleType(ruleType)
                 || isApprovalPolicyRuleType(ruleType)
+                || COLOR_PALETTE_RULE_TYPE.equals(ruleType)
                 || "visual_guidance".equals(ruleType)
                 || "form_rule".equals(ruleType)) {
             return true;
@@ -2531,6 +2667,17 @@ public class DomainRuleService {
                     environment,
                     materializationOutcomes);
         }
+        if (isGovernedColorPaletteTarget(targetLayer, targetArtifactType)
+                && COLOR_PALETTE_RULE_TYPE.equals(definition.getRuleType())) {
+            return createGovernedColorPaletteMaterialization(
+                    definition,
+                    targetLayer,
+                    targetArtifactType,
+                    targetArtifactKey,
+                    tenantId,
+                    environment,
+                    materializationOutcomes);
+        }
         if (isReactiveDeterminationCoordinate(targetLayer, targetArtifactType)) {
             requireReactiveDeterminationTargetContract(
                     definition,
@@ -2713,6 +2860,30 @@ public class DomainRuleService {
                 materializationOutcomes);
     }
 
+    private DomainRuleMaterialization createGovernedColorPaletteMaterialization(
+            DomainRuleDefinition definition,
+            String targetLayer,
+            String targetArtifactType,
+            String targetArtifactKey,
+            String tenantId,
+            String environment,
+            ArrayNode materializationOutcomes) {
+        ObjectNode payload = buildGovernedColorPaletteMaterializedPayload(
+                definition,
+                targetArtifactKey);
+        return createOrReuseDerivedMaterialization(
+                definition,
+                targetLayer,
+                targetArtifactType,
+                targetArtifactKey,
+                "/",
+                COLOR_PALETTE_ARTIFACT_TYPE,
+                payload,
+                tenantId,
+                environment,
+                materializationOutcomes);
+    }
+
     private DomainRuleMaterialization createOrReuseDerivedMaterialization(
             DomainRuleDefinition definition,
             String targetLayer,
@@ -2777,6 +2948,11 @@ public class DomainRuleService {
             DomainRuleDefinition definition,
             String targetLayer,
             String targetArtifactKey) {
+        if (COLOR_PALETTE_RULE_TYPE.equals(definition.getRuleType())
+                && COLOR_PALETTE_TARGET_LAYER.equals(targetLayer)) {
+            return definition.getRuleKey() + ":v" + definition.getVersion()
+                    + ":" + targetLayer + ":" + targetArtifactKey;
+        }
         return definition.getRuleKey() + ":" + targetLayer + ":" + targetArtifactKey;
     }
 

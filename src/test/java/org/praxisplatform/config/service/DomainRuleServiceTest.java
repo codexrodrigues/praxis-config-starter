@@ -4155,6 +4155,94 @@ class DomainRuleServiceTest {
                 .build();
     }
 
+    @Test
+    void predictsCanonicalGovernedColorPaletteMaterialization() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository, eventRepository);
+
+        var response = service.simulate(
+                new DomainRuleSimulationRequest(
+                        null,
+                        "corporate.status.palette",
+                        "design_token_palette",
+                        "design-system",
+                        "corporate.colors",
+                        "praxis-config-starter",
+                        objectMapper.readTree("""
+                                { "summary": "Paleta corporativa de estados" }
+                                """),
+                        objectMapper.readTree("""
+                                {
+                                  "palette": {
+                                    "paletteKey": "corporate.status",
+                                    "displayName": "Corporate status",
+                                    "familyKey": "corporate",
+                                    "variant": {"key": "light", "displayName": "Light"},
+                                    "entries": [{
+                                      "tokenId": "status.approved",
+                                      "displayName": "Approved",
+                                      "aliases": [],
+                                      "semanticRole": "success",
+                                      "cssReference": "var(--status-approved)",
+                                      "fallback": "#116329",
+                                      "purposes": ["state"]
+                                    }]
+                                  }
+                                }
+                                """),
+                        null,
+                        objectMapper.readTree("""
+                                { "requiredApprovals": ["design-system-owner"] }
+                                """)),
+                "tenant-a",
+                "dev");
+
+        assertThat(response.predictedMaterializations()).hasSize(1);
+        assertThat(response.predictedMaterializations().get(0).path("targetLayer").asText())
+                .isEqualTo("design_token_catalog");
+        assertThat(response.predictedMaterializations().get(0).path("targetArtifactType").asText())
+                .isEqualTo("governed-color-palette");
+        assertThat(response.predictedMaterializations().get(0).path("targetArtifactKey").asText())
+                .isEqualTo("corporate.status");
+        assertThat(response.predictedMaterializations().get(0).path("operation").asText())
+                .isEqualTo("palette.publish");
+        assertThat(response.predictedMaterializations().get(0).path("validation").path("valid").asBoolean())
+                .isTrue();
+        assertThat(response.explainability().path("decisionDiagnostics").path("authoringMode").asText())
+                .isEqualTo("governed");
+    }
+
+    @Test
+    void paletteCoverageDistinguishesVersionReplacementFromAnotherPaletteTarget() {
+        var definitions = mock(DomainRuleDefinitionRepository.class);
+        var service = service(definitions, mock(DomainRuleMaterializationRepository.class), mock(DomainRuleEventRepository.class));
+        var current = DomainRuleDefinition.builder().id(UUID.randomUUID())
+                .tenantId("tenant-a").environment("dev").ruleKey("palette.main").version(2)
+                .ruleType("design_token_palette").status("approved").resourceKey("colors")
+                .parameters("{\"paletteKey\":\"main\"}").definition("{}").governance("{}").build();
+        var previous = DomainRuleDefinition.builder().id(UUID.randomUUID())
+                .tenantId("tenant-a").environment("dev").ruleKey("palette.main").version(1)
+                .ruleType("design_token_palette").status("active").resourceKey("colors")
+                .parameters("{\"paletteKey\":\"main\"}").definition("{}").build();
+        when(definitions.findById(current.getId())).thenReturn(Optional.of(current));
+        when(definitions.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
+                "tenant-a", "dev", "colors", List.of("approved", "active"))).thenReturn(List.of(previous));
+        var request = new DomainRuleSimulationRequest(current.getId(), null, null, null, null, null, null, null, null, null);
+        assertThat(service.simulate(request, "tenant-a", "dev").existingCoverage()).isEmpty();
+        previous.setRuleKey("another.decision");
+        assertThat(service.simulate(request, "tenant-a", "dev").existingCoverage()).hasSize(1);
+        previous.setRuleKey("palette.main");
+        previous.setVersion(3);
+        assertThat(service.simulate(request, "tenant-a", "dev").existingCoverage()).hasSize(1);
+        previous.setVersion(1);
+        previous.setParameters("{\"paletteKey\":\"other-target\"}");
+        assertThat(service.simulate(request, "tenant-a", "dev").existingCoverage()).isEmpty();
+        previous.setParameters("{}");
+        assertThat(service.simulate(request, "tenant-a", "dev").existingCoverage()).hasSize(1);
+    }
+
     private org.praxisplatform.config.dto.DomainRuleMaterializationResponse materializationFor(
             org.praxisplatform.config.dto.DomainRulePublicationResponse response,
             String targetLayer) {
@@ -4209,7 +4297,8 @@ class DomainRuleServiceTest {
                 approvalRepository,
                 new DomainRuleDefinitionFingerprint(objectMapper),
                 objectMapper,
-                provider);
+                provider,
+                new GovernedColorPaletteContractValidator(objectMapper));
     }
 
     private DomainRuleGovernancePrincipal principal(String actorRef) {
