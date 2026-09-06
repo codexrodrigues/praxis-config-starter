@@ -285,13 +285,30 @@ public class SpringAiOpenAiService implements AiProvider {
             PreparedSchema preparedSchema,
             boolean jsonMode) {
         int resolvedTimeoutSeconds = resolveTimeoutSeconds(config);
+        Supplier<Boolean> cancellationRequested = AiStreamExecutionContextHolder.cancellationRequested();
+        AtomicBoolean abortRequested = new AtomicBoolean(false);
+        AtomicReference<CompletableFuture<HttpResponseFor<Response>>> futureRef = new AtomicReference<>();
+        AiStreamExecutionContextHolder.AbortRegistration registration =
+                AiStreamExecutionContextHolder.registerAbortAction(() -> {
+                    abortRequested.set(true);
+                    CompletableFuture<?> pending = futureRef.get();
+                    if (pending != null) pending.cancel(true);
+                });
         try (ClientLease lease = acquireClient(config)) {
+            if (abortRequested.get() || isCancelled(cancellationRequested)) {
+                throw new CancellationException("OpenAI call cancelled before start.");
+            }
             ResponseCreateParams params = buildParams(prompt, config, preparedSchema, jsonMode);
             CompletableFuture<HttpResponseFor<Response>> future = lease.client()
                     .async()
                     .responses()
                     .withRawResponse()
                     .create(params);
+            futureRef.set(future);
+            if (abortRequested.get() || isCancelled(cancellationRequested)) {
+                future.cancel(true);
+                throw new CancellationException("OpenAI call cancelled before response.");
+            }
             try {
                 OpenAiResponseProjection response;
                 try (HttpResponseFor<Response> rawResponse =
@@ -305,13 +322,21 @@ public class SpringAiOpenAiService implements AiProvider {
             } catch (TimeoutException exception) {
                 future.cancel(true);
                 throw AiProviderCallException.timeout(PROVIDER, exception);
+            } catch (InterruptedException exception) {
+                future.cancel(true);
+                Thread.currentThread().interrupt();
+                throw new CancellationException("OpenAI call interrupted.");
             } catch (ExecutionException exception) {
                 throw classifyCallFailure(unwrap(exception));
             }
-        } catch (AiProviderCallException exception) {
+        } catch (CancellationException | AiProviderCallException exception) {
             throw exception;
         } catch (Exception exception) {
             throw classifyCallFailure(exception);
+        } finally {
+            registration.close();
+            CompletableFuture<?> pending = futureRef.getAndSet(null);
+            if (pending != null && !pending.isDone()) pending.cancel(true);
         }
     }
 
@@ -457,6 +482,10 @@ public class SpringAiOpenAiService implements AiProvider {
             PreparedSchema preparedSchema,
             boolean jsonMode) {
         String resolvedModel = resolveModel(config);
+        if (config != null && config.getInvocationTrace() != null) {
+            // Preserve actual adapter selection even if no response/usage arrives before timeout.
+            config.getInvocationTrace().providerSelected(PROVIDER, resolvedModel);
+        }
         int resolvedMaxTokens = resolveMaxTokens(config);
         boolean explicitMaxTokens = config != null && config.getMaxTokens() != null;
         if (jsonMode && requiresReasoningTokenBudget(resolvedModel) && !explicitMaxTokens) {
@@ -471,7 +500,7 @@ public class SpringAiOpenAiService implements AiProvider {
         if (!usesFixedDefaultTemperature(resolvedModel)) {
             builder.temperature(resolveTemperature(config));
         }
-        reasoningEffort(resolvedModel, resolvedMaxTokens)
+        reasoningEffort(resolvedModel, resolvedMaxTokens, config)
                 .ifPresent(effort -> builder.reasoning(Reasoning.builder().effort(effort).build()));
         if (jsonMode) {
             builder.text(buildTextConfig(preparedSchema));
@@ -818,8 +847,12 @@ public class SpringAiOpenAiService implements AiProvider {
         }
     }
 
-    private Optional<ReasoningEffort> reasoningEffort(String modelName, int maxOutputTokens) {
-        if (!supportsCompactReasoningEffort(modelName) || maxOutputTokens > 2048) {
+    private Optional<ReasoningEffort> reasoningEffort(String modelName, int maxOutputTokens, AiCallConfig config) {
+        boolean agenticAuthoring = config != null
+                && config.getExecutionProfile() == AiExecutionProfile.AGENTIC_AUTHORING;
+        // Output capacity and reasoning effort are independent. A larger authoring decision must
+        // not silently inherit a deeper provider default while keeping the same phase deadline.
+        if (!supportsCompactReasoningEffort(modelName) || (!agenticAuthoring && maxOutputTokens > 2048)) {
             return Optional.empty();
         }
         if (usesLightReasoningProfile(modelName)) {

@@ -141,3 +141,15 @@ A typed `AiProviderCallException` owns the failure category even when an SDK cau
 contradictory transport wording. The semantic resolver must retain that classification before deciding
 an existing retry policy. This fixes diagnostic loss; it does not retrospectively prove the cause of
 an older run that did not export sufficient telemetry.
+
+
+## Authoring phase policy
+
+Pre-intent and intent resolution propagate the existing `AGENTIC_AUTHORING` execution profile.
+The OpenAI adapter keeps compact reasoning explicit for this profile even above 2048 output tokens;
+output capacity must not silently switch a phase to the provider's default reasoning policy.
+`gpt-5-mini` uses `low`; model selection and phase deadlines remain governed by existing settings.
+Structured calls share the stream abort registration: cancel releases a pending future, and an
+already cancelled turn cannot admit another call. This is not proof of stopped provider billing.
+The trace records the resolved request model before dispatch and replaces it with an observed
+response snapshot when available. Missing usage and response identifiers remain unknown.

@@ -200,7 +200,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                     "intent_full",
                     promptInput.prompt(),
                     AiJsonSchema.ofSchema(schema()),
-                    AiCallConfig.builder()
+                    AiCallConfig.agenticAuthoringBuilder()
                             .provider(request.provider())
                             .model(request.model())
                             .apiKey(request.apiKey())
@@ -218,7 +218,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                         "intent_full_visualization_repair",
                         fullVisualizationRepairPrompt(promptInput.prompt(), fullResolution.get()),
                         AiJsonSchema.ofSchema(schema()),
-                        AiCallConfig.builder()
+                        AiCallConfig.agenticAuthoringBuilder()
                                 .provider(request.provider())
                                 .model(request.model())
                                 .apiKey(request.apiKey())
@@ -323,7 +323,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 callConfig != null ? callConfig.getProvider() : null,
                 callConfig != null ? callConfig.getModel() : null);
         AiCallConfig tracedConfig = callConfig == null
-                ? AiCallConfig.builder().invocationTrace(trace).build()
+                ? AiCallConfig.agenticAuthoringBuilder().invocationTrace(trace).build()
                 : callConfig.toBuilder().invocationTrace(trace).build();
         try {
             JsonNode result = providerManagementService.generateJson(
@@ -484,7 +484,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                                     componentCapabilities,
                                     governedDomainContext),
                     AiJsonSchema.ofSchema(schema()),
-                    AiCallConfig.builder()
+                    AiCallConfig.agenticAuthoringBuilder()
                             .provider(request.provider())
                             .model(liveOptionRefinementModel(request, liveOptionRefinement))
                             .apiKey(request.apiKey())
@@ -527,7 +527,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                                 componentCapabilities,
                                 governedDomainContext),
                         AiJsonSchema.ofSchema(schema()),
-                        AiCallConfig.builder()
+                        AiCallConfig.agenticAuthoringBuilder()
                                 .provider(request.provider())
                                 .model(request.model())
                                 .apiKey(request.apiKey())
@@ -833,7 +833,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                             componentCapabilities,
                             governedDomainContext),
                     AiJsonSchema.ofSchema(compactPlatformGuidanceSchema()),
-                    AiCallConfig.builder()
+                    AiCallConfig.agenticAuthoringBuilder()
                             .provider(request.provider())
                             .model(request.model())
                             .apiKey(request.apiKey())
@@ -1033,7 +1033,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                     %s
                     """.formatted(context.toPrettyString()),
                     AiJsonSchema.ofSchema(declaredClientActionIntentSchema(declaredActions)),
-                    AiCallConfig.builder()
+                    AiCallConfig.agenticAuthoringBuilder()
                             .provider(request.provider())
                             .model(request.model())
                             .apiKey(request.apiKey())
@@ -1154,7 +1154,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                         "targeted_component_intent",
                         compactTargetedComponentIntentPrompt(request, effectivePrompt, target, capabilities),
                         AiJsonSchema.ofSchema(compactTargetedComponentIntentSchema(capabilities)),
-                        AiCallConfig.builder()
+                        AiCallConfig.agenticAuthoringBuilder()
                                 .provider(request.provider())
                                 .model(request.model())
                                 .apiKey(request.apiKey())
