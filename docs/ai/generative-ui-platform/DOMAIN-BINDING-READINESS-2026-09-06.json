@@ -1,0 +1,290 @@
+{
+  "scope": {
+    "tenantId": "demo",
+    "environment": "landing"
+  },
+  "classification": "transversal",
+  "adherence": "ja-suportado-mal-nomeado-ou-mal-materializado",
+  "backendVersion": "2.0.0-rc.49",
+  "configVersion": "0.1.0-rc.151",
+  "renderDeployId": "dep-daenp3fqj5pc73a7n000",
+  "renderDeployStatus": "Live",
+  "configurationChange": {
+    "PRAXIS_DOMAIN_KNOWLEDGE_PROJECTION_ENABLED": true
+  },
+  "modelsChanged": false,
+  "before": {
+    "probeFailed": false,
+    "rows": [
+      {
+        "table": "domain_catalog_release",
+        "schema": "public"
+      },
+      {
+        "table": "domain_knowledge_binding",
+        "schema": "public"
+      },
+      {
+        "kind": "concepts",
+        "count": 634,
+        "scope": "desenv/local"
+      },
+      {
+        "kind": "bindings",
+        "count": 600,
+        "scope": "desenv/local"
+      },
+      {
+        "kind": "catalog",
+        "count": 1,
+        "resource": "human-resources.cargos"
+      },
+      {
+        "kind": "catalog",
+        "count": 1,
+        "resource": "human-resources.departamentos"
+      },
+      {
+        "kind": "catalog",
+        "count": 1,
+        "resource": "human-resources.funcionarios"
+      }
+    ]
+  },
+  "reconciliation": [
+    {
+      "resourceKey": "human-resources.funcionarios",
+      "releaseKey": "praxis-service:human-resources.funcionarios:c0888aaf98f1dc4a",
+      "sourceHash": "c0888aaf98f1dc4a637b2c86c559684ac57b615a33902bbf4090269aad50060b",
+      "httpStatus": 202,
+      "response": {
+        "releaseId": "e00aab91-46e3-4ba1-8212-83cc70bece49",
+        "releaseKey": "praxis-service:human-resources.funcionarios:c0888aaf98f1dc4a",
+        "itemCount": 763
+      }
+    },
+    {
+      "resourceKey": "human-resources.cargos",
+      "releaseKey": "praxis-service:human-resources.cargos:aaf016d7f4d65252",
+      "sourceHash": "aaf016d7f4d6525287e64c3e94cf8530bd05b5b18ad357bd298812194d95db24",
+      "httpStatus": 202,
+      "response": {
+        "releaseId": "7e3bb68c-ebf4-4463-832c-392b9a26d24b",
+        "releaseKey": "praxis-service:human-resources.cargos:aaf016d7f4d65252",
+        "itemCount": 105
+      }
+    },
+    {
+      "resourceKey": "human-resources.departamentos",
+      "releaseKey": "praxis-service:human-resources.departamentos:b7d625b8508daac1",
+      "sourceHash": "b7d625b8508daac1178800f209bd8b8964fce5294e66148622db4644ac9faf92",
+      "httpStatus": 202,
+      "response": {
+        "releaseId": "703931bd-3a69-4152-a3eb-af0466eb24c6",
+        "releaseKey": "praxis-service:human-resources.departamentos:b7d625b8508daac1",
+        "itemCount": 90
+      }
+    }
+  ],
+  "review": {
+    "scope": "demo/landing",
+    "reviews": [
+      {
+        "resourceKey": "human-resources.funcionarios",
+        "releaseKey": "praxis-service:human-resources.funcionarios:c0888aaf98f1dc4a",
+        "sourceHash": "c0888aaf98f1dc4a637b2c86c559684ac57b615a33902bbf4090269aad50060b",
+        "conceptKey": "human-resources.funcionarios.surface.list",
+        "bindingKey": "binding:human-resources.funcionarios.surface.list:ui-surface",
+        "bindingType": "ui_surface",
+        "operationId": "getAll",
+        "path": "/api/human-resources/funcionarios/all",
+        "method": "GET",
+        "schemaUrl": "/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Ffuncionarios%2Fall&operation=get&schemaType=response&idField=id&readOnly=false",
+        "schemaHttpStatus": 200,
+        "capabilitiesHttpStatus": 200,
+        "surfaceContractMatched": true
+      },
+      {
+        "resourceKey": "human-resources.funcionarios",
+        "releaseKey": "praxis-service:human-resources.funcionarios:c0888aaf98f1dc4a",
+        "sourceHash": "c0888aaf98f1dc4a637b2c86c559684ac57b615a33902bbf4090269aad50060b",
+        "conceptKey": "human-resources.funcionarios.surface.detail",
+        "bindingKey": "binding:human-resources.funcionarios.surface.detail:ui-surface",
+        "bindingType": "ui_surface",
+        "operationId": "getById",
+        "path": "/api/human-resources/funcionarios/{id}",
+        "method": "GET",
+        "schemaUrl": "/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Ffuncionarios%2F%7Bid%7D&operation=get&schemaType=response&idField=id&readOnly=false",
+        "schemaHttpStatus": 200,
+        "capabilitiesHttpStatus": 200,
+        "surfaceContractMatched": true
+      },
+      {
+        "resourceKey": "human-resources.funcionarios",
+        "releaseKey": "praxis-service:human-resources.funcionarios:c0888aaf98f1dc4a",
+        "sourceHash": "c0888aaf98f1dc4a637b2c86c559684ac57b615a33902bbf4090269aad50060b",
+        "conceptKey": "human-resources.funcionarios.surface.edit",
+        "bindingKey": "binding:human-resources.funcionarios.surface.edit:ui-surface",
+        "bindingType": "ui_surface",
+        "operationId": "update",
+        "path": "/api/human-resources/funcionarios/{id}",
+        "method": "PUT",
+        "schemaUrl": "/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Ffuncionarios%2F%7Bid%7D&operation=put&schemaType=request&idField=id&readOnly=false",
+        "schemaHttpStatus": 200,
+        "capabilitiesHttpStatus": 200,
+        "surfaceContractMatched": true
+      },
+      {
+        "resourceKey": "human-resources.cargos",
+        "releaseKey": "praxis-service:human-resources.cargos:aaf016d7f4d65252",
+        "sourceHash": "aaf016d7f4d6525287e64c3e94cf8530bd05b5b18ad357bd298812194d95db24",
+        "conceptKey": "human-resources.cargos.surface.list",
+        "bindingKey": "binding:human-resources.cargos.surface.list:ui-surface",
+        "bindingType": "ui_surface",
+        "operationId": "getAll",
+        "path": "/api/human-resources/cargos/all",
+        "method": "GET",
+        "schemaUrl": "/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Fcargos%2Fall&operation=get&schemaType=response&idField=id&readOnly=false",
+        "schemaHttpStatus": 200,
+        "capabilitiesHttpStatus": 200,
+        "surfaceContractMatched": true
+      },
+      {
+        "resourceKey": "human-resources.cargos",
+        "releaseKey": "praxis-service:human-resources.cargos:aaf016d7f4d65252",
+        "sourceHash": "aaf016d7f4d6525287e64c3e94cf8530bd05b5b18ad357bd298812194d95db24",
+        "conceptKey": "human-resources.cargos.surface.detail",
+        "bindingKey": "binding:human-resources.cargos.surface.detail:ui-surface",
+        "bindingType": "ui_surface",
+        "operationId": "getById",
+        "path": "/api/human-resources/cargos/{id}",
+        "method": "GET",
+        "schemaUrl": "/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Fcargos%2F%7Bid%7D&operation=get&schemaType=response&idField=id&readOnly=false",
+        "schemaHttpStatus": 200,
+        "capabilitiesHttpStatus": 200,
+        "surfaceContractMatched": true
+      },
+      {
+        "resourceKey": "human-resources.cargos",
+        "releaseKey": "praxis-service:human-resources.cargos:aaf016d7f4d65252",
+        "sourceHash": "aaf016d7f4d6525287e64c3e94cf8530bd05b5b18ad357bd298812194d95db24",
+        "conceptKey": "human-resources.cargos.surface.edit",
+        "bindingKey": "binding:human-resources.cargos.surface.edit:ui-surface",
+        "bindingType": "ui_surface",
+        "operationId": "update",
+        "path": "/api/human-resources/cargos/{id}",
+        "method": "PUT",
+        "schemaUrl": "/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Fcargos%2F%7Bid%7D&operation=put&schemaType=request&idField=id&readOnly=false",
+        "schemaHttpStatus": 200,
+        "capabilitiesHttpStatus": 200,
+        "surfaceContractMatched": true
+      },
+      {
+        "resourceKey": "human-resources.departamentos",
+        "releaseKey": "praxis-service:human-resources.departamentos:b7d625b8508daac1",
+        "sourceHash": "b7d625b8508daac1178800f209bd8b8964fce5294e66148622db4644ac9faf92",
+        "conceptKey": "human-resources.departamentos.surface.list",
+        "bindingKey": "binding:human-resources.departamentos.surface.list:ui-surface",
+        "bindingType": "ui_surface",
+        "operationId": "getAll",
+        "path": "/api/human-resources/departamentos/all",
+        "method": "GET",
+        "schemaUrl": "/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Fdepartamentos%2Fall&operation=get&schemaType=response&idField=id&readOnly=false",
+        "schemaHttpStatus": 200,
+        "capabilitiesHttpStatus": 200,
+        "surfaceContractMatched": true
+      },
+      {
+        "resourceKey": "human-resources.departamentos",
+        "releaseKey": "praxis-service:human-resources.departamentos:b7d625b8508daac1",
+        "sourceHash": "b7d625b8508daac1178800f209bd8b8964fce5294e66148622db4644ac9faf92",
+        "conceptKey": "human-resources.departamentos.surface.detail",
+        "bindingKey": "binding:human-resources.departamentos.surface.detail:ui-surface",
+        "bindingType": "ui_surface",
+        "operationId": "getById",
+        "path": "/api/human-resources/departamentos/{id}",
+        "method": "GET",
+        "schemaUrl": "/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Fdepartamentos%2F%7Bid%7D&operation=get&schemaType=response&idField=id&readOnly=false",
+        "schemaHttpStatus": 200,
+        "capabilitiesHttpStatus": 200,
+        "surfaceContractMatched": true
+      },
+      {
+        "resourceKey": "human-resources.departamentos",
+        "releaseKey": "praxis-service:human-resources.departamentos:b7d625b8508daac1",
+        "sourceHash": "b7d625b8508daac1178800f209bd8b8964fce5294e66148622db4644ac9faf92",
+        "conceptKey": "human-resources.departamentos.surface.edit",
+        "bindingKey": "binding:human-resources.departamentos.surface.edit:ui-surface",
+        "bindingType": "ui_surface",
+        "operationId": "update",
+        "path": "/api/human-resources/departamentos/{id}",
+        "method": "PUT",
+        "schemaUrl": "/schemas/filtered?path=%2Fapi%2Fhuman-resources%2Fdepartamentos%2F%7Bid%7D&operation=put&schemaType=request&idField=id&readOnly=false",
+        "schemaHttpStatus": 200,
+        "capabilitiesHttpStatus": 200,
+        "surfaceContractMatched": true
+      }
+    ],
+    "changeSets": [
+      {
+        "id": "9056e501-5583-41ff-be2f-00ce07634f1f",
+        "key": "demo:landing:catalog-review:20260906:funcionarios:c0888aaf98f1dc4a",
+        "createdStatus": "proposed",
+        "validationStatus": "valid",
+        "valid": true,
+        "approvedStatus": "approved",
+        "appliedStatus": "applied",
+        "readbackStatus": "applied"
+      },
+      {
+        "id": "9898086d-2d3d-493e-9250-e0008761bd0a",
+        "key": "demo:landing:catalog-review:20260906:cargos:aaf016d7f4d65252",
+        "createdStatus": "proposed",
+        "validationStatus": "valid",
+        "valid": true,
+        "approvedStatus": "approved",
+        "appliedStatus": "applied",
+        "readbackStatus": "applied"
+      },
+      {
+        "id": "0d78f510-46c0-4969-b3fe-787bd1c03d1f",
+        "key": "demo:landing:catalog-review:20260906:departamentos:b7d625b8508daac1",
+        "createdStatus": "proposed",
+        "validationStatus": "valid",
+        "valid": true,
+        "approvedStatus": "approved",
+        "appliedStatus": "applied",
+        "readbackStatus": "applied"
+      }
+    ]
+  },
+  "eligibleBindings": [
+    {
+      "bindingKeys": [
+        "binding:human-resources.cargos.surface.detail:ui-surface",
+        "binding:human-resources.cargos.surface.edit:ui-surface",
+        "binding:human-resources.cargos.surface.list:ui-surface"
+      ],
+      "resourceKey": "human-resources.cargos",
+      "eligibleBindings": 3
+    },
+    {
+      "bindingKeys": [
+        "binding:human-resources.departamentos.surface.detail:ui-surface",
+        "binding:human-resources.departamentos.surface.edit:ui-surface",
+        "binding:human-resources.departamentos.surface.list:ui-surface"
+      ],
+      "resourceKey": "human-resources.departamentos",
+      "eligibleBindings": 3
+    },
+    {
+      "bindingKeys": [
+        "binding:human-resources.funcionarios.surface.detail:ui-surface",
+        "binding:human-resources.funcionarios.surface.edit:ui-surface",
+        "binding:human-resources.funcionarios.surface.list:ui-surface"
+      ],
+      "resourceKey": "human-resources.funcionarios",
+      "eligibleBindings": 3
+    }
+  ]
+}
