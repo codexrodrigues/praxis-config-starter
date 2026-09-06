@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -600,6 +601,9 @@ public class AiProviderManagementService {
             String userId,
             String environment,
             Integer callTimeoutSeconds) {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new CancellationException("AI configuration lookup cancelled before start.");
+        }
         String resolvedTenant = trimToNull(tenantId);
         if (resolvedTenant == null || userConfigService == null) {
             return null;
@@ -609,6 +613,10 @@ public class AiProviderManagementService {
                 () -> resolveStoredConfig(tenantId, userId, environment));
         try {
             return lookup.get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (InterruptedException interruptedException) {
+            lookup.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new CancellationException("AI configuration lookup interrupted.");
         } catch (TimeoutException timeoutException) {
             lookup.cancel(true);
             log.warn(

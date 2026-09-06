@@ -271,6 +271,52 @@ class AiProviderManagementServiceTest {
     }
 
     @Test
+    void interruptedAuthoringWorkerDoesNotReachProviderSelection() {
+        try {
+            Thread.currentThread().interrupt();
+            assertThrows(java.util.concurrent.CancellationException.class,
+                    () -> service.generateJson("cancelled turn", AiJsonSchema.ofSchema("{}"),
+                            AiCallConfig.agenticAuthoringBuilder().provider("openai").build(),
+                            "tenant", "user", "local"));
+            assertTrue(Thread.currentThread().isInterrupted());
+            verify(openai, never()).generateJson(any(), any(), any());
+            verify(userConfigService, never()).getResolved(any(), any(), any(), any(), any());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void interruptedConfigLookupDoesNotFallbackToPaidGeneration() throws Exception {
+        var lookupStarted = new java.util.concurrent.CountDownLatch(1);
+        var releaseLookup = new java.util.concurrent.CountDownLatch(1);
+        var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        var workerThread = new java.util.concurrent.atomic.AtomicReference<Thread>();
+        org.mockito.Mockito.doAnswer(invocation -> {
+            lookupStarted.countDown();
+            releaseLookup.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            return Optional.empty();
+        }).when(userConfigService).getResolved(any(), any(), any(), any(), any());
+        try {
+            var worker = executor.submit(() -> {
+                workerThread.set(Thread.currentThread());
+                assertThrows(java.util.concurrent.CancellationException.class,
+                        () -> service.generateJson("cancelled lookup", AiJsonSchema.ofSchema("{}"),
+                                AiCallConfig.agenticAuthoringBuilder().provider("openai").build(),
+                                "tenant", "user", "local"));
+                return Thread.currentThread().isInterrupted();
+            });
+            assertTrue(lookupStarted.await(2, java.util.concurrent.TimeUnit.SECONDS));
+            workerThread.get().interrupt();
+            assertTrue(worker.get(1, java.util.concurrent.TimeUnit.SECONDS));
+            verify(openai, never()).generateJson(any(), any(), any());
+        } finally {
+            releaseLookup.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     void listCatalogIncludesProviderStreamingCapabilities() {
         when(gemini.supportsTextStreaming(any())).thenReturn(true);
         when(gemini.supportsTurnCancellation(any())).thenReturn(true);
