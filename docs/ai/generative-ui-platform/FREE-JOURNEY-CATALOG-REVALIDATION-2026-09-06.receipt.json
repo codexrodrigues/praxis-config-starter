@@ -1,0 +1,311 @@
+{
+  "runId": "free-1a5b549e-408e-490e-b3bc-0510cde4374c",
+  "marker": "Praxis prova 7906318b",
+  "hostOrigin": "https://praxisui.dev",
+  "authorization": {
+    "budgetUsd": null,
+    "spendingControl": "user-attested-provider-account-limit",
+    "providerLimitIndependentlyVerified": false,
+    "maxTurns": 3,
+    "maxClarifications": 0,
+    "billingHardLimit": false,
+    "expectedModel": "gpt-5-mini",
+    "expectedPlanningModel": "gpt-5.6-luna",
+    "expectedVersion": "2.0.0-rc.47"
+  },
+  "owned": [
+    {
+      "id": 271,
+      "name": "Praxis prova 7906318b 0"
+    },
+    {
+      "id": 272,
+      "name": "Praxis prova 7906318b 1"
+    },
+    {
+      "id": 273,
+      "name": "Praxis prova 7906318b 2"
+    }
+  ],
+  "turns": [
+    {
+      "streamId": "dce9020d-69c5-4160-be29-7443e2f5e74e",
+      "threadId": "a09d6f2f-2054-3560-89d1-096cef492c79",
+      "turnId": "ef2356b1-2161-3f3e-888e-4643a4ce15f2",
+      "decisionId": "agentic-authoring-decision-a2efdb05",
+      "refinementOf": "",
+      "constraintsSha256": "ee02c60829faac060892f1a1fb8d670f45e03a2985687ceac81ccf7bf5ae53b7",
+      "previewSha256": "c6d9d4bfb55bffe976d7baae984a127b43d60eeed5744a5e256f8863babe2dd2",
+      "usage": {
+        "complete": true,
+        "invocations": [
+          {
+            "phase": "pre_intent_tool_plan",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "status": "success",
+            "latencyMs": 5866,
+            "inputTokens": 5291,
+            "outputTokens": 518,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 5809
+          },
+          {
+            "phase": "declared_client_action_intent",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5-mini-2025-08-07",
+            "status": "success",
+            "latencyMs": 2177,
+            "inputTokens": 301,
+            "outputTokens": 129,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 430
+          },
+          {
+            "phase": "intent_fast",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5-mini",
+            "status": "failure",
+            "latencyMs": 12306,
+            "inputTokens": null,
+            "outputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "totalTokens": null
+          },
+          {
+            "phase": "intent_full",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5-mini-2025-08-07",
+            "status": "success",
+            "latencyMs": 9439,
+            "inputTokens": 29505,
+            "outputTokens": 1030,
+            "cacheReadInputTokens": 4864,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 30535
+          },
+          {
+            "phase": "declared_client_action_intent",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5-mini-2025-08-07",
+            "status": "success",
+            "latencyMs": 1982,
+            "inputTokens": 348,
+            "outputTokens": 125,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 473
+          },
+          {
+            "phase": "intent_fast",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "status": "success",
+            "latencyMs": 6813,
+            "inputTokens": 4475,
+            "outputTokens": 613,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 5088
+          }
+        ],
+        "tokens": {
+          "inputTokens": null,
+          "outputTokens": null,
+          "cacheReadInputTokens": null,
+          "cacheWriteInputTokens": null,
+          "totalTokens": null
+        },
+        "estimatedCostUsd": null,
+        "priceSnapshot": {
+          "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+          "capturedAt": "2026-09-06"
+        },
+        "billingReconciled": false,
+        "embeddingsIncluded": false
+      }
+    }
+  ],
+  "admittedStreams": [
+    {
+      "streamId": "dce9020d-69c5-4160-be29-7443e2f5e74e",
+      "threadId": "a09d6f2f-2054-3560-89d1-096cef492c79",
+      "turnId": "ef2356b1-2161-3f3e-888e-4643a4ce15f2"
+    }
+  ],
+  "terminalObservations": [
+    {
+      "turnId": "ef2356b1-2161-3f3e-888e-4643a4ce15f2",
+      "type": "result",
+      "canApply": true,
+      "previewValid": true,
+      "warningCodes": [
+        "metadata-probe-not-run",
+        "llm-intent-resolution-used",
+        "llm-fast-intent-resolution-used"
+      ],
+      "usage": {
+        "complete": true,
+        "invocations": [
+          {
+            "phase": "pre_intent_tool_plan",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "status": "success",
+            "latencyMs": 5866,
+            "inputTokens": 5291,
+            "outputTokens": 518,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 5809
+          },
+          {
+            "phase": "declared_client_action_intent",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5-mini-2025-08-07",
+            "status": "success",
+            "latencyMs": 2177,
+            "inputTokens": 301,
+            "outputTokens": 129,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 430
+          },
+          {
+            "phase": "intent_fast",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5-mini",
+            "status": "failure",
+            "latencyMs": 12306,
+            "inputTokens": null,
+            "outputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "totalTokens": null
+          },
+          {
+            "phase": "intent_full",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5-mini-2025-08-07",
+            "status": "success",
+            "latencyMs": 9439,
+            "inputTokens": 29505,
+            "outputTokens": 1030,
+            "cacheReadInputTokens": 4864,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 30535
+          },
+          {
+            "phase": "declared_client_action_intent",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5-mini-2025-08-07",
+            "status": "success",
+            "latencyMs": 1982,
+            "inputTokens": 348,
+            "outputTokens": 125,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 473
+          },
+          {
+            "phase": "intent_fast",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "status": "success",
+            "latencyMs": 6813,
+            "inputTokens": 4475,
+            "outputTokens": 613,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 5088
+          }
+        ],
+        "tokens": {
+          "inputTokens": null,
+          "outputTokens": null,
+          "cacheReadInputTokens": null,
+          "cacheWriteInputTokens": null,
+          "totalTokens": null
+        },
+        "estimatedCostUsd": null,
+        "priceSnapshot": {
+          "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+          "capturedAt": "2026-09-06"
+        },
+        "billingReconciled": false,
+        "embeddingsIncluded": false
+      }
+    }
+  ],
+  "fixturesRemoved": [],
+  "liveProviderCertified": false,
+  "functionalRuntimeCertified": false,
+  "pendingCreate": null,
+  "pageOwned": false,
+  "backend": {
+    "version": "2.0.0-rc.47",
+    "provider": "openai",
+    "model": "gpt-5-mini"
+  },
+  "catalogProofs": [
+    {
+      "resourceKey": "human-resources.funcionarios",
+      "releaseKey": "praxis-service:human-resources.funcionarios:c0888aaf98f1dc4a",
+      "expectedDocumentCount": 762,
+      "actualDocumentCount": 762
+    },
+    {
+      "resourceKey": "human-resources.cargos",
+      "releaseKey": "praxis-service:human-resources.cargos:aaf016d7f4d65252",
+      "expectedDocumentCount": 105,
+      "actualDocumentCount": 105
+    },
+    {
+      "resourceKey": "human-resources.departamentos",
+      "releaseKey": "praxis-service:human-resources.departamentos:b7d625b8508daac1",
+      "expectedDocumentCount": 90,
+      "actualDocumentCount": 90
+    }
+  ],
+  "unresolvedStarts": [],
+  "cancellation": [
+    {
+      "streamId": "dce9020d-69c5-4160-be29-7443e2f5e74e",
+      "status": 200,
+      "terminalState": "completed",
+      "verified": true
+    }
+  ],
+  "cleanup": [
+    {
+      "id": 271,
+      "removed": true
+    },
+    {
+      "id": 272,
+      "removed": true
+    },
+    {
+      "id": 273,
+      "removed": true
+    }
+  ],
+  "observationsFailed": 0,
+  "cleanupComplete": true,
+  "journeyPassed": false
+}

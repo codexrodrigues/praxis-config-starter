@@ -1195,6 +1195,8 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(1800);
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(24);
         assertThat(configCaptor.getValue().getModel()).isEqualTo("gpt-5.6-luna");
+        assertThat(result.providerInvocations()).extracting(AiProviderInvocationTelemetry::phase)
+                .containsExactly("live_option_refinement");
         assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");
         assertThat(result.queryConstraints().path("appliesToDataSelection").asBoolean()).isTrue();
         assertThat(result.queryConstraints().path("filters").get(0).path("field").asText())

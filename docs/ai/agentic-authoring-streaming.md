@@ -1209,3 +1209,12 @@ a validação de portas do Core corretamente rejeita uma ligação de evento par
 A admissão serializa início/publicação; não equivale a serializar todo o trabalho de dois turnos já
 admitidos. A confirmação de cancelamento do stream também não comprova estorno ou interrupção
 instantânea de uma requisição já em processamento no provider.
+
+### Identidade da fase de refinamento de opções
+
+O refinamento semântico com `liveOptionFieldGrounding` ou `liveOptionValueGrounding`
+registra `live_option_refinement` na telemetria de invocações. O modelo segue
+`praxis.ai.authoring.intent-resolution.live-option.openai-model`;
+o valor geral `intent_fast` fica reservado à resolução rápida sem esse contexto.
+Consumidores de métricas e testes devem distinguir esse perfil do planejamento
+pré-intenção e do modelo de autoria, sem inferir a fase pelo nome do modelo.
