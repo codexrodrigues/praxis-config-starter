@@ -55,3 +55,25 @@ do ciclo de stream. Transporte local controlado, sem credenciais ou chamadas pag
 O gate real permanece pendente nesta revisão inicial. Será uma jornada canônica Page Builder,
 `gpt-5-mini`, no máximo três turnos humanos e zero retries de teste. Não se enfraquece o critério
 first-pass. Limite da conta atestado pelo usuário, sem verificação independente ou valor inventado.
+
+
+## Revisão adicional de interrupção da worker
+
+A revisão da cadeia encontrou dois mecanismos existentes: `AiStreamService` registra contexto/abort;
+`AgenticAuthoringTurnStreamService` interrompe sua tarefa. O adapter deve respeitar ambos. Foi
+reproduzido um erro: thread previamente interrompida era classificada como erro de stream do provider.
+A correção consulta o estado de interrupção antes da admissão JSON/stream e preserva a flag quando
+a espera do stream é interrompida. Não cria contexto ou API paralela de cancelamento.
+
+Passaram 92 testes focais (32 adapter, 40 authoring stream, 17 stream service, 3 fallback/cancel),
+incluindo três novos casos: JSON e stream em worker previamente interrompida, e interrupção do stream
+em espera. São 202 testes distintos no corte total; as baterias se sobrepõem. Essa correção adicional
+não está no SHA `e80b93fd2bbd141c811f6ea00d91f212debb1582` do gate `34005676687`, já em execução.
+A política de reasoning desse gate é a mesma; a evidência de interrupção adicional é local.
+
+Config #460 foi integrado e seu CI 34005668733 passou. O guidance canônico de jornadas em
+`codex-skills/praxis-generative-ui-authoring/references/pilot-scenarios.md` recebeu a distinção entre
+orçamento, reasoning, modelo selecionado e uso observado. A referência foi espelhada diretamente na
+skill instalada; sync/bootstrap não estão disponíveis neste workspace. A skill instalada de provider
+operations não possui fonte correspondente neste checkout de codex-skills; não foi criada uma cópia
+paralela como parte desta correção operacional.

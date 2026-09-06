@@ -664,6 +664,81 @@ class SpringAiOpenAiServiceTest {
     }
 
     @Test
+    void interruptReleasesWaitingStreamAndPreservesWorkerCancellation() throws Exception {
+        var received = new java.util.concurrent.CountDownLatch(1);
+        var releaseResponse = new java.util.concurrent.CountDownLatch(1);
+        var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        AtomicReference<Thread> workerThread = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/responses", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            received.countDown();
+            try { releaseResponse.await(8, java.util.concurrent.TimeUnit.SECONDS); }
+            catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+            exchange.close();
+        });
+        SpringAiOpenAiService service = service(server, "gpt-5-mini");
+        server.start();
+        try {
+            var worker = executor.submit(() -> {
+                workerThread.set(Thread.currentThread());
+                assertThrows(java.util.concurrent.CancellationException.class,
+                        () -> service.generateTextStream("pending stream",
+                                AiCallConfig.agenticAuthoringBuilder().timeoutSeconds(5).build(), ignored -> {}, () -> false));
+                return Thread.currentThread().isInterrupted();
+            });
+            assertTrue(received.await(2, java.util.concurrent.TimeUnit.SECONDS));
+            workerThread.get().interrupt();
+            assertTrue(worker.get(1, java.util.concurrent.TimeUnit.SECONDS));
+        } finally {
+            releaseResponse.countDown();
+            executor.shutdownNow();
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void interruptedWorkerDoesNotAdmitProviderStream() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = streamServer(capturedRequest);
+        SpringAiOpenAiService service = service(server, "gpt-5-mini");
+        server.start();
+        try {
+            Thread.currentThread().interrupt();
+            assertThrows(java.util.concurrent.CancellationException.class,
+                    () -> service.generateTextStream("cancelled worker", null, ignored -> {}, () -> false));
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertNull(capturedRequest.get());
+        } finally {
+            Thread.interrupted();
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void interruptedWorkerDoesNotAdmitStructuredCall() throws Exception {
+        AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
+        HttpServer server = responseServer(completedResponse("{}"), capturedRequest);
+        SpringAiOpenAiService service = service(server, "gpt-5-mini");
+        server.start();
+        try {
+            Thread.currentThread().interrupt();
+            assertThrows(java.util.concurrent.CancellationException.class,
+                    () -> service.generateJson("cancelled worker",
+                            AiJsonSchema.ofSchema("{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false}"),
+                            AiCallConfig.agenticAuthoringBuilder().build()));
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertNull(capturedRequest.get());
+        } finally {
+            Thread.interrupted();
+            service.closeDefaultClient();
+            server.stop(0);
+        }
+    }
+
+    @Test
     void missingApiKeyIsNormalizedAsStreamAuthenticationFailure() throws Exception {
         HttpServer server = streamServer(new AtomicReference<>());
         SpringAiOpenAiService service = service(server, "gpt-4o-mini");

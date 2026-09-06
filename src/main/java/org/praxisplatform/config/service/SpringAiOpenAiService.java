@@ -438,6 +438,10 @@ public class SpringAiOpenAiService implements AiProvider {
             } catch (TimeoutException exception) {
                 stream.close();
                 throw AiProviderStreamException.timeout(PROVIDER, exception);
+            } catch (InterruptedException exception) {
+                stream.close();
+                Thread.currentThread().interrupt();
+                throw new CancellationException("OpenAI stream interrupted.");
             } catch (ExecutionException exception) {
                 if (abortRequested.get() || isCancelled(cancellationRequested)) {
                     throw new CancellationException("OpenAI stream cancelled.");
@@ -1042,6 +1046,9 @@ public class SpringAiOpenAiService implements AiProvider {
     }
 
     private boolean isCancelled(Supplier<Boolean> cancellationRequested) {
+        if (Thread.currentThread().isInterrupted()) {
+            return true;
+        }
         if (cancellationRequested == null) {
             return false;
         }
