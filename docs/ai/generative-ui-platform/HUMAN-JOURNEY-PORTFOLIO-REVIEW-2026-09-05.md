@@ -103,6 +103,8 @@ que continua obrigatória. Timeouts sem resposta permanecem sem usage; nenhum co
 Owner: Config provider adapter; consumidores: traces de authoring e seus verificadores operacionais.
 Sem mudança de modelo, timeout, retry, DTO, preços, manifest ou endpoint. Não há artefato derivado
 público a regenerar. A evidência não identifica a causa do run `33999199428` retroativamente.
+Validação focal: 31 testes passaram no adapter, classificador, métricas e integração
+de fallback/cancelamento; duas regressões vermelhas antes da correção ficaram verdes.
 
 ### P1 — Seleção de campos perdida na criação de formulário
 
