@@ -152,6 +152,7 @@ output capacity must not silently switch a phase to the provider's default reaso
 Structured calls share the stream abort registration: cancel releases a pending future, and an
 already cancelled turn cannot admit another call. This includes worker interruption used by the
 authoring stream; preserve the interrupt flag after releasing the pending call. This is not proof
-of stopped provider billing.
+of stopped provider billing. Stored-config lookup must also preserve interruption and stop; only
+a lookup timeout or ordinary lookup failure may continue with configured defaults.
 The trace records the resolved request model before dispatch and replaces it with an observed
 response snapshot when available. Missing usage and response identifiers remain unknown.

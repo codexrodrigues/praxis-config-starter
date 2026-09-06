@@ -77,3 +77,19 @@ orçamento, reasoning, modelo selecionado e uso observado. A referência foi esp
 skill instalada; sync/bootstrap não estão disponíveis neste workspace. A skill instalada de provider
 operations não possui fonte correspondente neste checkout de codex-skills; não foi criada uma cópia
 paralela como parte desta correção operacional.
+
+
+## Preservação do cancelamento durante lookup de configuração
+
+A auditoria posterior seguiu a interrupção até `AiProviderManagementService`: o lookup assíncrono
+capturava `InterruptedException` como falha genérica, limpava a flag e prosseguia com os defaults.
+Dois negativos reproduziram geração admitida indevidamente. A correção interrompe antes do lookup
+quando a worker já foi cancelada e, se interrompida durante a espera, cancela o future, restaura a flag
+e propaga `CancellationException`. Timeout de lookup continua usando o fallback configurado existente.
+Aderência: `suportado-parcialmente`, corrigida na fronteira de provider, sem contrato novo.
+
+137 testes focais passaram (13 management, 32 adapter, 9 router, 3 fallback/cancel, 34 pre-intent,
+46 resolver). São 204 testes distintos considerando todas as baterias deste corte. Os negativos
+anteriores de HTTP/deadline também foram reexecutados nessa bateria. Config #461 foi integrado em
+`6d21f01d5c48d884b666aecd6c6911ce21f02915` e passou CI 34005970368; o complemento de lookup e a
+interrupção da worker não estão no SHA do gate pago 34005676687. Nenhum gate pago adicional foi aberto.
