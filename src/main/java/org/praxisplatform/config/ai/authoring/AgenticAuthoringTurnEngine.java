@@ -609,6 +609,9 @@ public class AgenticAuthoringTurnEngine {
                             principalContext.userId(),
                             principalContext.environment());
                     turnProviderInvocations.addAll(providerInvocations(fieldRefinedResolution));
+                    fieldRefinedResolution = preserveLiveOptionRefinementLineage(
+                            intentResolution,
+                            fieldRefinedResolution);
                 }
                 if (!hasPreservedLiveOptionPredicate(
                                 fieldRefinedResolution,
@@ -4833,8 +4836,8 @@ public class AgenticAuthoringTurnEngine {
                 || refinement.semanticDecision().constraints() == null) {
             return refinement;
         }
-        // The live-option pass is a constrained semantic classifier. It may choose current option
-        // IDs, but it cannot reopen the already governed operation, artifact, resource or visual
+        // The live-option pass is a constrained semantic classifier. It may ground predicate fields or choose
+        // current option IDs, but it cannot reopen the already governed operation, artifact, resource or visual
         // decision. Backend reconciliation enforces this boundary instead of trusting prompt
         // compliance from any provider/model.
         AgenticAuthoringSemanticDecision reconciledDecision = established.semanticDecision()
