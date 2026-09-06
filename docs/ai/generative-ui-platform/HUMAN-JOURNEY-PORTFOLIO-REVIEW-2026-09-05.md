@@ -34,6 +34,16 @@ O recibo atual não permite distinguir limite de saída, transporte, timeout ou 
 funcional já obtido deve ser reaproveitado como evidência, sem novo pagamento apenas para exportá-lo.
 Depois, fechar seleção exata de campos e ampliar as provas livres das operações/nesting do inventário.
 
+## Continuação local: diagnóstico e seleção exata
+
+A continuação implementou preservação da categoria tipada do provider, exportação sanitizada por
+turno e seleção semântica de campos com layout compilado. Passaram 412 testes Java focais e quatro
+jornadas Chromium com componentes reais e semântica controlada. O campo opcional extra permaneceu
+ausente do formulário e do POST, inclusive após reload. Ver
+[escopo, inventário e limites](FIELD-SELECTION-AND-TURN-DIAGNOSTICS-2026-09-05.md).
+A interpretação livre real deste caso e o gate first-pass permanecem pendentes; a execução anterior
+continua registrada como eventual-pass.
+
 ## Plano e mapa de impacto
 
 1. Revalidar a correção de continuidade em `66491255374553730a2ceee49bf30ec6afe9abc0` no gate
@@ -65,7 +75,7 @@ não necessariamente ausência do contrato. Não justifica automaticamente um co
 | “Quais recursos tenho para um dashboard? Monte uma visão por categoria” | Config visualization decision + GenericUiCompositionPlanProvider; Charts métricas/dimensões e Core composição | `suportado-parcialmente`: dashboard em dois domínios funciona com semântica controlada; criação livre real deste caso permanece sem certificação | Agregação/categoria corretas, dados reais, componentes pedidos, preservação de exclusões |
 | “Clique no grupo para ver os funcionários” | Charts crossFilter; composição, queryContext, lista/tabela e surface modal/drawer | `suportado-parcialmente`: clique, filtro e modal observados nesta revisão; drawer de salário e acessibilidade do ponto do gráfico não certificados | Requisição filtrada e registros corretos; retorno/fechamento preservam contexto |
 | “Crie um formulário para alterar o nome desta pessoa” | Metadata operação/schema/availability; CRUD descobre edição governada; prompt distingue seleção, escrita e prefill | `suportado-parcialmente`: não confundir criação POST com edição de entidade; sem prova desta solicitação livre específica | Resolver identidade sem ambiguidade; conferir campo gravável e operação; revisar valor; mutation e readback da mesma pessoa |
-| “Quero um formulário somente com estes campos” | `minimal-form-plan.v1` já possui `fields`; Dynamic Form possui configuração/layout/metadata de campos | `ja-suportado-mal-nomeado-ou-mal-materializado`: criação determinística enumera todos os editáveis; compilador não projeta a seleção de `fields` | Campos selecionados e required reconciliados com schema, sem omissão silenciosa; campo extra ausente do DOM e payload; reload preserva seleção |
+| “Quero um formulário somente com estes campos” | `minimal-form-plan.v1` já possui `fields`; Dynamic Form possui configuração/layout/metadata de campos | `ja-suportado-mal-nomeado-ou-mal-materializado`: corrigido localmente: seleção semântica com schema e layout compilado; quatro provas browser controladas, interpretação real ainda pendente | Campos selecionados e required reconciliados com schema, sem omissão silenciosa; campo extra ausente do DOM e payload; reload preserva seleção |
 | “Liste funcionários desta categoria e sugira filtros” | Lista `data.resource.bind`, `data.query.set`; Config queryConstraints e grounding de campos/option values | `suportado-parcialmente`: materialização de lista e testes existem; cenário livre filtrado com sugestões não certificado nesta revisão | Campo/valor canônicos, filtro enviado e dados respeitando o recorte; sugestão não muda o filtro sem escolha |
 | “Nesta tabela já renderizada, mostre o dado como moeda ou badge” | Table `column.format.set`, `column.renderer.set`; Config ComponentEditPlanService/PreviewService | `suportado-parcialmente`: operações e testes de refinamento existentes; não executados com LLM real neste corte | DOM usa renderer correto; tabela, linhas, filtros e colunas alheias preservados após apply/reload |
 | “Crie uma coluna calculada e esconda a coluna anterior” | Table `column.computed.add`, `column.computed.configure`, `column.visibility.set`; validadores de expressão | `suportado-parcialmente`: não confundir existência de operação com execução por conversa | Valores calculados conferidos em linhas distintas, coluna oculta no DOM, campos-fonte preservados, sem redefinir regra de negócio |

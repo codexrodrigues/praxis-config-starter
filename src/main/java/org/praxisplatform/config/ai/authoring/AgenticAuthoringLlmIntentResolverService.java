@@ -336,7 +336,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             trace.succeeded();
             return result;
         } catch (RuntimeException ex) {
-            trace.failed(providerFailureKind(rootCause(ex)));
+            trace.failed(providerFailureKind(providerFailureCause(ex)));
             throw ex;
         } finally {
             AiProviderInvocationTelemetry invocation = trace.snapshot();
@@ -385,7 +385,7 @@ public class AgenticAuthoringLlmIntentResolverService {
     private AgenticAuthoringLlmIntentResolution failedResolution(
             RuntimeException ex,
             AgenticAuthoringIntentResolutionRequest request) {
-        Throwable rootCause = rootCause(ex);
+        Throwable rootCause = providerFailureCause(ex);
         log.warn(
                 "[AgenticAuthoringLlmIntentResolver] Provider intent resolution failed; kind={} cause={}",
                 providerFailureKind(rootCause),
@@ -565,8 +565,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                             : value.visualizationDecision().axes().size()));
         } catch (RuntimeException ex) {
             log.debug("[AgenticAuthoringLlmIntentResolver] Fast intent pass failed; kind={} cause={}",
-                    providerFailureKind(rootCause(ex)),
-                    safeProviderFailureSummary(rootCause(ex)));
+                    providerFailureKind(providerFailureCause(ex)),
+                    safeProviderFailureSummary(providerFailureCause(ex)));
         }
         return Optional.empty();
     }
@@ -874,8 +874,8 @@ public class AgenticAuthoringLlmIntentResolverService {
         } catch (RuntimeException ex) {
             log.debug(
                     "[AgenticAuthoringLlmIntentResolver] Compact platform guidance confirmation fell back; kind={} cause={}",
-                    providerFailureKind(rootCause(ex)),
-                    safeProviderFailureSummary(rootCause(ex)));
+                    providerFailureKind(providerFailureCause(ex)),
+                    safeProviderFailureSummary(providerFailureCause(ex)));
             if (hasPriorPlatformGuidanceSemanticScope(request)) {
                 return Optional.of(failedResolution(ex, request));
             }
@@ -1072,8 +1072,8 @@ public class AgenticAuthoringLlmIntentResolverService {
         } catch (RuntimeException ex) {
             log.debug(
                     "[AgenticAuthoringLlmIntentResolver] Declared client action intent failed open to the general semantic resolver; kind={} cause={}",
-                    providerFailureKind(rootCause(ex)),
-                    safeProviderFailureSummary(rootCause(ex)));
+                    providerFailureKind(providerFailureCause(ex)),
+                    safeProviderFailureSummary(providerFailureCause(ex)));
             return Optional.empty();
         }
     }
@@ -1129,8 +1129,8 @@ public class AgenticAuthoringLlmIntentResolverService {
         } catch (RuntimeException ex) {
             log.debug(
                     "[AgenticAuthoringLlmIntentResolver] Compact targeted component intent failed closed; kind={} cause={}",
-                    providerFailureKind(rootCause(ex)),
-                    safeProviderFailureSummary(rootCause(ex)));
+                    providerFailureKind(providerFailureCause(ex)),
+                    safeProviderFailureSummary(providerFailureCause(ex)));
             return Optional.of(failedResolution(ex, request));
         }
     }
@@ -1168,7 +1168,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                         providerInvocations);
             } catch (RuntimeException ex) {
                 lastFailure = ex;
-                String failureKind = providerFailureKind(rootCause(ex));
+                String failureKind = providerFailureKind(providerFailureCause(ex));
                 if (attempt >= MAX_TARGETED_COMPONENT_INTENT_ATTEMPTS
                         || !isRetryableTargetedComponentFailure(failureKind)) {
                     throw ex;
@@ -2256,12 +2256,21 @@ public class AgenticAuthoringLlmIntentResolverService {
         return "unknown-error";
     }
 
-    private Throwable rootCause(Throwable error) {
+    private Throwable providerFailureCause(Throwable error) {
         Throwable current = error;
-        while (current != null && current.getCause() != null && current.getCause() != current) {
+        Set<Throwable> visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        while (current != null && visited.add(current)) {
+            // The provider's classified failure owns retry and diagnostics, even if its SDK cause
+            // has no message or contains text that would suggest a different failure class.
+            if (current instanceof AiProviderCallException) {
+                return current;
+            }
+            if (current.getCause() == null || visited.contains(current.getCause())) {
+                return current;
+            }
             current = current.getCause();
         }
-        return current == null ? error : current;
+        return error;
     }
 
     private String safeProviderFailureSummary(Throwable error) {

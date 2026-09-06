@@ -124,3 +124,20 @@ still the durable enforcement point.
 
 Key creation, budget changes, deployment-secret changes and key revocation are external operational
 actions and must not be performed by source-control automation.
+
+## Per-turn evidence after browser failures
+
+The Page Builder gate exports `provider-invocations.json` before validating terminal scenario receipts
+or first-pass success. It reads only inline `provider-telemetry-turn-N.json` attachments and projects
+an allowlist from the existing `praxis-agentic-authoring-provider-telemetry.v1` contract. Raw Playwright
+reports, prompts, responses, errors and arbitrary attachments are never uploaded by this exporter.
+
+Each observed turn retains its test/result ordinal and retry. Repeated phase/attempt pairs in different
+turns remain distinct invocations. Missing terminal telemetry and token counters remain `null`;
+truncation is preserved. These records cover authoring turns, not all embedding/indexing traffic,
+and must not be used to claim a complete invoice or zero cost for unknown usage.
+
+A typed `AiProviderCallException` owns the failure category even when an SDK cause has no message or
+contradictory transport wording. The semantic resolver must retain that classification before deciding
+an existing retry policy. This fixes diagnostic loss; it does not retrospectively prove the cause of
+an older run that did not export sufficient telemetry.

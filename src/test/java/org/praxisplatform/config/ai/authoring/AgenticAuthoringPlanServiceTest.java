@@ -1,5 +1,8 @@
 package org.praxisplatform.config.ai.authoring;
 
+import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.contains;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -182,7 +185,73 @@ class AgenticAuthoringPlanServiceTest {
     }
 
     @Test
-    void materializesCreateFormFromCanonicalRequestSchemaWithoutAnotherLlmCall() {
+    void semanticSelectionPreservesExactSubsetAndCanonicalMetadata() throws Exception {
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.putArray("required").add("nome");
+        ObjectNode fields = schema.putObject("properties");
+        fields.putObject("nome").put("type", "string").putObject("x-ui").put("label", "Nome oficial");
+        fields.putObject("email").put("type", "string");
+        ObjectNode llmPlan = (ObjectNode) funcionariosPlan();
+        llmPlan.putArray("fields").addObject().put("name", "nome").put("label", "Inventado")
+                .put("controlType", "select").put("required", false).put("defaultValue", "inventado");
+        when(providerManagementService.generateJson(any(), any(AiJsonSchema.class), any(), any(), any(), any()))
+                .thenReturn(llmPlan);
+        var result = service(new AgenticAuthoringArtifactProperties()).generateCreateFormPlanFromCanonicalSchema(
+                new AgenticAuthoringPlanRequest("Quero somente o nome.", "openai", "gpt-5-mini", "test-key",
+                        funcionariosIntent("create", "create_artifact")), schema, "tenant", "user", "local");
+        assertThat(result.valid()).as(result.failureCodes().toString()).isTrue();
+        assertThat(result.minimalFormPlan().path("fields").findValuesAsText("name")).containsExactly("nome");
+        JsonNode selected = result.minimalFormPlan().path("fields").get(0);
+        assertThat(selected.path("label").asText()).isEqualTo("Nome oficial");
+        assertThat(selected.path("required").asBoolean()).isTrue();
+        assertThat(selected.path("controlType").asText()).isEqualTo("input");
+        assertThat(selected.has("defaultValue")).isFalse();
+        assertThat(result.providerInvocations()).hasSize(1);
+        verify(providerManagementService).generateJson(contains("Canonical editable request fields"), any(AiJsonSchema.class), any(), any(), any(), any());
+    }
+
+    @Test
+    void semanticSelectionCannotOmitRequiredOrInventFields() throws Exception {
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.putArray("required").add("nome");
+        schema.putObject("properties").putObject("nome").put("type", "string");
+        ObjectNode llmPlan = (ObjectNode) funcionariosPlan();
+        llmPlan.putArray("fields").addObject().put("name", "inexistente").put("label", "Outro")
+                .put("controlType", "text").put("required", false);
+        when(providerManagementService.generateJson(any(), any(AiJsonSchema.class), any(), any(), any(), any()))
+                .thenReturn(llmPlan);
+        var result = service(new AgenticAuthoringArtifactProperties()).generateCreateFormPlanFromCanonicalSchema(
+                new AgenticAuthoringPlanRequest("Quero somente outro campo.", "openai", "gpt-5-mini", "test-key",
+                        funcionariosIntent("create", "create_artifact")), schema, "tenant", "user", "local");
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).contains("form-field-selection-not-canonical", "form-field-selection-required-field-omitted");
+        assertThat(result.minimalFormPlan().path("clarificationNeed").path("needed").asBoolean()).isTrue();
+        assertThat(result.minimalFormPlan().path("fields")).isEmpty();
+    }
+
+    @Test
+    void semanticSelectionOfOptionalFieldMustClarifyMissingRequiredField() throws Exception {
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.putArray("required").add("nome");
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("nome").put("type", "string");
+        properties.putObject("email").put("type", "string");
+        ObjectNode llmPlan = (ObjectNode) funcionariosPlan();
+        llmPlan.putArray("fields").addObject().put("name", "email").put("label", "Email")
+                .put("controlType", "input").put("required", false);
+        when(providerManagementService.generateJson(any(), any(AiJsonSchema.class), any(), any(), any(), any()))
+                .thenReturn(llmPlan);
+        var result = service(new AgenticAuthoringArtifactProperties()).generateCreateFormPlanFromCanonicalSchema(
+                new AgenticAuthoringPlanRequest("Quero somente email.", "openai", "gpt-5-mini", "test-key",
+                        funcionariosIntent("create", "create_artifact")), schema, "tenant", "user", "local");
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).containsExactly("form-field-selection-required-field-omitted");
+        assertThat(result.minimalFormPlan().path("fields").findValuesAsText("name")).containsExactly("email");
+        assertThat(result.minimalFormPlan().path("clarificationNeed").path("code").asText()).isEqualTo("policy-unsatisfied");
+    }
+
+    @Test
+    void buildsCanonicalFieldCatalogWithoutDecidingUserSelection() {
         AgenticAuthoringArtifactProperties properties = new AgenticAuthoringArtifactProperties();
         ObjectNode schema = objectMapper.createObjectNode();
         schema.putArray("required").add("nomeCompleto").add("cargoId");
@@ -213,7 +282,7 @@ class AgenticAuthoringPlanServiceTest {
                 .put("hidden", true);
 
         AgenticAuthoringPlanResult result = service(properties)
-                .materializeCreateFormPlanFromCanonicalSchema(
+                .buildCanonicalCreateFormFieldCatalog(
                         new AgenticAuthoringPlanRequest(
                                 "Crie um formulario de funcionarios",
                                 "openai",
@@ -226,7 +295,7 @@ class AgenticAuthoringPlanServiceTest {
         assertThat(result.failureCodes()).isEmpty();
         assertThat(result.warnings()).contains(
                 "minimal-form-plan-materialized-from-schemas-filtered",
-                "llm-plan-generation-skipped-canonical-schema-materialization");
+                "canonical-create-field-catalog-built");
         JsonNode fields = result.minimalFormPlan().path("fields");
         assertThat(fields).extracting(field -> field.path("name").asText())
                 .containsExactly("nomeCompleto", "cargoId", "email");

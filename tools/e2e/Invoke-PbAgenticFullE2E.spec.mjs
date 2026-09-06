@@ -205,3 +205,14 @@ test('materializes focused catalog scope from the canonical gate profile', () =>
     /\$env:API_CATALOG_PATH_PREFIXES\s*=\s*\(\$focusedApiCatalogPathPrefixes -join ","\)/,
   );
 });
+
+
+test('exports only sanitized per-turn telemetry before parsing receipts or rejecting the journey', () => {
+  const exporter = runnerSource.indexOf('& node $telemetryExporterPath');
+  assert.ok(exporter > 0);
+  assert.ok(exporter < runnerSource.indexOf('$playwrightSummary = Get-PlaywrightSummary $playwrightReportPath', exporter));
+  assert.ok(exporter < runnerSource.indexOf('if ($playwrightExitCode -ne 0)', exporter));
+  assert.match(workflowSource, /page-builder-agentic-e2e\/\*\*\/provider-invocations\.json/);
+  const uploads = workflowSource.slice(workflowSource.indexOf('- name: Upload smoke artifacts'));
+  assert.doesNotMatch(uploads, /playwright-results\.json/);
+});

@@ -480,6 +480,7 @@ jobs:
           path: |
             praxis-config-starter/artifacts/ai-sse-smoke/**/summary.json
             praxis-config-starter/artifacts/page-builder-agentic-e2e/**/result.json
+            praxis-config-starter/artifacts/page-builder-agentic-e2e/**/provider-invocations.json
             praxis-config-starter/artifacts/page-builder-agentic-e2e/**/source-audit.json
             praxis-config-starter/artifacts/page-builder-agentic-e2e/**/evidence-validation-summary.json
             praxis-config-starter/artifacts/agentic-authoring-publication/**
