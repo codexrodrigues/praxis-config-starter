@@ -96,8 +96,9 @@ inferência automática. Nenhum contrato novo, filtro textual de recurso ou muda
 
 Regressão negativa reproduziu exatamente as quatro opções indevidas; após o ajuste, **493 testes
 focais passaram** (resolver 265, engine 202, continuidade 12, vertical 2, portfolio 4, policy 8).
-A nova correção está validada localmente, ainda sem novo gate live. A execução falhada não confirma
-nem refuta a correção anterior de preservação do layout: ela não chegou à mesma condição inicial.
+A execução `33999199428` não chegou a revalidar a preservação do layout. Os gates subsequentes
+já incluíram a correção do resolver: `34001578127` comprovou o resultado funcional e o layout,
+mas precisou de uma segunda interação após falha inicial, permanecendo sem aprovação first-pass.
 Release do Config e deploy da Landing continuam pendentes do gate real aprovado.
 
 ### P1 — Oráculo da jornada livre confundia alias configurado e versão respondida
