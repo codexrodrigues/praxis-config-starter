@@ -1218,3 +1218,9 @@ registra `live_option_refinement` na telemetria de invocações. O modelo segue
 o valor geral `intent_fast` fica reservado à resolução rápida sem esse contexto.
 Consumidores de métricas e testes devem distinguir esse perfil do planejamento
 pré-intenção e do modelo de autoria, sem inferir a fase pelo nome do modelo.
+
+A reconciliação de linhagem aplica-se tanto à seleção do campo quanto à seleção
+de valores de option sources. Ambos são refinamentos da decisão já resolvida:
+operação, artefato, recurso e visualização não podem ser reabertos pela resposta
+dessa etapa. Predicados continuam sujeitos à validação existente; saída não
+resolvida não é promovida a materialização pela reconciliação.

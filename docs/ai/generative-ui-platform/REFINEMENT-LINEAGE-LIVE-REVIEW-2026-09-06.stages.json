@@ -1,0 +1,90 @@
+[
+  {
+    "seq": 25,
+    "keys": [
+      "resolved",
+      "warnings",
+      "confidence",
+      "routeClass",
+      "evidenceRefs",
+      "fallbackKind",
+      "requiredTools",
+      "schemaVersion",
+      "canMaterialize",
+      "semanticDecisionRef",
+      "requiresClarification",
+      "userFacingUnderstanding"
+    ],
+    "type": "intent.resolved",
+    "route": "component_authoring",
+    "valid": null,
+    "change": null,
+    "artifact": null,
+    "canApply": null,
+    "resolved": true,
+    "createdAt": "2026-09-06T05:23:51.320591+00:00",
+    "operation": null,
+    "canMaterialize": true,
+    "constraintFields": [],
+    "decisionArtifact": null,
+    "decisionOperation": null
+  },
+  {
+    "seq": 38,
+    "keys": [
+      "resolved",
+      "warnings",
+      "confidence",
+      "routeClass",
+      "evidenceRefs",
+      "fallbackKind",
+      "requiredTools",
+      "schemaVersion",
+      "canMaterialize",
+      "semanticDecisionRef",
+      "requiresClarification",
+      "userFacingUnderstanding"
+    ],
+    "type": "intent.resolved",
+    "route": "advisory_authoring",
+    "valid": null,
+    "change": null,
+    "artifact": null,
+    "canApply": null,
+    "resolved": true,
+    "createdAt": "2026-09-06T05:24:33.011616+00:00",
+    "operation": null,
+    "canMaterialize": false,
+    "constraintFields": [],
+    "decisionArtifact": null,
+    "decisionOperation": null
+  },
+  {
+    "seq": 40,
+    "keys": [
+      "preview",
+      "canApply",
+      "applyTarget",
+      "quickReplies",
+      "assistantContent",
+      "assistantMessage",
+      "intentResolution",
+      "decisionDiagnostics"
+    ],
+    "type": "result",
+    "route": null,
+    "valid": true,
+    "change": "answer_component_catalog_question",
+    "artifact": "component",
+    "canApply": false,
+    "resolved": null,
+    "createdAt": "2026-09-06T05:24:33.335214+00:00",
+    "operation": "explain",
+    "canMaterialize": null,
+    "constraintFields": [
+      "nome"
+    ],
+    "decisionArtifact": "component",
+    "decisionOperation": "explain"
+  }
+]

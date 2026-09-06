@@ -1,0 +1,209 @@
+{
+  "runId": "free-5cb6dcbd-402e-4631-99e8-e7ae77752584",
+  "marker": "Praxis prova 2728f2d4",
+  "hostOrigin": "https://praxisui.dev",
+  "authorization": {
+    "budgetUsd": null,
+    "spendingControl": "user-attested-provider-account-limit",
+    "providerLimitIndependentlyVerified": false,
+    "maxTurns": 3,
+    "maxClarifications": 0,
+    "billingHardLimit": false,
+    "expectedModel": "gpt-5-mini",
+    "expectedPlanningModel": "gpt-5.6-luna",
+    "expectedRefinementModel": "gpt-5.6-luna",
+    "expectedVersion": "2.0.0-rc.48"
+  },
+  "owned": [
+    {
+      "id": 274,
+      "name": "Praxis prova 2728f2d4 0"
+    },
+    {
+      "id": 275,
+      "name": "Praxis prova 2728f2d4 1"
+    },
+    {
+      "id": 276,
+      "name": "Praxis prova 2728f2d4 2"
+    }
+  ],
+  "turns": [],
+  "admittedStreams": [
+    {
+      "streamId": "81813cdd-7893-4187-98fc-d9016b22fac6",
+      "threadId": "d0488653-b36f-30c2-a7e8-f12c1883d1e5",
+      "turnId": "dc769daf-3091-300b-afb2-258f542f200e"
+    }
+  ],
+  "terminalObservations": [
+    {
+      "turnId": "dc769daf-3091-300b-afb2-258f542f200e",
+      "type": "result",
+      "canApply": false,
+      "previewValid": false,
+      "warningCodes": [
+        "metadata-probe-not-run",
+        "llm-intent-resolution-used",
+        "llm-semantic-intent-tuple-normalized",
+        "llm-fast-intent-resolution-used",
+        "llm-intent-resolution-second-pass-used",
+        "platform-guidance-resource-candidates-cleared",
+        "platform-guidance-quick-replies-materialized"
+      ],
+      "usage": {
+        "complete": true,
+        "invocations": [
+          {
+            "phase": "pre_intent_tool_plan",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "status": "success",
+            "latencyMs": 5159,
+            "inputTokens": 5297,
+            "outputTokens": 483,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 5780
+          },
+          {
+            "phase": "declared_client_action_intent",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5-mini-2025-08-07",
+            "status": "success",
+            "latencyMs": 4573,
+            "inputTokens": 303,
+            "outputTokens": 333,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 636
+          },
+          {
+            "phase": "intent_fast",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5-mini",
+            "status": "failure",
+            "latencyMs": 12270,
+            "inputTokens": null,
+            "outputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "totalTokens": null
+          },
+          {
+            "phase": "intent_full",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5-mini-2025-08-07",
+            "status": "success",
+            "latencyMs": 14439,
+            "inputTokens": 22426,
+            "outputTokens": 1308,
+            "cacheReadInputTokens": 4864,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 23734
+          },
+          {
+            "phase": "declared_client_action_intent",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5-mini-2025-08-07",
+            "status": "success",
+            "latencyMs": 2031,
+            "inputTokens": 352,
+            "outputTokens": 142,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 494
+          },
+          {
+            "phase": "live_option_refinement",
+            "attempt": 1,
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "status": "success",
+            "latencyMs": 6819,
+            "inputTokens": 4534,
+            "outputTokens": 684,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 5218
+          }
+        ],
+        "tokens": {
+          "inputTokens": null,
+          "outputTokens": null,
+          "cacheReadInputTokens": null,
+          "cacheWriteInputTokens": null,
+          "totalTokens": null
+        },
+        "estimatedCostUsd": null,
+        "priceSnapshot": {
+          "sourceUrl": "https://developers.openai.com/api/docs/pricing",
+          "capturedAt": "2026-09-06"
+        },
+        "billingReconciled": false,
+        "embeddingsIncluded": false
+      }
+    }
+  ],
+  "fixturesRemoved": [],
+  "liveProviderCertified": false,
+  "functionalRuntimeCertified": false,
+  "pendingCreate": null,
+  "pageOwned": false,
+  "backend": {
+    "version": "2.0.0-rc.48",
+    "provider": "openai",
+    "model": "gpt-5-mini"
+  },
+  "catalogProofs": [
+    {
+      "resourceKey": "human-resources.funcionarios",
+      "releaseKey": "praxis-service:human-resources.funcionarios:c0888aaf98f1dc4a",
+      "expectedDocumentCount": 762,
+      "actualDocumentCount": 762
+    },
+    {
+      "resourceKey": "human-resources.cargos",
+      "releaseKey": "praxis-service:human-resources.cargos:aaf016d7f4d65252",
+      "expectedDocumentCount": 105,
+      "actualDocumentCount": 105
+    },
+    {
+      "resourceKey": "human-resources.departamentos",
+      "releaseKey": "praxis-service:human-resources.departamentos:b7d625b8508daac1",
+      "expectedDocumentCount": 90,
+      "actualDocumentCount": 90
+    }
+  ],
+  "unresolvedStarts": [],
+  "cancellation": [
+    {
+      "streamId": "81813cdd-7893-4187-98fc-d9016b22fac6",
+      "status": 200,
+      "terminalState": "completed",
+      "verified": true
+    }
+  ],
+  "cleanup": [
+    {
+      "id": 274,
+      "removed": true
+    },
+    {
+      "id": 275,
+      "removed": true
+    },
+    {
+      "id": 276,
+      "removed": true
+    }
+  ],
+  "observationsFailed": 0,
+  "cleanupComplete": true,
+  "journeyPassed": false
+}

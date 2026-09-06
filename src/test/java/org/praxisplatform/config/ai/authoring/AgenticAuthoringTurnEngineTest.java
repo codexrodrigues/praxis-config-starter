@@ -2221,6 +2221,74 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void keepsFieldRefinementInsideEstablishedAuthoringRoute() throws Exception {
+        ObjectNode constraints = objectMapper.createObjectNode().put("appliesToDataSelection", true);
+        constraints.putArray("filters").addObject()
+                .put("field", "name").put("operator", "contains").put("value", "Synthetic record");
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/records", "get", "", "/api/records/filter", "post", 0.98d,
+                "Governed record catalog", List.of("api-metadata", "tool-search-api-resources"));
+        ObjectNode establishedNode = objectMapper.valueToTree(validIntent());
+        establishedNode.set("selectedCandidate", objectMapper.valueToTree(candidate));
+        establishedNode.set("candidates", objectMapper.valueToTree(List.of(candidate)));
+        establishedNode.putNull("semanticDecision");
+        AgenticAuthoringIntentResolutionResult established = objectMapper.treeToValue(
+                establishedNode, AgenticAuthoringIntentResolutionResult.class);
+        establishedNode = objectMapper.valueToTree(established);
+        ((ObjectNode) establishedNode.get("semanticDecision")).set("constraints", constraints);
+        established = objectMapper.treeToValue(establishedNode, AgenticAuthoringIntentResolutionResult.class);
+
+        ObjectNode driftNode = establishedNode.deepCopy();
+        driftNode.put("operationKind", "explain");
+        driftNode.put("artifactKind", "component");
+        driftNode.put("changeKind", "answer_component_catalog_question");
+        driftNode.putNull("selectedCandidate");
+        driftNode.putArray("candidates");
+        driftNode.putNull("semanticDecision");
+        AgenticAuthoringIntentResolutionResult drift = objectMapper.treeToValue(
+                driftNode, AgenticAuthoringIntentResolutionResult.class);
+        driftNode = objectMapper.valueToTree(drift);
+        ((ObjectNode) driftNode.get("semanticDecision")).set("constraints", constraints.deepCopy());
+        drift = objectMapper.treeToValue(driftNode, AgenticAuthoringIntentResolutionResult.class);
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(established, drift);
+
+        ObjectNode schemaPayload = objectMapper.createObjectNode();
+        ObjectNode groupField = schemaPayload.putObject("schema").putObject("properties").putObject("groupIdsIn");
+        groupField.put("description", "Groups used to classify records");
+        groupField.putObject("x-ui").putObject("optionSource")
+                .put("key", "group").put("resourcePath", "/api/groups");
+        groupField.putObject("x-domain-governance").putObject("aiUsage")
+                .put("visibility", "allow").put("reasoningUse", "allow");
+        AgenticAuthoringToolRegistry registry = Mockito.spy(new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        Mockito.doReturn(AgenticAuthoringToolResult.success(
+                        AgenticAuthoringToolRegistry.SEARCH_SCHEMA_FIELDS, schemaPayload, Map.of()))
+                .when(registry).execute(argThat(call -> AgenticAuthoringToolRegistry.SEARCH_SCHEMA_FIELDS.equals(call.name())),
+                        any(), eq("retrieveEvidence"), any());
+        Mockito.lenient().when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(true, List.of(), List.of(),
+                        objectMapper.createObjectNode(), objectMapper.createObjectNode(), null, null, "Preview ready."));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService, previewService, objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper), registry);
+        CapturingSink sink = new CapturingSink();
+        engine.execute(request("Create a view of the requested records"),
+                new AiPrincipalContext("tenant", "user", "local", true), sink);
+
+        verify(intentResolverService, times(2)).resolve(any(), eq("tenant"), eq("user"), eq("local"));
+        verify(previewService).preview(any(), eq("tenant"), eq("user"), eq("local"));
+        List<JsonNode> resolved = java.util.stream.IntStream.range(0, sink.types.size())
+                .filter(index -> "intent.resolved".equals(sink.types.get(index)))
+                .mapToObj(index -> (JsonNode) objectMapper.valueToTree(sink.payloads.get(index))).toList();
+        assertThat(resolved).hasSize(2);
+        assertThat(resolved).allSatisfy(event -> assertThat(event.path("routeClass").asText())
+                .isEqualTo("component_authoring"));
+        assertThat(resolved.get(1).path("warnings").toString())
+                .contains("live-option-refinement-scoped-to-constraints");
+    }
+
+    @Test
     void routesImplicitDashboardMaterializationThroughSemanticPreview() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
