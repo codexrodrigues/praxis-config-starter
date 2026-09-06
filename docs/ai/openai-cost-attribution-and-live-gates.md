@@ -150,6 +150,8 @@ The OpenAI adapter keeps compact reasoning explicit for this profile even above 
 output capacity must not silently switch a phase to the provider's default reasoning policy.
 `gpt-5-mini` uses `low`; model selection and phase deadlines remain governed by existing settings.
 Structured calls share the stream abort registration: cancel releases a pending future, and an
-already cancelled turn cannot admit another call. This is not proof of stopped provider billing.
+already cancelled turn cannot admit another call. This includes worker interruption used by the
+authoring stream; preserve the interrupt flag after releasing the pending call. This is not proof
+of stopped provider billing.
 The trace records the resolved request model before dispatch and replaces it with an observed
 response snapshot when available. Missing usage and response identifiers remain unknown.
