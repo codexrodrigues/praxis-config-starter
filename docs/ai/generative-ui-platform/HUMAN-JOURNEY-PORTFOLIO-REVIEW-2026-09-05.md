@@ -28,21 +28,23 @@ As frases abaixo são roteiros de avaliação, nunca regras de roteamento de int
 - Render foi conferido: API `2.0.0-rc.46`, provider `openai`, modelo `gpt-5-mini`, chave presente,
   status válido com Origin oficial. Nenhuma troca para Astra.
 
-Próximo corte técnico: preservar/exportar a telemetria sanitizada de cada invocação do primeiro
-turno, identificar a causa da instabilidade e validar a correção localmente antes de outro gate pago.
-O recibo atual não permite distinguir limite de saída, transporte, timeout ou parsing. O sucesso
-funcional já obtido deve ser reaproveitado como evidência, sem novo pagamento apenas para exportá-lo.
-Depois, fechar seleção exata de campos e ampliar as provas livres das operações/nesting do inventário.
+## Continuação: campos escolhidos e timeout identificado
 
-## Continuação local: diagnóstico e seleção exata
+Config #457/#458 e Angular #510 incorporados, com CIs verdes. A seleção semântica de campos agora
+é preservada no layout compilado; campos obrigatórios omitidos bloqueiam o preview e o pedido de
+esclarecimento chega ao usuário, sem reparo automático. Quatro jornadas Chromium controladas
+passaram; o extra opcional permaneceu ausente do DOM/POST após reload.
 
-A continuação implementou preservação da categoria tipada do provider, exportação sanitizada por
-turno e seleção semântica de campos com layout compilado. Passaram 412 testes Java focais e quatro
-jornadas Chromium com componentes reais e semântica controlada. O campo opcional extra permaneceu
-ausente do formulário e do POST, inclusive após reload. Ver
-[escopo, inventário e limites](FIELD-SELECTION-AND-TURN-DIAGNOSTICS-2026-09-05.md).
-A interpretação livre real deste caso e o gate first-pass permanecem pendentes; a execução anterior
-continua registrada como eventual-pass.
+O novo gate real `34003732255` falhou antes do apply: três turnos, 2/3 testes, zero retries e limpeza
+confirmada. A telemetria por turno foi exportada e identificou quatro timeouts nos limites locais de
+12/30 segundos, enquanto duas chamadas menores completaram. Uso/custo das chamadas interrompidas
+permanece desconhecido. O sucesso funcional antigo continua eventual-pass; não foi convertido em
+certificação do novo corte ou dos formulários livres.
+
+Ver [implementação, validação e análise de orçamento por fase](FIELD-SELECTION-AND-TURN-DIAGNOSTICS-2026-09-05.md)
+e [recibo live sanitizado](HUMAN-JOURNEY-LIVE-TIMEOUT-DIAGNOSIS-2026-09-05.receipt.json).
+Próxima prioridade: política de tempo/raciocínio e contexto na fonte canônica, com teste local de
+transporte/deadline antes de novo gate pago. Release e deploy permanecem condicionados a first-pass.
 
 ## Plano e mapa de impacto
 
