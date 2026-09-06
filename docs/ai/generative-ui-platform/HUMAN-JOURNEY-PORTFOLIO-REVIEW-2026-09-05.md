@@ -1,5 +1,14 @@
 # Revisão das jornadas humanas do assistente Praxis
 
+## Estado atualizado em 2026-09-06
+
+Config `rc.149` e Quickstart `rc.47` estão publicados. O Render confirmou `rc.47`, saúde UP
+e `gpt-5-mini`. O gate do artefato Maven Central `34008305555` passou first-pass: 3/3 testes,
+um pedido humano e zero retries Playwright. Landing #214 foi integrada e publicada com libs 9.0.65.
+O [registro do corte publicado](PUBLISHED-PROVIDER-CUT-2026-09-06.md) e seu recibo distinguem
+o gate canônico da jornada livre no Render. As reprovações, pendências e versões citadas nas
+seções históricas abaixo descrevem os respectivos cortes anteriores; não foram apagadas.
+
 ## Escopo e decisão
 
 Revisão transversal solicitada pelo usuário em 2026-09-05. Objetivo: conversar sobre o negócio,
@@ -11,7 +20,7 @@ Este inventário não certifica “qualquer componente”. Manifesto disponível
 interação determinística no navegador e jornada com LLM real são quatro evidências distintas.
 As frases abaixo são roteiros de avaliação, nunca regras de roteamento de intenção.
 
-## Resultado verificável
+## Resultado verificável do primeiro corte (histórico)
 
 - **Seis jornadas browser determinísticas passaram**: criação de formulário, dashboard/drill-down
   e edição de registro em dois domínios, com dados/fronteiras controlados e componentes reais.

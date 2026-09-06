@@ -1,0 +1,331 @@
+{
+  "observedAt": "2026-09-06T04:14:31.262885+00:00",
+  "frontendCommit": "bb2524a7baaec2911413f03eb941a302dcda9665",
+  "frontendDeploymentRun": 34009416445,
+  "backendVersion": "2.0.0-rc.47",
+  "attempts": [
+    {
+      "kind": "preflight-failure",
+      "receipt": {
+        "runId": "free-9d0baab6-c590-4f8d-a6b0-0cafc1c394fe",
+        "marker": "Praxis prova cbd1d28e",
+        "hostOrigin": "https://praxisui.dev",
+        "authorization": {
+          "budgetUsd": null,
+          "spendingControl": "user-attested-provider-account-limit",
+          "providerLimitIndependentlyVerified": false,
+          "maxTurns": 3,
+          "maxClarifications": 0,
+          "billingHardLimit": false,
+          "expectedModel": "gpt-5-mini",
+          "expectedVersion": "2.0.0-rc.47"
+        },
+        "owned": [],
+        "turns": [],
+        "fixturesRemoved": [],
+        "liveProviderCertified": false,
+        "functionalRuntimeCertified": false,
+        "pendingCreate": null,
+        "pageOwned": false,
+        "backend": {
+          "version": "2.0.0-rc.47",
+          "provider": "openai",
+          "model": "gpt-5-mini"
+        },
+        "cancellation": [],
+        "unresolvedStarts": [],
+        "cleanup": [],
+        "observationsFailed": 0,
+        "cleanupComplete": true,
+        "journeyPassed": false
+      },
+      "providerCalls": 0
+    },
+    {
+      "kind": "governed-non-applicable-result-and-collector-failure",
+      "receipt": {
+        "runId": "free-77ce78cb-5789-4698-b4f5-1a98b4570453",
+        "marker": "Praxis prova b97d948c",
+        "hostOrigin": "https://praxisui.dev",
+        "authorization": {
+          "budgetUsd": null,
+          "spendingControl": "user-attested-provider-account-limit",
+          "providerLimitIndependentlyVerified": false,
+          "maxTurns": 3,
+          "maxClarifications": 0,
+          "billingHardLimit": false,
+          "expectedModel": "gpt-5-mini",
+          "expectedVersion": "2.0.0-rc.47"
+        },
+        "owned": [
+          {
+            "id": 268,
+            "name": "Praxis prova b97d948c 0"
+          },
+          {
+            "id": 269,
+            "name": "Praxis prova b97d948c 1"
+          },
+          {
+            "id": 270,
+            "name": "Praxis prova b97d948c 2"
+          }
+        ],
+        "turns": [],
+        "fixturesRemoved": [],
+        "liveProviderCertified": false,
+        "functionalRuntimeCertified": false,
+        "pendingCreate": null,
+        "pageOwned": false,
+        "backend": {
+          "version": "2.0.0-rc.47",
+          "provider": "openai",
+          "model": "gpt-5-mini"
+        },
+        "unresolvedStarts": [],
+        "cancellation": [
+          {
+            "streamId": "a1b224c9-ed85-4941-936b-5d1b9a11bffb",
+            "status": 403,
+            "terminalState": null,
+            "verified": false
+          }
+        ],
+        "cleanup": [
+          {
+            "id": 268,
+            "removed": true
+          },
+          {
+            "id": 269,
+            "removed": true
+          },
+          {
+            "id": 270,
+            "removed": true
+          }
+        ],
+        "observationsFailed": 1,
+        "cleanupComplete": false,
+        "journeyPassed": false
+      }
+    }
+  ],
+  "recovery": {
+    "method": "read-only-config-store-query-by-exact-owned-stream-id",
+    "canonicalTerminal": {
+      "intent": {
+        "resolved": null,
+        "warnings": [
+          "metadata-probe-not-run",
+          "llm-intent-resolution-used",
+          "llm-intent-resolution-unresolved-clarification-required",
+          "O candidato disponível expõe um endpoint de filtragem (POST) — será necessário verificar no catálogo governado se há uma operação de listagem/consulta e as ações de edição para o cadastro antes da materialização.",
+          "llm-fast-intent-resolution-used",
+          "llm-pre-intent-query-constraints-not-preserved",
+          "llm-resource-selection-unconfirmed-by-ai-authored-focus",
+          "llm-resource-discovery-authoring-drift-normalized",
+          "deterministic-quick-replies-fallback-applied"
+        ],
+        "candidates": [
+          {
+            "evidence": [
+              "api-metadata",
+              "semantic-retrieval",
+              "schema-available",
+              "actions-probe-pending",
+              "semantic-role:operational-resource",
+              "tool-search-api-resources"
+            ],
+            "resourceKey": null,
+            "resourcePath": "/api/human-resources/funcionarios"
+          }
+        ],
+        "routeClass": null,
+        "canMaterialize": null
+      },
+      "status": "DONE",
+      "turnId": "dd59de87-af10-3247-af62-3d4e6b5abfe7",
+      "canApply": false,
+      "streamId": "a1b224c9-ed85-4941-936b-5d1b9a11bffb",
+      "threadId": "90ecc943-601e-3c8d-94c9-56cd636eea6d",
+      "terminalAt": "2026-09-06T03:52:12.548785+00:00",
+      "diagnosticKeys": [
+        "valid",
+        "routeClass",
+        "llmResolved",
+        "artifactKind",
+        "decisionValid",
+        "operationKind",
+        "schemaVersion",
+        "fallbackPolicy",
+        "requiresReview",
+        "retrievalSource",
+        "providerTelemetry",
+        "semanticAxisCount",
+        "toolLoopCompleted",
+        "semanticDecisionId",
+        "semanticPolicyApplied",
+        "authoringEvidenceCount",
+        "authoringEvidencePhase",
+        "consultativePostIntent",
+        "keywordFallbackApplied",
+        "llmResolutionAttempted",
+        "toolLoopTerminalReason",
+        "previewTechnicallyValid",
+        "semanticAxisPendingCount",
+        "semanticAxisVerifiedCount",
+        "semanticAxesSchemaVerified",
+        "authoringEvidenceSourceRefs",
+        "authoringEvidenceComponentId",
+        "semanticDecisionRefinementOf",
+        "semanticDecisionReviewReason",
+        "semanticDecisionVisualIntent",
+        "previewResourceSchemaVerified",
+        "semanticDecisionSchemaVersion",
+        "semanticDecisionReviewRequired",
+        "candidateSetContainsDomainAnchor",
+        "resourceSearchFocusDesiredSurface",
+        "selectedCandidateUsesDomainAnchor",
+        "semanticDecisionPreviousDecisionId",
+        "candidateSetContainsLexicalFallback",
+        "resourceDiscoveryCandidateSummaries",
+        "selectedCandidateUsesLexicalFallback",
+        "uiCompositionPlanUsesHardcodedAnchor",
+        "resourceSearchFocusUncertaintyPresent",
+        "authoringEvidenceOperationCandidateIds",
+        "resourceDiscoveryGroundedClarification",
+        "selectedResourceSchemaGroundingMissing",
+        "uiCompositionPlanUsesReferenceProvider",
+        "semanticDecisionReviewGroundedByPreview",
+        "resourceSearchFocusPrimaryBusinessEntity",
+        "candidateSetContainsBroadArtifactDiscovery",
+        "uiCompositionPlanHasUnverifiedSemanticAxes",
+        "selectedCandidateUsesBroadArtifactDiscovery"
+      ],
+      "providerTelemetry": {
+        "latencyMs": 22080,
+        "truncated": false,
+        "inputTokens": 15341,
+        "totalTokens": 17605,
+        "failureCount": 0,
+        "outputTokens": 2264,
+        "successCount": 3,
+        "schemaVersion": "praxis-agentic-authoring-provider-telemetry.v1",
+        "invocationCount": 3,
+        "rawPromptCopied": false,
+        "credentialsCopied": false,
+        "rawResponseCopied": false,
+        "providerInvocations": [
+          {
+            "model": "gpt-5.6-luna",
+            "phase": "pre_intent_tool_plan",
+            "status": "success",
+            "attempt": 1,
+            "provider": "openai",
+            "latencyMs": 7643,
+            "transport": "openai-responses-sdk",
+            "responseId": "resp_03bbf680fbbfa3d2016a9ce354ebac87d08613c91c802c38f9",
+            "failureKind": null,
+            "inputTokens": 5098,
+            "totalTokens": 5639,
+            "finishReason": "completed",
+            "outputTokens": 541,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null
+          },
+          {
+            "model": "gpt-5-mini-2025-08-07",
+            "phase": "declared_client_action_intent",
+            "status": "success",
+            "attempt": 1,
+            "provider": "openai",
+            "latencyMs": 2672,
+            "transport": "openai-responses-sdk",
+            "responseId": "resp_0cbbaefa2674b41a016a9ce35db94487d082ea9048f4956f07",
+            "failureKind": null,
+            "inputTokens": 301,
+            "totalTokens": 629,
+            "finishReason": "completed",
+            "outputTokens": 328,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null
+          },
+          {
+            "model": "gpt-5-mini-2025-08-07",
+            "phase": "intent_fast",
+            "status": "success",
+            "attempt": 1,
+            "provider": "openai",
+            "latencyMs": 11765,
+            "transport": "openai-responses-sdk",
+            "responseId": "resp_0fe1585fc7f8dd21016a9ce3607e6887d08fda8f39965a7225",
+            "failureKind": null,
+            "inputTokens": 9942,
+            "totalTokens": 11337,
+            "finishReason": "completed",
+            "outputTokens": 1395,
+            "cacheReadInputTokens": 2816,
+            "cacheWriteInputTokens": null
+          }
+        ],
+        "cacheReadInputTokens": 2816,
+        "cacheWriteInputTokens": 0
+      }
+    },
+    "streamActive": false,
+    "ownedRecordsRemoved": [
+      268,
+      269,
+      270
+    ],
+    "pageApplied": false,
+    "operationalCleanupVerifiedAfterRecovery": true,
+    "httpCancellationVerified": false
+  },
+  "catalogRepair": {
+    "observedAt": "2026-09-06T04:09:23.312875+00:00",
+    "tenant": "demo",
+    "environment": "landing",
+    "resources": [
+      {
+        "resourceKey": "human-resources.funcionarios",
+        "releaseKey": "praxis-service:human-resources.funcionarios:c0888aaf98f1dc4a",
+        "sourceHash": "c0888aaf98f1dc4a637b2c86c559684ac57b615a33902bbf4090269aad50060b",
+        "expected": 762,
+        "actual": 762,
+        "reconciled": true,
+        "publication": "PUBLISHED"
+      },
+      {
+        "resourceKey": "human-resources.cargos",
+        "releaseKey": "praxis-service:human-resources.cargos:aaf016d7f4d65252",
+        "sourceHash": "aaf016d7f4d6525287e64c3e94cf8530bd05b5b18ad357bd298812194d95db24",
+        "expected": 105,
+        "actual": 105,
+        "reconciled": true,
+        "publication": "PUBLISHED"
+      },
+      {
+        "resourceKey": "human-resources.departamentos",
+        "releaseKey": "praxis-service:human-resources.departamentos:b7d625b8508daac1",
+        "sourceHash": "b7d625b8508daac1178800f209bd8b8964fce5294e66148622db4644ac9faf92",
+        "expected": 90,
+        "actual": 90,
+        "reconciled": true,
+        "publication": "PUBLISHED"
+      }
+    ]
+  },
+  "validationAfterCollectorFix": {
+    "nodeTestsPassed": 17,
+    "typescriptPassed": true,
+    "paidRerun": false
+  },
+  "cost": {
+    "totalUsd": null,
+    "originalPriceSnapshotCoveredPlanningModel": false,
+    "embeddingsIncluded": false
+  },
+  "freeJourneyCertified": false
+}

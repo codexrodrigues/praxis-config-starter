@@ -1,0 +1,293 @@
+{
+  "kind": "praxis.generative-ui.publication-proof",
+  "observedAt": "2026-09-06T03:16:58.057802+00:00",
+  "config": {
+    "version": "0.1.0-rc.149",
+    "sourceCommit": "78109b4e54a2dab880ced2c62e6de2b712e0bca7",
+    "publicationRun": 34006472352,
+    "artifactSha256": "71c905af2b7a8d7f265d14f30484c0718275d69c0774fc2e044c6b0c002ecfe1"
+  },
+  "quickstart": {
+    "version": "2.0.0-rc.47",
+    "sourceCommit": "50d096bf7aa85b34dd8a6f13cb962dbe947bd11d",
+    "publicCommit": "7ba8d7d2c9de61482ac8da46be443e91021ffcae",
+    "prepareRun": 34007755714,
+    "publicationRun": 34008247036,
+    "sourceAndPublicPomVerified": true,
+    "localVerify": {
+      "total": 548,
+      "executed": 526,
+      "skipped": 22,
+      "failures": 0,
+      "errors": 0
+    },
+    "ci": {
+      "runId": 34007211212,
+      "total": 548,
+      "executed": 540,
+      "skipped": 8,
+      "failures": 0,
+      "errors": 0
+    }
+  },
+  "render": {
+    "observedAt": "2026-09-06T03:14:39.670892+00:00",
+    "health": "UP",
+    "build": {
+      "artifact": "praxis-api-quickstart",
+      "name": "praxis-api-quickstart",
+      "time": "2026-09-06T03:08:49.001Z",
+      "version": "2.0.0-rc.47",
+      "group": "com.example.praxis"
+    },
+    "provider": {
+      "provider": "openai",
+      "model": "gpt-5-mini",
+      "hasApiKey": true,
+      "source": "env",
+      "success": true
+    },
+    "sourceTag": "v2.0.0-rc.47",
+    "sourceCommit": "50d096bf7aa85b34dd8a6f13cb962dbe947bd11d",
+    "publicCommit": "7ba8d7d2c9de61482ac8da46be443e91021ffcae",
+    "configVersion": "0.1.0-rc.149",
+    "renderDeployId": "dep-daedibk9v7es73b3m130",
+    "renderStatusObserved": "Deploy succeeded | Live",
+    "paymentWarningPresent": true,
+    "paymentWarningBlockedObservedDeploy": false
+  },
+  "publishedGate": {
+    "runId": 34008305555,
+    "status": "success",
+    "configArtifactSource": "maven-central",
+    "model": "gpt-5-mini",
+    "uiCommit": "a94360259e8342033a93b6d753ff9717f9bb5425",
+    "uiVersion": "9.0.64",
+    "maxHumanTurns": 3,
+    "maxPlaywrightRetries": 0,
+    "providerAccountLimit": "user-attested",
+    "providerLimitIndependentlyVerified": false,
+    "firstPassFunctional": true,
+    "humanTurns": 1,
+    "playwright": {
+      "discovered": 3,
+      "executed": 3,
+      "passed": 3,
+      "skipped": 0,
+      "failed": 0,
+      "flaky": 0,
+      "attempts": 3,
+      "retryAttempts": 0,
+      "tests": [
+        {
+          "title": "Guard live rejeita interceptacao de endpoint critico antes do registro",
+          "status": "expected",
+          "attempts": 1,
+          "retryAttempts": 0
+        },
+        {
+          "title": "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
+          "status": "expected",
+          "attempts": 1,
+          "retryAttempts": 0
+        },
+        {
+          "title": "Auditoria live: capabilities reais possuem proveniência governada e não degradada",
+          "status": "expected",
+          "attempts": 1,
+          "retryAttempts": 0
+        }
+      ],
+      "durationMs": 86275
+    },
+    "scenarioEvidence": [
+      {
+        "schemaVersion": "praxis.page-builder-agentic-scenario-receipt/v1",
+        "scenarioId": "live-resource-workspace-command",
+        "archetype": "master-detail-command",
+        "outcome": "first-pass",
+        "firstPassFunctional": true,
+        "authoringFirstPass": true,
+        "playwrightRetryAttempts": 0,
+        "interaction": {
+          "initialPromptCount": 1,
+          "totalTurnCount": 1,
+          "clarificationQuickReplyCount": 0,
+          "governedRevisionCount": 0,
+          "correctiveTypedPromptCount": 0,
+          "deterministicRepairCount": 0
+        },
+        "terminal": {
+          "outcome": "applicable",
+          "transport": "stream",
+          "blockingDiagnosticCodes": [],
+          "referencePresent": true,
+          "backendPatchAuthority": true
+        },
+        "apply": {
+          "terminalReferenceMatched": true,
+          "streamIdMatched": true,
+          "resultEventIdMatched": true,
+          "payloadSha256": "cc4b7048f50b2f9ec970ccc6d15b8b75241e58af4dcbcfbdabf10917f8041310",
+          "matchesPersistedPayload": true
+        },
+        "persistence": {
+          "version": 1,
+          "etagPresent": true,
+          "persistedPayloadSha256": "cc4b7048f50b2f9ec970ccc6d15b8b75241e58af4dcbcfbdabf10917f8041310",
+          "reloadPayloadSha256": "cc4b7048f50b2f9ec970ccc6d15b8b75241e58af4dcbcfbdabf10917f8041310",
+          "reloadMatchesPersisted": true,
+          "reloadEtagMatches": true
+        },
+        "functionalAssertions": [
+          "composition.master-visible",
+          "composition.detail-visible",
+          "composition.selection-propagated",
+          "discovery.actions.http-200",
+          "discovery.capabilities.http-200",
+          "command.execute.http-200",
+          "command.duplicate.http-409",
+          "resource.refresh-observed",
+          "persistence.reload-rendered"
+        ],
+        "timingMs": {
+          "firstUsefulStatus": 45712,
+          "firstApplicableTerminal": 46324,
+          "applyCompleted": 48856,
+          "runtimeFunctional": 70942,
+          "reloadCompleted": 76603,
+          "total": 76603
+        }
+      }
+    ],
+    "dependencyAttestation": {
+      "configStarter": {
+        "artifactId": "praxis-config-starter",
+        "version": "0.1.0-rc.149",
+        "source": "maven-central",
+        "referenceJarSha256": "71c905af2b7a8d7f265d14f30484c0718275d69c0774fc2e044c6b0c002ecfe1",
+        "quickstartNestedJarSha256": "71c905af2b7a8d7f265d14f30484c0718275d69c0774fc2e044c6b0c002ecfe1",
+        "quickstartEntry": "BOOT-INF/lib/praxis-config-starter-0.1.0-rc.149.jar",
+        "byteIdentical": true
+      }
+    },
+    "cleanupVerified": true,
+    "criticalEndpointMocks": 0,
+    "capabilities": {
+      "source": "registry",
+      "degraded": false,
+      "catalogCount": 24,
+      "chartResourceBinding": true
+    },
+    "providerLedger": {
+      "scope": "authoring-turns-only",
+      "turns": [
+        {
+          "testOrdinal": 2,
+          "resultOrdinal": 0,
+          "retry": 0,
+          "turnNumber": 1,
+          "telemetry": {
+            "schemaVersion": "praxis-agentic-authoring-provider-telemetry.v1",
+            "invocationCount": 4,
+            "truncated": false,
+            "providerInvocations": [
+              {
+                "phase": "pre_intent_tool_plan",
+                "provider": "openai",
+                "model": "gpt-5-mini-2025-08-07",
+                "transport": "openai-responses-sdk",
+                "status": "failure",
+                "failureKind": "unknown",
+                "responseId": "resp_0ff1529d6323fd7f016a9cdb406db487d29d38da7f1897ecb5",
+                "finishReason": "incomplete",
+                "attempt": 1,
+                "latencyMs": 8125,
+                "inputTokens": 7273,
+                "outputTokens": 640,
+                "cacheReadInputTokens": 6912,
+                "cacheWriteInputTokens": null,
+                "totalTokens": 7913
+              },
+              {
+                "phase": "pre_intent_tool_plan",
+                "provider": "openai",
+                "model": "gpt-5-mini",
+                "transport": null,
+                "status": "failure",
+                "failureKind": "timeout",
+                "responseId": null,
+                "finishReason": null,
+                "attempt": 2,
+                "latencyMs": 4029,
+                "inputTokens": null,
+                "outputTokens": null,
+                "cacheReadInputTokens": null,
+                "cacheWriteInputTokens": null,
+                "totalTokens": null
+              },
+              {
+                "phase": "declared_client_action_intent",
+                "provider": "openai",
+                "model": "gpt-5-mini-2025-08-07",
+                "transport": "openai-responses-sdk",
+                "status": "success",
+                "failureKind": null,
+                "responseId": "resp_0ce8ecea8b9967f4016a9cdb59e1d087d2903cafb5a3d860f6",
+                "finishReason": "completed",
+                "attempt": 1,
+                "latencyMs": 2860,
+                "inputTokens": 309,
+                "outputTokens": 261,
+                "cacheReadInputTokens": 0,
+                "cacheWriteInputTokens": null,
+                "totalTokens": 570
+              },
+              {
+                "phase": "intent_fast",
+                "provider": "openai",
+                "model": "gpt-5-mini-2025-08-07",
+                "transport": "openai-responses-sdk",
+                "status": "success",
+                "failureKind": null,
+                "responseId": "resp_0eecfd002b5cf081016a9cdb5cb82487d2bd540bdee2aab6ab",
+                "finishReason": "completed",
+                "attempt": 1,
+                "latencyMs": 8314,
+                "inputTokens": 12400,
+                "outputTokens": 1114,
+                "cacheReadInputTokens": 4864,
+                "cacheWriteInputTokens": null,
+                "totalTokens": 13514
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "totalCostUsd": null,
+    "embeddingsIncludedInLedger": false
+  },
+  "landing": {
+    "mergedPr": 214,
+    "mergeCommit": "bb2524a7baaec2911413f03eb941a302dcda9665",
+    "uiVersion": "9.0.65",
+    "prCiRun": 34006902047,
+    "prCiStatus": "success",
+    "knownFlakyCases": [
+      "Studio handoff preview readiness",
+      "Studio primary navigation"
+    ],
+    "controlledBrowserCases": 6,
+    "controlledBrowserRetries": 0,
+    "canaryControlUnitTests": 12,
+    "mainCiRun": 34008293159,
+    "deploymentStatus": "success",
+    "freeLlmCanaryStatus": "not-certified-governed-non-applicable-result",
+    "mainCiStatus": "success",
+    "deploymentRun": 34009416445,
+    "freeLlmCanaryReceipt": "RENDER-FREE-JOURNEY-2026-09-06.receipt.json",
+    "canaryControlUnitTestsAfterFix": 17
+  },
+  "universalComponentCertification": false
+}

@@ -1,5 +1,9 @@
 # Política de chamadas por fase na jornada humana
 
+Atualização de publicação: Config `rc.149`/Quickstart `rc.47` passaram no gate Maven Central
+34008305555, com deploy Render confirmado. Ver a [prova do corte publicado](PUBLISHED-PROVIDER-CUT-2026-09-06.md).
+O histórico abaixo preserva a distinção entre source-checkout e artefato publicado.
+
 Classificação: `transversal`. Fonte canônica: Config, no resolver/planejador semântico e no adapter OpenAI.
 
 ## Inventário e mapa de impacto
