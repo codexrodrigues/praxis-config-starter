@@ -1,24 +1,21 @@
 name: CI and Release Java Starter (praxis-config-starter)
-
-on:
+'on':
   push:
-    branches:
-      - main
     tags:
-      - 'v*'
+      - v*
   workflow_dispatch:
     inputs:
       create_tag:
-        description: 'Create and push git tag from main. Must remain enabled for publication.'
+        description: Create and push git tag from main. Must remain enabled for publication.
         required: false
         default: true
         type: boolean
       version:
-        description: 'Explicit version (e.g. 0.1.0 or 0.1.0-rc.1). Optional when bump is provided.'
+        description: Explicit version (e.g. 0.1.0 or 0.1.0-rc.1). Optional when bump is provided.
         required: false
         type: string
       bump:
-        description: 'Semver bump to compute the next version when version is empty.'
+        description: Semver bump to compute the next version when version is empty.
         required: false
         default: patch
         type: choice
@@ -28,39 +25,17 @@ on:
           - major
           - prerelease
       preid:
-        description: 'Pre-release identifier when bump=prerelease (alpha, beta, rc).'
+        description: Pre-release identifier when bump=prerelease (alpha, beta, rc).
         required: false
         default: rc
         type: string
-
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && format('release-manual-{0}', github.run_id) || startsWith(github.ref, 'refs/tags/v') && format('release-{0}', github.ref_name) || format('ci-{0}', github.ref) }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-
+  group: java-release-${{ github.event_name }}
+  cancel-in-progress: false
 jobs:
-  build_main:
-    name: Build on main
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Set up Java 21 (Temurin)
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-
-      - name: Build (verify)
-        run: mvn -B -P ci-smoke-unit -T 1C clean verify
-
   create_tag:
     name: Create release tag
-    if: github.event_name == 'workflow_dispatch' && inputs.create_tag == true
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -68,6 +43,12 @@ jobs:
       resolved_version: ${{ steps.compute_version.outputs.resolved_version }}
       resolved_tag: ${{ steps.compute_version.outputs.resolved_tag }}
     steps:
+      - name: Require intentional release preparation
+        env:
+          CREATE_TAG: ${{ inputs.create_tag }}
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          [[ "$GITHUB_REF" == refs/heads/main && "$CREATE_TAG" == true && -n "$RELEASE_PAT" ]] || { echo '::error::Use main, create_tag=true and a configured RELEASE_PAT to trigger the tag publication.'; exit 1; }
       - name: Require release automation token
         env:
           RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
@@ -77,30 +58,22 @@ jobs:
             echo "::error::RELEASE_PAT is required so the pushed tag triggers the publication workflow."
             exit 1
           fi
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PAT }}
-
+          ref: ${{ github.sha }}
       - name: Set up Java 21 (Temurin)
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
-
-      - name: Ensure main/master branch
+      - name: Require main
         shell: bash
         run: |
-          set -euo pipefail
-          BRANCH="${GITHUB_REF_NAME}"
-          if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "master" ]; then
-            echo "::error::Run this workflow on main/master to create release tags. Current: $BRANCH"
-            exit 1
-          fi
-
+          [[ "$GITHUB_REF" == refs/heads/main ]] || exit 1
       - name: Compute next version
         id: compute_version
         shell: bash
@@ -195,9 +168,9 @@ jobs:
             echo "${base}-${preid}.1"
           }
 
-          VERSION_INPUT="${{ inputs.version }}"
-          BUMP_INPUT="${{ inputs.bump }}"
-          PREID_INPUT="${{ inputs.preid }}"
+          VERSION_INPUT="${RELEASE_INPUT_VERSION}"
+          BUMP_INPUT="${RELEASE_INPUT_BUMP}"
+          PREID_INPUT="${RELEASE_INPUT_PREID}"
 
           VERSION=""
           if [[ -n "${VERSION_INPUT:-}" ]]; then
@@ -224,7 +197,10 @@ jobs:
             echo "- Version: \`$VERSION\`"
             echo "- Tag: \`$TAG\`"
           } >> "$GITHUB_STEP_SUMMARY"
-
+        env:
+          RELEASE_INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_INPUT_BUMP: ${{ inputs.bump }}
+          RELEASE_INPUT_PREID: ${{ inputs.preid }}
       - name: Commit release version and push tag atomically
         shell: bash
         run: |
@@ -254,9 +230,11 @@ jobs:
           fi
 
           git tag -a "$TAG" -m "Release $TAG"
+          git fetch origin main
+          [[ "$(git rev-parse origin/main)" == "$GITHUB_SHA" ]] || { echo "::error::main advanced; prepare the new revision deliberately."; exit 1; }
           git push --atomic origin "HEAD:${GITHUB_REF_NAME}" "$TAG"
           echo "Persisted version '$VERSION' on '${GITHUB_REF_NAME}' and pushed tag '$TAG' atomically."
-
+    timeout-minutes: 10
   release:
     name: Publish to Maven Central
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -273,7 +251,12 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-
+      - name: Require a tag from main
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          [[ "$GITHUB_REF" == refs/tags/v* ]] || { echo '::error::Publication requires a version tag.'; exit 1; }
+          git merge-base --is-ancestor HEAD origin/main || { echo '::error::Tagged revision is not on main.'; exit 1; }
       - name: Set up Java 21 (Temurin) + Central server
         uses: actions/setup-java@v5
         with:
@@ -283,7 +266,6 @@ jobs:
           server-id: central
           server-username: CENTRAL_TOKEN_USER
           server-password: CENTRAL_TOKEN_PASS
-
       - name: Import GPG private key (sanitize + import)
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -306,7 +288,6 @@ jobs:
           fi
           gpg --batch --import /tmp/gpg.key
           gpg --batch --list-secret-keys --keyid-format LONG
-
       - name: Resolve GPG key id (fallback if secret missing)
         run: |
           set -euo pipefail
@@ -321,7 +302,6 @@ jobs:
           else
             echo "GPG_KEY_ID provided via secrets"
           fi
-
       - name: Resolve release version
         id: ver
         shell: bash
@@ -335,7 +315,6 @@ jobs:
           fi
           echo "resolved=${V}" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $V"
-
       - name: Verify tagged module version
         shell: bash
         run: |
@@ -346,24 +325,8 @@ jobs:
             echo "::error::Tagged pom.xml version '$POM_VERSION' does not match tag version '$TAG_VERSION'."
             exit 1
           fi
-
-      - name: Build and sign without tests (verify)
+      - name: Build, test, sign and publish the tagged release
         run: |
-          mvn -B -P release,ci-smoke-unit -DskipTests -Dgpg.skip=false -Dgpg.keyname="${GPG_KEY_ID}" -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" -Dgpg.executable=gpg -T 1C \
-            clean verify
-
-      - name: Check signatures exist
-        run: |
-          V='${{ steps.ver.outputs.resolved }}'
-          ls -l target || true
-          test -f target/praxis-config-starter-${V}.jar.asc
-          test -f target/praxis-config-starter-${V}-sources.jar.asc
-          test -f target/praxis-config-starter-${V}-javadoc.jar.asc
-          if [ ! -f pom.xml.asc ]; then
-            echo "Note: pom.xml.asc not found in module root; central plugin will pick attached POM signature if present."
-          fi
-
-      - name: Publish to Central
-        run: |
-          mvn -B -P release,ci-smoke-unit -DskipTests -Dgpg.skip=false -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" -DautoPublish=true -DwaitUntil=PUBLISHED -DwaitMaxTime=7200 -T 1C \
+          mvn -B -P release,ci-smoke-unit -Dgpg.skip=false -Dgpg.keyname="${GPG_KEY_ID}" -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" -DautoPublish=true -DwaitUntil=PUBLISHED -DwaitMaxTime=7200 -T 1C \
             clean verify org.sonatype.central:central-publishing-maven-plugin:publish
+    timeout-minutes: 45

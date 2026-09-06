@@ -6,8 +6,8 @@ O build, os gates downstream e a publicação usam Java 21, baseline necessário
 para o contrato canônico de snapshots do `praxis-rules-engine`.
 
 ## O que esta automatizado
-- Build automatico em `push` para `main` (job `Build on main`).
-- Build de `smoke/unit` em `push` para `main` com perfil Maven `ci-smoke-unit`.
+- Validacao local durante desenvolvimento; sem build remoto em commits/PRs.
+- Gate `ci-smoke-unit` na tag, na mesma sessao Maven que assina e publica; nao repete `clean verify`.
 - Criacao automatica de tag por `workflow_dispatch` (job `Create release tag`), com:
   - versao explicita (`version`), ou
   - calculo automatico por semver (`bump`: patch/minor/major/prerelease + `preid`).
@@ -37,7 +37,7 @@ e a fornece apenas ao Quickstart iniciado pelo smoke. Nao configure um valor
 padrao ou compartilhado para esse gate.
 
 ## Gate de authoring antes de publicar
-Antes de criar a tag de release, execute o smoke ponta a ponta contra o `praxis-api-quickstart`.
+Antes de criar a tag de release, execute localmente o smoke ponta a ponta contra o `praxis-api-quickstart`. Reserve o equivalente remoto abaixo ao gate necessario do corte, quando a prova local nao cobrir o ambiente exigido.
 Esse gate valida a integracao real entre o starter publicado/local, o host de referencia, endpoints HTTP de authoring,
 aplicacao de config e streaming SSE.
 
@@ -130,7 +130,7 @@ verificados do JAR e do POM. Esse e o gate que comprova o artefato publicado; um
 `source-checkout` nao substitui essa prova.
 
 ## Fluxo recomendado (mais simples)
-1) Executar o gate **Agentic Authoring HTTP Smoke**.
+1) Validar localmente; usar **Agentic Authoring HTTP Smoke** remoto somente quando necessario ao corte.
 2) Entrar em **Actions -> CI and Release Java Starter (praxis-config-starter) -> Run workflow**.
 3) Manter `create_tag=true`.
 4) Preencher:
@@ -159,7 +159,7 @@ Resultado:
 ## Convencao de tags
 - Formato aceito para release automatica: `v*` (ex.: `v1.2.0`, `v1.2.1-rc.1`).
 
-## Validacao local (opcional)
+## Validacao local antes do fechamento
 ```bash
 mvn -B -P ci-smoke-unit -T 1C clean verify
 ```

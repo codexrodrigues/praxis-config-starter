@@ -597,3 +597,7 @@ releitura atestada e os gates canônicos do ciclo de vida.
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
+
+## Política de CI e publicação
+
+Validação local durante desenvolvimento; Actions apenas no fechamento necessário de versões. Consulte [ACTIONS-RELEASE-POLICY.md](ACTIONS-RELEASE-POLICY.md) para gatilhos, gates e recuperação.

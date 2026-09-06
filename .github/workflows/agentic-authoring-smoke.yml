@@ -113,6 +113,7 @@ jobs:
     name: Approve paid provider gate
     if: inputs.paid_gate_lane != 'none'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     environment: ai-paid-gates
     permissions:
       contents: read

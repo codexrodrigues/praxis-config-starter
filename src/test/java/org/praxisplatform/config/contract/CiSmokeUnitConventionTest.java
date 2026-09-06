@@ -42,11 +42,12 @@ class CiSmokeUnitConventionTest {
         String workflow = Files.readString(resolveRepoFile(".github/workflows/release.yml"));
 
         assertThat(workflow).contains("name: CI and Release Java Starter (praxis-config-starter)");
-        assertThat(workflow).contains("branches:");
-        assertThat(workflow).contains("      - main");
-        assertThat(workflow).contains("run: mvn -B -P ci-smoke-unit -T 1C clean verify");
+        assertThat(workflow).doesNotContain("branches:", "pull_request:", "build_main:");
+        assertThat(workflow).contains("workflow_dispatch:", "tags:", "- v*");
         assertThat(workflow).contains("mvn -B -P release,ci-smoke-unit");
-        assertThat(workflow).contains("mvn -B -P release,ci-smoke-unit -DskipTests");
+        assertThat(workflow).doesNotContain("-DskipTests", "-Dmaven.test.skip=true");
+        assertThat(workflow).contains("clean verify org.sonatype.central:central-publishing-maven-plugin:publish");
+        assertThat(workflow.split("clean verify", -1)).hasSize(2);
     }
 
     @Test
@@ -59,7 +60,9 @@ class CiSmokeUnitConventionTest {
                 .contains("git commit -m \"chore: release $TAG\"")
                 .contains("git tag -a \"$TAG\" -m \"Release $TAG\"")
                 .contains("git push --atomic origin \"HEAD:${GITHUB_REF_NAME}\" \"$TAG\"")
-                .contains("format('release-manual-{0}', github.run_id)")
+                .contains("group: java-release-${{ github.event_name }}")
+                .contains("git merge-base --is-ancestor HEAD origin/main")
+                .contains("main advanced; prepare the new revision deliberately.")
                 .contains("if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')")
                 .contains("Tagged pom.xml version '$POM_VERSION' does not match tag version '$TAG_VERSION'.");
         assertThat(workflow)
