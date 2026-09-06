@@ -1,0 +1,218 @@
+{
+  "schemaVersion": "praxis.page-builder-agentic-production-like-result/v1",
+  "productionLike": false,
+  "criticalEndpointMocks": 0,
+  "criticalInterceptionGuard": {
+    "testTitle": "Guard live rejeita interceptacao de endpoint critico antes do registro",
+    "applicable": true,
+    "passed": true
+  },
+  "executionLane": "live",
+  "validationMode": "smoke",
+  "e2ePassed": false,
+  "provider": "openai",
+  "providerRequired": true,
+  "model": "gpt-5-mini",
+  "embeddingProvider": "openai",
+  "datasourceKinds": {
+    "application": "postgresql",
+    "config": "postgresql"
+  },
+  "dependencyAttestation": {
+    "configStarter": {
+      "artifactId": "praxis-config-starter",
+      "version": "0.1.0-rc.150",
+      "source": "source-checkout",
+      "referenceJarSha256": "4e78ffe2c067cab4b1cdd57afa670a86cbcad6fe56c01aebc5bb1f6339d1159e",
+      "quickstartNestedJarSha256": "4e78ffe2c067cab4b1cdd57afa670a86cbcad6fe56c01aebc5bb1f6339d1159e",
+      "quickstartEntry": "BOOT-INF/lib/praxis-config-starter-0.1.0-rc.150.jar",
+      "byteIdentical": true
+    }
+  },
+  "pgvector": {
+    "schemaVersion": "praxis.pgvector-preflight/v1",
+    "ready": true,
+    "extensionVersion": "0.8.0",
+    "table": "vector_store",
+    "embeddingType": "vector(768)"
+  },
+  "compilerProofs": {
+    "java": null,
+    "typescript": null
+  },
+  "backendBaseUrl": "http://127.0.0.1:8088",
+  "uiBaseUrl": "http://localhost:4003",
+  "loopbackOnly": true,
+  "cleanupVerified": true,
+  "artifactRoot": "D:\\a\\praxis-config-starter\\praxis-config-starter\\praxis-config-starter\\artifacts\\page-builder-agentic-e2e\\smoke\\20260906-054406",
+  "sourceAudit": {
+    "passed": true,
+    "artifact": "source-audit.json"
+  },
+  "evidenceValidation": {
+    "passed": false,
+    "artifact": "evidence-validation-summary.json",
+    "attestation": null
+  },
+  "git": [
+    {
+      "name": "praxis-config-starter",
+      "sha": "45f57295c9f96ac7d2d5ce146e71b6f04cfd2bec",
+      "treeSha": "4e02e1188310729c0d45e7d20eb420a211eec1d6",
+      "materialization": "working-tree",
+      "dirty": false
+    },
+    {
+      "name": "praxis-metadata-starter",
+      "sha": "f43d3c384fbcc209c6264b64bf6e5ebbe3c0ea6d",
+      "treeSha": "0ba753f6f05a8a05e409e309fe0e2c43a2faf9a0",
+      "materialization": "git-archive",
+      "dirty": true
+    },
+    {
+      "name": "praxis-api-quickstart",
+      "sha": "b2b671d1408aa4f5fcecd6559a7bb37aee81d11f",
+      "treeSha": "3cd8c6188fddcf905e01b8c0e7a2cf5f58498ceb",
+      "materialization": "working-tree",
+      "dirty": false
+    },
+    {
+      "name": "praxis-ui-angular",
+      "sha": "a94360259e8342033a93b6d753ff9717f9bb5425",
+      "treeSha": "40c792af5048949c0d230b02bf928fddfa4a8404",
+      "materialization": "working-tree",
+      "dirty": false
+    }
+  ],
+  "versions": {
+    "configStarter": "0.1.0-rc.150",
+    "quickstartConfigDependency": "0.1.0-rc.150",
+    "metadataStarterDependency": "8.0.0-rc.132",
+    "quickstart": "2.0.0-rc.48",
+    "angularWorkspace": "0.0.0",
+    "java": 21,
+    "node": "v20.20.2",
+    "playwright": "1.54.2",
+    "chromium": "139.0.7258.5"
+  },
+  "contractHash": "02468e16f49c5be27ac584dd0592014fd4612f141d1a8ab2e9a5a153fe9c1757",
+  "capabilities": {
+    "source": "registry",
+    "degraded": false,
+    "catalogCount": 24,
+    "chartResourceBinding": true
+  },
+  "aiRegistry": {
+    "ready": true,
+    "snapshotHash": "484af27ed53ff64e246afc99a86546ee5bcdc31fffa87cc8b20181b413486d3c",
+    "bootstrapOutcome": "succeeded"
+  },
+  "catalogs": {
+    "domain": {
+      "schemaVersion": "praxis.domain-catalog/v0.2",
+      "source": "/schemas/domain",
+      "ingested": true,
+      "groups": [],
+      "resourceKeys": [
+        "operations.missoes"
+      ],
+      "rag": {
+        "schemaVersion": "praxis.domain-catalog-rag-status/v0.1",
+        "status": "PUBLISHED",
+        "reconciled": true,
+        "expectedDocumentCount": 460,
+        "actualDocumentCount": 460,
+        "revision": 3,
+        "attempt": 2
+      }
+    },
+    "api": {
+      "source": "/schemas/catalog",
+      "indexingState": "READY",
+      "scope": "resource:operations.missoes"
+    }
+  },
+  "matrix": {
+    "schemaVersion": "praxis.page-builder-agentic-gate-matrix/v1",
+    "executionLane": "live",
+    "providerRequired": true,
+    "scenarios": [
+      "critical-interception-guard",
+      "governed-capabilities-provenance",
+      "live-resource-workspace-command"
+    ],
+    "expectedDiscovered": 3,
+    "minimumExecuted": 3,
+    "expectedSkipped": 0,
+    "requiredPassedTests": [
+      "Guard live rejeita interceptacao de endpoint critico antes do registro",
+      "Auditoria live: capabilities reais possuem proveniência governada e não degradada",
+      "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload"
+    ],
+    "streamProcessingTimeoutSeconds": 360,
+    "playwrightTestTimeoutMs": 600000,
+    "retries": 0,
+    "humanTurnLimit": 3,
+    "domainCatalogRagRequired": true,
+    "domainCatalogResourceKey": "operations.missoes",
+    "apiCatalogGroup": "operations",
+    "apiCatalogPathPrefixes": [
+      "/api/operations/missoes"
+    ],
+    "diagnosticProjectionRequirements": [],
+    "receiptRequirements": [
+      {
+        "scenarioId": "live-resource-workspace-command",
+        "archetype": "master-detail-command",
+        "requiredFunctionalAssertions": [
+          "composition.master-visible",
+          "composition.detail-visible",
+          "composition.selection-propagated",
+          "discovery.actions.http-200",
+          "discovery.capabilities.http-200",
+          "command.execute.http-200",
+          "command.duplicate.http-409",
+          "resource.refresh-observed",
+          "persistence.reload-rendered"
+        ]
+      }
+    ],
+    "runtimeExcellenceReceiptRequirements": [],
+    "semanticRefinementRequirements": []
+  },
+  "playwright": {
+    "discovered": 3,
+    "executed": 3,
+    "passed": 2,
+    "skipped": 0,
+    "failed": 1,
+    "flaky": 0,
+    "attempts": 3,
+    "retryAttempts": 0,
+    "tests": [
+      {
+        "title": "Guard live rejeita interceptacao de endpoint critico antes do registro",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      },
+      {
+        "title": "Fluxo 3 — workspace de missões persiste master-detail e executa start descoberto com refresh e reload",
+        "status": "unexpected",
+        "attempts": 1,
+        "retryAttempts": 0
+      },
+      {
+        "title": "Auditoria live: capabilities reais possuem proveniência governada e não degradada",
+        "status": "expected",
+        "attempts": 1,
+        "retryAttempts": 0
+      }
+    ],
+    "durationMs": 112913
+  },
+  "scenarioEvidence": [],
+  "runtimeExcellenceEvidence": [],
+  "diagnosticEvidence": [],
+  "failureType": "System.Management.Automation.RuntimeException"
+}
