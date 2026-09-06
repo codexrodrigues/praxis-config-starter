@@ -51,6 +51,18 @@ class AgenticAuthoringRepairClassificationPolicyTest {
     }
 
     @Test
+    void doesNotRepairAnExplicitCanonicalFormClarification() {
+        var plan = objectMapper.createObjectNode();
+        plan.putObject("clarificationNeed").put("needed", true).put("code", "policy-unsatisfied")
+                .put("question", "A operação exige nome. Deseja incluí-lo?");
+        var result = new AgenticAuthoringPreviewResult(false,
+                List.of("form-field-selection-required-field-omitted"), List.of(), plan,
+                objectMapper.createObjectNode(), null, null, null);
+        assertThat(AgenticAuthoringRepairClassificationPolicy.classify(intent("eligible", List.of()), result))
+                .isEqualTo("user_clarification_required");
+    }
+
+    @Test
     void classifiesValidOrMissingPreviewAsNonRetryable() {
         assertThat(AgenticAuthoringRepairClassificationPolicy.classify(
                         intent("eligible", List.of()),

@@ -53,3 +53,18 @@ Node executável, não por execução local do script Windows.
 
 O modelo configurado permanece gpt-5-mini. O limite da conta é declarado pelo usuário, não verificado
 independentemente. Não há reconstrução de custo desconhecido dos runs antigos.
+
+## Fechamento do esclarecimento no runtime
+
+A revisão posterior ao primeiro merge reproduziu mais dois problemas de consumo do estado existente:
+`clarificationNeed.needed=true` não chegava a `assistantMessage`, e o classificador de reparo
+considerava o preview inválido reparável. A correção publica a pergunta canônica e classifica o estado
+como `user_clarification_required`, impedindo o reparo automático do preview.
+
+Os dois testes de regressão falharam antes da correção; depois passaram as suites focais de preview,
+classificação e turn engine: 303 testes, incluindo revalidação de casos já contabilizados acima.
+O gate live `34003732255` foi iniciado no commit `e00035f1` e não contém este ajuste posterior;
+a sua evidência deve ser atribuída ao SHA efetivamente executado, sem estendê-la a uma jornada de
+seleção de campos que ele não executa. Config #457 e Angular #510 já passaram seus CIs e foram
+incorporados. O primeiro dispatch `34003661988` foi recusado pela política de branch do ambiente,
+antes do job com provider; nenhuma alteração na proteção foi feita.

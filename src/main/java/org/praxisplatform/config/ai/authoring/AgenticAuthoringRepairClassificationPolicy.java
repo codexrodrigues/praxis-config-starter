@@ -42,7 +42,9 @@ final class AgenticAuthoringRepairClassificationPolicy {
     private static boolean isUserClarificationRequired(
             AgenticAuthoringIntentResolutionResult intentResolution,
             AgenticAuthoringPreviewResult preview) {
-        return hasGateStatus(intentResolution, "clarification_required")
+        return (preview != null && preview.minimalFormPlan() != null
+                && preview.minimalFormPlan().path("clarificationNeed").path("needed").asBoolean(false))
+                || hasGateStatus(intentResolution, "clarification_required")
                 || hasAny(intentResolution == null ? null : intentResolution.failureCodes(),
                         "resource-candidate-required",
                         "target-widget-required",
