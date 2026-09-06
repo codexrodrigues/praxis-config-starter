@@ -440,7 +440,7 @@ public class AgenticAuthoringPreviewService {
             String tenantId,
             String userId,
             String environment,
-            String schemaBaseUrl) {
+            String schemaBaseUrl) throws IOException {
         AgenticAuthoringIntentResolutionResult intent = request == null ? null : request.intentResolution();
         if (schemaRetrievalService == null
                 || intent == null
@@ -460,9 +460,8 @@ public class AgenticAuthoringPreviewService {
                         userId,
                         environment);
         if (schemaResult != null && schemaResult.isSuccess()) {
-            return planService.materializeCreateFormPlanFromCanonicalSchema(
-                    request,
-                    schemaResult.getSchema());
+            return planService.generateCreateFormPlanFromCanonicalSchema(
+                    request, schemaResult.getSchema(), tenantId, userId, environment);
         }
         List<String> warnings = new ArrayList<>(intent.warnings() == null ? List.of() : intent.warnings());
         warnings.add("minimal-form-plan-schema-grounding-required");

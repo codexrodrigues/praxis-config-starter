@@ -223,7 +223,7 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
-    void previewUsesCanonicalCreateRequestSchemaInsteadOfGeneratingAnotherLlmPlan() throws Exception {
+    void previewGroundsSemanticFieldSelectionInCanonicalCreateRequestSchema() throws Exception {
         AgenticAuthoringIntentResolutionResult intent = createEmployeeFormIntent();
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Crie um formulario de funcionarios",
@@ -245,7 +245,7 @@ class AgenticAuthoringPreviewServiceTest {
                 eq("user"),
                 eq("local")))
                 .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
-        when(planService.materializeCreateFormPlanFromCanonicalSchema(any(), eq(schema)))
+        when(planService.generateCreateFormPlanFromCanonicalSchema(any(), eq(schema), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(new AgenticAuthoringPlanResult(
                         true,
                         List.of(),
@@ -267,12 +267,12 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.minimalFormPlan()).isSameAs(plan);
         assertThat(result.compiledFormPatch()).isSameAs(patch);
         assertThat(result.warnings()).contains("minimal-form-plan-materialized-from-schemas-filtered");
-        verify(planService).materializeCreateFormPlanFromCanonicalSchema(any(), eq(schema));
+        verify(planService).generateCreateFormPlanFromCanonicalSchema(any(), eq(schema), eq("tenant"), eq("user"), eq("local"));
         verify(planService, never()).generateMinimalFormPlan(any(), any(), any(), any());
     }
 
     @Test
-    void minimalFormPlanEndpointUsesCanonicalCreateRequestSchemaWithoutLlmGeneration() throws Exception {
+    void minimalFormPlanEndpointUsesCanonicalSchemaForSemanticFieldSelection() throws Exception {
         AgenticAuthoringIntentResolutionResult intent = createEmployeeFormIntent();
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Crie um formulario de funcionarios",
@@ -293,7 +293,7 @@ class AgenticAuthoringPreviewServiceTest {
                 eq("user"),
                 eq("local")))
                 .thenReturn(SchemaFetchResult.success(schema, "http://localhost/schemas/filtered"));
-        when(planService.materializeCreateFormPlanFromCanonicalSchema(any(), eq(schema)))
+        when(planService.generateCreateFormPlanFromCanonicalSchema(any(), eq(schema), eq("tenant"), eq("user"), eq("local")))
                 .thenReturn(new AgenticAuthoringPlanResult(
                         true,
                         List.of(),
@@ -312,7 +312,7 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.valid()).isTrue();
         assertThat(result.minimalFormPlan()).isSameAs(plan);
         assertThat(result.warnings()).contains("minimal-form-plan-materialized-from-schemas-filtered");
-        verify(planService).materializeCreateFormPlanFromCanonicalSchema(any(), eq(schema));
+        verify(planService).generateCreateFormPlanFromCanonicalSchema(any(), eq(schema), eq("tenant"), eq("user"), eq("local"));
         verify(planService, never()).generateMinimalFormPlan(any(), any(), any(), any());
         verifyNoInteractions(patchCompilerService);
     }

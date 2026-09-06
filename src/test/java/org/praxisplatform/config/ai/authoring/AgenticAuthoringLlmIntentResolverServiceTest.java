@@ -3894,6 +3894,38 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
     }
 
     @Test
+    void preservesTypedTimeoutWhenTheNestedCauseHasNoMessage() throws Exception {
+        assertTypedFailurePreserved(AiProviderCallException.timeout(
+                "openai", new java.util.concurrent.TimeoutException()), "timeout");
+    }
+
+    @Test
+    void preservesTypedQuotaInsteadOfReclassifyingTheNestedTransportMessage() throws Exception {
+        assertTypedFailurePreserved(AiProviderCallException.fromHttpStatus(
+                "openai", 429, "insufficient_quota", new RuntimeException("socket timeout private-body")),
+                "quota-exhausted");
+    }
+
+    private void assertTypedFailurePreserved(AiProviderCallException failure, String expectedKind) throws Exception {
+        when(providerManagementService.generateJson(any(), any(AiJsonSchema.class), any(),
+                eq("tenant"), eq("user"), eq("local")))
+                .thenThrow(new RuntimeException("outer wrapper", failure));
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                providerManagementService, objectMapper).resolve(
+                new AgenticAuthoringIntentResolutionRequest("crie um dashboard", "page-builder", "praxis-chart",
+                        "/page-builder-ia", objectMapper.createObjectNode(), null, "openai", "gpt-5-mini", "test-key"),
+                "crie um dashboard", objectMapper.createObjectNode(), null, List.of(), componentCapabilities(),
+                "tenant", "user", "local").orElseThrow();
+        assertThat(result.resolved()).isFalse();
+        assertThat(result.warnings()).contains("llm-provider-" + expectedKind);
+        assertThat(result.providerInvocations()).isNotEmpty().allSatisfy(invocation -> {
+            assertThat(invocation.status()).isEqualTo("failure");
+            assertThat(invocation.failureKind()).isEqualTo(expectedKind);
+        });
+        assertThat(objectMapper.writeValueAsString(result)).doesNotContain("private-body", "outer wrapper");
+    }
+
+    @Test
     void classifiesLegacyProviderFailureMessagesWhenProviderDoesNotExposeStructuredKind() throws Exception {
         when(providerManagementService.generateJson(
                 any(),

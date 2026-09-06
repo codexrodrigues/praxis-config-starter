@@ -1604,6 +1604,10 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
         & cmd.exe /c "npx.cmd playwright test --config=$playwrightConfig --retries=$Retries"
         $playwrightExitCode = $LASTEXITCODE
         if (Test-Path -LiteralPath $playwrightReportPath) {
+            # Export allowlisted per-turn evidence before later receipt or first-pass gates can fail.
+            $telemetryExporterPath = Join-Path $starterRoot "tools\e2e\export-page-builder-provider-telemetry.mjs"
+            & node $telemetryExporterPath --report $playwrightReportPath --out (Join-Path $artifactRoot "provider-invocations.json")
+            if ($LASTEXITCODE -ne 0) { throw "Provider telemetry export failed." }
             $playwrightSummary = Get-PlaywrightSummary $playwrightReportPath
             $scenarioEvidence = @(Get-PlaywrightScenarioEvidence `
                 -ReportPath $playwrightReportPath `

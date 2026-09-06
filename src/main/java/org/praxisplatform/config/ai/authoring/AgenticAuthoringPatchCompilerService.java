@@ -176,6 +176,24 @@ public class AgenticAuthoringPatchCompilerService {
         inputs.put("responseSchemaUrl", responseSchemaUrl);
         inputs.put("formId", formId);
         inputs.put("componentInstanceId", formId);
+        // The governed plan owns field selection/order; schema hydration still owns field semantics.
+        ObjectNode config = inputs.putObject("config");
+        ArrayNode selectedMetadata = config.putArray("fieldMetadata");
+        ObjectNode section = config.putArray("sections").addObject();
+        section.put("id", formId + "-fields");
+        ArrayNode rows = section.putArray("rows");
+        int fieldIndex = 0;
+        for (JsonNode field : plan.path("fields")) {
+            String fieldName = text(field, "name");
+            selectedMetadata.addObject().put("name", fieldName).put("label", text(field, "label"));
+            ObjectNode row = rows.addObject();
+            row.put("id", formId + "-row-" + fieldIndex);
+            ObjectNode column = row.putArray("columns").addObject();
+            column.put("id", formId + "-column-" + fieldIndex++);
+            column.putObject("span").put("xs", 12);
+            column.putArray("fields").add(fieldName);
+            column.putArray("items").addObject().put("kind", "field").put("id", formId + "-field-" + fieldIndex).put("fieldName", fieldName);
+        }
         ObjectNode composition = page.putObject("composition");
         composition.putArray("links");
 

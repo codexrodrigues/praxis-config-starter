@@ -29,12 +29,19 @@ class AgenticAuthoringFreePortfolioForwardTest {
         properties.setArtifactsDir(java.nio.file.Path.of("docs/ai/agentic-authoring/proofs"));
         var schema = schema(domain);
         var intent = intent(resource, "form", null);
-        var plan = new AgenticAuthoringPlanService(provider, properties, mapper)
-                .materializeCreateFormPlanFromCanonicalSchema(
-                        new AgenticAuthoringPlanRequest("Preciso cadastrar um novo registro.", "openai", null, null, intent), schema);
+        var planService = new AgenticAuthoringPlanService(provider, properties, mapper);
+        var request = new AgenticAuthoringPlanRequest("Quero somente nome e equipe.", "openai", "gpt-5-mini", null, intent);
+        ObjectNode semanticPlan = (ObjectNode) planService.buildCanonicalCreateFormFieldCatalog(request, schema).minimalFormPlan();
+        var selectedFields = mapper.createArrayNode();
+        for (JsonNode field : semanticPlan.path("fields")) {
+            if (List.of("name", "groupId").contains(field.path("name").asText())) selectedFields.add(field);
+        }
+        semanticPlan.set("fields", selectedFields);
+        when(provider.generateJson(any(), any(AiJsonSchema.class), any(), any(), any(), any())).thenReturn(semanticPlan);
+        var plan = planService.generateCreateFormPlanFromCanonicalSchema(request, schema, "synthetic", "proof", "local");
         assertThat(plan.valid()).as(plan.failureCodes().toString()).isTrue();
         assertThat(plan.minimalFormPlan().path("fields").findValuesAsText("name"))
-                .contains("name", "groupId").doesNotContain("id");
+                .containsExactly("name", "groupId");
         JsonNode group = plan.minimalFormPlan().path("fields").findParents("name").stream()
                 .filter(field -> "groupId".equals(field.path("name").asText())).findFirst().orElseThrow();
         assertThat(group.path("required").asBoolean()).isTrue();
@@ -46,7 +53,10 @@ class AgenticAuthoringFreePortfolioForwardTest {
         assertThat(plan.minimalFormPlan().path("sourceRefs").toString())
                 .contains("operation=post&schemaType=request");
         writeFixture(domain, "form", intent, mapper.valueToTree(compiled));
-        verifyNoInteractions(provider);
+        var config = compiled.compiledFormPatch().at("/patch/page/widgets/0/definition/inputs/config");
+        assertThat(config.path("sections").findValuesAsText("fieldName")).containsExactly("name", "groupId");
+        assertThat(config.path("fieldMetadata").findValuesAsText("name")).containsExactly("name", "groupId");
+        verify(provider).generateJson(any(), any(AiJsonSchema.class), any(), any(), any(), any());
     }
 
     @ParameterizedTest
@@ -108,6 +118,7 @@ class AgenticAuthoringFreePortfolioForwardTest {
         var fields = schema.putObject("properties");
         fields.putObject("id").put("type", "integer").put("readOnly", true);
         fields.putObject("name").put("type", "string").putObject("x-ui").put("label", "Nome").put("controlType", "input");
+        fields.putObject("notes").put("type", "string").putObject("x-ui").put("label", "Observações opcionais");
         fields.putObject("group").put("type", "string").putArray("enum").add("A").add("B");
         fields.putObject("groupId").put("type", "integer").putObject("x-ui").put("label", "Grupo")
                 .put("controlType", "select").putObject("optionSource").put("key", domain + ".groups")
