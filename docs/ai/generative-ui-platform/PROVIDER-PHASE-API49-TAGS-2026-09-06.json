@@ -1,0 +1,14 @@
+{
+  "source": {
+    "tagObject": "13ba244d4a5e816ad602e150f9cee974991db893",
+    "commit": "f5315d2094fbd25db3b700969a846c7726fe3035",
+    "version": "2.0.0-rc.49",
+    "config": "0.1.0-rc.151"
+  },
+  "public": {
+    "tagObject": "8b5cdf2d708680040a18f19c16d8adf7357822df",
+    "commit": "a2eeb4dd5fb16f6fdee2d5ebe5bded77c2e42026",
+    "version": "2.0.0-rc.49",
+    "config": "0.1.0-rc.151"
+  }
+}

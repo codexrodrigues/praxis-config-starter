@@ -1,0 +1,12 @@
+{
+  "checkedAt": "2026-09-06T14:14:36.189575+00:00",
+  "build": {
+    "artifact": "praxis-api-quickstart",
+    "name": "praxis-api-quickstart",
+    "time": "2026-09-06T14:11:26.839Z",
+    "version": "2.0.0-rc.49",
+    "group": "com.example.praxis"
+  },
+  "health": "UP",
+  "dashboardDeployId": null
+}

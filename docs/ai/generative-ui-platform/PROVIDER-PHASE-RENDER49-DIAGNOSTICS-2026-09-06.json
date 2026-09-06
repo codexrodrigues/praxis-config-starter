@@ -1,0 +1,121 @@
+{
+  "apply": [
+    {
+      "seq": 44,
+      "codes": [],
+      "canApply": false,
+      "previewKeys": [
+        "valid",
+        "warnings",
+        "diagnostics",
+        "failureCodes",
+        "minimalFormPlan",
+        "assistantMessage",
+        "compiledFormPatch",
+        "uiCompositionPlan"
+      ],
+      "quickReplyIds": [
+        "governed-review-revise"
+      ],
+      "decisionDiagnostics": {
+        "valid": true,
+        "llmResolved": true,
+        "artifactKind": "page",
+        "reviewReason": "semantic-preview-materialization-mismatch",
+        "decisionValid": false,
+        "operationKind": "create",
+        "requiresReview": true,
+        "retrievalSource": "semantic_retrieval",
+        "keywordFallbackApplied": false,
+        "previewTechnicallyValid": true,
+        "semanticDecisionReviewReason": "",
+        "previewResourceSchemaVerified": true,
+        "semanticDecisionReviewRequired": false,
+        "selectedCandidateUsesLexicalFallback": false,
+        "uiCompositionPlanUsesHardcodedAnchor": false,
+        "selectedResourceSchemaGroundingMissing": false,
+        "uiCompositionPlanUsesReferenceProvider": false,
+        "semanticDecisionReviewGroundedByPreview": false,
+        "uiCompositionPlanHasUnverifiedSemanticAxes": false,
+        "selectedCandidateUsesBroadArtifactDiscovery": false
+      },
+      "previewDiagnosticKeys": [
+        "changeKind",
+        "operationKind",
+        "targetWidgetKey",
+        "fieldScopeDecision",
+        "projectKnowledgeAudit",
+        "derivedCurrentPageSummary"
+      ]
+    }
+  ],
+  "materialization": [
+    {
+      "planKeys": [
+        "kind",
+        "state",
+        "canvas",
+        "version",
+        "widgets",
+        "bindings",
+        "plannerId",
+        "sourceRefs",
+        "diagnostics",
+        "layoutPreset",
+        "deviceLayouts",
+        "layoutPresetOptions"
+      ],
+      "failureCodes": [
+        "semantic-preview-resource-workspace-grounding-required"
+      ],
+      "providerFailures": [
+        {
+          "phase": "preview_message",
+          "failureKind": "unknown",
+          "finishReason": "incomplete"
+        }
+      ],
+      "fieldScopeDecision": "accepted-create"
+    }
+  ],
+  "workspace": [
+    {
+      "filterFields": [
+        "name"
+      ],
+      "semanticLayout": "resource-master-detail",
+      "filterOperators": [
+        "contains"
+      ],
+      "primaryComponent": "praxis-table",
+      "materializedLayout": "master-detail-dashboard",
+      "workspaceGrounding": {
+        "source": "",
+        "status": "unavailable",
+        "resourceKey": "",
+        "schemaVersion": "praxis-resource-workspace-grounding-diagnostics.v1",
+        "operationCount": 0,
+        "filterOperationCount": 0,
+        "commandOperationCount": 0
+      }
+    }
+  ],
+  "tool": [
+    {
+      "seq": 34,
+      "tool": "verifyDomainOperation",
+      "type": "thought.step",
+      "phase": "tool.start",
+      "valid": null,
+      "errorCode": null
+    },
+    {
+      "seq": 35,
+      "tool": "verifyDomainOperation",
+      "type": "thought.step",
+      "phase": "tool.error",
+      "valid": false,
+      "errorCode": "operational-grounding-binding-required"
+    }
+  ]
+}
