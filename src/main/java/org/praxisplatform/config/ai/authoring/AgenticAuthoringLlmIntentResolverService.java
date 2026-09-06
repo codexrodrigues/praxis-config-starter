@@ -296,17 +296,6 @@ public class AgenticAuthoringLlmIntentResolverService {
                 """;
     }
 
-    private String liveOptionRefinementModel(
-            AgenticAuthoringIntentResolutionRequest request,
-            boolean liveOptionRefinement) {
-        if (!liveOptionRefinement
-                || request == null
-                || !"openai".equalsIgnoreCase(valueOrDefault(request.provider(), ""))) {
-            return request == null ? null : request.model();
-        }
-        return liveOptionRefinementOpenAiModel;
-    }
-
     private JsonNode invokeJson(
             String phase,
             String prompt,
@@ -486,7 +475,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                     AiJsonSchema.ofSchema(schema()),
                     AiCallConfig.agenticAuthoringBuilder()
                             .provider(request.provider())
-                            .model(liveOptionRefinementModel(request, liveOptionRefinement))
+                            .model(request.model())
+                            .providerModelOverrides(liveOptionRefinement
+                                    ? java.util.Map.of("openai", liveOptionRefinementOpenAiModel)
+                                    : java.util.Map.of())
                             .apiKey(request.apiKey())
                             .temperature(0.0d)
                             .maxTokens(MAX_FAST_INTENT_RESOLUTION_TOKENS)

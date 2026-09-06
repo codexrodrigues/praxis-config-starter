@@ -219,7 +219,7 @@ public class AiProviderManagementService {
         AiCallConfig config = AiCallConfig.builder()
                 .provider(provider)
                 .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, stored))
-                .model(resolveModel(requestConfig != null ? requestConfig.getModel() : null, stored))
+                .model(resolveCallModel(provider, requestConfig, stored))
                 .temperature(requestConfig != null ? requestConfig.getTemperature() : null)
                 .maxTokens(requestConfig != null ? requestConfig.getMaxTokens() : null)
                 .timeoutSeconds(requestConfig != null ? requestConfig.getTimeoutSeconds() : null)
@@ -256,7 +256,7 @@ public class AiProviderManagementService {
         AiCallConfig config = AiCallConfig.builder()
                 .provider(provider)
                 .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, stored))
-                .model(resolveModel(requestConfig != null ? requestConfig.getModel() : null, stored))
+                .model(resolveCallModel(provider, requestConfig, stored))
                 .temperature(requestConfig != null ? requestConfig.getTemperature() : null)
                 .maxTokens(requestConfig != null ? requestConfig.getMaxTokens() : null)
                 .timeoutSeconds(requestConfig != null ? requestConfig.getTimeoutSeconds() : null)
@@ -665,6 +665,16 @@ public class AiProviderManagementService {
             return resolved;
         }
         return stored != null ? trimToNull(stored.apiKey()) : null;
+    }
+
+    private String resolveCallModel(String provider, AiCallConfig request, StoredAiConfig stored) {
+        // Provider resolution remains authoritative: explicit request, scoped config, host default.
+        // Phase policy must not depend on whether the client supplied that provider explicitly.
+        Map<String, String> overrides = request == null ? null : request.getProviderModelOverrides();
+        String phaseModel = overrides == null ? null
+                : trimToNull(overrides.get(normalizeAlias(normalizeProvider(provider))));
+        return phaseModel != null ? phaseModel
+                : resolveModel(request != null ? request.getModel() : null, stored);
     }
 
     private String resolveModel(String requestedModel, StoredAiConfig stored) {

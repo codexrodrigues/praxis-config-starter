@@ -38,6 +38,31 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"openai", " Open-AI "})
+    void appliesPlanningModelAfterCanonicalProviderResolution(String requestedProvider) {
+        var adapter = org.mockito.Mockito.mock(org.praxisplatform.config.service.AiProvider.class);
+        when(adapter.getProviderName()).thenReturn("openai");
+        when(adapter.generateJson(any(), any(), any())).thenReturn(objectMapper.createObjectNode());
+        var manager = new AiProviderManagementService(objectMapper, null, null, List.of(adapter));
+        ReflectionTestUtils.setField(manager, "defaultProvider", "openai");
+        ReflectionTestUtils.invokeMethod(manager, "initProviderRegistry");
+        var planner = new AgenticAuthoringLlmPreIntentToolPlanningService(
+                manager, objectMapper, null, 7, 1, 0L, "gpt-5.6-luna");
+        var request = new AgenticAuthoringTurnStreamRequest(
+                "Crie uma tela", "test", "page", "/test", objectMapper.createObjectNode(), null,
+                requestedProvider, "gpt-5-mini", null, "session", "turn", List.of(), null,
+                List.of(), objectMapper.createObjectNode(), null);
+
+        planner.plan(request, new AiPrincipalContext("tenant", "user", "local", true));
+
+        var config = ArgumentCaptor.forClass(AiCallConfig.class);
+        verify(adapter).generateJson(any(), any(), config.capture());
+        assertThat(config.getValue().getModel()).isEqualTo("gpt-5.6-luna");
+        assertThat(config.getValue().getInvocationTrace().snapshot().model()).isEqualTo("gpt-5.6-luna");
+    }
+
     @Test
     void exposesSelectedDomainDecisionToSemanticPlanningWithoutApiResourceDiscovery() throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -145,7 +170,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         assertThat(result.planned()).isTrue();
         assertThat(result.providerInvocations()).singleElement().satisfies(invocation -> {
             assertThat(invocation.phase()).isEqualTo("pre_intent_tool_plan");
-            assertThat(invocation.model()).isEqualTo("gpt-5.6-luna");
+            assertThat(invocation.model()).isEqualTo(configCaptor.getValue().getModel());
             assertThat(invocation.status()).isEqualTo("success");
         });
         assertThat(result.plan().reason()).contains("fonte governada");
@@ -226,7 +251,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains(objectMapper.getNodeFactory().textNode("single-table"));
         assertThat(configCaptor.getValue().getExecutionProfile()).isEqualTo(org.praxisplatform.config.service.AiExecutionProfile.AGENTIC_AUTHORING);
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(7);
-        assertThat(configCaptor.getValue().getModel()).isEqualTo("gpt-5.6-luna");
+        assertThat(configCaptor.getValue().getProviderModelOverrides()).containsEntry("openai", "gpt-5.6-luna");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(640);
         assertThat(configCaptor.getValue().getInvocationTrace()).isNotNull();
     }
