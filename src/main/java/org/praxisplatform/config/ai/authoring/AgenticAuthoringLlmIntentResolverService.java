@@ -465,7 +465,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 fastCandidates);
         try {
             JsonNode result = invokeJson(
-                    "intent_fast",
+                    liveOptionRefinement ? "live_option_refinement" : "intent_fast",
                     liveOptionRefinement
                             ? liveOptionRefinementPrompt(request, effectivePrompt, fastCandidates)
                             : focusedResourceAuthoring

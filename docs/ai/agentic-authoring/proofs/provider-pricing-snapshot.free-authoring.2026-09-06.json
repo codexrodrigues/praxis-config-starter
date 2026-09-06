@@ -4,7 +4,7 @@
   "capturedAt": "2026-09-06",
   "currency": "USD",
   "unit": "per-million-tokens",
-  "sourceUrl": "https://developers.openai.com/api/docs/models/gpt-5-mini",
+  "sourceUrl": "https://developers.openai.com/api/docs/pricing",
   "entries": [
     {
       "provider": "openai",
@@ -16,6 +16,17 @@
       "inputUsdPerMillion": 0.25,
       "cachedInputUsdPerMillion": 0.025,
       "outputUsdPerMillion": 2.0
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "modelPrefixes": [
+        "gpt-5.6-luna-"
+      ],
+      "serviceTier": "standard",
+      "inputUsdPerMillion": 0.2,
+      "cachedInputUsdPerMillion": 0.02,
+      "outputUsdPerMillion": 1.2
     }
   ]
 }
