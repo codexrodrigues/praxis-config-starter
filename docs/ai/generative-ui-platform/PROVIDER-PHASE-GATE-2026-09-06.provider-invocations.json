@@ -1,0 +1,86 @@
+{
+  "scope": "authoring-turns-only",
+  "turns": [
+    {
+      "testOrdinal": 2,
+      "resultOrdinal": 0,
+      "retry": 0,
+      "turnNumber": 1,
+      "telemetry": {
+        "schemaVersion": "praxis-agentic-authoring-provider-telemetry.v1",
+        "invocationCount": 4,
+        "truncated": false,
+        "providerInvocations": [
+          {
+            "phase": "pre_intent_tool_plan",
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "transport": "openai-responses-sdk",
+            "status": "success",
+            "failureKind": null,
+            "responseId": "resp_01d4233eab15a6a9016a9d696b902887d2aff284e8783d1374",
+            "finishReason": "completed",
+            "attempt": 1,
+            "latencyMs": 7138,
+            "inputTokens": 7273,
+            "outputTokens": 494,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 7767
+          },
+          {
+            "phase": "declared_client_action_intent",
+            "provider": "openai",
+            "model": "gpt-5-mini-2025-08-07",
+            "transport": "openai-responses-sdk",
+            "status": "success",
+            "failureKind": null,
+            "responseId": "resp_01944f647994f2a1016a9d6975a19887d29bcb4f9812ea9914",
+            "finishReason": "completed",
+            "attempt": 1,
+            "latencyMs": 1988,
+            "inputTokens": 309,
+            "outputTokens": 137,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 446
+          },
+          {
+            "phase": "intent_fast",
+            "provider": "openai",
+            "model": "gpt-5-mini",
+            "transport": null,
+            "status": "failure",
+            "failureKind": "timeout",
+            "responseId": null,
+            "finishReason": null,
+            "attempt": 1,
+            "latencyMs": 12024,
+            "inputTokens": null,
+            "outputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "totalTokens": null
+          },
+          {
+            "phase": "intent_full",
+            "provider": "openai",
+            "model": "gpt-5-mini-2025-08-07",
+            "transport": "openai-responses-sdk",
+            "status": "success",
+            "failureKind": null,
+            "responseId": "resp_069b7e68a717b339016a9d6983c53887d28ca19adccf2f9a8f",
+            "finishReason": "completed",
+            "attempt": 1,
+            "latencyMs": 15872,
+            "inputTokens": 26838,
+            "outputTokens": 1220,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": null,
+            "totalTokens": 28058
+          }
+        ]
+      }
+    }
+  ]
+}
