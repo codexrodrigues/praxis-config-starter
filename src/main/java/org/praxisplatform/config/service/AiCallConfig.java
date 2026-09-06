@@ -1,6 +1,7 @@
 package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import java.util.Map;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -19,6 +20,9 @@ import lombok.NoArgsConstructor;
 public class AiCallConfig {
     private String provider;
     private String model;
+    /** Backend-owned phase policy, applied only after the effective provider is resolved. */
+    @JsonIgnore
+    private Map<String, String> providerModelOverrides;
     private Double temperature;
     private Integer maxTokens;
     private Integer timeoutSeconds;
@@ -43,6 +47,7 @@ public class AiCallConfig {
         return new AiCallConfigBuilder()
                 .provider(provider)
                 .model(model)
+                .providerModelOverrides(providerModelOverrides)
                 .temperature(temperature)
                 .maxTokens(maxTokens)
                 .timeoutSeconds(timeoutSeconds)
@@ -61,6 +66,7 @@ public class AiCallConfig {
     public static final class AiCallConfigBuilder {
         private String provider;
         private String model;
+        private Map<String, String> providerModelOverrides;
         private Double temperature;
         private Integer maxTokens;
         private Integer timeoutSeconds;
@@ -81,6 +87,11 @@ public class AiCallConfig {
 
         public AiCallConfigBuilder model(String model) {
             this.model = model;
+            return this;
+        }
+
+        public AiCallConfigBuilder providerModelOverrides(Map<String, String> value) {
+            this.providerModelOverrides = value == null ? Map.of() : Map.copyOf(value);
             return this;
         }
 
@@ -133,6 +144,7 @@ public class AiCallConfig {
             return new AiCallConfig(
                     provider,
                     model,
+                    providerModelOverrides,
                     temperature,
                     maxTokens,
                     timeoutSeconds,

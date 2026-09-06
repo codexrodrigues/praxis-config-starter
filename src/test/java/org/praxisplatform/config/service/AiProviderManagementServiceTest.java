@@ -73,6 +73,63 @@ class AiProviderManagementServiceTest {
         service.initProviderRegistry();
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource(nullValues = "NULL", value = {
+            "openai, gemini, gemini, openai, gpt-5.6-luna",
+            "NULL, openai, gemini, openai, gpt-5.6-luna",
+            "NULL, NULL, openai, openai, gpt-5.6-luna",
+            "gemini, openai, openai, gemini, requested-model",
+            "NULL, gemini, openai, gemini, requested-model",
+            "open-ai, gemini, gemini, openai, gpt-5.6-luna"
+    })
+    void appliesPhaseModelOnlyAfterScopedProviderPrecedence(
+            String requested, String stored, String host, String expectedProvider, String expectedModel) {
+        ReflectionTestUtils.setField(service, "defaultProvider", host);
+        var payload = objectMapper.createObjectNode();
+        var ai = payload.putObject("ai").put("model", "stored-model");
+        if (stored != null) ai.put("provider", stored);
+        when(userConfigService.getResolved("tenant", "user", "praxis-global-config-editor",
+                "praxis:global-config:tenant", "local"))
+                .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(
+                        UiUserConfig.builder().payload(payload.toString()).build(), UserConfigService.Scope.USER)));
+        AiProvider adapter = expectedProvider.equals("openai") ? openai : gemini;
+        when(adapter.generateJson(any(), any(), any())).thenReturn(objectMapper.createObjectNode());
+        var trace = new AiProviderInvocationTrace("live_option_refinement", 1, requested, "requested-model");
+        service.generateJson("synthetic", AiJsonSchema.ofSchema("{}"),
+                AiCallConfig.agenticAuthoringBuilder().provider(requested).model("requested-model")
+                        .providerModelOverrides(java.util.Map.of("openai", "gpt-5.6-luna"))
+                        .invocationTrace(trace).build(), "tenant", "user", "local");
+        var config = ArgumentCaptor.forClass(AiCallConfig.class);
+        verify(adapter).generateJson(any(), any(), config.capture());
+        assertEquals(expectedModel, config.getValue().getModel());
+        assertEquals(expectedModel, trace.snapshot().model());
+        verify(userConfigService).getResolved("tenant", "user", "praxis-global-config-editor",
+                "praxis:global-config:tenant", "local");
+        verifyNoMoreInteractions(userConfigService);
+    }
+
+    @Test
+    void textGenerationUsesTheSameResolvedProviderPhasePolicy() {
+        ReflectionTestUtils.setField(service, "defaultProvider", "openai");
+        when(openai.generateText(any(), any())).thenReturn("synthetic");
+        service.generateText("synthetic", AiCallConfig.agenticAuthoringBuilder().model("gpt-5-mini")
+                .providerModelOverrides(java.util.Map.of("openai", "gpt-5.6-luna")).build(), null, null, null);
+        var config = ArgumentCaptor.forClass(AiCallConfig.class);
+        verify(openai).generateText(any(), config.capture());
+        assertEquals("gpt-5.6-luna", config.getValue().getModel());
+    }
+
+    @Test
+    void phaseModelPolicyStaysInternalAndSurvivesBuilderCopy() throws Exception {
+        var config = AiCallConfig.agenticAuthoringBuilder().model("requested-model")
+                .providerModelOverrides(java.util.Map.of("openai", "gpt-5.6-luna")).build();
+        assertEquals(config.getProviderModelOverrides(), config.toBuilder().build().getProviderModelOverrides());
+        assertFalse(objectMapper.valueToTree(config).has("providerModelOverrides"));
+        var decoded = objectMapper.readValue(
+                "{\"model\":\"requested-model\",\"providerModelOverrides\":{\"openai\":\"untrusted\"}}", AiCallConfig.class);
+        assertTrue(decoded.getProviderModelOverrides() == null || decoded.getProviderModelOverrides().isEmpty());
+    }
+
     @Test
     void transcribeAudioUsesConfiguredProviderModelAndScopedStoredCredentialExactlyOnce() {
         UiUserConfig storedConfig = UiUserConfig.builder()

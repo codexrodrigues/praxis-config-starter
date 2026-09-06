@@ -206,7 +206,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 break;
             }
             AiProviderInvocationTrace trace = new AiProviderInvocationTrace(
-                    "pre_intent_tool_plan", attempt, request.provider(), planningModel(request));
+                    "pre_intent_tool_plan", attempt, request.provider(), request.model());
             AiCallConfig callConfig = callConfig(request, attemptTimeoutSeconds)
                     .toBuilder()
                     .invocationTrace(trace)
@@ -351,22 +351,14 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             int attemptTimeoutSeconds) {
         return AiCallConfig.agenticAuthoringBuilder()
                 .provider(request.provider())
-                .model(planningModel(request))
+                .model(request.model())
+                .providerModelOverrides(StringUtils.hasText(openAiPlanningModel)
+                        ? java.util.Map.of("openai", openAiPlanningModel) : java.util.Map.of())
                 .apiKey(request.apiKey())
                 .temperature(0.0d)
                 .maxTokens(MAX_PLANNING_TOKENS)
                 .timeoutSeconds(attemptTimeoutSeconds)
                 .build();
-    }
-
-    private String planningModel(AgenticAuthoringTurnStreamRequest request) {
-        String provider = request == null || request.provider() == null
-                ? ""
-                : request.provider().trim().toLowerCase(java.util.Locale.ROOT);
-        if ("openai".equals(provider) && StringUtils.hasText(openAiPlanningModel)) {
-            return openAiPlanningModel;
-        }
-        return request == null ? null : request.model();
     }
 
     private static String normalizeModel(String value) {

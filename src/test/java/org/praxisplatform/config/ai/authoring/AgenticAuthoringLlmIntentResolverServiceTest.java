@@ -1057,8 +1057,10 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 eq("tenant"), eq("user"), eq("local"));
     }
 
-    @Test
-    void usesCompactIntentPassForGovernedLiveOptionFieldRefinement() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"openai", "gemini"})
+    void usesCompactIntentPassForGovernedLiveOptionFieldRefinement(String requestedProvider) throws Exception {
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
         when(providerManagementService.generateJson(
@@ -1148,7 +1150,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 "/page-builder-ia",
                 objectMapper.createObjectNode(),
                 null,
-                "openai",
+                requestedProvider,
                 "gpt-5-mini",
                 "test-key",
                 "session-live-option",
@@ -1194,7 +1196,7 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("queryConstraints.appliesToDataSelection=true");
         assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(1800);
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(24);
-        assertThat(configCaptor.getValue().getModel()).isEqualTo("gpt-5.6-luna");
+        assertThat(configCaptor.getValue().getProviderModelOverrides()).containsEntry("openai", "gpt-5.6-luna");
         assertThat(result.providerInvocations()).extracting(AiProviderInvocationTelemetry::phase)
                 .containsExactly("live_option_refinement");
         assertThat(result.warnings()).contains("llm-fast-intent-resolution-used");

@@ -601,6 +601,14 @@ classificacao e planejamento estruturado em uma classe de custo/latencia separad
 de autoria. A configuracao nao altera o modelo de providers nao OpenAI nem o modelo usado nas fases
 posteriores do turno.
 
+A política interna `AiCallConfig.providerModelOverrides` é aplicada por
+`AiProviderManagementService` após resolver o provider efetivo (pedido explícito,
+configuração salva no escopo, default do host), incluindo aliases canônicos.
+Assim, omitir o provider no pedido não elimina a política da fase. A resolução usa
+uma única leitura de configuração; o campo é ignorado na serialização e desserialização
+JSON e não faz parte dos DTOs HTTP. A telemetria registra o modelo selecionado pelo
+gerenciador. Providers sem override preservam a precedência existente de modelo.
+
 O refinamento semantico de valores atuais de option sources usa a mesma separacao de responsabilidade:
 `praxis.ai.authoring.intent-resolution.live-option.openai-model` (default `gpt-5.6-luna`) executa
 somente a classificacao estruturada dos candidatos vivos depois que recurso e campo canonicos ja foram
