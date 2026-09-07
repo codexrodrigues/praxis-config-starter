@@ -36,6 +36,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mockito;
@@ -370,8 +372,9 @@ class AgenticAuthoringTurnEngineTest {
                 .isEqualTo("human-resources.funcionarios");
     }
 
-    @Test
-    void terminalPublicationGuaranteesActionsForStructuredClarification() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void terminalPublicationOnlyFillsUndeclaredClarificationReplies(boolean explicitEmptyList) {
         AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
                 intentResolverService,
                 previewService,
@@ -382,7 +385,9 @@ class AgenticAuthoringTurnEngineTest {
         CapturingSink sink = new CapturingSink();
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("intentResolution", dashboardNeedsResourceClarificationIntent(List.of()));
-        payload.put("quickReplies", List.of());
+        if (explicitEmptyList) {
+            payload.put("quickReplies", List.of());
+        }
         payload.put("canApply", false);
 
         AgenticAuthoringTurnEventAppendResult appended = ReflectionTestUtils.invokeMethod(
@@ -393,6 +398,11 @@ class AgenticAuthoringTurnEngineTest {
 
         assertThat(appended.appendedType("result")).isTrue();
         JsonNode result = objectMapper.valueToTree(sink.payloads.get(0));
+        assertThat(result.path("canApply").asBoolean()).isFalse();
+        if (explicitEmptyList) {
+            assertThat(result.path("quickReplies")).isEmpty();
+            return;
+        }
         assertThat(result.path("quickReplies")).hasSize(2);
         assertThat(result.path("quickReplies").path(0).path("id").asText())
                 .isEqualTo("retry-semantic-resolution");
@@ -12782,8 +12792,9 @@ class AgenticAuthoringTurnEngineTest {
                 .isFalse();
     }
 
-    @Test
-    void suppressesResourceQuickRepliesWhenAiAuthoredFocusRemainsUnconfirmed() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "questions", "pending"})
+    void suppressesResourceQuickRepliesWhenAiAuthoredFocusRemainsUnconfirmed(String clarificationKind) throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringIntentResolverService intentResolverService =
@@ -12852,8 +12863,21 @@ class AgenticAuthoringTurnEngineTest {
                 "Na operacao de compras eu preciso acompanhar contratos e fornecedores sem escolher a API agora.",
                 domainDiscoveryContext());
 
+        ObjectNode resolutionNode = objectMapper.valueToTree(resourceDiscoveryNeedsClarificationIntent());
+        if (!"none".equals(clarificationKind)) {
+            if ("questions".equals(clarificationKind)) {
+                resolutionNode.putArray("clarificationQuestions").add("Quais colunas deseja mostrar?");
+            } else {
+                resolutionNode.putObject("pendingClarification")
+                        .put("sourcePrompt", request.userPrompt())
+                        .putArray("questions").add("Quais colunas deseja mostrar?");
+            }
+            resolutionNode.putArray("quickReplies").addObject()
+                    .put("id", "select-columns").put("kind", "clarify")
+                    .put("label", "Selecionar colunas").put("prompt", "Quero selecionar as colunas.");
+        }
         when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
-                .thenReturn(resourceDiscoveryNeedsClarificationIntent());
+                .thenReturn(objectMapper.treeToValue(resolutionNode, AgenticAuthoringIntentResolutionResult.class));
 
         AgenticAuthoringTurnOutcome outcome = engine.execute(request, principalContext, sink);
 
@@ -12878,6 +12902,7 @@ class AgenticAuthoringTurnEngineTest {
                 .isTrue();
         org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
                 .isEmpty();
+        assertThat(result.path("canApply").asBoolean()).isFalse();
     }
 
     @Test
