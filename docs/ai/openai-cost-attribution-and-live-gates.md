@@ -143,6 +143,36 @@ an existing retry policy. This fixes diagnostic loss; it does not retrospectivel
 an older run that did not export sufficient telemetry.
 
 
+## Mission diagnostics when the browser journey fails
+
+The browser mission journey attaches the existing governed-state projection after
+each settled turn, before transport, preview and apply assertions. The runner exports
+`governed-state-turns.json` before parsing functional receipts or rejecting the failed
+Playwright exit code. The workflow uploads this sanitized derivative even on failure.
+
+The export includes observed states, decision/preview validity, apply eligibility,
+bounded diagnostic codes and reply IDs, lineage presence, and test/result/turn/retry
+ordinals. `sourceSchemaVersion` identifies the source projection; the export deliberately
+does not reproduce its full shape. Free-text reasons and canonical action payloads are
+omitted, alongside prompts, titles, raw errors, credentials and business identifiers.
+Missing observations remain absent or `null`; a known empty reply array stays `[]`.
+
+This file is diagnostic-only. It neither replaces the functional receipt nor makes a
+failed run production-like. An older UI checkout may produce no observations; that is
+missing evidence, not proof that the journey passed. A failure before a turn settles or
+before its projection can be read may still have no governed-state observation. Provider
+telemetry remains separately captured by the turn helper's `finally` block.
+
+Local validation uses the following command; it does not call a provider:
+
+```sh
+node --test tools/e2e/export-page-builder-governed-state.spec.mjs tools/e2e/Invoke-PbAgenticFullE2E.spec.mjs
+```
+
+For a later approved
+live run, pin both the updated Angular capture and Config exporter commits. Do not infer
+the root cause of an older blocked preview from newly added fixtures.
+
 ## Authoring phase policy
 
 Pre-intent and intent resolution propagate the existing `AGENTIC_AUTHORING` execution profile.

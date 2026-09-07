@@ -1607,7 +1607,11 @@ if (`$env:PRAXIS_AI_OPENAI_MODEL) { `$env:SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL = 
             # Export allowlisted per-turn evidence before later receipt or first-pass gates can fail.
             $telemetryExporterPath = Join-Path $starterRoot "tools\e2e\export-page-builder-provider-telemetry.mjs"
             & node $telemetryExporterPath --report $playwrightReportPath --out (Join-Path $artifactRoot "provider-invocations.json")
-            if ($LASTEXITCODE -ne 0) { throw "Provider telemetry export failed." }
+            $telemetryExportExitCode = $LASTEXITCODE
+            $governedStateExporterPath = Join-Path $starterRoot "tools\e2e\export-page-builder-governed-state.mjs"
+            & node $governedStateExporterPath --report $playwrightReportPath --out (Join-Path $artifactRoot "governed-state-turns.json")
+            if ($LASTEXITCODE -ne 0) { throw "Governed state export failed." }
+            if ($telemetryExportExitCode -ne 0) { throw "Provider telemetry export failed." }
             $playwrightSummary = Get-PlaywrightSummary $playwrightReportPath
             $scenarioEvidence = @(Get-PlaywrightScenarioEvidence `
                 -ReportPath $playwrightReportPath `
