@@ -216,3 +216,14 @@ test('exports only sanitized per-turn telemetry before parsing receipts or rejec
   const uploads = workflowSource.slice(workflowSource.indexOf('- name: Upload smoke artifacts'));
   assert.doesNotMatch(uploads, /playwright-results\.json/);
 });
+
+test('exports governed diagnostics before receipt parsing and preserves the failing gate', () => {
+  const exporter = runnerSource.indexOf('& node $governedStateExporterPath');
+  assert.ok(exporter > 0);
+  assert.ok(exporter < runnerSource.indexOf('$playwrightSummary = Get-PlaywrightSummary $playwrightReportPath', exporter));
+  assert.ok(exporter < runnerSource.indexOf('if ($playwrightExitCode -ne 0)', exporter));
+  assert.match(runnerSource, /if \(\$playwrightExitCode -ne 0\) \{ throw/);
+  assert.match(workflowSource, /page-builder-agentic-e2e\/\*\*\/governed-state-turns\.json/);
+  const uploads = workflowSource.slice(workflowSource.indexOf('- name: Upload smoke artifacts'));
+  assert.doesNotMatch(uploads, /playwright-results\.json|governed-state-turn-\*|\*\*\/\*/);
+});
