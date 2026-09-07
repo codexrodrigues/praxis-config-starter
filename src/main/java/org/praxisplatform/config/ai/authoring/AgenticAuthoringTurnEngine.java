@@ -1432,7 +1432,9 @@ public class AgenticAuthoringTurnEngine {
         if (payload instanceof Map<?, ?> payloadMap
                 && payloadMap.get("intentResolution") instanceof AgenticAuthoringIntentResolutionResult resolution
                 && requiresTerminalClarificationReplies(resolution)
-                && (!(payloadMap.get("quickReplies") instanceof List<?> replies) || replies.isEmpty())) {
+                // An explicit list (including an empty one) is the terminal route's decision.
+                // Never restore pre-gate suggestions after a route deliberately suppressed them.
+                && !(payloadMap.get("quickReplies") instanceof List<?>)) {
             @SuppressWarnings("unchecked")
             Map<String, Object> mutablePayload = (Map<String, Object>) payloadMap;
             mutablePayload.put("quickReplies", terminalClarificationQuickReplies(resolution));

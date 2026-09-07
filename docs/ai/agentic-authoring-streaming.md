@@ -491,6 +491,22 @@ Os eventos devem usar os tipos existentes sempre que possivel:
 | `error` | `code`, `assistantMessage`, `message`, `phase` |
 | `cancelled` | `message`, `phase` |
 
+### Coerência do resultado terminal
+
+Uma lista explícita em `result.quickReplies`, inclusive `[]`, é a decisão final
+da rota. A finalização não deve repovoá-la com sugestões anteriores de
+`intentResolution` após um bloqueio de grounding. O fallback de esclarecimento
+continua disponível quando a rota ainda não forneceu uma lista. Isso não altera
+`canApply` nem os gates de autorização; clientes e replay devem preservar o resultado.
+
+A mensagem da prévia deve descrever os componentes declarados em `widgets`,
+nas `surfaces` e nos slots de composição suportados de tabs/expansion. Referências
+a componentes em diagnósticos, candidatos rejeitados, catálogos ou dados não são
+materializações. Não usar uma busca recursiva irrestrita por `componentId`/`id`
+para decidir se a experiência contém CRUD ou qual tipo de gráfico foi produzido.
+Quando a prévia consulta dados, distinguir essa leitura de alteração de registros
+e de salvamento da configuração.
+
 `intent.resolved` e um evento persistido, replay-safe e nao terminal. Ele deve
 alimentar a UI com a interpretacao segura da intencao do usuario, por exemplo
 `userFacingUnderstanding`, sem expor chain-of-thought nem autorizar aplicacao.

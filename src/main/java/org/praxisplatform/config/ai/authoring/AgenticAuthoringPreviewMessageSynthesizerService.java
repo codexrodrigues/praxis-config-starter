@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -341,59 +342,68 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         return result;
     }
 
-    private boolean containsComponent(JsonNode node, String componentId) {
-        if (node == null || node.isMissingNode() || node.isNull() || componentId == null || componentId.isBlank()) {
-            return false;
-        }
-        if (node.isObject()) {
-            if (componentId.equals(text(node, "componentId"))
-                    || componentId.equals(text(node.path("definition"), "id"))
-                    || componentId.equals(text(node, "id"))) {
-                return true;
-            }
-            for (JsonNode child : node) {
-                if (containsComponent(child, componentId)) {
-                    return true;
-                }
-            }
-        } else if (node.isArray()) {
-            for (JsonNode child : node) {
-                if (containsComponent(child, componentId)) {
-                    return true;
-                }
-            }
-        }
-        return false;
+    private boolean containsComponent(JsonNode plan, String componentId) {
+        return materializedComponents(plan).stream()
+                .anyMatch(component -> component.componentId().equals(componentId));
     }
 
-    private String chartType(JsonNode node) {
-        if (node == null || node.isMissingNode() || node.isNull()) {
-            return "";
+    private List<MaterializedComponent> materializedComponents(JsonNode plan) {
+        List<MaterializedComponent> components = new ArrayList<>();
+        if (plan == null || !plan.isObject()) {
+            return components;
         }
-        if (node.isObject()) {
-            if ("praxis-chart".equals(text(node, "componentId"))
-                    || "praxis-chart".equals(text(node.path("definition"), "id"))
-                    || "praxis-chart".equals(text(node, "id"))) {
-                String type = chartWidgetType(node);
-                if (!type.isBlank()) {
-                    return type;
-                }
-            }
-            for (JsonNode child : node) {
-                String nested = chartType(child);
-                if (!nested.isBlank()) {
-                    return nested;
-                }
-            }
-        } else if (node.isArray()) {
-            for (JsonNode child : node) {
-                String nested = chartType(child);
-                if (!nested.isBlank()) {
-                    return nested;
-                }
+        collectMaterializedWidgets(plan.path("widgets"), false, components);
+        // Surface widgets are declared composition, unlike candidate/registry diagnostics.
+        JsonNode surfaces = plan.path("surfaces");
+        if (surfaces.isObject()) {
+            for (JsonNode surface : surfaces) {
+                collectMaterializedWidgets(surface.path("widgets"), false, components);
             }
         }
-        return "";
+        return components;
+    }
+
+    private void collectMaterializedWidgets(
+            JsonNode widgets, boolean nestedDefinitions, List<MaterializedComponent> components) {
+        if (!widgets.isArray()) {
+            return;
+        }
+        for (JsonNode widget : widgets) {
+            JsonNode definition = widget.path("definition").isObject() ? widget.path("definition") : widget;
+            String componentId = definition != widget || nestedDefinitions
+                    ? text(definition, "id") : text(widget, "componentId");
+            if (componentId.isBlank()) {
+                continue;
+            }
+            components.add(new MaterializedComponent(componentId, definition));
+            JsonNode config = definition.path("inputs").path("config");
+            // These are the nested component slots supported by the composition compiler.
+            // Do not recursively scan arbitrary inputs: data and diagnostics can contain IDs too.
+            if ("praxis-tabs".equals(componentId)) {
+                collectContainerWidgets(config.path("tabs"), components);
+                collectContainerWidgets(config.path("nav").path("links"), components);
+            } else if ("praxis-expansion".equals(componentId)) {
+                collectContainerWidgets(config.path("panels"), components);
+            }
+        }
+    }
+
+    private void collectContainerWidgets(JsonNode containers, List<MaterializedComponent> components) {
+        if (containers.isArray()) {
+            for (JsonNode container : containers) {
+                collectMaterializedWidgets(container.path("widgets"), true, components);
+            }
+        }
+    }
+
+    private record MaterializedComponent(String componentId, JsonNode definition) {}
+
+    private String chartType(JsonNode plan) {
+        return materializedComponents(plan).stream()
+                .filter(component -> "praxis-chart".equals(component.componentId()))
+                .map(component -> chartWidgetType(component.definition()))
+                .filter(type -> !type.isBlank())
+                .findFirst().orElse("");
     }
 
     private String chartWidgetType(JsonNode widget) {
@@ -559,7 +569,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         } else {
             message.append("\n- Nenhum registro foi escolhido automaticamente.");
         }
-        message.append("\n- A prévia não confirmou nem preencheu valores de alteração; nada foi executado ou salvo.");
+        message.append("\n- A prévia não confirmou nem preencheu valores de alteração; nenhum registro foi alterado e a configuração não foi salva.");
         message.append("\n- Próximo passo: confirme o registro e revise os campos e ações governados antes de continuar.");
         return AgenticAuthoringPresentationText.assistantReply(
                 sanitizeTechnicalLanguage(message.toString(), intentResolution));

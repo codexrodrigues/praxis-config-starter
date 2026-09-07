@@ -27,6 +27,53 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void rejectedComponentsAndDataMustNotChangeTableMessage() {
+        AgenticAuthoringIntentResolutionResult intent = governedPreIntentIntent("table");
+        ObjectNode plan = uiCompositionPlan();
+        String baseline = service().synthesize(request(), intent, plan, true,
+                List.of(), List.of(), "fallback seguro", "tenant", "user", "local");
+        assertThat(baseline).contains("Materialização: tabela").doesNotContain("confirme o registro");
+        plan.putObject("diagnostics").putObject("componentSelection")
+                .putArray("rejectedCandidates").addObject()
+                .put("componentId", "praxis-crud").put("reason", "no-semantic-capability-match");
+        ObjectNode inputs = (ObjectNode) plan.path("widgets").path(0).path("inputs");
+        inputs.putArray("data").addObject().put("id", "praxis-crud");
+        inputs.putObject("metadata").putArray("widgets").addObject().put("componentId", "praxis-crud");
+        String result = service().synthesize(request(), intent, plan, true,
+                List.of(), List.of(), "fallback seguro", "tenant", "user", "local");
+        assertThat(result).isEqualTo(baseline);
+    }
+
+    @Test
+    void rejectedChartMustNotOverrideMaterializedChartType() {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.putObject("diagnostics").putArray("rejectedCandidates").addObject()
+                .put("componentId", "praxis-chart").putObject("inputs")
+                .putObject("config").put("type", "pie");
+        plan.set("widgets", chartModificationPlan().path("widgets"));
+        String result = service().synthesize(request(), chartModificationIntent(), plan, true,
+                List.of(), List.of(), "fallback seguro", "tenant", "user", "local");
+        assertThat(result).contains("linhas").doesNotContain("pizza");
+    }
+
+    @Test
+    void detectsMaterializedCrudInsideSupportedContainerSlots() {
+        for (String slot : List.of("tabs", "nav", "panels")) {
+            ObjectNode plan = objectMapper.createObjectNode();
+            ObjectNode widget = plan.putArray("widgets").addObject();
+            widget.put("componentId", "panels".equals(slot) ? "praxis-expansion" : "praxis-tabs");
+            ObjectNode config = widget.putObject("inputs").putObject("config");
+            ObjectNode container = "nav".equals(slot)
+                    ? config.putObject("nav").putArray("links").addObject()
+                    : config.putArray(slot).addObject();
+            container.putArray("widgets").addObject().put("id", "praxis-crud");
+            String result = service().synthesize(request(), operationalCrudIntent(), plan, true,
+                    List.of(), List.of(), "fallback seguro", "tenant", "user", "local");
+            assertThat(result).as(slot).contains("tela operacional");
+        }
+    }
+
+    @Test
     void synthesizeReturnsSafeLlmMessageWithPreviewContext() {
         when(providerManagementService.generateText(
                 any(String.class),
@@ -226,7 +273,7 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                 .contains("lista foi recortada pelos critérios pedidos")
                 .contains("nenhum registro foi escolhido automaticamente")
                 .contains("não confirmou nem preencheu valores de alteração")
-                .contains("nada foi executado ou salvo")
+                .contains("nenhum registro foi alterado e a configuração não foi salva")
                 .doesNotContain("nome e sexo")
                 .doesNotContain("campos confirmados");
         org.mockito.Mockito.verify(providerManagementService, org.mockito.Mockito.never()).generateText(

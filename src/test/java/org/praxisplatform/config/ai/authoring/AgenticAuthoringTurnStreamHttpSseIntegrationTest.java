@@ -58,8 +58,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
-// Policy Studio is outside this HTTP/SSE slice; do not bootstrap unrelated repositories.
+// Policy Studio and palette projection are outside this HTTP/SSE slice;
+// do not bootstrap their unrelated repositories or projection services.
 @MockBean(classes = {
+    org.praxisplatform.config.controller.GovernedColorPaletteController.class,
     org.praxisplatform.config.controller.DomainRuleChangeWorkspaceController.class,
     org.praxisplatform.config.controller.DomainRuleRolloutController.class,
     org.praxisplatform.config.controller.DomainRuleRolloutPolicyController.class,
