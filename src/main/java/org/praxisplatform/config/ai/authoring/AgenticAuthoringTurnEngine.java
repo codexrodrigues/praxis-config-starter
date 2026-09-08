@@ -1937,11 +1937,18 @@ public class AgenticAuthoringTurnEngine {
         boolean unconfirmedAiAuthoredResourceFocus = contains(
                 intentResolution == null ? null : intentResolution.warnings(),
                 "llm-resource-selection-unconfirmed-by-ai-authored-focus");
+        boolean unresolvedLlmIntent = contains(
+                intentResolution == null ? null : intentResolution.warnings(),
+                "llm-intent-resolution-unresolved-clarification-required");
         if (onlyWeakCandidates && !providerFailure) {
             return null;
         }
         List<AgenticAuthoringQuickReply> quickReplies = onlyWeakCandidates || unconfirmedAiAuthoredResourceFocus
                 ? List.of()
+                // Discovery grounds the next semantic turn; it cannot manufacture a
+                // server-issued create decision after the primary interpretation failed.
+                : unresolvedLlmIntent
+                ? (intentResolution.quickReplies() == null ? List.of() : intentResolution.quickReplies())
                 : projection != null && projection.hasResources()
                 ? consultativeQuickReplies(request, new AgenticAuthoringConsultativeAnswer(
                         "resource_discovery",

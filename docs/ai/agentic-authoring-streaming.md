@@ -45,6 +45,27 @@ authoring em:
 - `GET /api/praxis/config/ai/authoring/turn/stream/{streamId}/probe`
 - `POST /api/praxis/config/ai/authoring/turn/stream/{streamId}/cancel`
 
+## Intencao nao resolvida nao autoriza materializacao
+
+Quando a interpretacao primaria retorna vazia, nao resolvida ou com falha de
+provider, candidatos de discovery nao podem promover o resultado para criacao.
+O resolver preserva `unknown/unknown` e `needs_clarification` (ou `provider_error`),
+sem candidato selecionado para execucao. Essa verificacao ocorre depois das
+politicas de reconciliacao, inclusive quando um caminho legado estava habilitado.
+Um binding pode confirmar o recurso; nao pode substituir a decisao semantica.
+
+O Turn Engine tambem nao sintetiza uma decisao `server-issued-quick-reply` de
+criacao a partir desses candidatos quando recebe
+`llm-intent-resolution-unresolved-clarification-required`. Ele preserva apenas
+as opcoes de clarificacao ja publicadas pelo resolver, mantendo `canApply=false`.
+O bloqueio por foco semantico nao confirmado continua independente.
+
+Os codigos `intent-operation-unknown` e `intent-artifact-unknown` descrevem o
+resultado normalizado, nao provam o conteudo original retornado pelo provider.
+Usar os warnings e a evidencia do turno para distinguir interpretacao nao
+resolvida de rejeicao posterior do foco/recurso. A ausencia de uma previa nao
+deve ser corrigida inventando uma intencao local ou afrouxando o gate de apply.
+
 ## Decisao canonica
 
 Agentic authoring nao deve criar um segundo formato de stream. O fluxo reutiliza a
