@@ -28,6 +28,138 @@ class AgenticAuthoringIntentResolverServiceTest {
     private final AgenticAuthoringIntentResolverService service =
             new AgenticAuthoringIntentResolverService(objectMapper, quickstartCandidateCatalog());
 
+    private void assertUnresolvedIntent(AgenticAuthoringIntentResolutionResult result) {
+        assertThat(result.valid()).isFalse();
+        assertThat(result.operationKind()).isEqualTo("unknown");
+        assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.changeKind()).isEqualTo("needs_clarification");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.gate().status()).isEqualTo("clarification_required");
+        assertThat(result.failureCodes()).contains("intent-operation-unknown", "intent-artifact-unknown");
+        assertThat(result.quickReplies()).isEmpty();
+        assertThat(result.warnings()).contains("llm-intent-resolution-unresolved-clarification-required");
+        assertThat(result.warnings()).doesNotContain("keyword-fallback-applied", "keyword-fallback-fail-safe-applied");
+    }
+
+    private AgenticAuthoringLlmIntentResolution resolvedAuthoringIntent(
+            String artifactKind, String resourcePath, boolean governedRule) {
+        return new AgenticAuthoringLlmIntentResolution(
+                true, "create", artifactKind, "create_artifact", resourcePath, null, "new_instruction",
+                "Intenção semântica explícita para testar a reconciliação dos candidatos.",
+                List.of(), List.of(), List.of("llm-intent-resolution-used"), null, null, governedRule);
+    }
+
+    private void stubResolvedAuthoringIntent(
+            AgenticAuthoringLlmIntentResolverService model, String artifactKind, String resourcePath) {
+        Mockito.when(model.resolve(Mockito.any(), Mockito.anyString(), Mockito.any(), Mockito.any(),
+                        Mockito.anyList(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any()))
+                .thenReturn(Optional.of(resolvedAuthoringIntent(artifactKind, resourcePath, false)));
+    }
+
+    // Constructed diagnostic fixtures, not a replay of the live provider response.
+    // Exercise the public resolver with the application's legacy fallback default (false).
+    @Test
+    void semanticOnlyConfirmedMissionBindingPreservesResolvedIntent() {
+        assertSemanticOnlyMissionFocus("operations.missoes", "", true, true, true);
+    }
+
+    @Test
+    void semanticOnlyConfirmedMissionBindingResolvesResidualFocusUncertainty() {
+        assertSemanticOnlyMissionFocus("operations.missoes", "Confirm the governed binding.", true, true, true);
+    }
+
+    @Test
+    void semanticOnlyUnconfirmedMissionFocusRejectsAnOtherwiseResolvedIntent() {
+        assertSemanticOnlyMissionFocus("operations.missoes", "Confirm the governed binding.", false, true, false);
+    }
+
+    @Test
+    void semanticOnlyMismatchedCanonicalFocusRejectsEvenAGovernedMissionBinding() {
+        assertSemanticOnlyMissionFocus("operations.incidentes", "", true, true, false);
+    }
+
+    @Test
+    void semanticOnlyUnresolvedModelIsNotReplacedByAConfirmedMissionCandidate() {
+        assertSemanticOnlyMissionFocus("operations.missoes", "", true, false, false);
+    }
+
+    @Test
+    void semanticOnlyExactFocusWithoutResidualUncertaintyPreservesResolvedIntent() {
+        assertSemanticOnlyMissionFocus("operations.missoes", "", false, true, true);
+    }
+
+    @Test
+    void semanticOnlyUnresolvedModelWithoutSemanticOrientationCannotBePromotedByPromptWords() {
+        assertSemanticOnlyMissionFocus("operations.missoes", "", true, false, false,
+                false, "Crie uma tabela operacional de missões.");
+    }
+
+    @Test
+    void semanticOnlyUnresolvedModelWithoutSemanticOrientationAndNeutralPromptStaysBlocked() {
+        assertSemanticOnlyMissionFocus("operations.missoes", "", true, false, false,
+                false, "Preciso de ajuda com este recurso.");
+    }
+
+    private void assertSemanticOnlyMissionFocus(
+            String entity, String uncertainty, boolean governedBinding, boolean modelResolved, boolean expectedValid) {
+        assertSemanticOnlyMissionFocus(entity, uncertainty, governedBinding, modelResolved, expectedValid,
+                true, "Crie uma tabela operacional de missões.");
+    }
+
+    private void assertSemanticOnlyMissionFocus(
+            String entity, String uncertainty, boolean governedBinding, boolean modelResolved, boolean expectedValid,
+            boolean semanticOrientationPresent, String prompt) {
+        AgenticAuthoringCandidate candidate = governedBinding
+                ? governedPageCandidate("/api/operations/missoes/filter/cursor", "post", 1d)
+                : candidateWithEvidence("/api/operations/missoes", 0.92d, List.of("operations", "missoes"));
+        AgenticAuthoringLlmIntentResolverService model = Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(model.resolve(Mockito.any(), Mockito.anyString(), Mockito.any(), Mockito.any(),
+                        Mockito.anyList(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        modelResolved,
+                        modelResolved ? "create" : "unknown",
+                        modelResolved ? "table" : "unknown",
+                        modelResolved ? "create_artifact" : "needs_clarification",
+                        modelResolved ? candidate.resourcePath() : null,
+                        null, "none", "Diagnóstico de resolução semântica.", List.of(), List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService semanticOnlyService = new AgenticAuthoringIntentResolverService(
+                objectMapper, Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class), model, null,
+                AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY, null, false);
+        ObjectNode constraints = objectMapper.createObjectNode().put("appliesToDataSelection", false);
+        constraints.putArray("filters");
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3", "Resolve the governed mission table.",
+                List.of(), "authoring_or_other", "", true, constraints, "table", "praxis-table");
+        AgenticAuthoringIntentResolutionResult result = semanticOnlyService.resolve(
+                requestWithContextHints(prompt, "deterministic-smoke-disabled",
+                        resourceDiscoveryContext("table", List.of(candidate), semanticOrientationPresent
+                                ? new AgenticAuthoringResourceSearchFocus(
+                                        entity, List.of(), "mission table", uncertainty, "LLM-authored focus")
+                                : null)),
+                "tenant", "user", "local", semanticOrientationPresent ? orientation : null);
+
+        Mockito.verify(model).resolve(Mockito.any(), Mockito.anyString(), Mockito.any(), Mockito.any(),
+                Mockito.anyList(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any());
+        assertThat(result.valid()).as("entity=%s, uncertainty=%s, binding=%s, modelResolved=%s; warnings=%s; failures=%s",
+                entity, uncertainty, governedBinding, modelResolved, result.warnings(), result.failureCodes())
+                .isEqualTo(expectedValid);
+        if (expectedValid) {
+            assertThat(result.operationKind()).isEqualTo("create");
+            assertThat(result.artifactKind()).isEqualTo("table");
+            assertThat(result.selectedCandidate()).isNotNull();
+            assertThat(result.selectedCandidate().resourcePath()).isEqualTo(candidate.resourcePath());
+            assertThat(result.warnings()).doesNotContain("llm-resource-selection-unconfirmed-by-ai-authored-focus");
+        } else {
+            assertThat(result.operationKind()).isEqualTo("unknown");
+            assertThat(result.artifactKind()).isEqualTo("unknown");
+            assertThat(result.failureCodes()).contains("intent-operation-unknown", "intent-artifact-unknown");
+            if (modelResolved) {
+                assertThat(result.warnings()).contains("llm-resource-selection-unconfirmed-by-ai-authored-focus");
+            }
+        }
+    }
+
     @Test
     void keepsFallbackProvenanceFromContaminatingAStrongerDuplicateCandidate() {
         AgenticAuthoringCandidate governed = new AgenticAuthoringCandidate(
@@ -1555,7 +1687,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void concreteDashboardPromptWithResolvedResourceStillConsultsLlmIntent() {
+    void concreteDashboardPromptRequiresAnActualLlmResolution() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         AgenticAuthoringIntentResolverService llmBackedService =
@@ -1588,18 +1720,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.any(),
                 Mockito.any(),
                 Mockito.any());
-        assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("create");
-        assertThat(result.artifactKind()).isEqualTo("dashboard");
-        assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
-        assertThat(result.warnings())
-                .contains("keyword-fallback-applied")
-                .doesNotContain("llm-intent-resolution-used", "llm-provider-timeout");
+        assertUnresolvedIntent(result);
+
     }
 
     @Test
-    void simpleDashboardOverviewPromptWithResolvedResourceStillConsultsLlmIntent() {
+    void simpleDashboardOverviewRequiresAnActualLlmResolution() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         AgenticAuthoringIntentResolverService llmBackedService =
@@ -1631,18 +1757,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.any(),
                 Mockito.any(),
                 Mockito.any());
-        assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("create");
-        assertThat(result.artifactKind()).isEqualTo("dashboard");
-        assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
-        assertThat(result.warnings())
-                .contains("keyword-fallback-applied")
-                .doesNotContain("llm-intent-resolution-used", "llm-provider-timeout");
+        assertUnresolvedIntent(result);
+
     }
 
     @Test
-    void simpleDashboardOverviewPromptWorksAcrossOperationalDomainsAfterLlmMiss() {
+    void operationalDomainCandidatesCannotReplaceMissingLlmIntent() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         AgenticAuthoringIntentResolverService llmBackedService =
@@ -1674,19 +1794,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.any(),
                 Mockito.any(),
                 Mockito.any());
-        assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("create");
-        assertThat(result.artifactKind()).isEqualTo("dashboard");
-        assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/operations/incidentes");
-        assertThat(result.selectedCandidate().submitUrl()).isEqualTo("/api/operations/incidentes/filter/cursor");
-        assertThat(result.warnings())
-                .contains("keyword-fallback-applied")
-                .doesNotContain("llm-intent-resolution-used", "llm-provider-timeout");
+        assertUnresolvedIntent(result);
+
     }
 
     @Test
-    void simpleDashboardOverviewPromptUsesListableResourceWhenNoAnalyticsEndpointExistsAfterLlmMiss() {
+    void listableResourceCannotReplaceMissingLlmIntent() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         AgenticAuthoringIntentResolverService llmBackedService =
@@ -1718,15 +1831,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.any(),
                 Mockito.any(),
                 Mockito.any());
-        assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("create");
-        assertThat(result.artifactKind()).isEqualTo("dashboard");
-        assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
-        assertThat(result.warnings())
-                .contains("governed-deterministic-resolution-applied")
-                .doesNotContain("keyword-fallback-applied", "keyword-fallback-fail-safe-applied")
-                .doesNotContain("llm-intent-resolution-used", "llm-provider-timeout");
+        assertUnresolvedIntent(result);
+
     }
 
     @Test
@@ -4298,7 +4404,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void fallsBackToKeywordResolverOnlyWhenLlmIntentIsUnresolved() {
+    void unresolvedLlmIntentCannotFallBackToExecutableKeywordResolution() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         Mockito.when(llmIntentResolver.resolve(
@@ -4340,14 +4446,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.operationKind()).isEqualTo("create");
-        assertThat(result.artifactKind()).isEqualTo("form");
-        assertThat(result.changeKind()).isEqualTo("create_artifact");
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
-        assertThat(result.warnings()).contains(
-                "llm-intent-resolution-used",
-                "llm-intent-resolution-unresolved-fallback-deterministic",
-                "llm-unresolved-test");
+        assertUnresolvedIntent(result);
+
     }
 
     @Test
@@ -9009,7 +9109,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void humanDashboardPromptRecoversFromPrimaryLlmTimeoutWhenGovernedCandidatesAreAvailable() {
+    void governedCandidatesCannotRecoverPrimaryLlmTimeoutIntoCreation() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         Mockito.when(llmIntentResolver.resolve(
@@ -9051,23 +9151,15 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 null));
 
-        assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("create");
-        assertThat(result.artifactKind()).isEqualTo("page");
-        assertThat(result.changeKind()).isEqualTo("create_artifact");
-        assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
-        assertThat(result.warnings())
-                .contains(
-                        "llm-intent-resolution-used",
-                        "llm-intent-resolution-failed",
-                        "llm-provider-timeout",
-                        "llm-provider-failure-recovered-by-grounded-candidates",
-                        "pre-llm-governed-resource-choice-ranked")
-                .doesNotContain(
-                        "llm-intent-resolution-provider-failed-clarification-required",
-                        "keyword-fallback-applied",
-                        "pre-llm-governed-resource-choice-applied");
+        assertThat(result.valid()).isFalse();
+        assertThat(result.operationKind()).isEqualTo("unknown");
+        assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.changeKind()).isEqualTo("provider_error");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.quickReplies()).isEmpty();
+        assertThat(result.warnings()).contains("llm-provider-timeout")
+                .doesNotContain("llm-provider-failure-recovered-by-grounded-candidates");
+
         Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),
                 Mockito.anyString(),
@@ -10005,7 +10097,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void businessRulePromptRoutesToSharedRuleWhenLlmIntentIsUnavailable() {
+    void businessRulePromptStaysUnresolvedWhenLlmIntentIsUnavailable() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         Mockito.when(llmIntentResolver.resolve(
@@ -10031,21 +10123,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                 "deterministic-smoke-disabled",
                 contextHints));
 
-        assertThat(result.valid()).isFalse();
-        assertThat(result.gate().status()).isEqualTo("route_required");
-        assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
-        assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
-        assertThat(result.selectedCandidate().evidence()).contains("quick-reply-context");
-        assertThat(result.warnings()).contains("llm-intent-resolution-fallback-deterministic");
-        assertThat(result.assistantMessage())
-                .contains("/api/praxis/config/domain-rules/intake")
-                .contains("/api/praxis/config/domain-rules/simulations")
-                .doesNotContain("/api/procurement/suppliers");
+        assertUnresolvedIntent(result);
+
     }
 
     @Test
-    void businessRulePromptDiscoversBusinessResourceEvenWhenFallbackLooksLikeComponentAuthoring() {
+    void businessRuleDiscoveryCannotAuthorizeRoutingWithoutLlmIntent() {
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
         Mockito.when(llmIntentResolver.resolve(
@@ -10070,15 +10153,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                 "deterministic-smoke-disabled",
                 objectMapper.createObjectNode()));
 
-        assertThat(result.valid()).isFalse();
-        assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/procurement/suppliers");
-        assertThat(result.gate().status()).isEqualTo("route_required");
-        assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
-        assertThat(result.assistantMessage())
-                .contains("/api/praxis/config/domain-rules/intake")
-                .contains("/api/praxis/config/domain-rules/simulations")
-                .doesNotContain("/api/procurement/suppliers");
+        assertUnresolvedIntent(result);
+
     }
 
     @Test
@@ -10097,7 +10173,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any(),
                         Mockito.any(),
                         Mockito.any()))
-                .thenReturn(Optional.empty());
+                .thenReturn(Optional.of(resolvedAuthoringIntent("form", null, true)));
         AgenticAuthoringCandidate genericHigherScoreCandidate = richCandidate(
                 "/api/human-resources/habilidades",
                 0.98d,
@@ -10185,7 +10261,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any(),
                         Mockito.any(),
                         Mockito.any()))
-                .thenReturn(Optional.empty());
+                .thenReturn(Optional.of(resolvedAuthoringIntent("form", null, true)));
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
@@ -10251,7 +10327,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any(),
                         Mockito.any(),
                         Mockito.any()))
-                .thenReturn(Optional.empty());
+                .thenReturn(Optional.of(resolvedAuthoringIntent("form", null, true)));
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
@@ -10317,7 +10393,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any(),
                         Mockito.any(),
                         Mockito.any()))
-                .thenReturn(Optional.empty());
+                .thenReturn(Optional.of(resolvedAuthoringIntent("form", null, true)));
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 new AgenticAuthoringApiMetadataCandidateCatalog(repository),
@@ -11341,7 +11417,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void resourceDiscoveryAuthoringEvidenceNormalizesConsultativeLlmDriftToPageMaterialization() {
+    void resourceDiscoveryEvidenceCannotPromoteConsultationIntoCreation() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
@@ -11394,14 +11470,10 @@ class AgenticAuthoringIntentResolverServiceTest {
                 resourceDiscoveryContext("page", List.of(employeeCandidate))));
 
         assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("create");
-        assertThat(result.artifactKind()).isEqualTo("page");
-        assertThat(result.changeKind()).isEqualTo("create_artifact");
-        assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
-        assertThat(result.warnings()).contains("llm-resource-discovery-authoring-drift-normalized");
-        assertThat(result.semanticDecision()).isNotNull();
-        assertThat(result.semanticDecision().reviewRequired()).isFalse();
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.warnings()).doesNotContain("llm-resource-discovery-authoring-drift-normalized");
     }
 
     @Test
@@ -12389,7 +12461,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any(),
                         Mockito.any(),
                         Mockito.any()))
-                .thenReturn(java.util.Optional.empty());
+                .thenReturn(Optional.of(resolvedAuthoringIntent("table", "/api/human-resources/funcionarios", false)));
 
         AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
                 "Crie uma tabela para consultar nome, cargo e departamento dos funcionários.",
@@ -13112,6 +13184,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        stubResolvedAuthoringIntent(llmIntentResolver, "page", "/api/human-resources/vw-perfil-heroi");
         AgenticAuthoringCandidate employeeCandidate = withEvidence(
                 withEvidence(
                         withEvidence(candidateWithEvidence(
@@ -13184,6 +13257,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        stubResolvedAuthoringIntent(llmIntentResolver, "table", null);
         AgenticAuthoringCandidate genericEmployeesCandidate = withEvidence(
                 withEvidence(
                         withEvidence(candidateWithEvidence(
@@ -13918,7 +13992,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void materializableResourceDiscoveryOverridesConsultativeProjectionSelectionWithGovernedOperationalCandidate() {
+    void materializableResourceDiscoveryPreservesConsultativeIntentDuringReconciliation() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
@@ -13993,18 +14067,10 @@ class AgenticAuthoringIntentResolverServiceTest {
                         List.of(employeeCandidate, profileProjection, analyticsProjection))));
 
         assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("create");
-        assertThat(result.artifactKind()).isEqualTo("page");
-        assertThat(result.changeKind()).isEqualTo("create_artifact");
-        assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
-        assertThat(result.warnings())
-                .contains(
-                        "llm-resource-discovery-authoring-drift-normalized",
-                        "llm-resource-selection-overridden-by-governed-ranking")
-                .doesNotContain("resource-selection-role-mismatch-with-governed-candidate");
-        assertThat(result.semanticDecision()).isNotNull();
-        assertThat(result.semanticDecision().reviewRequired()).isFalse();
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.warnings()).doesNotContain("llm-resource-discovery-authoring-drift-normalized");
     }
 
     @Test
@@ -14984,7 +15050,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any(),
                         Mockito.any(),
                         Mockito.any()))
-                .thenReturn(Optional.empty());
+                .thenReturn(Optional.of(resolvedAuthoringIntent("form", null, true)));
         AgenticAuthoringCandidate unrelatedGroundedCandidate = richCandidate(
                 "/api/human-resources/habilidades",
                 0.98d,
@@ -15055,7 +15121,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any(),
                         Mockito.any(),
                         Mockito.any()))
-                .thenReturn(Optional.empty());
+                .thenReturn(Optional.of(resolvedAuthoringIntent("form", null, true)));
         AgenticAuthoringCandidate weakVehicleCandidate = weakLexicalCandidateWithMatchedTerms(
                 "/api/assets/veiculos",
                 0.70d,
@@ -15383,7 +15449,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void canonicalExplicitResourcePathRecoversFromAnUnresolvedLlmFocusAfterGovernedReconciliation() {
+    void explicitResourcePathCannotReplaceAnUnresolvedLlmIntent() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
@@ -15461,14 +15527,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                 "local",
                 semanticOrientation);
 
-        assertThat(result.valid()).isTrue();
-        assertThat(result.operationKind()).isEqualTo("create");
-        assertThat(result.artifactKind()).isEqualTo("form");
-        assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/operations/incidentes");
-        assertThat(result.warnings())
-                .contains("llm-intent-resolution-used")
-                .doesNotContain("llm-resource-selection-unconfirmed-by-ai-authored-focus");
+        assertUnresolvedIntent(result);
+
     }
 
     @Test
@@ -15735,7 +15795,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.warnings())
                 .contains(
                         "llm-intent-resolution-used",
-                        "llm-resource-selection-unconfirmed-by-ai-authored-focus")
+                        "llm-intent-resolution-unresolved-clarification-required")
                 .doesNotContain("llm-intent-resolution-satisfied-by-pre-intent-governed-evidence");
         Mockito.verify(llmIntentResolver).resolve(
                 Mockito.any(),

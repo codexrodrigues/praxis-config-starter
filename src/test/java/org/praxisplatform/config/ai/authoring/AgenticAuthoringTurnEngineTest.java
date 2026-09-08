@@ -12793,8 +12793,12 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"none", "questions", "pending"})
-    void suppressesResourceQuickRepliesWhenAiAuthoredFocusRemainsUnconfirmed(String clarificationKind) throws Exception {
+    @org.junit.jupiter.params.provider.CsvSource({
+            "none,false", "questions,false", "pending,false",
+            "none,true", "questions,true", "pending,true"
+    })
+    void suppressesInventedResourceQuickRepliesWhenIntentOrFocusRemainsUnconfirmed(
+            String clarificationKind, boolean unresolvedIntent) throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
         AgenticAuthoringIntentResolverService intentResolverService =
@@ -12864,6 +12868,9 @@ class AgenticAuthoringTurnEngineTest {
                 domainDiscoveryContext());
 
         ObjectNode resolutionNode = objectMapper.valueToTree(resourceDiscoveryNeedsClarificationIntent());
+        if (unresolvedIntent) {
+            resolutionNode.putArray("warnings").add("llm-intent-resolution-unresolved-clarification-required");
+        }
         if (!"none".equals(clarificationKind)) {
             if ("questions".equals(clarificationKind)) {
                 resolutionNode.putArray("clarificationQuestions").add("Quais colunas deseja mostrar?");
@@ -12893,15 +12900,23 @@ class AgenticAuthoringTurnEngineTest {
                 eq("user"),
                 eq("local"));
         JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
-        org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
-                .contains("ainda não possuem vínculo semântico e operacional aprovado")
-                .contains("não vou materializar a tela nem oferecer uma dessas fontes como confirmação");
+        if (!unresolvedIntent) {
+            org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
+                    .contains("ainda não possuem vínculo semântico e operacional aprovado")
+                    .contains("não vou materializar a tela nem oferecer uma dessas fontes como confirmação");
+        }
         org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics")
                         .path("resourceDiscoveryGroundedClarification")
                         .asBoolean())
                 .isTrue();
-        org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
-                .isEmpty();
+        if (unresolvedIntent && !"none".equals(clarificationKind)) {
+            assertThat(result.path("quickReplies")).hasSize(1);
+            assertThat(result.path("quickReplies").path(0).path("id").asText()).isEqualTo("select-columns");
+            assertThat(result.path("quickReplies").path(0).path("semanticDecision").isNull()
+                    || result.path("quickReplies").path(0).path("semanticDecision").isMissingNode()).isTrue();
+        } else {
+            org.assertj.core.api.Assertions.assertThat(result.path("quickReplies")).isEmpty();
+        }
         assertThat(result.path("canApply").asBoolean()).isFalse();
     }
 

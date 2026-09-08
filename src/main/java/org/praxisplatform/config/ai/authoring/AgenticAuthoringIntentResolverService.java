@@ -372,7 +372,6 @@ public class AgenticAuthoringIntentResolverService {
                 || (legacyKeywordFallbackEnabled
                 && shouldResolveLlmIntent
                 && (llmIntent == null || (!llmIntent.resolved() && !primaryLlmIntentProviderFailure)));
-        boolean providerFailureRecoveredByGroundedCandidates = false;
         boolean semanticPolicyRefinedVisualProjection = false;
         boolean apiCatalogAuthoringDriftNormalized = false;
         boolean consultativeApiCatalogAuthoringDriftNormalized = false;
@@ -508,36 +507,15 @@ public class AgenticAuthoringIntentResolverService {
             }
         } else if (llmIntent != null) {
             if (primaryLlmIntentProviderFailure) {
-                if (legacyKeywordFallbackEnabled && shouldRecoverProviderFailureWithGroundedAuthoring(prompt, candidates)) {
-                    operationKind = "create";
-                    artifactKind = "page";
-                    changeKind = "create_artifact";
-                    deterministicFallbackApplied = true;
-                    primaryLlmIntentProviderFailure = false;
-                    providerFailureRecoveredByGroundedCandidates = true;
-                } else {
-                    operationKind = "unknown";
-                    artifactKind = "unknown";
-                    changeKind = "provider_error";
-                    deterministicFallbackApplied = false;
-                }
+                operationKind = "unknown";
+                artifactKind = "unknown";
+                changeKind = "provider_error";
+                deterministicFallbackApplied = false;
             } else {
                 operationKind = fallbackResolution.operationKind();
                 artifactKind = fallbackResolution.artifactKind();
                 changeKind = fallbackResolution.changeKind();
                 deterministicFallbackApplied = legacyKeywordFallbackEnabled;
-                if (shouldNormalizeGroundedResourceDiscoveryAuthoringDrift(
-                        request,
-                        prompt,
-                        operationKind,
-                        artifactKind,
-                        changeKind,
-                        candidates)) {
-                    operationKind = "create";
-                    artifactKind = materializableResourceDiscoveryArtifactKind(request, "page");
-                    changeKind = "create_artifact";
-                    resourceDiscoveryAuthoringDriftNormalized = true;
-                }
                 if (candidates.isEmpty()
                         || isBroadArtifactDiscoveryOnly(candidates)) {
                     candidates = discoverCandidates(prompt, artifactKind, target, tenantId, environment);
@@ -662,18 +640,6 @@ public class AgenticAuthoringIntentResolverService {
             artifactKind = "page";
             changeKind = "create_artifact";
             apiCatalogAuthoringDriftNormalized = true;
-        }
-        if (shouldNormalizeGroundedResourceDiscoveryAuthoringDrift(
-                request,
-                prompt,
-                operationKind,
-                artifactKind,
-                changeKind,
-                candidates)) {
-            operationKind = "create";
-            artifactKind = materializableResourceDiscoveryArtifactKind(request, "page");
-            changeKind = "create_artifact";
-            resourceDiscoveryAuthoringDriftNormalized = true;
         }
         candidates = filterConsultativeApiCatalogCandidates(prompt, artifactKind, candidates);
         if ("api_catalog".equals(artifactKind)) {
@@ -1042,15 +1008,7 @@ public class AgenticAuthoringIntentResolverService {
             resourceDiscoveryFocusSelectionApplied = true;
             llmResourceSelectionOverriddenByPromptAlignment = false;
             llmResourceSelectionOverriddenByGovernedRanking = true;
-            if (isApiCatalogQuestion(operationKind, artifactKind, changeKind)
-                    || "explore".equals(operationKind)
-                    || "unknown".equals(valueOrUnknown(operationKind))
-                    || "unknown".equals(valueOrUnknown(artifactKind))) {
-                operationKind = "create";
-                artifactKind = materializableResourceDiscoveryArtifactKind(request, "page");
-                changeKind = "create_artifact";
-                resourceDiscoveryAuthoringDriftNormalized = true;
-            }
+            // Candidate reconciliation changes grounding, never the primary intent.
         }
         AgenticAuthoringCandidate dedicatedProjectionCandidate =
                 strongerDedicatedProjectionCandidateForGovernedNeed(
@@ -1142,18 +1100,26 @@ public class AgenticAuthoringIntentResolverService {
             selectedCandidate = null;
             candidates = List.of();
         }
-        if (primaryLlmIntentProviderFailure) {
+        // Pre-intent tool results and late candidate reconciliation are evidence, not
+        // authority to replace an unresolved primary interpretation. Revalidate this
+        // boundary after all projection policies, including historical lexical paths.
+        boolean unresolvedPrimaryLlmIntent = shouldResolveLlmIntent
+                && (llmIntent == null || !llmIntent.resolved());
+        if (primaryLlmIntentProviderFailure || unresolvedPrimaryLlmIntent) {
             operationKind = "unknown";
             artifactKind = "unknown";
-            changeKind = "provider_error";
+            changeKind = primaryLlmIntentProviderFailure ? "provider_error" : "needs_clarification";
             selectedCandidate = null;
+            deterministicFallbackApplied = false;
+            resourceDiscoveryAuthoringDriftNormalized = false;
         }
         // Validate the AI-authored focus only after canonical candidate reconciliation.
         // At this point the selection can include explicit source binding and governed
         // ranking evidence that is intentionally unavailable to the initial LLM call.
         // Applying this gate earlier would incorrectly retain a clarification state even
         // when a canonical candidate has subsequently been verified.
-        boolean unconfirmedAiAuthoredResourceSelection = !explicitLocalUiComposition
+        boolean unconfirmedAiAuthoredResourceSelection = !unresolvedPrimaryLlmIntent
+                && !explicitLocalUiComposition
                 && hasUnconfirmedAiAuthoredResourceFocus(request, selectedCandidate);
         if (unconfirmedAiAuthoredResourceSelection) {
             llmIntent = withLlmWarning(
@@ -1328,7 +1294,8 @@ public class AgenticAuthoringIntentResolverService {
         // A failed primary interpretation has no semantic authority for an
         // executable continuation. Broad catalog candidates remain diagnostics;
         // selecting one must not silently invent create/table intent next turn.
-        if (primaryLlmIntentProviderFailure) {
+        if (primaryLlmIntentProviderFailure
+                || unresolvedPrimaryLlmIntent && !llmAuthoredQuickRepliesUsed) {
             quickReplies = List.of();
             llmAuthoredQuickRepliesUsed = false;
             clarificationQuickRepliesRecovered = false;
@@ -1343,9 +1310,12 @@ public class AgenticAuthoringIntentResolverService {
         boolean keywordFallbackAppliedForGovernance =
                 deterministicFallbackApplied
                         && !governedDeterministicResolution
-                        && !primaryLlmIntentProviderFailure
-                        && !providerFailureRecoveredByGroundedCandidates;
+                        && !primaryLlmIntentProviderFailure;
         List<String> warnings = warnings(llmIntent);
+        if (unresolvedPrimaryLlmIntent && llmIntent == null) {
+            warnings = withoutWarnings(warnings, "semantic-intent-resolution-not-attempted");
+            warnings = withWarning(warnings, "llm-intent-resolution-unresolved-clarification-required");
+        }
         if (llmTreatsPendingAsNewInstruction) {
             warnings = withWarning(warnings, "llm-follow-up-kind-new-instruction");
         }
@@ -1381,14 +1351,6 @@ public class AgenticAuthoringIntentResolverService {
         }
         if (conversationHistoryIsolatedForBlankCreate) {
             warnings = withWarning(warnings, "llm-conversation-history-isolated-for-blank-create");
-        }
-        if (providerFailureRecoveredByGroundedCandidates) {
-            warnings = withoutWarnings(
-                    warnings,
-                    "llm-intent-resolution-provider-failed-clarification-required",
-                    "keyword-fallback-applied",
-                    "keyword-fallback-fail-safe-applied");
-            warnings = withWarning(warnings, "llm-provider-failure-recovered-by-grounded-candidates");
         }
         if (llmSingleChartDecisionRejectedForOpenOperationalPrompt(prompt, llmIntent)) {
             warnings = withWarning(warnings, "llm-single-chart-decision-requires-explicit-analytical-intent");
@@ -1461,7 +1423,7 @@ public class AgenticAuthoringIntentResolverService {
         }
         if (llmAuthoredQuickRepliesUsed) {
             warnings = withWarning(warnings, "llm-authored-quick-replies-used");
-        } else if (!primaryLlmIntentProviderFailure && !fallbackQuickReplies.isEmpty()) {
+        } else if (!primaryLlmIntentProviderFailure && !unresolvedPrimaryLlmIntent && !fallbackQuickReplies.isEmpty()) {
             warnings = withWarning(warnings, "deterministic-quick-replies-fallback-applied");
         }
         if (explicitLocalUiComposition) {
@@ -2472,36 +2434,6 @@ public class AgenticAuthoringIntentResolverService {
                 && !isConcreteDashboardMaterializationPrompt(prompt);
     }
 
-    private boolean shouldNormalizeGroundedResourceDiscoveryAuthoringDrift(
-            AgenticAuthoringIntentResolutionRequest request,
-            String prompt,
-            String operationKind,
-            String artifactKind,
-            String changeKind,
-            List<AgenticAuthoringCandidate> candidates) {
-        if (request == null
-                || candidates == null
-                || candidates.isEmpty()
-                || !hasMaterializableResourceDiscoveryContext(request)
-                || !hasBusinessDataAuthoringSignal(request, prompt)) {
-            return false;
-        }
-        boolean consultativeOrUnknown = isApiCatalogQuestion(operationKind, artifactKind, changeKind)
-                || "unknown".equals(valueOrUnknown(operationKind))
-                || "unknown".equals(valueOrUnknown(artifactKind));
-        if (!consultativeOrUnknown) {
-            return false;
-        }
-        return candidates.stream()
-                .filter(Objects::nonNull)
-                .filter(candidate -> hasEvidence(candidate, "tool-search-api-resources")
-                        || hasResourceDiscoveryCandidate(request, candidate))
-                .filter(candidate -> hasTrustedSelectionEvidence(candidate))
-                .filter(candidate -> !isWeakLexicalCandidate(candidate))
-                .anyMatch(candidate -> hasEvidence(candidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE)
-                        || !isDerivedProjectionCandidate(candidate));
-    }
-
     private boolean hasMaterializableResourceDiscoveryContext(AgenticAuthoringIntentResolutionRequest request) {
         JsonNode resourceDiscovery = request.contextHints() == null
                 ? null
@@ -2596,23 +2528,6 @@ public class AgenticAuthoringIntentResolverService {
             }
         }
         return false;
-    }
-
-    private boolean shouldRecoverProviderFailureWithGroundedAuthoring(
-            String prompt,
-            List<AgenticAuthoringCandidate> candidates) {
-        if (candidates == null || candidates.isEmpty() || !isBusinessDataAuthoringPrompt(prompt)) {
-            return false;
-        }
-        return candidates.stream()
-                .filter(Objects::nonNull)
-                .filter(candidate -> !hasEvidence(candidate, "broad-artifact-discovery"))
-                .anyMatch(candidate -> hasTrustedSelectionEvidence(candidate)
-                        && !isWeakLexicalCandidate(candidate)
-                        || hasEvidence(candidate, "explicit-resource-path")
-                        || hasEvidence(candidate, "quick-reply-context")
-                        || hasEvidence(candidate, "current-page-target-resource")
-                        || promptMatchesCandidatePathIdentity(prompt, candidate));
     }
 
     private boolean isOpenBusinessSurfaceAuthoringPrompt(String prompt) {
