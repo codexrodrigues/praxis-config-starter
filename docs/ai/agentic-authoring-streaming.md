@@ -66,6 +66,29 @@ Usar os warnings e a evidencia do turno para distinguir interpretacao nao
 resolvida de rejeicao posterior do foco/recurso. A ausencia de uma previa nao
 deve ser corrigida inventando uma intencao local ou afrouxando o gate de apply.
 
+## Reconciliacao de evidencias de candidatos
+
+Depois da resolucao semantica, a deduplicacao nao deve trocar um binding
+operacional verificado por grounding apenas documental do mesmo alvo. O resolver
+conserva o candidato `domain_binding` completo, sem copiar seus marcadores para
+o candidato `domain_catalog`, quando ambos possuem recurso, schema, operacao,
+endpoint e metodo compativeis. A comparacao de metodos HTTP ignora apenas caixa;
+caminhos e schemas precisam coincidir exatamente.
+
+Essa preferencia requer `domain-binding`, `schema-grounding-verified` e
+`resource-capabilities-verified`, ausencia de marcadores lexicais fracos e fonte
+coerente entre marcadores e bundle. Tenant, ambiente e release das evidencias
+precisam coincidir; bundles com contextos misturados nao recebem essa preferencia.
+Evidencia sem escopo nao pode ser combinada com evidencia de escopo declarado.
+Dois candidatos sem escopo podem ser reconciliados no turno atual, mas isso nao
+comprova autorizacao do principal nem dispensa verificacao operacional posterior.
+
+Mesmo entre candidatos da mesma fonte, a uniao de evidencias exige essa
+compatibilidade estrutural e contextual. Compartilhar `resourcePath` nao basta
+para transportar confirmacao de um schema, comando ou contexto para outro.
+Essa politica nao altera a intencao primaria, nao cria permissoes e nao libera
+preview/apply sem os demais gates canonicos.
+
 ## Decisao canonica
 
 Agentic authoring nao deve criar um segundo formato de stream. O fluxo reutiliza a
