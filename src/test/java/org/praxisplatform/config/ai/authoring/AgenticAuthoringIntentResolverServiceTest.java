@@ -14935,6 +14935,9 @@ class AgenticAuthoringIntentResolverServiceTest {
                 "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response");
         semanticCandidate.put("score", 0.56d);
         semanticCandidate.put("reason", "api_metadata semantic retrieval");
+        // Both discoveries refer to the same governed scope. An unscoped context
+        // candidate must not donate evidence to a scoped candidate merely by path.
+        semanticCandidate.set("evidenceBundle", objectMapper.valueToTree(rediscoveredEmployeeCandidate.evidenceBundle()));
         semanticCandidate.putArray("evidence")
                 .add("api-metadata")
                 .add("semantic-retrieval")

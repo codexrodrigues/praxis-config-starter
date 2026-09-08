@@ -6960,6 +6960,15 @@ public class AgenticAuthoringIntentResolverService {
     private AgenticAuthoringCandidate preferredCandidateForSameResource(
             AgenticAuthoringCandidate left,
             AgenticAuthoringCandidate right) {
+        // Post-semantic reconciliation, not intent inference. Keep the already verified
+        // operational candidate intact instead of replacing it with documentary grounding.
+        // Never transfer its verification markers to a different candidate/provenance.
+        if (canRetainVerifiedBinding(left, right)) {
+            return left;
+        }
+        if (canRetainVerifiedBinding(right, left)) {
+            return right;
+        }
         int leftStrength = evidenceStrength(left);
         int rightStrength = evidenceStrength(right);
         AgenticAuthoringCandidate preferred;
@@ -6974,6 +6983,69 @@ public class AgenticAuthoringIntentResolverService {
         return mergeCandidateEvidence(preferred, secondary);
     }
 
+    private boolean canRetainVerifiedBinding(
+            AgenticAuthoringCandidate binding,
+            AgenticAuthoringCandidate catalog) {
+        return binding != null && catalog != null
+                && hasVerifiedOperationalBindingEvidence(binding)
+                && !hasEvidence(binding, "lexical-fallback")
+                && !hasEvidence(binding, "weak-evidence")
+                && candidateHasConsistentSource(binding, AgenticAuthoringCandidateProvenancePolicy.DOMAIN_BINDING)
+                && candidateHasConsistentSource(catalog, AgenticAuthoringCandidateProvenancePolicy.DOMAIN_CATALOG)
+                && !hasVerifiedOperationalBindingEvidence(catalog)
+                && compatibleCandidateEvidence(binding, catalog);
+    }
+
+    private boolean candidateHasConsistentSource(AgenticAuthoringCandidate candidate, String source) {
+        AgenticAuthoringEvidenceBundle bundle = candidate.evidenceBundle();
+        return source.equals(AgenticAuthoringCandidateProvenancePolicy.retrievalSource(List.of(candidate)))
+                && (bundle == null || source.equals(bundle.retrievalSource()));
+    }
+
+    private boolean compatibleCandidateEvidence(
+            AgenticAuthoringCandidate left,
+            AgenticAuthoringCandidate right) {
+        // Exact structural identity is deliberately conservative. A shared resourcePath
+        // alone does not identify a schema, read projection, or command.
+        if (!sameNonBlankCandidateValue(left.resourcePath(), right.resourcePath())
+                || !sameNonBlankCandidateValue(left.schemaUrl(), right.schemaUrl())
+                || left.operation() == null || left.operation().isBlank()
+                || !sameCandidateMethod(left.operation(), right.operation())
+                || !Objects.equals(left.submitUrl(), right.submitUrl())
+                || !sameCandidateMethod(left.submitMethod(), right.submitMethod())) {
+            return false;
+        }
+        List<String> leftScope = candidateEvidenceScope(left);
+        List<String> rightScope = candidateEvidenceScope(right);
+        return leftScope != null && leftScope.equals(rightScope);
+    }
+
+    private boolean sameNonBlankCandidateValue(String left, String right) {
+        return left != null && !left.isBlank() && left.equals(right);
+    }
+
+    private boolean sameCandidateMethod(String left, String right) {
+        return left == null ? right == null : right != null && left.equalsIgnoreCase(right);
+    }
+
+    private List<String> candidateEvidenceScope(AgenticAuthoringCandidate candidate) {
+        AgenticAuthoringEvidenceBundle bundle = candidate.evidenceBundle();
+        // Unscoped candidates can be reconciled only with other unscoped candidates
+        // from the current resolution. This is not proof of principal authorization.
+        if (bundle == null || bundle.evidence().isEmpty()) {
+            return List.of("", "", "");
+        }
+        if (bundle.evidence().stream().anyMatch(Objects::isNull)) {
+            return null;
+        }
+        List<List<String>> scopes = bundle.evidence().stream()
+                .map(item -> List.of(item.tenantId(), item.environment(), item.releaseId()))
+                .distinct()
+                .toList();
+        // Mixed or conflicting provenance must not acquire confirmation by deduplication.
+        return scopes.size() == 1 ? scopes.get(0) : null;
+    }
+
     private AgenticAuthoringCandidate mergeCandidateEvidence(
             AgenticAuthoringCandidate preferred,
             AgenticAuthoringCandidate secondary) {
@@ -6982,7 +7054,8 @@ public class AgenticAuthoringIntentResolverService {
         }
         String preferredSource = AgenticAuthoringCandidateProvenancePolicy.retrievalSource(List.of(preferred));
         String secondarySource = AgenticAuthoringCandidateProvenancePolicy.retrievalSource(List.of(secondary));
-        if (!preferredSource.equals(secondarySource)) {
+        if (!preferredSource.equals(secondarySource)
+                || !compatibleCandidateEvidence(preferred, secondary)) {
             return preferred;
         }
         List<String> preferredEvidence = preferred.evidence() == null ? List.of() : preferred.evidence();
