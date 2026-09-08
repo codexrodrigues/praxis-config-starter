@@ -52,6 +52,50 @@ test('distinguishes missing observations from false or empty known observations'
   const missing = exportGovernedState(report([attachment({ schemaVersion: projection.schemaVersion, scenarioId: projection.scenarioId })])).turns[0].projection;
   assert.equal(missing.preview.present, null);
   assert.equal(missing.quickReplyIds, null);
+  assert.equal(missing.intentResolutionEvidence.terminalIntentPresent, null);
+  assert.equal(missing.intentResolutionEvidence.warningCodes, null);
+  assert.equal(missing.intentResolutionEvidence.resolutionTelemetry.llmResolved, null);
+});
+
+const unresolved = 'llm-intent-resolution-unresolved-clarification-required';
+const focus = 'llm-resource-selection-unconfirmed-by-ai-authored-focus';
+for (const warningCodes of [[unresolved], [unresolved, focus], ['llm-intent-resolution-provider-failed-clarification-required'], []]) {
+  test(`exports exact intent evidence without inventing a cause: ${warningCodes.join(',') || 'none'}`, () => {
+    const evidence = {
+      terminalIntentPresent: true, valid: false, warningCodes,
+      resolutionTelemetry: { llmResolutionAttempted: true, llmResolved: false, keywordFallbackApplied: false, semanticPolicyApplied: false },
+    };
+    const result = exportGovernedState(report([attachment({ ...projection, intentResolutionEvidence: evidence })])).turns[0].projection;
+    assert.deepEqual(result.intentResolutionEvidence, evidence);
+    assert.equal(result.applyEligibility.controllerCanApply, false);
+    assert.equal(result.rootCause, undefined);
+    assert.equal(result.productionLike, undefined);
+  });
+}
+
+test('re-sanitizes intent evidence by exact allowlist even for token-shaped secrets', () => {
+  const evidence = {
+    terminalIntentPresent: true, valid: 'true', warningCodes: [focus, 'PRIVATE', focus, 'llm-provider-error-PRIVATE', { code: unresolved }],
+    effectivePrompt: 'PRIVATE', rawResponse: 'PRIVATE',
+    resolutionTelemetry: {
+      llmResolved: 'false', llmResolutionAttempted: 1, keywordFallbackApplied: false,
+      selectedResourcePath: 'PRIVATE', selectedCandidateEvidence: ['PRIVATE'],
+      providerInvocations: ['PRIVATE'], request: { apiKey: 'PRIVATE' },
+    },
+  };
+  const result = exportGovernedState(report([attachment({ ...projection, intentResolutionEvidence: evidence })])).turns[0].projection;
+  assert.deepEqual(result.intentResolutionEvidence.warningCodes, [focus]);
+  assert.equal(result.intentResolutionEvidence.valid, null);
+  assert.equal(result.intentResolutionEvidence.resolutionTelemetry.llmResolved, null);
+  assert.equal(result.intentResolutionEvidence.resolutionTelemetry.llmResolutionAttempted, null);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE|rawResponse|selectedResourcePath|providerInvocations|apiKey/);
+});
+
+test('keeps malformed warning arrays unknown and an absent terminal explicitly false', () => {
+  const evidence = { terminalIntentPresent: false, warningCodes: unresolved };
+  const result = exportGovernedState(report([attachment({ ...projection, intentResolutionEvidence: evidence })])).turns[0].projection;
+  assert.equal(result.intentResolutionEvidence.terminalIntentPresent, false);
+  assert.equal(result.intentResolutionEvidence.warningCodes, null);
 });
 test('retains separate turn and retry ordinals, with no deduplication across attempts', () => {
   const input = report([attachment(), attachment(projection, 2)]);

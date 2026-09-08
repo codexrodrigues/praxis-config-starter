@@ -10,6 +10,31 @@ const codes = (value, limit) => Array.isArray(value)
   ? [...new Set(value.map(code).filter(value => value !== null))].slice(0, limit) : null;
 const fields = (value, names, sanitize) => Object.fromEntries(names.map(name => [name, sanitize(value?.[name])]));
 
+// Defense in depth: the Angular attachment is already projected, but is not trusted.
+// These are canonical resolver codes, not a general token-shaped string allowlist.
+const intentWarningAllowlist = [
+  'semantic-intent-resolution-not-attempted',
+  'llm-intent-resolution-used',
+  'llm-intent-resolution-unresolved-clarification-required',
+  'llm-intent-resolution-provider-failed-clarification-required',
+  'llm-intent-resolution-failed',
+  'llm-provider-error',
+  'llm-provider-timeout',
+  'llm-resource-selection-unconfirmed-by-ai-authored-focus',
+  'llm-intent-resolution-second-pass-used',
+];
+
+function intentEvidence(value) {
+  return {
+    ...fields(value, ['terminalIntentPresent', 'valid'], boolean),
+    warningCodes: Array.isArray(value?.warningCodes)
+      ? intentWarningAllowlist.filter(code => value.warningCodes.includes(code)) : null,
+    resolutionTelemetry: fields(value?.resolutionTelemetry, [
+      'llmResolutionAttempted', 'llmResolved', 'keywordFallbackApplied', 'semanticPolicyApplied',
+    ], boolean),
+  };
+}
+
 function sanitize(value) {
   if (!value || value.schemaVersion !== schemaVersion
       || value.scenarioId !== 'live-resource-workspace-command') {
@@ -20,6 +45,7 @@ function sanitize(value) {
   return {
     sourceSchemaVersion: schemaVersion,
     scenarioId: value.scenarioId,
+    intentResolutionEvidence: intentEvidence(value.intentResolutionEvidence),
     observedDisposition: fields(value.observedDisposition, ['testObservedState', 'controllerState', 'domState'], code),
     decisionDiagnostics: {
       status: code(value.decisionDiagnostics?.status),
