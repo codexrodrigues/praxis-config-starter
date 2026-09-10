@@ -85,6 +85,9 @@ public final class AgenticAuthoringValidatorRegistry {
             "section-id-unique",
             "destructive-removal-confirmation",
             "remote-resource-binding-safe",
+            "detail-source-fallback-valid",
+            "detail-inline-rich-content-valid",
+            "detail-action-reference-declared",
             "endpoint-url-safe",
             "endpoint-uses-praxis-backend-surface",
             "presign-endpoint-fixed-contract",
@@ -572,6 +575,9 @@ public final class AgenticAuthoringValidatorRegistry {
                     // These are structural: operations resolve by stable ids and compile only canonical editor/runtime paths.
                 }
                 case "remote-resource-binding-safe" -> validateRemoteResourceBindingSafe(operation, planOperation, failures);
+                case "detail-source-fallback-valid" -> validateDetailSourceFallback(operationId, planOperation, config, failures);
+                case "detail-inline-rich-content-valid" -> validateDetailInlineRichContent(operationId, planOperation, config, failures);
+                case "detail-action-reference-declared" -> validateDetailActionReferences(operationId, planOperation, config, failures);
                 case "endpoint-url-safe" -> validateFilesEndpointUrlSafe(operationId, planOperation, failures);
                 case "endpoint-uses-praxis-backend-surface" -> validateFilesEndpointPraxisSurface(operationId, planOperation, failures);
                 case "presign-endpoint-fixed-contract" -> validateFilesEndpointPathContract(operationId, planOperation, failures, "presign");
@@ -1919,11 +1925,211 @@ public final class AgenticAuthoringValidatorRegistry {
             JsonNode operation,
             JsonNode planOperation,
             List<String> failures) {
-        if (containsUnsafeAbsoluteUrl(planOperation.path("input"))) {
+        JsonNode bindingInput = "detail.configure".equals(text(operation, "operationId"))
+                ? planOperation.path("input").path("source") : planOperation.path("input");
+        if (containsUnsafeAbsoluteUrl(bindingInput)) {
             failures.add("validator remote-resource-binding-safe failed for "
                     + text(operation, "operationId")
                     + ": absolute remote URLs are not allowed in authoring plans");
+        } else if (containsUnsafeDetailResourcePathBinding(bindingInput)) {
+            failures.add("validator remote-resource-binding-safe failed for "
+                    + text(operation, "operationId")
+                    + ": resourcePath must use an unambiguous relative route");
         }
+    }
+
+    private void validateDetailSourceFallback(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode existingSource = config.path("behavior").path("detail").path("source");
+        JsonNode sourcePatch = detailSourcePatch(operationId, planOperation);
+        String mode = effectiveText(existingSource, sourcePatch, "mode", "inline");
+        String fallbackMode = effectiveText(existingSource, sourcePatch, "fallbackMode", "none");
+        JsonNode inlineSchema = effectiveNode(existingSource, sourcePatch, "inlineSchema");
+        JsonNode existingResource = existingSource.path("resource");
+        JsonNode resourcePatch = sourcePatch.path("resource");
+        boolean detailEnabled = effectiveDetailEnabled(operationId, planOperation, config);
+
+        if (!"none".equals(fallbackMode) && fallbackMode.equals(mode)) {
+            failures.add("validator detail-source-fallback-valid failed for " + operationId
+                    + ": fallback mode must differ from the primary source mode");
+        }
+        if (((detailEnabled && "inline".equals(mode)) || "inline".equals(fallbackMode)) && !inlineSchema.isObject()) {
+            failures.add("validator detail-source-fallback-valid failed for " + operationId
+                    + ": inline source requires inlineSchema");
+        }
+        if (("resource".equals(mode) || "resource".equals(fallbackMode))
+                && !hasCompleteDetailResource(existingResource, resourcePatch)) {
+            failures.add("validator detail-source-fallback-valid failed for " + operationId
+                    + ": resource source requires kind, id and version");
+        }
+    }
+
+    private void validateDetailInlineRichContent(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode inlineSchema = effectiveDetailInlineSchema(operationId, planOperation, config);
+        if (inlineSchema.isMissingNode() || inlineSchema.isNull()) {
+            return;
+        }
+        if (containsInvalidDetailRichContent(inlineSchema)) {
+            failures.add("validator detail-inline-rich-content-valid failed for " + operationId
+                    + ": inline Rich Content must use a canonical document and safe rootClassName");
+        }
+    }
+
+    private void validateDetailActionReferences(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode inlineSchema = effectiveDetailInlineSchema(operationId, planOperation, config);
+        if (inlineSchema.isMissingNode() || inlineSchema.isNull()) {
+            return;
+        }
+        Set<String> declared = new LinkedHashSet<>();
+        for (JsonNode action : config.path("actions").path("row").path("actions")) {
+            String id = text(action, "id");
+            if (!id.isBlank()) {
+                declared.add(id);
+            }
+        }
+        Set<String> referenced = new LinkedHashSet<>();
+        collectTextProperty(inlineSchema, "actionId", referenced);
+        referenced.removeAll(declared);
+        if (!referenced.isEmpty()) {
+            failures.add("validator detail-action-reference-declared failed for " + operationId
+                    + ": undeclared row actions " + referenced);
+        }
+    }
+
+    private JsonNode detailSourcePatch(String operationId, JsonNode planOperation) {
+        JsonNode input = planOperation.path("input");
+        return "detail.configure".equals(operationId) ? input.path("source") : input;
+    }
+
+    private JsonNode effectiveDetailInlineSchema(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config) {
+        JsonNode existingSource = config.path("behavior").path("detail").path("source");
+        JsonNode sourcePatch = detailSourcePatch(operationId, planOperation);
+        String mode = effectiveText(existingSource, sourcePatch, "mode", "inline");
+        String fallbackMode = effectiveText(existingSource, sourcePatch, "fallbackMode", "none");
+        if (!(effectiveDetailEnabled(operationId, planOperation, config) && "inline".equals(mode))
+                && !"inline".equals(fallbackMode)) {
+            return MissingNode.getInstance();
+        }
+        return effectiveNode(existingSource, sourcePatch, "inlineSchema");
+    }
+
+    private boolean effectiveDetailEnabled(String operationId, JsonNode planOperation, JsonNode config) {
+        JsonNode existing = config.path("behavior").path("detail").path("enabled");
+        JsonNode patch = "detail.configure".equals(operationId)
+                ? planOperation.path("input").path("enabled")
+                : MissingNode.getInstance();
+        JsonNode value = !patch.isMissingNode() ? patch : existing;
+        return !value.isBoolean() || value.asBoolean();
+    }
+
+    private JsonNode effectiveNode(JsonNode existing, JsonNode patch, String field) {
+        return patch != null && patch.isObject() && patch.has(field)
+                ? patch.path(field)
+                : existing.path(field);
+    }
+
+    private String effectiveText(JsonNode existing, JsonNode patch, String field, String fallback) {
+        JsonNode value = effectiveNode(existing, patch, field);
+        String normalized = value.isTextual() ? value.asText("").trim() : "";
+        return normalized.isBlank() ? fallback : normalized;
+    }
+
+    private boolean hasCompleteDetailResource(JsonNode existing, JsonNode patch) {
+        Set<String> kinds = Set.of("ui-composition", "form-schema", "table-schema", "dashboard-schema");
+        String kind = effectiveText(existing, patch, "kind", "");
+        return kinds.contains(kind)
+                && !effectiveText(existing, patch, "id", "").isBlank()
+                && !effectiveText(existing, patch, "version", "").isBlank();
+    }
+
+    private boolean containsInvalidDetailRichContent(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return false;
+        }
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                if (containsInvalidDetailRichContent(child)) return true;
+            }
+            return false;
+        }
+        if (!node.isObject()) {
+            return false;
+        }
+        if ("richContent".equals(text(node, "type"))) {
+            JsonNode document = node.path("document");
+            String rootClassName = text(node, "rootClassName");
+            if (!document.isObject()
+                    || !"praxis.rich-content".equals(text(document, "kind"))
+                    || !"1.0.0".equals(text(document, "version"))
+                    || !document.path("nodes").isArray()
+                    || (!rootClassName.isBlank()
+                        && !rootClassName.matches("[a-zA-Z_][a-zA-Z0-9_-]*(\\s+[a-zA-Z_][a-zA-Z0-9_-]*)*"))) {
+                return true;
+            }
+        }
+        Iterator<JsonNode> children = node.elements();
+        while (children.hasNext()) {
+            if (containsInvalidDetailRichContent(children.next())) return true;
+        }
+        return false;
+    }
+
+    private void collectTextProperty(JsonNode node, String property, Set<String> values) {
+        if (node == null || node.isMissingNode() || node.isNull()) return;
+        if (node.isArray()) {
+            node.forEach(child -> collectTextProperty(child, property, values));
+            return;
+        }
+        if (!node.isObject()) return;
+        JsonNode value = node.path(property);
+        if (value.isTextual() && !value.asText("").trim().isBlank()) {
+            values.add(value.asText("").trim());
+        }
+        node.elements().forEachRemaining(child -> collectTextProperty(child, property, values));
+    }
+
+    private boolean containsUnsafeDetailResourcePathBinding(JsonNode bindingInput) {
+        JsonNode resourcePath = bindingInput.path("resourcePath");
+        String path = resourcePath.isTextual() ? resourcePath.asText("") : text(resourcePath, "path");
+        if (unsafeRelativeResourcePath(path)) {
+            return true;
+        }
+        JsonNode allowList = bindingInput.path("resourceAllowList");
+        if (allowList.isArray()) {
+            for (JsonNode entry : allowList) {
+                if (entry.isTextual() && unsafeRelativeResourcePath(entry.asText(""))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean unsafeRelativeResourcePath(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String normalized = value.trim();
+        String path = normalized.replaceFirst("[?#].*$", "");
+        return normalized.matches("(?i)^(//|[a-z][a-z0-9+.-]*:|[a-z]:[\\\\/]).*")
+                || path.matches("(?i).*%(25)*(2e|2f|5c).*")
+                || path.indexOf('\\') >= 0
+                || normalized.chars().anyMatch(character -> character < 0x20 || character == 0x7f)
+                || path.matches(".*(^|/)\\.{1,2}(/|$).*");
     }
 
     private void validateSchemaColumnOverrideFieldImmutable(

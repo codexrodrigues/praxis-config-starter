@@ -220,6 +220,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     boolean supportsDomainPatchHandler(String handler) {
         return "table-column-format-set".equals(handler)
                 || "table-column-order-set".equals(handler)
+                || "table-detail-configure".equals(handler)
                 || "table-renderer-compose-layout-merge".equals(handler)
                 || "table-renderer-compose-item-merge".equals(handler)
                 || "stepper-step-reorder".equals(handler)
@@ -417,6 +418,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     resolved,
                     proposedConfig,
                     failures);
+            case "table-detail-configure" -> compileTableDetailConfigure(componentId, operation, effect, planOperation, proposedConfig, failures);
             case "table-renderer-compose-layout-merge" -> compileTableRendererComposeLayoutMerge(
                     componentId,
                     operation,
@@ -1233,6 +1235,37 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     }
 
     private record IndexedTableColumn(JsonNode column, int originalIndex, boolean explicit, double order) {
+    }
+
+    private ObjectNode compileTableDetailConfigure(
+            String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation,
+            ObjectNode proposedConfig, List<String> failures) {
+        if (!"praxis-table".equals(componentId)) {
+            failures.add("table-detail-configure requires praxis-table");
+            return null;
+        }
+        try {
+            JsonNode previous = proposedConfig.path("behavior").deepCopy();
+            ObjectNode next = TableDetailAuthoringSemantics.apply(proposedConfig, text(operation, "operationId"), planOperation.path("input"));
+            proposedConfig.set("behavior", next.path("behavior"));
+            ObjectNode compiled = objectMapper.createObjectNode();
+            compiled.put("componentId", componentId);
+            compiled.put("operationId", text(operation, "operationId"));
+            compiled.put("op", "merge-object");
+            compiled.put("effectKind", "compile-domain-patch");
+            compiled.put("domainHandler", text(effect, "handler"));
+            compiled.put("path", "behavior");
+            compiled.put("resolvedPath", "behavior");
+            compiled.set("previousValue", previous);
+            compiled.set("value", next.path("behavior").deepCopy());
+            compiled.set("input", planOperation.path("input").deepCopy());
+            compiled.set("affectedPaths", operation.path("affectedPaths"));
+            compiled.set("submissionImpact", operation.path("submissionImpact"));
+            return compiled;
+        } catch (IllegalArgumentException error) {
+            failures.add(error.getMessage());
+            return null;
+        }
     }
 
     private ObjectNode compileTableRendererComposeLayoutMerge(
