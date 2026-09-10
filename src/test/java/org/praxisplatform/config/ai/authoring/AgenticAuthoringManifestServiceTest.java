@@ -142,7 +142,7 @@ class AgenticAuthoringManifestServiceTest {
                 {
                   "config": {},
                   "plan": {
-                    "operationId": "expansion.detailSource.configure",
+                    "operationId": "detail.source.configure",
                     "input": {
                       "resourcePath": { "path": "https://evil.example/api/customers" }
                     }
@@ -757,7 +757,7 @@ class AgenticAuthoringManifestServiceTest {
                     }
                   },
                   "plan": {
-                    "operationId": "expansion.detailSource.configure",
+                    "operationId": "detail.source.configure",
                     "input": {
                       "mode": "resourcePath",
                       "resourcePath": { "path": "https://evil.example/api/customers" }
@@ -785,7 +785,7 @@ class AgenticAuthoringManifestServiceTest {
                     }
                   },
                   "plan": {
-                    "operationId": "expansion.detailSource.configure",
+                    "operationId": "detail.source.configure",
                     "input": {
                       "mode": "resourcePath",
                       "resourcePath": {
@@ -804,14 +804,13 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(safe.compiled()).isTrue();
         assertThat(safe.failures()).isEmpty();
         JsonNode operation = safe.patch().path("operations").get(0);
-        assertThat(operation.path("operationId").asText()).isEqualTo("expansion.detailSource.configure");
+        assertThat(operation.path("operationId").asText()).isEqualTo("detail.source.configure");
         assertThat(operation.path("op").asText()).isEqualTo("merge-object");
-        assertThat(operation.path("path").asText()).isEqualTo("behavior.expansion.detail.source");
+        assertThat(operation.path("path").asText()).isEqualTo("behavior");
         assertThat(operation.path("submissionImpact").asText()).isEqualTo("affects-remote-binding");
         assertThat(safe.patch()
                         .path("proposedConfig")
                         .path("behavior")
-                        .path("expansion")
                         .path("detail")
                         .path("source")
                         .path("resourcePath")
@@ -2422,7 +2421,7 @@ class AgenticAuthoringManifestServiceTest {
                             "submissionImpact": "visual-only"
                           },
                           {
-                            "operationId": "expansion.detailSource.configure",
+                            "operationId": "detail.source.configure",
                             "target": {
                               "kind": "expansion",
                               "resolver": "expansion-config",
@@ -2441,9 +2440,9 @@ class AgenticAuthoringManifestServiceTest {
                               }
                             },
                             "effects": [
-                              { "kind": "merge-object", "path": "behavior.expansion.detail.source" }
+                              { "kind": "merge-object", "path": "behavior.detail.source" }
                             ],
-                            "affectedPaths": ["behavior.expansion.detail.source.resourcePath"],
+                            "affectedPaths": ["behavior.detail.source.resourcePath"],
                             "preconditions": ["config-initialized"],
                             "validators": ["remote-resource-binding-safe"],
                             "submissionImpact": "affects-remote-binding"

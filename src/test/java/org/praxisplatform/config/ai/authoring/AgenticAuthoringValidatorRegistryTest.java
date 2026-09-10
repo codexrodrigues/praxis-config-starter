@@ -54,7 +54,7 @@ class AgenticAuthoringValidatorRegistryTest {
 
         registry.executeOperationValidators(
                 "praxis-table",
-                operationWithValidators("expansion.detailSource.configure", false, "remote-resource-binding-safe"),
+                operationWithValidators("detail.source.configure", false, "remote-resource-binding-safe"),
                 plan("{}", """
                         {
                           "resourcePath": {
@@ -67,7 +67,153 @@ class AgenticAuthoringValidatorRegistryTest {
                 new ArrayList<>());
 
         assertThat(failures)
-                .contains("validator remote-resource-binding-safe failed for expansion.detailSource.configure: absolute remote URLs are not allowed in authoring plans");
+                .contains("validator remote-resource-binding-safe failed for detail.source.configure: absolute remote URLs are not allowed in authoring plans");
+    }
+
+    @Test
+    void shouldValidateNestedDetailSourceWithoutTreatingPresentationAsRemoteBinding() throws Exception {
+        List<String> failures = new ArrayList<>();
+        JsonNode operation = operationWithValidators("detail.configure", false, "remote-resource-binding-safe");
+        registry.executeOperationValidators("praxis-table", operation,
+                plan("{}", """
+                        {"source":{"resourcePath":{"path":"https://evil.example/detail"}}}
+                        """), objectMapper.readTree("{}"), failures, new ArrayList<>());
+        assertThat(failures).anyMatch(message -> message.contains("absolute remote URLs"));
+        failures.clear();
+        registry.executeOperationValidators("praxis-table", operation,
+                plan("{}", """
+                        {"presentation":{"placement":"bottom"}}
+                        """), objectMapper.readTree("{}"), failures, new ArrayList<>());
+        assertThat(failures).isEmpty();
+    }
+
+    @Test
+    void shouldRejectAmbiguousRelativeDetailResourcePaths() throws Exception {
+        JsonNode operation = operationWithValidators("detail.source.configure", false, "remote-resource-binding-safe");
+        for (String path : List.of(
+                "/api/orders/../admin/detail",
+                "/api/orders/%252e%252e/admin/detail",
+                "/api/orders/..\\admin/detail",
+                "javascript:alert(1)")) {
+            List<String> failures = new ArrayList<>();
+            registry.executeOperationValidators("praxis-table", operation,
+                    plan("{}", objectMapper.createObjectNode()
+                            .set("resourcePath", objectMapper.createObjectNode().put("path", path)).toString()),
+                    objectMapper.readTree("{}"), failures, new ArrayList<>());
+            assertThat(failures).contains(
+                    "validator remote-resource-binding-safe failed for detail.source.configure: resourcePath must use an unambiguous relative route");
+        }
+    }
+
+    @Test
+    void shouldLeaveEncodedDetailQuerySemanticsToTheEndpointContract() throws Exception {
+        List<String> failures = new ArrayList<>();
+        registry.executeOperationValidators(
+                "praxis-table",
+                operationWithValidators("detail.source.configure", false, "remote-resource-binding-safe"),
+                plan("{}", """
+                        {
+                          "resourcePath": {
+                            "path": "/api/orders/{id}/detail?next=%2Fsummary&label=%2E"
+                          },
+                          "resourceAllowList": ["/api/orders/*/detail"]
+                        }
+                        """),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+    }
+
+    @Test
+    void shouldRejectIncompleteOrCyclicDetailFallbacksAfterMergingCurrentSource() throws Exception {
+        JsonNode operation = operationWithValidators(
+                "detail.source.configure",
+                false,
+                "detail-source-fallback-valid");
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "behavior": {"detail": {"source": {
+                    "mode": "resourcePath",
+                    "resourcePath": {"path": "/api/orders/{id}/detail"},
+                    "resource": {"kind": "ui-composition", "id": "orders.detail"}
+                  }}}
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+        registry.executeOperationValidators("praxis-table", operation,
+                plan("{}", "{\"fallbackMode\":\"resource\"}"),
+                config, failures, new ArrayList<>());
+        assertThat(failures).anyMatch(message -> message.contains("requires kind, id and version"));
+
+        failures.clear();
+        registry.executeOperationValidators("praxis-table", operation,
+                plan("{}", """
+                        {"mode":"resource","fallbackMode":"resource","resource":{"version":"1.0.0"}}
+                        """),
+                config, failures, new ArrayList<>());
+        assertThat(failures).anyMatch(message -> message.contains("must differ from the primary source mode"));
+    }
+
+    @Test
+    void shouldRejectInvalidInlineRichContentAndUndeclaredDetailActions() throws Exception {
+        JsonNode operation = operationWithValidators(
+                "detail.source.configure",
+                false,
+                "detail-inline-rich-content-valid",
+                "detail-action-reference-declared");
+        JsonNode input = objectMapper.readTree("""
+                {
+                  "mode": "inline",
+                  "inlineSchema": {
+                    "type": "richContent",
+                    "rootClassName": "unsafe<script>",
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [{
+                        "type": "actionButton",
+                        "label": "Review",
+                        "action": {"actionId": "review-request"}
+                      }]
+                    }
+                  }
+                }
+                """);
+        List<String> failures = new ArrayList<>();
+        registry.executeOperationValidators("praxis-table", operation,
+                plan("{}", input.toString()), objectMapper.readTree("{}"), failures, new ArrayList<>());
+
+        assertThat(failures).anyMatch(message -> message.contains("safe rootClassName"));
+        assertThat(failures).anyMatch(message -> message.contains("undeclared row actions [review-request]"));
+    }
+
+    @Test
+    void shouldAcceptDeclaredDetailActionAndSafeRichContent() throws Exception {
+        JsonNode operation = operationWithValidators(
+                "detail.configure",
+                false,
+                "detail-source-fallback-valid",
+                "detail-inline-rich-content-valid",
+                "detail-action-reference-declared");
+        JsonNode config = objectMapper.readTree("""
+                {"actions":{"row":{"actions":[{"id":"review-request"}]}}}
+                """);
+        List<String> failures = new ArrayList<>();
+        registry.executeOperationValidators("praxis-table", operation,
+                plan("{}", """
+                        {"source":{"mode":"inline","inlineSchema":{
+                          "type":"richContent",
+                          "rootClassName":"detail-card elevated",
+                          "document":{"kind":"praxis.rich-content","version":"1.0.0","nodes":[{
+                            "type":"actionButton","label":"Review","action":{"actionId":"review-request"}
+                          }]}
+                        }}}
+                        """),
+                config, failures, new ArrayList<>());
+
+        assertThat(failures).isEmpty();
     }
 
     @Test
@@ -1030,7 +1176,7 @@ class AgenticAuthoringValidatorRegistryTest {
                 .contains(
                         "validator child-operation-known failed for form.childOperation.delegate: childComponentId and childOperationId are required",
                 "validator child-manifest-available failed for form.childOperation.delegate: unsupported childComponentId unknown",
-                "validator no-local-child-config-write failed for form.childOperation.delegate: child config must be delegated");
+                        "validator no-local-child-config-write failed for form.childOperation.delegate: child config must be delegated");
     }
 
     @Test
@@ -2512,8 +2658,8 @@ class AgenticAuthoringValidatorRegistryTest {
     private JsonNode operationWithValidators(
             String operationId,
             boolean targetRequired,
-            String validators) throws Exception {
-        return operation(operationId, "column", "column-by-field", targetRequired, validators);
+            String... validators) throws Exception {
+        return operation(operationId, "column", "column-by-field", targetRequired, String.join(",", validators));
     }
 
     private JsonNode operation(
