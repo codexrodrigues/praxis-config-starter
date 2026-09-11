@@ -1,5 +1,6 @@
 package org.praxisplatform.config.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -63,10 +64,12 @@ public class AiRegistryTemplateService {
     String payload = buildPayload(componentId, resolvedDescription, configJson, templateMeta);
     Optional<AiRegistry> existing = findTemplate(componentId);
 
-    if (existing.isPresent()
-        && payload.equals(existing.get().getPayload())
-        && existing.get().getEmbedding() != null) {
-      return existing.get();
+    if (existing.isPresent() && sameDocument(payload, existing.get().getPayload())) {
+      // PostgreSQL jsonb changes serialization; keep the stored representation for no-op updates.
+      payload = existing.get().getPayload();
+      if (existing.get().getEmbedding() != null) {
+        return existing.get();
+      }
     }
 
     List<Float> embedding =
@@ -191,6 +194,16 @@ public class AiRegistryTemplateService {
         .etag(etag)
         .configSha256(configSha256)
         .build();
+  }
+
+  private boolean sameDocument(String incoming, String stored) {
+    if (incoming.equals(stored)) return true;
+    if (stored == null) return false;
+    try {
+      return objectMapper.readTree(incoming).equals(objectMapper.readTree(stored));
+    } catch (JsonProcessingException invalidStoredDocument) {
+      return false;
+    }
   }
 
   private AiRegistry saveConfig(AiRegistry config, Optional<AiRegistry> existing) {

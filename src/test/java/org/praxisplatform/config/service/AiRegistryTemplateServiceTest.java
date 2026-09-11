@@ -275,6 +275,22 @@ class AiRegistryTemplateServiceTest {
   }
 
   @Test
+  void semanticallyIdenticalJsonbReadbackDoesNotRegenerateOrAdvanceRevision() {
+    UUID etag = UUID.randomUUID();
+    AiRegistry existing = AiRegistry.builder().registryKey("praxis-table")
+        .payload("{\"configJson\": {}, \"aiDescription\": \"Tabela\", \"componentId\": \"praxis-table\"}")
+        .embedding(List.of(0.1f)).version(4L).etag(etag).build();
+    when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+        REGISTRY_TYPE, "praxis-table", COMPONENT_TYPE, Scope.SYSTEM, SCOPE_KEY))
+        .thenReturn(Optional.of(existing));
+    var result = service.upsertTemplate("praxis-table", objectMapper.createObjectNode(), "Tabela", null);
+    assertThat(result).isSameAs(existing);
+    assertThat(result.getEtag()).isEqualTo(etag);
+    verify(embeddingService, never()).embed(anyString());
+    verify(repository, never()).save(any());
+  }
+
+  @Test
   void recoveryPreservesProvenanceAndRepeatedFailureDoesNotAdvanceRevision() throws Exception {
     UUID etag = UUID.randomUUID();
     AiRegistry existing = AiRegistry.builder()
