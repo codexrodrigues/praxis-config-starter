@@ -356,6 +356,16 @@ metadata increment `version` and rotate `etag` only when persisted material stat
 embedding, tags, source, source reference or status. Reingesting identical material keeps the stable
 registry identity tuple and preserves both tokens.
 
+Template upserts persist the canonical document when embedding generation fails with a
+normalized provider failure or unavailable provider configuration. Such records remain available
+by exact key, but semantic searches exclude them until a later upsert successfully generates the
+embedding. This is an on-upsert retry, not a background recovery job. A changed document clears
+its stale embedding if regeneration fails. An identical document with an existing embedding skips
+regeneration and preserves its revision. Retrying an identical unindexed document preserves its
+tags and provenance; successful embedding recovery advances the material revision, while another
+failure without a material change does not. Document replacement keeps the existing replacement
+policy for provenance. Validation and persistence errors still fail the request.
+
 Template reads and upserts expose this existing evidence as `revision.version` and `revision.etag`.
 They also expose `revision.configSha256`, computed from canonical `configJson` only, so callers can
 distinguish a registry metadata revision from a change to the configured template document. A

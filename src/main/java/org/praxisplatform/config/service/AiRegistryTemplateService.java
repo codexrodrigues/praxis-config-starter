@@ -1,5 +1,6 @@
 package org.praxisplatform.config.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -28,9 +29,10 @@ import org.springframework.transaction.annotation.Transactional;
  * Servico canonico de persistencia, upsert e busca semantica dos templates de registry
  * armazenados em {@code ai_registry}.
  *
- * <p>Os templates sao salvos como registros de escopo {@code SYSTEM/GLOBAL}, com embedding e
- * payload serializado, para sustentar lookup por similaridade, catalogos de templates publicados
- * e reutilizacao de configuracoes base pela plataforma.
+ * <p>Os templates sao salvos como registros de escopo {@code SYSTEM/GLOBAL}, com payload
+ * serializado e, quando disponivel, uma projecao de embedding para lookup por similaridade. A
+ * indisponibilidade do provedor de embeddings nao pode impedir a persistencia canonica do
+ * template.
  */
 @Service
 @RequiredArgsConstructor
@@ -59,8 +61,19 @@ public class AiRegistryTemplateService {
     validateConfigJson(configJson);
 
     String resolvedDescription = resolveDescription(componentId, aiDescription);
-    List<Float> embedding = buildEmbedding(componentId, resolvedDescription, configJson, templateMeta);
     String payload = buildPayload(componentId, resolvedDescription, configJson, templateMeta);
+    Optional<AiRegistry> existing = findTemplate(componentId);
+
+    if (existing.isPresent() && sameDocument(payload, existing.get().getPayload())) {
+      // PostgreSQL jsonb changes serialization; keep the stored representation for no-op updates.
+      payload = existing.get().getPayload();
+      if (existing.get().getEmbedding() != null) {
+        return existing.get();
+      }
+    }
+
+    List<Float> embedding =
+        buildEmbeddingOrNull(componentId, resolvedDescription, configJson, templateMeta);
 
     AiRegistry cfg =
         AiRegistry.builder()
@@ -73,7 +86,7 @@ public class AiRegistryTemplateService {
             .embedding(embedding)
             .build();
 
-    return saveConfig(cfg);
+    return saveConfig(cfg, existing);
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -183,28 +196,36 @@ public class AiRegistryTemplateService {
         .build();
   }
 
-  private AiRegistry saveConfig(AiRegistry config) {
-    Optional<AiRegistry> existing =
-        repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
-            config.getRegistryType(),
-            config.getRegistryKey(),
-            config.getComponentType(),
-            config.getScope(),
-            config.getScopeKey());
+  private boolean sameDocument(String incoming, String stored) {
+    if (incoming.equals(stored)) return true;
+    if (stored == null) return false;
+    try {
+      return objectMapper.readTree(incoming).equals(objectMapper.readTree(stored));
+    } catch (JsonProcessingException invalidStoredDocument) {
+      return false;
+    }
+  }
 
+  private AiRegistry saveConfig(AiRegistry config, Optional<AiRegistry> existing) {
     if (existing.isPresent()) {
       AiRegistry dbConfig = existing.get();
+      boolean samePayload = config.getPayload().equals(dbConfig.getPayload());
       boolean changed =
           dbConfig.applyMaterialState(
               config.getPayload(),
               config.getEmbedding(),
-              config.getTags(),
-              config.getSource(),
-              config.getSourceRef(),
+              samePayload ? dbConfig.getTags() : config.getTags(),
+              samePayload ? dbConfig.getSource() : config.getSource(),
+              samePayload ? dbConfig.getSourceRef() : config.getSourceRef(),
               config.getStatus());
       return changed ? repository.save(dbConfig) : dbConfig;
     }
     return repository.save(config);
+  }
+
+  private Optional<AiRegistry> findTemplate(String componentId) {
+    return repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+        REGISTRY_TYPE, componentId, COMPONENT_TYPE, Scope.SYSTEM, SYSTEM_SCOPE_KEY);
   }
 
   private AiRegistryTemplateSearchResult mapToSearchResult(
@@ -254,6 +275,20 @@ public class AiRegistryTemplateService {
       String componentId, String aiDescription, JsonNode configJson, JsonNode templateMeta) {
     String summary = buildSummary(componentId, aiDescription, configJson, templateMeta);
     return embeddingService.embed(summary);
+  }
+
+  private List<Float> buildEmbeddingOrNull(
+      String componentId, String aiDescription, JsonNode configJson, JsonNode templateMeta) {
+    try {
+      return buildEmbedding(componentId, aiDescription, configJson, templateMeta);
+    } catch (AiProviderCallException | IllegalStateException exception) {
+      log.warn(
+          "[AI-REGISTRY:TEMPLATE-EMBEDDING-DEGRADED] Template '{}' will be persisted without "
+              + "semantic-search projection because embedding generation failed ({})",
+          componentId,
+          exception.getClass().getSimpleName());
+      return null;
+    }
   }
 
   private String buildSummary(
