@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -158,7 +159,6 @@ class AiRegistryTemplateServiceTest {
             .etag(originalEtag)
             .build();
 
-    when(embeddingService.embed(anyString())).thenReturn(List.of(0.7f));
     when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
             REGISTRY_TYPE, "praxis-table", COMPONENT_TYPE, Scope.SYSTEM, SCOPE_KEY))
         .thenReturn(Optional.of(existing));
@@ -168,7 +168,158 @@ class AiRegistryTemplateServiceTest {
     assertThat(saved).isSameAs(existing);
     assertThat(saved.getVersion()).isEqualTo(5L);
     assertThat(saved.getEtag()).isEqualTo(originalEtag);
+    verify(embeddingService, never()).embed(anyString());
     verify(repository, never()).save(existing);
+  }
+
+  @Test
+  void upsertTemplatePersistsCanonicalPayloadWithoutEmbeddingWhenProviderFails() throws Exception {
+    JsonNode configJson = objectMapper.readTree("{\"widgets\":[{\"key\":\"summary\"}]}");
+    when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+            REGISTRY_TYPE,
+            "praxis-page-builder:master-detail",
+            COMPONENT_TYPE,
+            Scope.SYSTEM,
+            SCOPE_KEY))
+        .thenReturn(Optional.empty());
+    when(embeddingService.embed(anyString()))
+        .thenThrow(AiProviderCallException.fromHttpStatus("openai", 503, "unavailable"));
+    when(repository.save(any(AiRegistry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+    AiRegistry saved =
+        service.upsertTemplate(
+            "praxis-page-builder:master-detail",
+            configJson,
+            "Master detail",
+            objectMapper.readTree("{\"variantId\":\"master-detail\"}"));
+
+    assertThat(saved.getEmbedding()).isNull();
+    assertThat(objectMapper.readTree(saved.getPayload()).path("configJson")).isEqualTo(configJson);
+    verify(repository).save(saved);
+  }
+
+  @Test
+  void changedTemplateClearsStaleEmbeddingAndAdvancesRevisionWhenProviderFails() throws Exception {
+    UUID originalEtag = UUID.fromString("123e4567-e89b-12d3-a456-426614174002");
+    AiRegistry existing =
+        AiRegistry.builder()
+            .registryType(REGISTRY_TYPE)
+            .registryKey("praxis-page-builder:master-detail")
+            .componentType(COMPONENT_TYPE)
+            .scope(Scope.SYSTEM)
+            .scopeKey(SCOPE_KEY)
+            .payload(
+                "{\"componentId\":\"praxis-page-builder:master-detail\",\"aiDescription\":\"Old\",\"configJson\":{\"widgets\":[]}}")
+            .embedding(List.of(0.4f, 0.5f))
+            .status("active")
+            .version(7L)
+            .etag(originalEtag)
+            .build();
+    when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+            REGISTRY_TYPE,
+            "praxis-page-builder:master-detail",
+            COMPONENT_TYPE,
+            Scope.SYSTEM,
+            SCOPE_KEY))
+        .thenReturn(Optional.of(existing));
+    when(embeddingService.embed(anyString()))
+        .thenThrow(AiProviderCallException.fromHttpStatus("openai", 503, "unavailable"));
+    when(repository.save(existing)).thenReturn(existing);
+
+    AiRegistry saved =
+        service.upsertTemplate(
+            "praxis-page-builder:master-detail",
+            objectMapper.readTree("{\"widgets\":[{\"key\":\"details\"}]}"),
+            "Updated",
+            null);
+
+    assertThat(saved).isSameAs(existing);
+    assertThat(saved.getEmbedding()).isNull();
+    assertThat(saved.getVersion()).isEqualTo(8L);
+    assertThat(saved.getEtag()).isNotEqualTo(originalEtag);
+    assertThat(objectMapper.readTree(saved.getPayload()).path("aiDescription").asText())
+        .isEqualTo("Updated");
+    verify(repository).save(existing);
+  }
+
+  @Test
+  void identicalUnindexedTemplateRetriesEmbeddingAndRestoresSemanticProjection() throws Exception {
+    AiRegistry existing =
+        AiRegistry.builder()
+            .registryType(REGISTRY_TYPE)
+            .registryKey("praxis-table")
+            .componentType(COMPONENT_TYPE)
+            .scope(Scope.SYSTEM)
+            .scopeKey(SCOPE_KEY)
+            .payload(
+                "{\"componentId\":\"praxis-table\",\"aiDescription\":\"Tabela\",\"configJson\":{\"columns\":[]}}")
+            .embedding(null)
+            .status("active")
+            .version(3L)
+            .etag(UUID.fromString("123e4567-e89b-12d3-a456-426614174003"))
+            .build();
+    when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+            REGISTRY_TYPE, "praxis-table", COMPONENT_TYPE, Scope.SYSTEM, SCOPE_KEY))
+        .thenReturn(Optional.of(existing));
+    when(embeddingService.embed(anyString())).thenReturn(List.of(0.8f));
+    when(repository.save(existing)).thenReturn(existing);
+
+    AiRegistry saved =
+        service.upsertTemplate(
+            "praxis-table", objectMapper.readTree("{\"columns\":[]}"), "Tabela", null);
+
+    assertThat(saved.getEmbedding()).containsExactly(0.8f);
+    assertThat(saved.getVersion()).isEqualTo(4L);
+    verify(embeddingService, times(1)).embed(anyString());
+    verify(repository).save(existing);
+  }
+
+  @Test
+  void recoveryPreservesProvenanceAndRepeatedFailureDoesNotAdvanceRevision() throws Exception {
+    UUID etag = UUID.randomUUID();
+    AiRegistry existing = AiRegistry.builder()
+        .registryType(REGISTRY_TYPE).registryKey("praxis-table").componentType(COMPONENT_TYPE)
+        .scope(Scope.SYSTEM).scopeKey(SCOPE_KEY)
+        .payload("{\"componentId\":\"praxis-table\",\"aiDescription\":\"Tabela\",\"configJson\":{}}")
+        .tags("published").source("recipe").sourceRef("recipe-42").status("active")
+        .version(5L).etag(etag).build();
+    when(repository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(
+        REGISTRY_TYPE, "praxis-table", COMPONENT_TYPE, Scope.SYSTEM, SCOPE_KEY))
+        .thenReturn(Optional.of(existing));
+    when(embeddingService.embed(anyString()))
+        .thenThrow(new IllegalStateException("unavailable"))
+        .thenReturn(List.of(0.3f));
+    when(repository.save(any(AiRegistry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+    AiRegistry failed = service.upsertTemplate("praxis-table", objectMapper.createObjectNode(), "Tabela", null);
+    assertThat(failed.getVersion()).isEqualTo(5L);
+    assertThat(failed.getEtag()).isEqualTo(etag);
+    verify(repository, never()).save(any());
+    AiRegistry recovered = service.upsertTemplate("praxis-table", objectMapper.createObjectNode(), "Tabela", null);
+    assertThat(recovered.getEmbedding()).containsExactly(0.3f);
+    assertThat(recovered.getVersion()).isEqualTo(6L);
+    assertThat(recovered.getEtag()).isNotEqualTo(etag);
+    assertThat(recovered.getTags()).isEqualTo("published");
+    assertThat(recovered.getSource()).isEqualTo("recipe");
+    assertThat(recovered.getSourceRef()).isEqualTo("recipe-42");
+    assertThat(recovered.getStatus()).isEqualTo("active");
+  }
+
+  @Test
+  void persistenceFailureRemainsVisibleWhenEmbeddingIsUnavailable() {
+    when(embeddingService.embed(anyString())).thenThrow(new IllegalStateException("unavailable"));
+    when(repository.save(any(AiRegistry.class)))
+        .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("storage unavailable"));
+    assertThatThrownBy(() -> service.upsertTemplate("praxis-table", objectMapper.createObjectNode(), "Tabela", null))
+        .isInstanceOf(org.springframework.dao.DataAccessResourceFailureException.class);
+  }
+
+  @Test
+  void programmingFailureInEmbeddingIsNotReportedAsSuccessfulPersistence() {
+    when(embeddingService.embed(anyString())).thenThrow(new NullPointerException("programming defect"));
+    assertThatThrownBy(() -> service.upsertTemplate("praxis-table", objectMapper.createObjectNode(), "Tabela", null))
+        .isInstanceOf(NullPointerException.class);
+    verify(repository, never()).save(any());
   }
 
   @Test
