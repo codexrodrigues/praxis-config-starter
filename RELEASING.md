@@ -172,3 +172,7 @@ mvn -B -P ci-smoke-unit -T 1C clean verify
   - Validar `GPG_PRIVATE_KEY` sem CRLF/BOM e `GPG_PASSPHRASE`.
 - Falha na publicacao:
   - Verificar `CENTRAL_TOKEN_USER/CENTRAL_TOKEN_PASS` e namespace no Central Portal.
+  - Se o log mostrar `Uploaded bundle successfully` seguido de timeout, conservar o `deploymentId`: o envio pode continuar no Central mesmo depois que o runner encerra.
+  - Executar o workflow manual **Inspect Maven Central deployment** na `main`, informando esse UUID. Ele consulta somente o status pela [API oficial](https://central.sonatype.org/publish/publish-portal-api/), com os secrets existentes, sem checkout, tag, upload ou republicacao.
+  - `PENDING`, `VALIDATING` e `PUBLISHING` exigem acompanhar o mesmo envio; `VALIDATED` exige investigar por que um envio automatico aguarda publicacao; `FAILED` exige diagnosticar os erros antes de nova tentativa. Nao apagar o deployment enquanto houver investigacao.
+  - `PUBLISHED` confirma a conclusao no Central; verificar tambem a resolucao do POM/JAR publicado pelo consumidor. Um workflow de consulta bem-sucedido, sozinho, nao comprova publicacao: conferir sempre `deploymentState`.
