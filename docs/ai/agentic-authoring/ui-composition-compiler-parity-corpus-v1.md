@@ -169,6 +169,14 @@ mvn -q \
 This writes the reviewable Java report to
 `target/ui-composition-golden/java-report.json`.
 
+The Java execution receipt includes `AiRegistryTemplateService`, even though the golden
+runner mocks its repository boundary. Changes to that service require regenerating
+`compilerReceipts.java` from the report's `compilerIdentity.sourceReceipt`. Review the
+source blob, class hashes and closure hash changes; preserve the corpus cases and their
+expected projections. Rerun the gate above, including the deliberate-divergence tests,
+before publication. Updating only the template unit tests does not validate this derived receipt.
+
+
 After the Angular implementation is committed and its worktree is clean, generate the official
 closure from the sibling `praxis-ui-angular` checkout. This single command deletes stale `dist`
 and Angular persistent-cache outputs, executes the topological production build, derives/copies
