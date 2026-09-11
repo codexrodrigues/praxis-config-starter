@@ -1,0 +1,65 @@
+name: Inspect Maven Central deployment
+
+'on':
+  workflow_dispatch:
+    inputs:
+      deployment_id:
+        description: Deployment UUID printed by the official release upload
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  inspect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Read existing deployment status
+        env:
+          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+          CENTRAL_TOKEN_USER: ${{ secrets.CENTRAL_TOKEN_USER }}
+          CENTRAL_TOKEN_PASS: ${{ secrets.CENTRAL_TOKEN_PASS }}
+        shell: python
+        run: |
+          import base64
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+          import uuid
+
+          deployment_id = str(uuid.UUID(os.environ['DEPLOYMENT_ID']))
+          user = os.environ['CENTRAL_TOKEN_USER']
+          password = os.environ['CENTRAL_TOKEN_PASS']
+          if not user or not password:
+              raise SystemExit('Central publishing credentials are not configured')
+          token = base64.b64encode(f'{user}:{password}'.encode()).decode()
+          print(f'::add-mask::{token}', flush=True)
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          request = urllib.request.Request(
+              f'https://central.sonatype.com/api/v1/publisher/status?id={deployment_id}',
+              data=b'',
+              headers={'Authorization': f'Bearer {token}'},
+              method='POST',
+          )
+          try:
+              with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
+                  result = json.load(response)
+          except urllib.error.HTTPError as error:
+              raise SystemExit(f'Central status request failed: HTTP {error.code}') from None
+          states = {'PENDING', 'VALIDATING', 'VALIDATED', 'PUBLISHING', 'PUBLISHED', 'FAILED'}
+          if result.get('deploymentId') != deployment_id or result.get('deploymentState') not in states:
+              raise SystemExit('Unexpected Central deployment response')
+          summary = {key: result[key] for key in ('deploymentId', 'deploymentState', 'purls', 'errors') if key in result}
+          output = json.dumps(summary, ensure_ascii=True)
+          for secret in (token, password, user):
+              output = output.replace(secret, '[REDACTED]')
+          print(output)
+          if result['deploymentState'] == 'FAILED':
+              raise SystemExit('Central rejected this deployment; inspect the reported errors before retrying')
