@@ -111,9 +111,9 @@
         {
           "id": "ai-registry-template-service-mock-boundary",
           "sourcePath": "src/main/java/org/praxisplatform/config/service/AiRegistryTemplateService.java",
-          "sourceGitBlob": "ea91c03eff1835aa064bdb29f5b12a0abe55e353",
+          "sourceGitBlob": "46f867dca1726f10ec576d06d1cdd07f8655ccee",
           "artifacts": [
-            { "path": "target/classes/org/praxisplatform/config/service/AiRegistryTemplateService.class", "sha256": "0d50771e5f5a71cf098140a22963dd8cf1b96a6708b6f709d03eaee3bebb7e41" }
+            { "path": "target/classes/org/praxisplatform/config/service/AiRegistryTemplateService.class", "sha256": "81e883b2da33f4ef12125d19ff64f0c8937bb0ac2d81162b234ca2451c5bde8f" }
           ]
         },
         {
@@ -182,7 +182,7 @@
         "org.praxisplatform.config.dto.AiRegistryTemplateRevision -> org.praxisplatform.config.dto.AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder",
         "org.praxisplatform.config.dto.AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder -> org.praxisplatform.config.dto.AiRegistryTemplateRevision"
       ],
-      "closureSha256": "cc73e50159be20d1f4076a6776f358520f138e4f8b3cf82e3f178de395aa3f26"
+      "closureSha256": "4c6a06ab845ce921cd4acabb1d82b8eb790c4e14ebb73158f49ec7dfcdad563b"
     }
   },
   "targetProfiles": {
