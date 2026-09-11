@@ -39,13 +39,13 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Run PostgreSQL migration proof
+      - name: Run PostgreSQL migration and template recovery proofs
         env:
           POSTGRES_TEST_EPHEMERAL: 'true'
           POSTGRES_TEST_URL: jdbc:postgresql://localhost:5432/praxis_config_migration_test
           POSTGRES_TEST_USER: praxis
           POSTGRES_TEST_PASSWORD: praxis
-        run: mvn -B "-Dtest=DomainCatalogScopePostgresMigrationTest" test
+        run: mvn -B "-Dtest=DomainCatalogScopePostgresMigrationTest,AiRegistryTemplatePostgresTest" test
     timeout-minutes: 15
 concurrency:
   group: domain-catalog-migration-${{ github.ref }}
