@@ -3187,6 +3187,7 @@ public class DomainRuleService {
         }
         if ("draft".equals(materialization.getStatus()) || "pending_review".equals(materialization.getStatus())) {
             materialization.setStatus("applied");
+            materialization.setEverApplied(true);
             materialization.setAppliedByType("authenticated");
             materialization.setAppliedBy(principal.actorRef());
             materialization.setAppliedAt(now);
@@ -3352,6 +3353,9 @@ public class DomainRuleService {
             supersedeAppliedTargetHeads(materialization, principal, now);
         }
         materialization.setStatus(status);
+        if ("applied".equals(status)) {
+            materialization.setEverApplied(true);
+        }
         materialization.setValidationResult(writeNullable(request.validationResult()));
         if ("applied".equals(status) && !"applied".equals(previousStatus)) {
             materialization.setAppliedByType("authenticated");

@@ -2534,6 +2534,7 @@ class DomainRuleServiceTest {
                         objectMapper.createObjectNode().put("raw", "must not leak publication notes")),
                 principal("procurement-owner"));
 
+        assertThat(materialization.getEverApplied()).isTrue();
         assertThat(response.publicationStatus()).isEqualTo("published");
         assertThat(response.publicationReadiness()).isEqualTo("ready_to_publish");
         assertThat(response.definition().status()).isEqualTo("active");
@@ -3767,6 +3768,7 @@ class DomainRuleServiceTest {
                 principal("release-operator"));
 
         assertThat(response.status()).isEqualTo("applied");
+        assertThat(materialization.getEverApplied()).isTrue();
         assertThat(response.appliedByType()).isEqualTo("authenticated");
         assertThat(response.appliedBy()).isEqualTo("release-operator");
         assertThat(response.appliedAt()).isNotNull();
@@ -3916,6 +3918,7 @@ class DomainRuleServiceTest {
         DomainRuleDefinition previousDefinition = activeDefinition("sales.orders.rule.total", 1);
         DomainRuleDefinition nextDefinition = activeDefinition("sales.orders.rule.total", 2);
         DomainRuleMaterialization previous = targetMaterialization(previousDefinition, "applied");
+        previous.setEverApplied(true);
         DomainRuleMaterialization next = targetMaterialization(nextDefinition, "pending_review");
         when(materializationRepository.findById(next.getId())).thenReturn(Optional.of(next));
         when(materializationRepository.findAppliedForUpdateByExactTarget(
@@ -3931,6 +3934,8 @@ class DomainRuleServiceTest {
                 principal("sales-owner"));
 
         assertThat(previous.getStatus()).isEqualTo("superseded");
+        assertThat(previous.getEverApplied()).isTrue();
+        assertThat(next.getEverApplied()).isTrue();
         assertThat(response.status()).isEqualTo("applied");
         assertThat(response.ruleVersion()).isEqualTo(2);
     }
@@ -3942,6 +3947,7 @@ class DomainRuleServiceTest {
         DomainRuleService service = service(definitionRepository, materializationRepository);
         DomainRuleDefinition definition = activeDefinition("sales.orders.rule.total", 1);
         DomainRuleMaterialization applied = targetMaterialization(definition, "applied");
+        applied.setEverApplied(true);
         when(definitionRepository.findById(definition.getId())).thenReturn(Optional.of(definition));
         when(definitionRepository.save(any(DomainRuleDefinition.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -3957,6 +3963,7 @@ class DomainRuleServiceTest {
 
         assertThat(definition.getStatus()).isEqualTo("deprecated");
         assertThat(applied.getStatus()).isEqualTo("superseded");
+        assertThat(applied.getEverApplied()).isTrue();
     }
 
     @Test
