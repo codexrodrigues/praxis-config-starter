@@ -9,6 +9,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
@@ -30,6 +31,16 @@ public class DomainRuleMaterialization {
 
   @Id
   private UUID id;
+
+  /** Internal optimistic version; leave null for a new entity with an assigned UUID. */
+  @Version
+  @Column(name = "row_version", nullable = false)
+  private Long rowVersion;
+
+  /** False for a new draft, true after application, null for inconclusive pre-migration history. */
+  @Builder.Default
+  @Column(name = "ever_applied")
+  private Boolean everApplied = false;
 
   @Column(name = "tenant_id", length = 128)
   private String tenantId;
@@ -100,6 +111,13 @@ public class DomainRuleMaterialization {
     if (status == null || status.isBlank()) {
       status = "draft";
     }
+    if (everApplied == null) {
+      everApplied = false;
+    }
+    if ("applied".equals(status) || appliedAt != null
+        || ("superseded".equals(status) && Boolean.FALSE.equals(everApplied))) {
+      everApplied = true;
+    }
     if (materializedPayload == null || materializedPayload.isBlank()) {
       materializedPayload = "{}";
     }
@@ -114,6 +132,10 @@ public class DomainRuleMaterialization {
   @PreUpdate
   public void onUpdate() {
     updatedAt = Instant.now();
+    if ("applied".equals(status) || appliedAt != null
+        || ("superseded".equals(status) && Boolean.FALSE.equals(everApplied))) {
+      everApplied = true;
+    }
     if (materializedPayload == null || materializedPayload.isBlank()) {
       materializedPayload = "{}";
     }

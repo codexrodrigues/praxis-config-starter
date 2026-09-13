@@ -206,6 +206,8 @@ hosts may replace it with an authenticated remote adapter without importing
 Starter DTOs. Missing heads return empty, while integrity, scope and access
 failures remain explicit and never activate inferred fallback content. See
 [Rule snapshot control plane v1](docs/domain-rules/snapshot-control-plane-v1.md).
+Materialization persistence and retention are documented in
+[Materialization application history](docs/domain-rules/materialization-application-history.md).
 
 ## Minimal Configuration
 
