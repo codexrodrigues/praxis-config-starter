@@ -361,6 +361,7 @@ public class DomainRuleChangeWorkspaceService {
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleChangeWorkspaceResponse promote(
       UUID id, String ifMatch, DomainRuleGovernancePrincipal principal) {
+    domainRuleService.prepareLifecycleScope(principal);
     DomainRuleChangeWorkspace workspace = scopedWorkspaceForUpdate(id, principal);
     if ("PROMOTED".equals(workspace.getStatus()) && workspace.getPromotedDefinitionId() != null) {
       return response(workspace);
@@ -407,6 +408,8 @@ public class DomainRuleChangeWorkspaceService {
     validation.put("review", "approved");
     validation.put("workspaceId", workspace.getId().toString());
     validation.put("workspaceRevision", approval.getWorkspaceRevision());
+    // This insert belongs to promotion and is already protected by the scope mutex.
+    definitionRepository.flush();
     domainRuleService.transitionDefinitionStatus(
         proposed.id(), new DomainRuleDefinitionStatusTransitionRequest("approved", validation),
         new DomainRuleGovernancePrincipal(

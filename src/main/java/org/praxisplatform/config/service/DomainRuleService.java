@@ -104,6 +104,13 @@ public class DomainRuleService {
     private final ObjectMapper objectMapper;
     private final ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGateProvider;
     private final GovernedColorPaletteContractValidator governedColorPaletteValidator;
+    private final DomainRuleEntityRefresh lifecycleRefresh;
+
+    void prepareLifecycleScope(DomainRuleGovernancePrincipal principal) {
+        requirePrincipal(principal);
+        lifecycleRefresh.requireCleanEntry();
+        definitionRepository.lockLifecycleScope(principal);
+    }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
     public DomainRuleIntakeResponse intake(
@@ -381,9 +388,13 @@ public class DomainRuleService {
             throw new ConfigurationIngestionException("Domain rule status transition request is required");
         }
         requirePrincipal(principal);
+        prepareLifecycleScope(principal);
         String status = requireAllowedStatus(request.status(), "status", DEFINITION_STATUSES);
         DomainRuleDefinition definition = definitionRepository.findById(definitionId)
                 .orElseThrow(() -> new ConfigurationIngestionException("Rule definition not found: " + definitionId));
+        requireScope(definition.getTenantId(), principal.tenantId(), "tenantId");
+        requireScope(definition.getEnvironment(), principal.environment(), "environment");
+        lifecycleRefresh.definition(definition);
         requireScope(definition.getTenantId(), principal.tenantId(), "tenantId");
         requireScope(definition.getEnvironment(), principal.environment(), "environment");
         requireAllowedDefinitionTransition(definition.getStatus(), status);
@@ -589,12 +600,17 @@ public class DomainRuleService {
             throw new ConfigurationIngestionException("ruleDefinitionId is required");
         }
         requirePrincipal(principal);
+        prepareLifecycleScope(principal);
         String tenantId = principal.tenantId();
         String environment = principal.environment();
 
         DomainRuleDefinition definition = definitionRepository.findById(request.ruleDefinitionId())
                 .orElseThrow(() -> new ConfigurationIngestionException(
                         "Rule definition not found: " + request.ruleDefinitionId()));
+        requireScope(definition.getTenantId(), tenantId, "tenantId");
+        requireScope(definition.getEnvironment(), environment, "environment");
+
+        lifecycleRefresh.definition(definition);
         requireScope(definition.getTenantId(), tenantId, "tenantId");
         requireScope(definition.getEnvironment(), environment, "environment");
 
@@ -725,6 +741,11 @@ public class DomainRuleService {
         requireText(request.targetLayer(), "targetLayer");
         requireText(request.targetArtifactType(), "targetArtifactType");
         requireText(request.targetArtifactKey(), "targetArtifactKey");
+        for (String coordinate : List.of(request.targetLayer(), request.targetArtifactType(), request.targetArtifactKey())) {
+            if (!coordinate.equals(coordinate.trim())) {
+                throw new ConfigurationIngestionException("Materialization target coordinates must not contain surrounding whitespace");
+            }
+        }
         requirePrincipal(principal);
         String tenantId = principal.tenantId();
         String environment = principal.environment();
@@ -751,6 +772,8 @@ public class DomainRuleService {
                 INITIAL_MATERIALIZATION_STATUSES);
         String materializationKey = request.materializationKey().trim();
         JsonNode materializedPayload = deriveMaterializedPayload(definition, request);
+        requireExplicitOperationalEffect(definition, request.targetLayer(), request.targetArtifactType(),
+                request.targetArtifactKey(), materializedPayload);
         boolean reactiveDetermination = isReactiveDeterminationTarget(
                 request.targetLayer(),
                 request.targetArtifactType());
@@ -777,7 +800,7 @@ public class DomainRuleService {
                         "materializedRuleId")
                 : normalize(request.materializedRuleId());
         String sourceHash = normalize(request.sourceHash());
-        if (reactiveDetermination) {
+        if (reactiveDetermination || OperationalPolicyTarget.Family.supports(request.targetLayer(), request.targetArtifactType())) {
             String derivedSourceHash = derivedSourceHash(
                     definition,
                     request.targetLayer().trim(),
@@ -788,7 +811,7 @@ public class DomainRuleService {
                     materializedPayload);
             if (StringUtils.hasText(sourceHash) && !derivedSourceHash.equals(sourceHash)) {
                 throw new ConfigurationIngestionException(
-                        "Reactive determination sourceHash must match the canonical derived projection");
+                        "Materialization sourceHash must match the canonical derived projection");
             }
             sourceHash = derivedSourceHash;
         }
@@ -1812,11 +1835,19 @@ public class DomainRuleService {
         return payload;
     }
 
+    JsonNode operationalProjection(DomainRuleDefinition definition, OperationalPolicyTarget target) {
+        return switch (target.family()) {
+            case APPROVAL -> buildApprovalPolicyMaterializedPayload(definition, target.targetArtifactKey());
+            case WORKFLOW -> buildWorkflowActionMaterializedPayload(definition, target.targetArtifactKey());
+            case VALIDATION -> buildBackendValidationMaterializedPayload(definition, target.targetArtifactKey());
+        };
+    }
+
     private ObjectNode buildBackendValidationMaterializedPayload(
             DomainRuleDefinition definition,
             String targetArtifactKey) {
-        JsonNode parameters = read(definition.getParameters());
-        JsonNode condition = read(definition.getCondition());
+        JsonNode parameters = DomainRuleMaterializationFingerprint.parse(definition.getParameters());
+        JsonNode condition = DomainRuleMaterializationFingerprint.parse(definition.getCondition());
 
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("kind", "resource_validation_policy");
@@ -1849,14 +1880,15 @@ public class DomainRuleService {
             copyText(parameters, validationPolicy, "validationMessageTemplate");
             copyText(parameters, validationPolicy, "severity");
         }
+        OperationalPolicyContract.projectEffect(definition, new OperationalPolicyTarget("backend_validation", "resource-validation", payload.path("resourceKey").asText()), payload);
         return payload;
     }
 
     private ObjectNode buildWorkflowActionMaterializedPayload(
             DomainRuleDefinition definition,
             String targetArtifactKey) {
-        JsonNode parameters = read(definition.getParameters());
-        JsonNode condition = read(definition.getCondition());
+        JsonNode parameters = DomainRuleMaterializationFingerprint.parse(definition.getParameters());
+        JsonNode condition = DomainRuleMaterializationFingerprint.parse(definition.getCondition());
         String resourceKey = deriveWorkflowActionResourceKey(definition, parameters);
         String actionId = deriveWorkflowActionId(targetArtifactKey, parameters);
 
@@ -1904,14 +1936,15 @@ public class DomainRuleService {
                 }
             }
         }
+        OperationalPolicyContract.projectEffect(definition, new OperationalPolicyTarget("workflow_action", "resource-workflow-action", resourceKey + ":" + actionId), payload);
         return payload;
     }
 
     private ObjectNode buildApprovalPolicyMaterializedPayload(
             DomainRuleDefinition definition,
             String targetArtifactKey) {
-        JsonNode parameters = read(definition.getParameters());
-        JsonNode condition = read(definition.getCondition());
+        JsonNode parameters = DomainRuleMaterializationFingerprint.parse(definition.getParameters());
+        JsonNode condition = DomainRuleMaterializationFingerprint.parse(definition.getCondition());
         String resourceKey = deriveActionApprovalResourceKey(definition, parameters);
         String actionId = deriveActionApprovalId(targetArtifactKey, parameters);
 
@@ -1958,6 +1991,7 @@ public class DomainRuleService {
                 policy.set("blockedWhen", blockedWhen);
             }
         }
+        OperationalPolicyContract.projectEffect(definition, new OperationalPolicyTarget("approval_policy", "resource-action-approval", resourceKey + ":" + actionId), payload);
         return payload;
     }
 
@@ -2500,6 +2534,7 @@ public class DomainRuleService {
                         tenantId,
                         environment,
                         materializationOutcomes);
+                materializationRepository.flush();
             } else {
                 candidates = orderedMaterializations(candidates);
                 candidates.forEach(materialization ->
@@ -2514,6 +2549,7 @@ public class DomainRuleService {
             candidates = orderedMaterializations(candidates);
         }
 
+        candidates.forEach(lifecycleRefresh::materialization);
         return candidates.stream()
                 .peek(materialization -> {
                     requireScope(materialization.getTenantId(), tenantId, "tenantId");
@@ -2532,6 +2568,7 @@ public class DomainRuleService {
                                 "Rule materialization status is not publishable: " + materialization.getStatus());
                     }
                 })
+                .peek(this::requireOperationalIntegrity)
                 .map(materialization -> maybeApplyMaterialization(materialization, principal, now))
                 .map(this::toResponse)
                 .toList();
@@ -2895,6 +2932,7 @@ public class DomainRuleService {
             String tenantId,
             String environment,
             ArrayNode materializationOutcomes) {
+        requireExplicitOperationalEffect(definition, targetLayer, targetArtifactType, targetArtifactKey, payload);
         String materializationKey = derivedMaterializationKey(definition, targetLayer, targetArtifactKey);
         String sourceHash = derivedSourceHash(
                 definition,
@@ -2909,6 +2947,7 @@ public class DomainRuleService {
                 normalize(environment),
                 materializationKey);
         if (existing.isPresent()) {
+            lifecycleRefresh.materialization(existing.get());
             requireReusableDerivedMaterialization(
                     existing.get(),
                     definition,
@@ -2977,6 +3016,36 @@ public class DomainRuleService {
         }
     }
 
+    private void requireOperationalIntegrity(DomainRuleMaterialization materialization) {
+        if (!OperationalPolicyTarget.Family.supports(materialization.getTargetLayer(), materialization.getTargetArtifactType())) return;
+        var definition = materialization.getRuleDefinition();
+        JsonNode payload = DomainRuleMaterializationFingerprint.parse(materialization.getMaterializedPayload());
+        requireExplicitOperationalEffect(definition, materialization.getTargetLayer(), materialization.getTargetArtifactType(),
+                materialization.getTargetArtifactKey(), payload);
+        String expectedHash = DomainRuleMaterializationFingerprint.sha256(definition, materialization.getTargetLayer(),
+                materialization.getTargetArtifactType(), materialization.getTargetArtifactKey(), materialization.getTargetPointer(),
+                materialization.getMaterializedRuleId(), payload);
+        if (!expectedHash.equals(materialization.getSourceHash())) {
+            throw new ConfigurationIngestionException("Operational policy sourceHash must match its canonical projection");
+        }
+    }
+
+    private void requireExplicitOperationalEffect(DomainRuleDefinition definition, String layer, String type,
+            String key, JsonNode payload) {
+        if (!OperationalPolicyTarget.Family.supports(layer, type)) return;
+        var target = new OperationalPolicyTarget(layer, type, key);
+        if (!payload.path(target.family().slot).has("effect")) {
+            throw new ConfigurationIngestionException("New operational policy publications require explicit effect BLOCK or ALLOW");
+        }
+        OperationalPolicyContract.validate(definition, target, payload);
+        JsonNode expected = operationalProjection(definition, target);
+        if (!expected.path(target.family().slot).has("effect")
+                || !org.praxisplatform.rules.digest.PraxisCanonicalJson.canonicalize(expected)
+                    .equals(org.praxisplatform.rules.digest.PraxisCanonicalJson.canonicalize(payload))) {
+            throw new ConfigurationIngestionException("Operational policy payload must match its canonical definition projection");
+        }
+    }
+
     private static String derivedSourceHash(
             DomainRuleDefinition definition,
             String targetLayer,
@@ -2985,6 +3054,10 @@ public class DomainRuleService {
             String targetPointer,
             String materializedRuleId,
             JsonNode materializedPayload) {
+        if (OperationalPolicyTarget.Family.supports(targetLayer, targetArtifactType)) {
+            return DomainRuleMaterializationFingerprint.sha256(definition, targetLayer, targetArtifactType,
+                    targetArtifactKey, targetPointer, materializedRuleId, materializedPayload);
+        }
         String source = String.join(
                 "\n",
                 nullToEmpty(definition.getRuleKey()),
@@ -3335,6 +3408,7 @@ public class DomainRuleService {
             throw new ConfigurationIngestionException("Domain rule status transition request is required");
         }
         requirePrincipal(principal);
+        prepareLifecycleScope(principal);
         String tenantId = principal.tenantId();
         String environment = principal.environment();
         String status = requireAllowedStatus(request.status(), "status", MATERIALIZATION_STATUSES);
@@ -3342,7 +3416,16 @@ public class DomainRuleService {
                 .orElseThrow(() -> new ConfigurationIngestionException("Rule materialization not found: " + materializationId));
         requireScope(materialization.getTenantId(), tenantId, "tenantId");
         requireScope(materialization.getEnvironment(), environment, "environment");
+        lifecycleRefresh.materialization(materialization);
+        lifecycleRefresh.definition(materialization.getRuleDefinition());
+        requireScope(materialization.getTenantId(), tenantId, "tenantId");
+        requireScope(materialization.getEnvironment(), environment, "environment");
+        requireScope(materialization.getRuleDefinition().getTenantId(), tenantId, "tenantId");
+        requireScope(materialization.getRuleDefinition().getEnvironment(), environment, "environment");
         requireAllowedMaterializationTransition(materialization.getStatus(), status);
+        if ("applied".equals(status)) {
+            requireOperationalIntegrity(materialization);
+        }
         if ("applied".equals(status) && !hasActiveDefinition(materialization)) {
             throw new ConfigurationIngestionException("Rule materialization can only be applied when its definition is active");
         }
@@ -3702,6 +3785,7 @@ public class DomainRuleService {
                         normalize(definition.getEnvironment()),
                         definition.getId())
                 .stream()
+                .peek(lifecycleRefresh::materialization)
                 .filter(materialization -> "applied".equals(materialization.getStatus()))
                 .forEach(materialization -> supersedeMaterialization(materialization, principal, now));
     }
@@ -3719,6 +3803,7 @@ public class DomainRuleService {
                 .stream()
                 .filter(existing -> !existing.getId().equals(selected.getId()))
                 .toList();
+        superseded.forEach(lifecycleRefresh::materialization);
         superseded.forEach(existing -> supersedeMaterialization(existing, principal, now));
         if (!superseded.isEmpty()) {
             // The partial unique index is immediate in PostgreSQL. Flush the previous head first so

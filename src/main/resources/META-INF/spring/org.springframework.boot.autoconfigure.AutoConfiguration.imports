@@ -9,3 +9,4 @@ org.praxisplatform.config.autoconfig.DomainRuleExplanationAutoConfiguration
 org.praxisplatform.config.autoconfig.AgenticAuthoringAutoConfiguration
 org.praxisplatform.config.autoconfig.AiRegistryBootstrapAutoConfiguration
 org.praxisplatform.config.autoconfig.AiRegistryHealthAutoConfiguration
+org.praxisplatform.config.autoconfig.OperationalPolicyAutoConfiguration

@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -212,6 +213,7 @@ class DomainRuleServiceTest {
                         objectMapper.readTree("""
                                 {
                                   "optionSourceKey": "supplier",
+                                  "validationPolicy": { "effect": "BLOCK" },
                                   "validationMessageTemplate": "Fornecedor indisponivel para novos pedidos",
                                   "disabledReasonTemplate": "Fornecedor com status indisponivel"
                                 }
@@ -564,6 +566,7 @@ class DomainRuleServiceTest {
                           },
                           "requiredStates": ["PROGRAMADA"],
                           "requiredApprovals": ["finance-owner"],
+                          "availabilityPolicy": { "effect": "BLOCK" },
                           "message": "Pagamento bloqueado por decisao governada ate revisao de compliance."
                         }
                         """)
@@ -682,6 +685,7 @@ class DomainRuleServiceTest {
                           },
                           "requiredApprovals": ["payroll-manager"],
                           "approvalGroups": ["hr-payroll"],
+                          "approvalPolicy": { "effect": "BLOCK" },
                           "approverContext": "payroll-events",
                           "message": "Aprovacao em massa exige decisao gerencial governada.",
                           "severity": "blocking"
@@ -1432,6 +1436,7 @@ class DomainRuleServiceTest {
                 .parameters("""
                         {
                           "severity": "error",
+                          "validationPolicy": { "effect": "BLOCK" },
                           "validationMessageTemplate": "Fornecedor indisponivel"
                         }
                         """)
@@ -1464,9 +1469,10 @@ class DomainRuleServiceTest {
                 "backend-validation-policy",
                 "pending_review",
                 null,
-                "hash-status-validation",
+                null,
                 null), principal("migration-factory"));
 
+        assertThat(response.sourceHash()).startsWith("derived:sha256:");
         assertThat(response.targetLayer()).isEqualTo("backend_validation");
         assertThat(response.targetArtifactType()).isEqualTo("resource-validation");
         assertThat(response.targetArtifactKey()).isEqualTo("procurement.suppliers");
@@ -1481,6 +1487,106 @@ class DomainRuleServiceTest {
                 .isEqualTo("error");
         assertThat(response.materializedPayload().path("validationPolicy").path("validationMessageTemplate").asText())
                 .isEqualTo("Fornecedor indisponivel");
+    }
+
+    @Test
+    void blocksNewOperationalMaterializationWhenDefinitionDoesNotDeclareEffect() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = operationalValidationDefinition(definitionId, "{}");
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+
+        assertThatThrownBy(() -> service.createMaterialization(
+                operationalValidationRequest(definitionId, "procurement.suppliers", null, null), principal("migration-factory")))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("require explicit effect BLOCK or ALLOW");
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
+    }
+
+    @Test
+    void blocksManualOperationalPayloadWhoseEffectDiffersFromItsDefinition() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = operationalValidationDefinition(
+                definitionId, "{\"validationPolicy\":{\"effect\":\"BLOCK\"}}");
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        ObjectNode payload = (ObjectNode) service.operationalProjection(definition, operationalValidationTarget());
+        payload.with("validationPolicy").put("effect", "ALLOW");
+
+        assertThatThrownBy(() -> service.createMaterialization(
+                operationalValidationRequest(definitionId, "procurement.suppliers", payload, null), principal("migration-factory")))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("invalid or contradictory");
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
+    }
+
+    @Test
+    void blocksExternalSourceHashForOperationalMaterialization() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = operationalValidationDefinition(
+                definitionId, "{\"validationPolicy\":{\"effect\":\"BLOCK\"}}");
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+
+        assertThatThrownBy(() -> service.createMaterialization(
+                operationalValidationRequest(definitionId, "procurement.suppliers", null, "external-hash"), principal("migration-factory")))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("sourceHash must match the canonical derived projection");
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
+    }
+
+    @Test
+    void blocksOperationalMaterializationWithWhitespaceInTargetCoordinate() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = operationalValidationDefinition(
+                definitionId, "{\"validationPolicy\":{\"effect\":\"BLOCK\"}}");
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+
+        assertThatThrownBy(() -> service.createMaterialization(
+                operationalValidationRequest(definitionId, " procurement.suppliers", null, null), principal("migration-factory")))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("target coordinates must not contain surrounding whitespace");
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
+    }
+
+    @Test
+    void blocksOperationalMaterializationKeyReuseWhenSourceHashDiffers() {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition definition = operationalValidationDefinition(
+                definitionId, "{\"validationPolicy\":{\"effect\":\"BLOCK\"}}");
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
+        DomainRuleMaterialization existing = DomainRuleMaterialization.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleDefinition(definition)
+                .materializationKey(operationalValidationMaterializationKey())
+                .targetLayer("backend_validation")
+                .targetArtifactType("resource-validation")
+                .targetArtifactKey("procurement.suppliers")
+                .status("pending_review")
+                .sourceHash("derived:sha256:different")
+                .build();
+        when(materializationRepository.findByTenantIdAndEnvironmentAndMaterializationKey(
+                "tenant-a", "dev", operationalValidationMaterializationKey())).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> service.createMaterialization(
+                operationalValidationRequest(definitionId, "procurement.suppliers", null, null), principal("migration-factory")))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("different sourceHash");
+        verify(materializationRepository, org.mockito.Mockito.never()).save(any(DomainRuleMaterialization.class));
     }
 
     @Test
@@ -2487,17 +2593,23 @@ class DomainRuleServiceTest {
                 .environment("dev")
                 .ruleKey("procurement.suppliers.rule.selection-eligibility")
                 .version(2)
-                .ruleType("policy_reference")
+                .ruleType("validation")
                 .status("approved")
                 .contextKey("procurement")
                 .resourceKey("procurement.suppliers")
                 .serviceKey("praxis-api-quickstart")
                 .definition("{\"summary\":\"Impedir seleção de fornecedores bloqueados.\"}")
-                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .parameters("{\"validationPolicy\":{\"effect\":\"BLOCK\"}}")
                 .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
                 .approvedBy("domain-approver")
                 .approvedAt(Instant.parse("2026-04-27T00:00:00Z"))
                 .build();
+        OperationalPolicyTarget target = new OperationalPolicyTarget(
+                "backend_validation", "resource-validation", "procurement.suppliers");
+        JsonNode operationalPayload = service.operationalProjection(definition, target);
+        String operationalSourceHash = DomainRuleMaterializationFingerprint.sha256(
+                definition, "backend_validation", "resource-validation", "procurement.suppliers",
+                "/validationPolicy", "backend-validation-policy", operationalPayload);
         DomainRuleMaterialization materialization = DomainRuleMaterialization.builder()
                 .id(UUID.randomUUID())
                 .tenantId("tenant-a")
@@ -2508,7 +2620,10 @@ class DomainRuleServiceTest {
                 .targetArtifactType("resource-validation")
                 .targetArtifactKey("procurement.suppliers")
                 .status("pending_review")
-                .materializedPayload("{}")
+                .targetPointer("/validationPolicy")
+                .materializedRuleId("backend-validation-policy")
+                .materializedPayload(operationalPayload.toString())
+                .sourceHash(operationalSourceHash)
                 .build();
 
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
@@ -2545,7 +2660,7 @@ class DomainRuleServiceTest {
                 .path("materializationOutcomes"))
                 .singleElement()
                 .satisfies(outcome -> {
-                    assertThat(outcome.path("resolution").asText()).isEqualTo("selected_existing");
+                    assertThat(outcome.path("resolution").asText()).isEqualTo("reused");
                     assertThat(outcome.path("materializationKey").asText()).isEqualTo("supplier:selection-policy");
                     assertThat(outcome.path("targetLayer").asText()).isEqualTo("backend_validation");
                     assertThat(outcome.path("statusAtResolution").asText()).isEqualTo("pending_review");
@@ -2897,7 +3012,7 @@ class DomainRuleServiceTest {
                 .resourceKey("procurement.suppliers")
                 .serviceKey("praxis-api-quickstart")
                 .definition("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}")
-                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\",\"validationPolicy\":{\"effect\":\"BLOCK\"}}")
                 .condition("""
                         {
                           "in": [
@@ -3173,7 +3288,7 @@ class DomainRuleServiceTest {
                 .resourceKey("procurement.suppliers")
                 .serviceKey("praxis-api-quickstart")
                 .definition("{\"summary\":\"Impedir selecao de fornecedores bloqueados.\"}")
-                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\",\"validationPolicy\":{\"effect\":\"BLOCK\"}}")
                 .condition("""
                         {
                           "in": [
@@ -3480,7 +3595,7 @@ class DomainRuleServiceTest {
                 .resourceKey("procurement.suppliers")
                 .serviceKey("praxis-api-quickstart")
                 .definition("{\"summary\":\"Impedir selecao de fornecedores inativos.\"}")
-                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\",\"validationPolicy\":{\"effect\":\"BLOCK\"}}")
                 .condition("""
                         {
                           "in": [
@@ -3503,7 +3618,7 @@ class DomainRuleServiceTest {
                 .resourceKey("procurement.suppliers")
                 .serviceKey("praxis-api-quickstart")
                 .definition("{\"summary\":\"Impedir selecao de fornecedores suspensos.\"}")
-                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .parameters("{\"optionSourceKey\":\"supplier\",\"validationPolicy\":{\"effect\":\"BLOCK\"}}")
                 .condition("""
                         {
                           "in": [
@@ -3596,7 +3711,7 @@ class DomainRuleServiceTest {
                 .resourceKey("procurement.purchase-orders")
                 .serviceKey("praxis-api-quickstart")
                 .definition("{\"summary\":\"Bloquear fornecedores inativos no backend.\"}")
-                .parameters("{\"severity\":\"error\",\"validationMessageTemplate\":\"Fornecedor indisponivel\"}")
+                .parameters("{\"severity\":\"error\",\"validationMessageTemplate\":\"Fornecedor indisponivel\",\"validationPolicy\":{\"effect\":\"BLOCK\"}}")
                 .condition("""
                         {
                           "in": [
@@ -3736,6 +3851,7 @@ class DomainRuleServiceTest {
         DomainRuleService service = service(definitionRepository, materializationRepository);
         UUID materializationId = UUID.randomUUID();
         DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .tenantId("tenant-a").environment("dev")
                 .id(UUID.randomUUID())
                 .ruleKey("rule-a")
                 .version(1)
@@ -3784,6 +3900,7 @@ class DomainRuleServiceTest {
         UUID materializationId = UUID.randomUUID();
         Instant previousApplication = Instant.parse("2026-07-01T10:15:30Z");
         DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .tenantId("tenant-a").environment("dev")
                 .id(UUID.randomUUID())
                 .ruleKey("rule-a")
                 .version(1)
@@ -3831,6 +3948,7 @@ class DomainRuleServiceTest {
         DomainRuleService service = service(definitionRepository, materializationRepository);
         UUID materializationId = UUID.randomUUID();
         DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .tenantId("tenant-a").environment("dev")
                 .id(UUID.randomUUID())
                 .ruleKey("rule-a")
                 .version(1)
@@ -3874,6 +3992,7 @@ class DomainRuleServiceTest {
         DomainRuleService service = service(definitionRepository, materializationRepository);
         UUID materializationId = UUID.randomUUID();
         DomainRuleDefinition definition = DomainRuleDefinition.builder()
+                .tenantId("tenant-a").environment("dev")
                 .id(UUID.randomUUID())
                 .ruleKey("rule-a")
                 .version(1)
@@ -4259,6 +4378,49 @@ class DomainRuleServiceTest {
                 .orElseThrow();
     }
 
+    private DomainRuleDefinition operationalValidationDefinition(UUID definitionId, String parameters) {
+        return DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.operational-validation")
+                .version(1)
+                .ruleType("validation")
+                .status("approved")
+                .contextKey("procurement")
+                .resourceKey("procurement.suppliers")
+                .serviceKey("praxis-api-quickstart")
+                .definition("{\"summary\":\"Block invalid suppliers.\"}")
+                .parameters(parameters)
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
+                .build();
+    }
+
+    private OperationalPolicyTarget operationalValidationTarget() {
+        return new OperationalPolicyTarget("backend_validation", "resource-validation", "procurement.suppliers");
+    }
+
+    private String operationalValidationMaterializationKey() {
+        return "procurement.suppliers.rule.operational-validation:backend_validation:procurement.suppliers";
+    }
+
+    private DomainRuleMaterializationRequest operationalValidationRequest(
+            UUID definitionId, String targetArtifactKey, JsonNode payload, String sourceHash) {
+        return new DomainRuleMaterializationRequest(
+                definitionId,
+                operationalValidationMaterializationKey(),
+                "backend_validation",
+                "resource-validation",
+                targetArtifactKey,
+                "/validationPolicy",
+                null,
+                "backend-validation-policy",
+                "pending_review",
+                payload,
+                sourceHash,
+                null);
+    }
+
     private DomainRuleService service(
             DomainRuleDefinitionRepository definitionRepository,
             DomainRuleMaterializationRepository materializationRepository) {
@@ -4305,7 +4467,7 @@ class DomainRuleServiceTest {
                 new DomainRuleDefinitionFingerprint(objectMapper),
                 objectMapper,
                 provider,
-                new GovernedColorPaletteContractValidator(objectMapper));
+                new GovernedColorPaletteContractValidator(objectMapper), mock(DomainRuleEntityRefresh.class));
     }
 
     private DomainRuleGovernancePrincipal principal(String actorRef) {

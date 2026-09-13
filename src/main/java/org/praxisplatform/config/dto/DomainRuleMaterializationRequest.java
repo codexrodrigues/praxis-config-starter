@@ -9,7 +9,7 @@ public record DomainRuleMaterializationRequest(
         UUID ruleDefinitionId,
         @Schema(description = "Stable idempotency key for this definition and target coordinate. Reactive determinations require {ruleKey}:backend_determination:{targetArtifactKey}.")
         String materializationKey,
-        @Schema(description = "Canonical runtime layer that owns the derived target artifact. Reactive backend calculations use backend_determination; other governed layers remain extensible.")
+        @Schema(description = "Canonical runtime layer that owns the derived target artifact. Reactive backend calculations use backend_determination; other governed layers remain extensible. Coordinates must be exact, without surrounding whitespace.")
         String targetLayer,
         @Schema(description = "Canonical contract type of the target artifact. backend_determination requires resource-reactive-determination; other governed artifact types remain extensible.")
         String targetArtifactType,
@@ -26,9 +26,9 @@ public record DomainRuleMaterializationRequest(
         String materializedRuleId,
         @Schema(description = "Initial lifecycle status. The public creation boundary accepts only draft or pending_review; activation is a separate authenticated operation.")
         String status,
-        @Schema(description = "Target-specific draft payload derived from the governed definition. Must be absent for resource-reactive-determination because Config compiles it from parameters.reactiveDetermination.")
+        @Schema(description = "Target-specific draft payload derived from the governed definition. Must be absent for resource-reactive-determination because Config compiles it from parameters.reactiveDetermination. Operational approval, workflow and validation payloads must match the canonical definition projection and declare BLOCK or ALLOW in the corresponding source parameters slot.")
         JsonNode materializedPayload,
-        @Schema(description = "Digest binding the draft to its exact semantic source and target projection.")
+        @Schema(description = "Digest binding the draft to its exact semantic source and target projection. For operational policies Config derives this digest; a supplied value must match.")
         String sourceHash,
         @Schema(description = "Machine validation evidence for the draft. It does not represent business homologation.")
         JsonNode validationResult
