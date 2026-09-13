@@ -14,6 +14,28 @@ import jakarta.persistence.LockModeType;
 
 public interface DomainRuleDefinitionRepository extends JpaRepository<DomainRuleDefinition, UUID> {
 
+    /** Acquire before loading definitions/workspaces/heads; held through the Config commit. */
+    default void lockLifecycleScope(org.praxisplatform.config.service.DomainRuleGovernancePrincipal principal) {
+        String result = acquireLifecycleLock(org.praxisplatform.config.service.DomainRuleLifecycleScope.lockKey(principal));
+        if (!"".equals(result)) {
+            throw new org.praxisplatform.config.exception.ConfigurationIngestionException(
+                    "Domain rule lifecycle requires PostgreSQL READ COMMITTED isolation");
+        }
+    }
+
+    @org.springframework.transaction.annotation.Transactional(
+            transactionManager = org.praxisplatform.config.tx.ConfigTransactionManagerNames.CONFIG,
+            propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    @org.springframework.data.jpa.repository.QueryHints(
+            @jakarta.persistence.QueryHint(name = "org.hibernate.flushMode", value = "COMMIT"))
+    @Query(value = """
+            select case when current_setting('transaction_isolation') = 'read committed'
+              then cast(pg_advisory_xact_lock(:scopeKey) as text)
+              else 'unsupported_isolation' end
+            """, nativeQuery = true)
+    String acquireLifecycleLock(@Param("scopeKey") long scopeKey);
+
+
     @Query("""
             select definition from DomainRuleDefinition definition
             where definition.tenantId = :tenantId

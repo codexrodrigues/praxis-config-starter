@@ -61,6 +61,13 @@ public class DomainRuleSnapshotAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  org.praxisplatform.config.service.DomainRuleEntityRefresh domainRuleEntityRefresh(
+      org.springframework.data.jpa.repository.JpaContext context) {
+    return new org.praxisplatform.config.service.DomainRuleEntityRefresh(context);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   DomainRuleDefinitionFingerprint domainRuleDefinitionFingerprint(ObjectMapper objectMapper) {
     return new DomainRuleDefinitionFingerprint(objectMapper);
   }

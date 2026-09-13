@@ -208,6 +208,8 @@ failures remain explicit and never activate inferred fallback content. See
 [Rule snapshot control plane v1](docs/domain-rules/snapshot-control-plane-v1.md).
 Materialization persistence and retention are documented in
 [Materialization application history](docs/domain-rules/materialization-application-history.md).
+Embedded hosts resolve authoritative operational evidence through
+[Operational policy resolution](docs/domain-rules/operational-policy-resolution.md).
 
 ## Minimal Configuration
 
