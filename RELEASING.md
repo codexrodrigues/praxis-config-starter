@@ -37,7 +37,7 @@ e a fornece apenas ao Quickstart iniciado pelo smoke. Nao configure um valor
 padrao ou compartilhado para esse gate.
 
 ## Gate de authoring antes de publicar
-Antes de criar a tag de release, execute localmente o smoke ponta a ponta contra o `praxis-api-quickstart`. Reserve o equivalente remoto abaixo ao gate necessario do corte, quando a prova local nao cobrir o ambiente exigido.
+Antes de criar a tag de release, execute localmente o smoke ponta a ponta contra o `praxis-api-quickstart`. Para a equivalência determinística delimitada de rc.156, consulte a seção do corte abaixo. Reserve o equivalente remoto abaixo ao gate necessario do corte, quando a prova local nao cobrir o ambiente exigido.
 Esse gate valida a integracao real entre o starter publicado/local, o host de referencia, endpoints HTTP de authoring,
 aplicacao de config e streaming SSE.
 
@@ -176,3 +176,29 @@ mvn -B -P ci-smoke-unit -T 1C clean verify
   - Executar o workflow manual **Inspect Maven Central deployment** na `main`, informando esse UUID. Ele consulta somente o status pela [API oficial](https://central.sonatype.org/publish/publish-portal-api/), com os secrets existentes, sem checkout, tag, upload ou republicacao.
   - `PENDING`, `VALIDATING` e `PUBLISHING` exigem acompanhar o mesmo envio; `VALIDATED` exige investigar por que um envio automatico aguarda publicacao; `FAILED` exige diagnosticar os erros antes de nova tentativa. Nao apagar o deployment enquanto houver investigacao.
   - `PUBLISHED` confirma a conclusao no Central; verificar tambem a resolucao do POM/JAR publicado pelo consumidor. Um workflow de consulta bem-sucedido, sozinho, nao comprova publicacao: conferir sempre `deploymentState`.
+
+
+## Corte de políticas operacionais (rc.156)
+
+As definições restritivas `selection_eligibility` do smoke de lifecycle também
+produzem `backend_validation`: declarar `parameters.validationPolicy.effect=BLOCK`,
+inclusive no intake de referência de autoria. O verificador
+confere esse efeito na projeção canônica; não inserir efeito no payload derivado.
+O runtime mantém leitura tipada e histórico imutável, como documentado em
+[operational-policy-resolution.md](docs/domain-rules/operational-policy-resolution.md).
+
+Para este corte sem alteração de authoring/LLM, as provas locais PostgreSQL de
+histórico/lifecycle/resolução e a jornada HTTP autenticada dos consumidores são o
+gate determinístico do contrato. A suíte `ci-smoke-unit` permanece obrigatória na
+tag. O script PowerShell foi alinhado por inspeção da fonte; só contabilizar sua
+execução remota quando houver um run correspondente. Uma prova local contra
+SNAPSHOT não fecha a adoção publicada: resolver o novo POM/JAR no Maven Central,
+conferir checksums, rodar `mvn -B verify` no host com o pin final e conferir o JAR
+aninhado, antes de integrar o consumidor. A publicação não certifica os demais
+gates de backend de operações em lote nem autoriza deploy do host.
+
+O workflow remoto determinístico inicia o host com `CONFIG_DATASOURCE_URL` dos
+secrets e pode aplicar Flyway V63 nesse banco. Neste corte de publicação da
+biblioteca, sem migração/deploy do host, ele não é disparado. As provas PostgreSQL
+efêmeras locais substituem apenas esse preflight para o contrato operacional;
+não contam como execução do workflow nem como prova de infraestrutura remota.
