@@ -283,6 +283,9 @@ function Assert-BackendValidationPolicy(
     if ($payload.validationPolicy.resourceKey -ne $ExpectedResourceKey) {
         throw "Expected validationPolicy.resourceKey=$ExpectedResourceKey, got '$($payload.validationPolicy.resourceKey)'."
     }
+    if ($payload.validationPolicy.effect -cne "BLOCK") {
+        throw "Expected validationPolicy.effect=BLOCK, got '$($payload.validationPolicy.effect)'."
+    }
     $conditionStatuses = @($payload.validationPolicy.condition.'in'[1])
     foreach ($status in $ExpectedBlockedStatuses) {
         if ($conditionStatuses -notcontains $status) {
@@ -361,6 +364,7 @@ $intake = Invoke-JsonRequest `
         }
         parameters = @{
             optionSourceKey = "supplier"
+            validationPolicy = @{ effect = "BLOCK" }
         }
         governance = @{
             requiredApprovals = @($reviewerUserId)
@@ -394,6 +398,7 @@ $definitionBody = @{
     }
     parameters = @{
         optionSourceKey = "supplier"
+        validationPolicy = @{ effect = "BLOCK" }
     }
     governance = @{
         requiredApprovals = @($reviewerUserId)
@@ -743,6 +748,7 @@ $inactiveDefinition = Invoke-JsonRequest `
         }
         parameters = @{
             optionSourceKey = "supplier"
+            validationPolicy = @{ effect = "BLOCK" }
         }
         condition = @{
             "in" = @(
@@ -773,6 +779,7 @@ $suspendedDefinition = Invoke-JsonRequest `
         }
         parameters = @{
             optionSourceKey = "supplier"
+            validationPolicy = @{ effect = "BLOCK" }
         }
         condition = @{
             "in" = @(
