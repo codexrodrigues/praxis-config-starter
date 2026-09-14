@@ -39,6 +39,9 @@ class DomainRuleSnapshotAutoConfigurationTest {
   private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
       .withConfiguration(AutoConfigurations.of(DomainRuleSnapshotAutoConfiguration.class))
       .withBean(ObjectMapper.class, ObjectMapper::new)
+      // Production JPA supplies the owning persistence context used by lifecycle refresh.
+      .withBean(org.springframework.data.jpa.repository.JpaContext.class,
+          () -> mock(org.springframework.data.jpa.repository.JpaContext.class))
       .withBean(DomainRuleDefinitionRepository.class, () -> mock(DomainRuleDefinitionRepository.class))
       .withBean(DomainRuleDefinitionApprovalRepository.class,
           () -> mock(DomainRuleDefinitionApprovalRepository.class))
@@ -57,6 +60,7 @@ class DomainRuleSnapshotAutoConfigurationTest {
   void exposesPublicReaderAndHttpControllerWhenPersistenceBoundaryExists() {
     contextRunner.run(context -> {
       assertThat(context).hasSingleBean(PublishedRuleSnapshotHeadReader.class);
+      assertThat(context).hasSingleBean(org.praxisplatform.config.service.DomainRuleEntityRefresh.class);
       assertThat(context).hasSingleBean(DomainRuleSnapshotController.class);
       assertThat(context).hasSingleBean(DomainRuleExecutionObservationService.class);
       assertThat(context).hasSingleBean(DomainRuleExecutionObservationController.class);
