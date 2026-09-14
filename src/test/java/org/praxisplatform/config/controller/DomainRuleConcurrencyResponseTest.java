@@ -4,6 +4,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.exception.ConfigGlobalExceptionHandler;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
@@ -11,6 +12,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@Tag("unit")
 class DomainRuleConcurrencyResponseTest {
     @Test
     void staleUpdateExplainsReloadWithoutExposingEntityOrDatabaseDetails() throws Exception {
