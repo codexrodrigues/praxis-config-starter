@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -21,9 +22,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 public final class OperationalPolicyService {
     private static final JsonMapper JSON = new JsonMapper();
     private static final int MAX_HISTORY_ROWS = 4096;
+    private static final int POLICY_READ_TIMEOUT_SECONDS = 5;
     private final DomainRuleMaterializationRepository materializations;
     private final DomainRuleService projections;
-    private final TransactionTemplate transaction;
+    private final PlatformTransactionManager configTransactionManager;
     private final Clock clock;
 
     public OperationalPolicyService(DomainRuleMaterializationRepository materializations, DomainRuleService projections,
@@ -31,18 +33,31 @@ public final class OperationalPolicyService {
         this.materializations = Objects.requireNonNull(materializations);
         this.projections = Objects.requireNonNull(projections);
         this.clock = Objects.requireNonNull(clock);
-        transaction = new TransactionTemplate(Objects.requireNonNull(configTransactionManager));
-        transaction.setReadOnly(true);
-        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        this.configTransactionManager = Objects.requireNonNull(configTransactionManager);
     }
 
     public OperationalPolicyResolution resolveOperationalPolicy(OperationalPolicyTarget target, DomainRuleGovernancePrincipal resolvedPrincipal) {
+        return resolveOperationalPolicy(target, resolvedPrincipal, Duration.ofSeconds(POLICY_READ_TIMEOUT_SECONDS));
+    }
+
+    /** Resolves current policy within the caller's remaining absolute unit budget. */
+    public OperationalPolicyResolution resolveOperationalPolicy(OperationalPolicyTarget target,
+            DomainRuleGovernancePrincipal resolvedPrincipal, Duration remainingBudget) {
         Objects.requireNonNull(target, "target");
+        Objects.requireNonNull(remainingBudget, "remainingBudget");
         DomainRuleLifecycleScope.lockKey(resolvedPrincipal); // Validate resolved identity; no write lock for readers.
         String tenant = resolvedPrincipal.tenantId().trim();
         String environment = resolvedPrincipal.environment().trim();
+        // TransactionTemplate accepts whole seconds. Flooring (rather than rounding up) and
+        // failing closed below one second keeps Config work inside the caller's deadline.
+        long timeoutSeconds = Math.min(POLICY_READ_TIMEOUT_SECONDS, remainingBudget.toSeconds());
+        if (timeoutSeconds < 1) return unavailable(target, tenant, environment);
         try {
+            TransactionTemplate transaction = new TransactionTemplate(configTransactionManager);
+            transaction.setReadOnly(true);
+            transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+            transaction.setTimeout(Math.toIntExact(timeoutSeconds));
             List<String> rows = transaction.execute(status -> materializations.operationalSnapshot(tenant, environment,
                     target.targetLayer(), target.targetArtifactType(), target.targetArtifactKey()));
             if (rows == null || rows.size() > MAX_HISTORY_ROWS) return unavailable(target, tenant, environment);

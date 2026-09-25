@@ -3,6 +3,7 @@ package org.praxisplatform.config.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -13,6 +14,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Collections;
@@ -31,6 +33,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.TransactionSystemException;
 
@@ -54,6 +57,26 @@ class OperationalPolicyServiceTest {
         assertUnavailable(resolution);
         verify(repository).operationalSnapshot("tenant-a", "dev", TARGET.targetLayer(), TARGET.targetArtifactType(), TARGET.targetArtifactKey());
         verify(repository, never()).findAll();
+    }
+
+    @Test
+    void boundedResolutionFloorsToRemainingWholeSecondsAndFailsClosedBelowOneSecond() {
+        DomainRuleMaterializationRepository repository = mock(DomainRuleMaterializationRepository.class);
+        when(repository.operationalSnapshot(any(), any(), any(), any(), any())).thenReturn(List.of());
+        PlatformTransactionManager transactions = transactionManager();
+        var reader = reader(repository, transactions);
+
+        reader.resolveOperationalPolicy(TARGET, principal("tenant-a", "reader-a", "dev"), Duration.ofMillis(1_999));
+        var captured = org.mockito.ArgumentCaptor.forClass(TransactionDefinition.class);
+        verify(transactions).getTransaction(captured.capture());
+        assertThat(captured.getValue().getTimeout()).isEqualTo(1);
+
+        clearInvocations(repository, transactions);
+        OperationalPolicyResolution tooLate = reader.resolveOperationalPolicy(TARGET,
+                principal("tenant-a", "reader-a", "dev"), Duration.ofMillis(999));
+        assertUnavailable(tooLate);
+        verify(transactions, never()).getTransaction(any());
+        verify(repository, never()).operationalSnapshot(any(), any(), any(), any(), any());
     }
 
     @Test
