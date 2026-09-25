@@ -8,6 +8,7 @@ import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
@@ -656,6 +657,27 @@ class DomainRuleLifecycleConcurrencyPostgresTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> repeatable.executeWithoutResult(ignored -> apply(draft, scope)))
                 .isInstanceOf(ConfigurationIngestionException.class).hasMessageContaining("READ COMMITTED");
         assertThat(status("domain_rule_materialization", draft)).isEqualTo("draft");
+    }
+
+    @Test
+    void operationalPolicyReadFailsClosedWhenItsTransactionBudgetExpires() throws Exception {
+        Scope scope = scope();
+        var blocker = POSTGRES.getPostgresDatabase().getConnection();
+        blocker.setAutoCommit(false);
+        try (var statement = blocker.createStatement()) {
+            statement.execute("lock table domain_rule_materialization in access exclusive mode");
+            long started = System.nanoTime();
+            OperationalPolicyResolution resolution = resolution(scope, approvalTarget());
+            long elapsedMillis = Duration.ofNanos(System.nanoTime() - started).toMillis();
+
+            assertThat(resolution.resolutionState())
+                    .isEqualTo(OperationalPolicyResolution.State.INCONSISTENT_OR_UNAVAILABLE);
+            assertThat(resolution.policy()).isNull();
+            assertThat(elapsedMillis).as("Config policy reads have a finite transaction timeout")
+                    .isLessThan(8_000);
+        } finally {
+            try { blocker.rollback(); } finally { blocker.close(); }
+        }
     }
 
     private OperationalPolicyTarget approvalTarget() {
