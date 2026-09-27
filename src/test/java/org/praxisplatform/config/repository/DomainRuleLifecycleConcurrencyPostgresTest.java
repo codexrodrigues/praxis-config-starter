@@ -660,21 +660,21 @@ class DomainRuleLifecycleConcurrencyPostgresTest {
     }
 
     @Test
-    void operationalPolicyReadFailsClosedWhenItsTransactionBudgetExpires() throws Exception {
+    void operationalPolicyReadFailsClosedWithinTheSuppliedTransactionBudget() throws Exception {
         Scope scope = scope();
         var blocker = POSTGRES.getPostgresDatabase().getConnection();
         blocker.setAutoCommit(false);
         try (var statement = blocker.createStatement()) {
             statement.execute("lock table domain_rule_materialization in access exclusive mode");
             long started = System.nanoTime();
-            OperationalPolicyResolution resolution = resolution(scope, approvalTarget());
+            OperationalPolicyResolution resolution = resolution(scope, approvalTarget(), Duration.ofMillis(1_999));
             long elapsedMillis = Duration.ofNanos(System.nanoTime() - started).toMillis();
 
             assertThat(resolution.resolutionState())
                     .isEqualTo(OperationalPolicyResolution.State.INCONSISTENT_OR_UNAVAILABLE);
             assertThat(resolution.policy()).isNull();
-            assertThat(elapsedMillis).as("Config policy reads have a finite transaction timeout")
-                    .isLessThan(8_000);
+            assertThat(elapsedMillis).as("the bounded overload applies its floored one-second timeout to PostgreSQL")
+                    .isLessThan(4_000);
         } finally {
             try { blocker.rollback(); } finally { blocker.close(); }
         }
@@ -687,6 +687,11 @@ class DomainRuleLifecycleConcurrencyPostgresTest {
     private OperationalPolicyResolution resolution(Scope scope, OperationalPolicyTarget target) {
         return new OperationalPolicyService(materializations, rules, transactionManager, java.time.Clock.systemUTC())
                 .resolveOperationalPolicy(target, scope.principal());
+    }
+
+    private OperationalPolicyResolution resolution(Scope scope, OperationalPolicyTarget target, Duration budget) {
+        return new OperationalPolicyService(materializations, rules, transactionManager, java.time.Clock.systemUTC())
+                .resolveOperationalPolicy(target, scope.principal(), budget);
     }
 
     private UUID policy(Scope scope, OperationalPolicyTarget target, String effect, boolean apply) throws Exception {
