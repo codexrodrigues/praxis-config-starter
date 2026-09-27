@@ -70,6 +70,11 @@ class OperationalPolicyServiceTest {
         var captured = org.mockito.ArgumentCaptor.forClass(TransactionDefinition.class);
         verify(transactions).getTransaction(captured.capture());
         assertThat(captured.getValue().getTimeout()).isEqualTo(1);
+        assertThat(captured.getValue().isReadOnly()).isTrue();
+        assertThat(captured.getValue().getPropagationBehavior())
+                .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        assertThat(captured.getValue().getIsolationLevel())
+                .isEqualTo(TransactionDefinition.ISOLATION_READ_COMMITTED);
 
         clearInvocations(repository, transactions);
         OperationalPolicyResolution tooLate = reader.resolveOperationalPolicy(TARGET,

@@ -40,7 +40,16 @@ public final class OperationalPolicyService {
         return resolveOperationalPolicy(target, resolvedPrincipal, Duration.ofSeconds(POLICY_READ_TIMEOUT_SECONDS));
     }
 
-    /** Resolves current policy within the caller's remaining absolute unit budget. */
+    /**
+     * Resolves current policy with a read-transaction timeout bounded by the supplied budget.
+     *
+     * <p>The caller must sample a monotonic remaining budget immediately before this call, reserve
+     * time for connection-pool acquisition and work outside the Config transaction, and recheck
+     * its absolute deadline after this method returns. The transaction timeout does not provide
+     * an end-to-end deadline for the caller and may not include connection acquisition. Config
+     * floors the budget to whole seconds, caps it at five seconds, and fails closed below one
+     * second.
+     */
     public OperationalPolicyResolution resolveOperationalPolicy(OperationalPolicyTarget target,
             DomainRuleGovernancePrincipal resolvedPrincipal, Duration remainingBudget) {
         Objects.requireNonNull(target, "target");
@@ -48,8 +57,8 @@ public final class OperationalPolicyService {
         DomainRuleLifecycleScope.lockKey(resolvedPrincipal); // Validate resolved identity; no write lock for readers.
         String tenant = resolvedPrincipal.tenantId().trim();
         String environment = resolvedPrincipal.environment().trim();
-        // TransactionTemplate accepts whole seconds. Flooring (rather than rounding up) and
-        // failing closed below one second keeps Config work inside the caller's deadline.
+        // TransactionTemplate accepts whole seconds. Flooring (rather than rounding up) ensures
+        // the configured transaction timeout does not exceed the supplied whole-second budget.
         long timeoutSeconds = Math.min(POLICY_READ_TIMEOUT_SECONDS, remainingBudget.toSeconds());
         if (timeoutSeconds < 1) return unavailable(target, tenant, environment);
         try {
