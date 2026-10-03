@@ -15,6 +15,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.flywaydb.core.Flyway;
@@ -660,25 +661,106 @@ class DomainRuleLifecycleConcurrencyPostgresTest {
     }
 
     @Test
-    void operationalPolicyReadFailsClosedWithinTheSuppliedTransactionBudget() throws Exception {
+    void operationalPolicyReadWithOneSecondTimeoutSurvivesAShortRealLockWait() throws Exception {
         Scope scope = scope();
-        var blocker = POSTGRES.getPostgresDatabase().getConnection();
-        blocker.setAutoCommit(false);
-        try (var statement = blocker.createStatement()) {
+        UUID policy = policy(scope, approvalTarget(), "ALLOW", true);
+        // Closing the independent blocker before the executor also releases/drains on assertion failure.
+        try (var executor = Executors.newSingleThreadExecutor();
+                var blocker = POSTGRES.getPostgresDatabase().getConnection();
+                var statement = blocker.createStatement()) {
+            blocker.setAutoCommit(false);
+            int blockerPid = connectionPid(statement);
             statement.execute("lock table domain_rule_materialization in access exclusive mode");
-            long started = System.nanoTime();
-            OperationalPolicyResolution resolution = resolution(scope, approvalTarget(), Duration.ofMillis(1_999));
-            long elapsedMillis = Duration.ofNanos(System.nanoTime() - started).toMillis();
+            try {
+                var reader = executor.submit(() -> timedPolicyResolution(scope));
+                assertPolicyReadWait(blockerPid, reader);
+                blocker.rollback(); // Release only after observing the real policy query waiting in PostgreSQL.
+                var read = reader.get(4, TimeUnit.SECONDS);
 
-            assertThat(resolution.resolutionState())
-                    .isEqualTo(OperationalPolicyResolution.State.INCONSISTENT_OR_UNAVAILABLE);
-            assertThat(resolution.policy()).isNull();
-            assertThat(elapsedMillis).as("the bounded overload applies its floored one-second timeout to PostgreSQL")
-                    .isLessThan(4_000);
-        } finally {
-            try { blocker.rollback(); } finally { blocker.close(); }
+                assertThat(read.resolution().resolutionState())
+                        .isEqualTo(OperationalPolicyResolution.State.ELIGIBLE_APPLIED_HEAD);
+                assertThat(read.resolution().policy().effect()).isEqualTo(OperationalPolicyResolution.Effect.ALLOW);
+                assertThat(read.resolution().policy().materializationId()).isEqualTo(policy);
+            } finally {
+                blocker.rollback();
+            }
         }
     }
+
+    @Test
+    void operationalPolicyReadFailsClosedWithinTheSuppliedTransactionBudget() throws Exception {
+        Scope scope = scope();
+        policy(scope, approvalTarget(), "ALLOW", true);
+        try (var executor = Executors.newSingleThreadExecutor();
+                var blocker = POSTGRES.getPostgresDatabase().getConnection();
+                var statement = blocker.createStatement()) {
+            blocker.setAutoCommit(false);
+            int blockerPid = connectionPid(statement);
+            statement.execute("lock table domain_rule_materialization in access exclusive mode");
+            try {
+                var reader = executor.submit(() -> timedPolicyResolution(scope));
+                assertPolicyReadWait(blockerPid, reader);
+                var read = reader.get(4, TimeUnit.SECONDS); // Keep the owner lock until the bounded read terminates.
+
+                assertThat(read.resolution().resolutionState())
+                        .isEqualTo(OperationalPolicyResolution.State.INCONSISTENT_OR_UNAVAILABLE);
+                assertThat(read.resolution().policy()).isNull();
+                assertThat(read.elapsedMillis()).as("the real PostgreSQL wait exhausts the floored one-second timeout")
+                        .isGreaterThanOrEqualTo(500).isLessThan(4_000);
+            } finally {
+                blocker.rollback();
+            }
+        }
+    }
+
+    private TimedPolicyResolution timedPolicyResolution(Scope scope) {
+        long started = System.nanoTime();
+        var resolved = resolution(scope, approvalTarget(), Duration.ofMillis(1_999));
+        return new TimedPolicyResolution(resolved, Duration.ofNanos(System.nanoTime() - started).toMillis());
+    }
+
+    private int connectionPid(java.sql.Statement statement) throws java.sql.SQLException {
+        try (var rows = statement.executeQuery("select pg_backend_pid()")) {
+            assertThat(rows.next()).isTrue();
+            return rows.getInt(1);
+        }
+    }
+
+    private void assertPolicyReadWait(int blockerPid, Future<?> reader) throws Exception {
+        Integer waiterPid = null;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        try (var observer = POSTGRES.getPostgresDatabase().getConnection();
+                var statement = observer.prepareStatement("""
+                        select activity.pid
+                        from pg_stat_activity activity join pg_locks waiting_lock on waiting_lock.pid = activity.pid
+                        where activity.datname = current_database() and activity.state = 'active'
+                          and activity.wait_event_type = 'Lock'
+                          and waiting_lock.locktype = 'relation' and not waiting_lock.granted
+                          and waiting_lock.relation = 'domain_rule_materialization'::regclass
+                          and ? = any(pg_blocking_pids(activity.pid))
+                          and activity.query like '%domain_rule_materialization%'
+                        """)) {
+            observer.setReadOnly(true);
+            statement.setQueryTimeout(1); // Bound observation only; the real policy read owns its transaction timeout.
+            statement.setInt(1, blockerPid);
+            while (System.nanoTime() < deadline && !reader.isDone()) {
+                try (var rows = statement.executeQuery()) {
+                    if (rows.next()) {
+                        waiterPid = rows.getInt(1);
+                        assertThat(rows.next()).as("one real policy reader waits on the owned blocker").isFalse();
+                        break;
+                    }
+                }
+                // Poll actual lock state; elapsed time never releases or orders either transaction.
+                Thread.onSpinWait();
+            }
+        }
+        assertThat(waiterPid).as("the bounded policy query must reach PostgreSQL and wait on the owned table lock")
+                .isNotNull().isNotEqualTo(blockerPid);
+        assertThat(reader.isDone()).as("the read is still waiting before the owner chooses whether to release").isFalse();
+    }
+
+    private record TimedPolicyResolution(OperationalPolicyResolution resolution, long elapsedMillis) {}
 
     private OperationalPolicyTarget approvalTarget() {
         return new OperationalPolicyTarget("approval_policy", "resource-action-approval", "hr.orders:approve");
