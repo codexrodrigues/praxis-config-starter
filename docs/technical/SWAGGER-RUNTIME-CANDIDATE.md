@@ -1,6 +1,6 @@
 # Composição Swagger — candidato privado
 
-Estado em 02/10/2026: **não validado, não publicado e não adotado pelo host**. A versão `0.1.0-boot35-validation-SNAPSHOT` identifica apenas esta prova isolada. Não há mudança de endpoint, DTO, wire, política, prazo, IAM ou persistência.
+Estado em 02/10/2026: **focal privado aprovado; publicação e adoção pelo host pendentes**. A versão `0.1.0-boot35-validation-SNAPSHOT` identifica apenas esta prova isolada. Não há mudança de endpoint, DTO, wire, política, prazo, IAM ou esquema de persistência.
 
 ## Causa e dono
 
@@ -14,4 +14,8 @@ O dono da dependência direta e da aresta OpenAI é o Config. Este candidato ele
 - Compilar Config e executar focais dos DTOs/controllers anotados e do contrato OpenAPI. A exclusão de uma dependência transitiva do cliente OpenAI requer ao menos compilação e prova focal do consumidor SDK; não presumir que a árvore sozinha certifica esse cliente.
 - Validar Config com Metadata candidato sob Boot 3.5 e executar no host os seletores HTTP que encontraram o `NoSuchMethodError`, preservando oráculos de schema/hash, domínio e segurança. Depois repetir as provas PostgreSQL de política e timeout com as coordenadas privadas exatas. As falhas restantes do focal host têm de ser diagnosticadas separadamente; a colisão não as explica por si só.
 
-Nenhuma dessas provas foi executada por este autor neste worktree. A mudança no POM não autoriza instalar sobre coordenada pública, publicar release, alterar pin oficial do host nem alegar correção causal até passar pelos gates. Não há artefato de UI, corpus HTTP ou documentação pública a sincronizar antes de observar eventual diferença no contrato servido. A revisão independente deve confrontar POM, árvore efetiva, JAR e testes com a mesma fonte congelada.
+O coordenador executou o focal privado de Config na fonte congelada: 81 testes passaram, sem falhas, erros ou skips, incluindo três testes PostgreSQL novos, concorrência de lifecycle, unidades de rollout/política e os contratos SDK selecionados. O JAR candidato tem SHA-256 `a0f49e8a3d11231a06f7be3dd5678f58bac1c46ac9efce08051f9e9ed7065d90`. O verify focal final do host com esse artefato ainda está em curso; esse resultado não certifica a composição nem autoriza instalar sobre coordenada pública, publicar release ou alterar o pin oficial do host. Não há artefato de UI, corpus HTTP ou documentação pública a sincronizar antes de observar eventual diferença no contrato servido. A revisão independente deve confrontar POM, árvore efetiva, JAR e testes com a mesma fonte congelada.
+
+## Inserção de entidades versionadas no baseline Hibernate 6.6
+
+O verify privado do host expôs, separadamente da colisão Swagger, três inserções novas com UUID atribuído e `@Version Long` já preenchido com `0`: dois caminhos de bootstrap de `DomainRuleRolloutPolicyHead` e a criação de `DomainRuleSnapshotRollout`. O candidato deixa a versão nula somente antes da primeira persistência. A prova PostgreSQL focal confirmou `row_version=0` após insert, incremento no update e rejeição de escrita obsoleta nos caminhos aplicáveis. UUID, revisão de domínio, ETag, locks e migrações permanecem iguais. A fixture HTTP `PolicyStudioOperationalHttpPostgresIntegrationTest` aplica a mesma regra a workspace e cenários novos e passou em focal separado com o artefato Config anterior; sua recomposição final com a coordenada privada atual ainda depende do verify do host em curso.

@@ -54,6 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Project Knowledge Vector RAG checkpoint.
 
 ### Changed
+- Private Hibernate 6.6 validation candidate leaves `@Version Long` unset on new
+  rollout-policy heads and staged rollouts with assigned UUIDs. The private
+  PostgreSQL focal proved inserted version `0`, version increment and stale-write
+  rejection; final host composition, publication and adoption remain pending.
+  Existing entities and domain revisions retain their previous behavior.
 - Private Boot 3.5 composition candidate aligns the direct
   `swagger-annotations-jakarta` dependency with Swagger Core 2.2.47 and excludes
   the duplicate non-Jakarta `swagger-annotations` brought by `openai-java`.
