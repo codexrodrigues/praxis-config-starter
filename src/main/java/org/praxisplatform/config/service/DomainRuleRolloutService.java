@@ -88,7 +88,7 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
         .ruleSetKey(candidate.getRuleSetKey()).candidateSnapshotId(candidate.getId())
         .expectedActiveSnapshotId(head.getActiveSnapshotId()).expectedHeadEtag(head.getHeadEtag())
         .policyId(policy.getId()).status("PREPARING").createdBy(principal.actorRef())
-        .createdAt(now).updatedAt(now).expiresAt(expiresAt).rowVersion(0L).build());
+        .createdAt(now).updatedAt(now).expiresAt(expiresAt).build());
     append(rollout, "CREATED", principal.actorRef(), now);
     DomainRuleSnapshot active = snapshots.findById(head.getActiveSnapshotId()).orElseThrow();
     return response(rollout, candidate, active, policy);
