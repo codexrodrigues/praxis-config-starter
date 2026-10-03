@@ -189,6 +189,7 @@ Minimum runtime expectations:
 
 - Java 21+ (required by the canonical `praxis-rules-engine` snapshot contract)
 - Spring Boot 3.5+
+- Preparação rc.158: Swagger Jakarta 2.2.47, sem annotations não Jakarta trazidas pelo SDK OpenAI. Confira a árvore efetiva do host; disponibilidade Central e adoção são gates separados.
 - PostgreSQL 14+
 - `pgvector` when vector search/RAG is enabled
 
