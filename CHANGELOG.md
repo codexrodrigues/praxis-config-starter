@@ -54,6 +54,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Project Knowledge Vector RAG checkpoint.
 
 ### Changed
+- Private Boot 3.5 composition candidate aligns the direct
+  `swagger-annotations-jakarta` dependency with Swagger Core 2.2.47 and excludes
+  the duplicate non-Jakarta `swagger-annotations` brought by `openai-java`.
+  Config still depends directly on Jakarta annotations for its documented DTOs
+  and controllers; no domain, endpoint, payload, policy or timeout contract
+  changes. The public `0.1.0-rc.157` coordinate remains unchanged. Build,
+  dependency-tree, host and PostgreSQL validation are separate gates before
+  any publication or adoption.
 - Scenario creation and update now serialize with Test Run recording on the
   parent workspace lock, rotate the workspace revision/ETag and invalidate
   evidence captured against older expectations. Scenario updates persist the
