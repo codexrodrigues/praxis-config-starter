@@ -197,7 +197,7 @@ public class DomainRuleRolloutPolicyService {
             principal.tenantId(), principal.environment(), ruleSetKey)
         .orElseGet(() -> DomainRuleRolloutPolicyHead.builder()
             .id(UUID.randomUUID()).tenantId(principal.tenantId()).environment(principal.environment())
-            .ruleSetKey(ruleSetKey).activationRevision(0L).rowVersion(0L).build());
+            .ruleSetKey(ruleSetKey).activationRevision(0L).build());
     head.setActivePolicyId(policy.getId());
     head.setActivationRevision(head.getActivationRevision() + 1);
     head.setHeadEtag(UUID.randomUUID());
@@ -226,7 +226,7 @@ public class DomainRuleRolloutPolicyService {
               .updatedBy(active.map(DomainRuleRolloutPolicy::getActivatedBy)
                   .filter(value -> value != null && !value.isBlank()).orElse(requireActor(principal)))
               .updatedAt(active.map(DomainRuleRolloutPolicy::getActivatedAt).orElse(now))
-              .rowVersion(0L).build());
+              .build());
         });
   }
 

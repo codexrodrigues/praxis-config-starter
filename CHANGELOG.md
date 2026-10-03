@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-rc.158] — release preparation
+
+- Align direct Jakarta Swagger annotations to 2.2.47 and exclude the duplicate non-Jakarta artifact from its `openai-java` dependency. No endpoint, payload, policy or timeout change.
+- Leave nullable `@Version Long` unset for newly created rollout-policy heads and staged rollouts with assigned UUIDs. Hibernate inserts version 0, updates increment it, and stale writers remain rejected; existing versions and domain revisions are unchanged.
+- Private PostgreSQL/service and composed-host proofs passed. Official publication and downstream adoption remain separate gates; the historical private candidate is not a public artifact.
+
 ## Unreleased
 
 ### Added
