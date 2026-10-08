@@ -52,6 +52,67 @@ class CanonicalJsonHashServiceTest {
     }
 
     @Test
+    void exactHashPreservesNestedNullWithoutChangingLegacyHash() throws Exception {
+        var omitted = objectMapper.readTree("{\"bindings\":{},\"fields\":[{\"name\":\"email\"}]}");
+        var explicit = objectMapper.readTree("{\"fields\":[{\"name\":\"email\",\"mask\":null}],\"bindings\":{\"emptyState\":null}}");
+        var reordered = objectMapper.readTree("{\"bindings\":{\"emptyState\":null},\"fields\":[{\"mask\":null,\"name\":\"email\"}]}");
+        assertThat(service.sha256(omitted)).isEqualTo(service.sha256(explicit));
+        assertThat(service.sha256Exact(omitted)).isNotEqualTo(service.sha256Exact(explicit));
+        assertThat(service.sha256Exact(explicit)).isEqualTo(service.sha256Exact(reordered));
+    }
+
+    @Test
+    void exactHashPreservesArrayOrder() throws Exception {
+        assertThat(service.sha256Exact(objectMapper.readTree("[\"email\",\"phone\"]")))
+                .isNotEqualTo(service.sha256Exact(objectMapper.readTree("[\"phone\",\"email\"]")));
+    }
+
+    @Test
+    void exactHashIgnoresCorporateNullAndEscapingDefaultsWithoutMutatingHost() throws Exception {
+        var host = objectMapper.copy()
+                .configure(com.fasterxml.jackson.databind.cfg.JsonNodeFeature.READ_NULL_PROPERTIES, false)
+                .configure(com.fasterxml.jackson.databind.cfg.JsonNodeFeature.WRITE_NULL_PROPERTIES, false);
+        host.getFactory().enable(com.fasterxml.jackson.core.json.JsonWriteFeature.ESCAPE_NON_ASCII.mappedFeature());
+        var corporate = new CanonicalJsonHashService(host);
+        var explicit = objectMapper.readTree("{\"ação\":null,\"nested\":{\"label\":\"😀\",\"optional\":null},\"array\":[null,true]}");
+        var omitted = objectMapper.readTree("{\"nested\":{\"label\":\"😀\"},\"array\":[null,true]}");
+        assertThat(corporate.sha256Exact(explicit)).isEqualTo(service.sha256Exact(explicit));
+        assertThat(corporate.sha256Exact(explicit)).isNotEqualTo(corporate.sha256Exact(omitted));
+        assertThat(corporate.sha256Exact(java.util.Map.of("label", "ação")))
+                .isEqualTo(service.sha256Exact(objectMapper.readTree("{\"label\":\"ação\"}")));
+        assertThat(host.readTree("{\"optional\":null}").has("optional")).isFalse();
+        assertThat(host.writeValueAsString(explicit)).contains("\\u").doesNotContain("optional");
+        // Legacy hashing keeps its existing host conversion/escaping and null-omission behavior.
+        assertThat(corporate.sha256(explicit)).isNotEqualTo(service.sha256(explicit));
+    }
+
+    @Test
+    void exactHashIgnoresHostStringSerializer() throws Exception {
+        var module = new com.fasterxml.jackson.databind.module.SimpleModule();
+        module.addSerializer(String.class, new com.fasterxml.jackson.databind.JsonSerializer<String>() {
+            @Override public void serialize(String value, com.fasterxml.jackson.core.JsonGenerator generator,
+                    com.fasterxml.jackson.databind.SerializerProvider provider) throws java.io.IOException {
+                generator.writeString("host-redacted");
+            }
+        });
+        var host = objectMapper.copy().registerModule(module);
+        var value = objectMapper.readTree("{\"label\":\"ação\"}");
+        assertThat(new CanonicalJsonHashService(host).sha256Exact(value)).isEqualTo(service.sha256Exact(value));
+        assertThat(host.writeValueAsString("label")).isEqualTo("\"host-redacted\"");
+    }
+
+    @Test
+    void exactHashRejectsForeignNodesAndNonFiniteValues() {
+        for (var value : java.util.List.of(
+                objectMapper.createObjectNode().putPOJO("foreign", new Object()),
+                objectMapper.createObjectNode().put("binary", new byte[] {1}),
+                objectMapper.createObjectNode().set("missing", com.fasterxml.jackson.databind.node.MissingNode.getInstance()),
+                objectMapper.createObjectNode().put("number", Double.NaN))) {
+            assertThatThrownBy(() -> service.sha256Exact(value)).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Test
     void rejectsNonFiniteNumbers() {
         assertThatThrownBy(() -> service.sha256(Double.NaN))
                 .isInstanceOf(IllegalStateException.class)

@@ -51,6 +51,7 @@
         <praxis-config-contracts.version>0.1.0-beta.4</praxis-config-contracts.version>
         <praxis-rules-engine.version>0.1.0-beta.15</praxis-rules-engine.version>
         <swagger-annotations.version>2.2.47</swagger-annotations.version>
+        <swagger-core.version>2.2.22</swagger-core.version>
     </properties>
 
     <dependencyManagement>
@@ -66,6 +67,14 @@
     </dependencyManagement>
 
     <dependencies>
+        <!-- Compile the optional OpenAPI adapter against the reference host's baseline.
+             The consuming host owns Swagger/Springdoc runtime dependencies. -->
+        <dependency>
+            <groupId>io.swagger.core.v3</groupId>
+            <artifactId>swagger-core-jakarta</artifactId>
+            <version>${swagger-core.version}</version>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>io.github.codexrodrigues</groupId>
             <artifactId>praxis-config-contracts</artifactId>

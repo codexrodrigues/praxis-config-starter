@@ -221,3 +221,6 @@ Geracao de bindings (A-02) a partir da mesma fonte:
 Observacao:
 
 - o teste `AiContractSpecConsistencyTest` funciona como drift guard entre OpenAPI e constantes geradas no backend.
+
+- [Correlated baseline metadata writer](ui-layout-baseline-metadata-writer.md): server seed/admission SPI, versioned full-document assembly inputs, atomic Config append, historical replay and pending operational gates.
+- [Focal PostgreSQL metadata gate](ui-layout-metadata-postgres-gate.md): existing dedicated schema, opt-in execution, rollback-only fixtures and explicit pending database/transaction coverage.

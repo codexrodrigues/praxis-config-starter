@@ -3,11 +3,13 @@ package org.praxisplatform.config.autoconfig;
 import org.praxisplatform.config.controller.EnterpriseRuntimeContextController;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.DefaultEnterpriseRuntimeContextChoiceProvider;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeContextSwitchProvider;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeNavigationProvider;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeSecurityEventProvider;
 import org.praxisplatform.config.service.DefaultEnterpriseRuntimeTenantProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeContextProvider;
+import org.praxisplatform.config.service.EnterpriseRuntimeContextChoiceProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeContextSwitchProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeNavigationProvider;
 import org.praxisplatform.config.service.EnterpriseRuntimeSecurityEventProvider;
@@ -54,6 +56,12 @@ public class EnterpriseRuntimeAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public EnterpriseRuntimeContextChoiceProvider enterpriseRuntimeContextChoiceProvider() {
+        return new DefaultEnterpriseRuntimeContextChoiceProvider();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public EnterpriseRuntimeTenantProvider enterpriseRuntimeTenantProvider() {
         return new DefaultEnterpriseRuntimeTenantProvider();
     }
@@ -73,16 +81,16 @@ public class EnterpriseRuntimeAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public EnterpriseRuntimeContextController enterpriseRuntimeContextController(
-            AiPrincipalContextResolver principalContextResolver,
             EnterpriseRuntimeContextProvider runtimeContextProvider,
             EnterpriseRuntimeContextSwitchProvider runtimeContextSwitchProvider,
+            EnterpriseRuntimeContextChoiceProvider runtimeContextChoiceProvider,
             EnterpriseRuntimeTenantProvider runtimeTenantProvider,
             EnterpriseRuntimeNavigationProvider runtimeNavigationProvider,
             EnterpriseRuntimeSecurityEventProvider runtimeSecurityEventProvider) {
         return new EnterpriseRuntimeContextController(
-                principalContextResolver,
                 runtimeContextProvider,
                 runtimeContextSwitchProvider,
+                runtimeContextChoiceProvider,
                 runtimeTenantProvider,
                 runtimeNavigationProvider,
                 runtimeSecurityEventProvider);
