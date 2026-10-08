@@ -1,0 +1,12 @@
+{
+  "kind": "praxis.table.editor",
+  "version": 1,
+  "config": {
+    "columns": [
+      {
+        "id": "col1",
+        "label": "Column 1"
+      }
+    ]
+  }
+}

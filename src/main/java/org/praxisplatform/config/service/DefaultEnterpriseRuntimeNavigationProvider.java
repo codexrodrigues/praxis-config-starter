@@ -1,20 +1,12 @@
 package org.praxisplatform.config.service;
 
-import java.time.Instant;
-import java.util.List;
 import org.praxisplatform.config.dto.EnterpriseRuntimeContextRequest;
 import org.praxisplatform.config.dto.EnterpriseRuntimeNavigationResponse;
 
+/** No host authority is installed: never synthesize navigation or successful emptiness. */
 public class DefaultEnterpriseRuntimeNavigationProvider implements EnterpriseRuntimeNavigationProvider {
-
-    static final String SCHEMA_VERSION = "praxis-enterprise-runtime-navigation.v1";
-
     @Override
     public EnterpriseRuntimeNavigationResponse getNavigation(EnterpriseRuntimeContextRequest request) {
-        return new EnterpriseRuntimeNavigationResponse(
-                SCHEMA_VERSION,
-                List.of(),
-                List.of("runtime.navigation.read"),
-                Instant.now());
+        throw EnterpriseRuntimeProviderUnavailable.failure(request);
     }
 }

@@ -68,6 +68,7 @@ The names below are intentionally provisional until implementation starts.
 
 ```http
 GET /api/praxis/runtime/context
+GET /api/praxis/runtime/context/choices
 GET /api/praxis/runtime/tenants
 PUT /api/praxis/runtime/context
 GET /api/praxis/runtime/navigation
@@ -76,12 +77,15 @@ GET /api/praxis/runtime/security-events
 
 Minimum payload semantics:
 
-- `context`: safe user projection, active tenant/company, environment, locale,
-  timezone, active profile and active module when known.
-- `tenants`: accessible tenant/company choices with stable ids, labels and active
-  marker; no private entitlement internals.
-- `context switch`: host-authorized request to change active tenant/company/profile;
-  response must make the effective context explicit.
+- `context`: one stateful response: `selection-required`, `ready` or
+  `selection-invalid`; only `ready` contains the safe effective context.
+- `context choices`: bounded, opaque complete choices and a session/query-bound
+  cursor; a choice cannot be reconstructed from tenant/profile/module dimensions.
+- `context switch`: only `choiceRef` plus `expectedSelectionVersion`; the host
+  resolves the complete choice, reauthorizes it and commits compare-and-set before
+  returning the same canonical context response.
+- `tenants`: retained as a distinct host discovery projection. It is not a context
+  selector and cannot replace opaque choices or selection CAS.
 - `navigation`: tree or graph of host-visible destinations, with optional links to
   Praxis resource/action/surface refs from `praxis-metadata-starter`.
 - `security-events`: optional safe projection of recent public events; no raw roles,
@@ -90,8 +94,14 @@ Minimum payload semantics:
 ## Integration Rules
 
 - Runtime context resolution must be server-authoritative in corporate mode.
-- Header hints such as `X-Tenant-ID`, `X-User-ID` and `X-Env` may support local
-  development or downstream requests, but they must not replace host authorization.
+- Runtime identity and initial choice discovery require a server-authenticated
+  session, not a tenant/profile/user header or a tenant already selected.
+- `effectiveContext.activeOrganizationId`, when present, is the host-confirmed
+  identifier of the current administrative organization for that contextVersion.
+  It is a scope fact for presentation and contextual requests, never a role,
+  capability, grant or catalog of permitted layout assignments.
+- `effectiveContext.authorities` is the deliberate minimum public projection for
+  field access; it is never inferred from the separate presentation capabilities.
 - Tenant/company switching must define how subsequent metadata, config and resource
   calls receive the effective context.
 - Navigation nodes should reference canonical Praxis concepts when available:
@@ -146,34 +156,16 @@ The packaging decision for the first slice is to implement the contract in
 `praxis-config-starter`, while keeping the provider SPI host-neutral enough to move
 or split into a future `praxis-enterprise-runtime-starter` if the boundary grows.
 
-The first code cut delivered provider SPI, safe DTOs and
-`GET /api/praxis/runtime/context` with tests.
+The current C0b code cut supersedes the earlier provisional switch envelope.
+`EnterpriseRuntimeContextResponse` is now the sole response for GET and switch;
+`EnterpriseRuntimeContextSwitchResponse` and dimensional command fields were
+removed without aliases. Host-owned `EnterpriseRuntimeContextChoiceProvider`
+serves `GET /api/praxis/runtime/context/choices`; defaults fail closed rather
+than manufacture session state, choices, navigation, tenants or events. The host
+alone owns selection versioning, context versioning, choice reauthorization,
+revocation and operational CAS.
 
-The second code cut adds tenant/company choices through
-`GET /api/praxis/runtime/tenants`, `EnterpriseRuntimeTenantProvider` and safe
-DTOs. The default provider exposes only the active tenant from
-`AiPrincipalContext`; corporate hosts must provide their own provider when they
-have real entitlement data.
-
-The third code cut adds navigation discovery through
-`GET /api/praxis/runtime/navigation`, `EnterpriseRuntimeNavigationProvider` and
-safe DTOs. Navigation nodes may reference canonical Praxis concepts through
-`resourceKey`, `surfaceRef`, `actionRef`, `moduleKey` and `capabilityRef`, but
-the default provider returns an empty tree so the starter never invents host
-menus or private entitlements.
-
-The fourth code cut adds context switch through `PUT /api/praxis/runtime/context`,
-`EnterpriseRuntimeContextSwitchProvider`, a switch command DTO and a switch
-response DTO. The response makes the effective context explicit and returns safe
-propagation headers for subsequent metadata, config and resource calls. The
-default provider can materialize safe profile/module/locale/timezone choices, but
-it denies switching to a different tenant because tenant entitlement is
-host-owned.
-
-The fifth code cut adds security/runtime events through
-`GET /api/praxis/runtime/security-events`,
-`EnterpriseRuntimeSecurityEventProvider` and safe DTOs. The default provider
-returns an empty list so the starter never invents host audit data. Corporate
-hosts may project safe signals such as session freshness, auth posture or runtime
-warnings, but must not expose raw roles, permissions, policies, tokens, prompts,
-SQL, private audit internals or sensitive attributes.
+`GET /api/praxis/runtime/tenants` remains because it can represent a distinct
+host discovery projection. It is explicitly not a selection mechanism, does not
+authorize a context and must not be used by consumers as a substitute for
+`/context/choices`.

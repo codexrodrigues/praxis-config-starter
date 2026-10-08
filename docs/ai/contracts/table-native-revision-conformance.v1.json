@@ -1,0 +1,296 @@
+{
+  "schemaVersion": "praxis.table-native-revision-conformance/v1",
+  "evidenceClass": "finite-generated-test-fixtures",
+  "producer": "projects/praxis-table/src/lib/table-authoring-revision.ts",
+  "cases": [
+    {
+      "id": "equal-pin",
+      "baseline": {
+        "kind": "praxis.table.editor",
+        "version": 1,
+        "bindings": {
+          "resourcePath": "/fixture/purchase-orders"
+        },
+        "config": {
+          "columns": [],
+          "columnProjection": {
+            "source": "schema",
+            "overrides": {
+              "a": {
+                "header": "A",
+                "width": "120px"
+              },
+              "b": {
+                "visible": false
+              }
+            }
+          }
+        }
+      },
+      "expectedPatch": {
+        "columns": [],
+        "columnProjection": {
+          "source": "schema",
+          "overrides": {
+            "a": {
+              "header": "A",
+              "width": "120px"
+            },
+            "b": {
+              "visible": false
+            }
+          }
+        }
+      },
+      "command": {
+        "commandRef": "00000000-0000-4000-8000-000000000001",
+        "target": {
+          "componentType": "praxis-table",
+          "componentId": "purchase-orders"
+        },
+        "authoringDocument": {
+          "kind": "praxis.table.editor",
+          "version": 1,
+          "bindings": {
+            "resourcePath": "/fixture/purchase-orders"
+          },
+          "config": {
+            "columns": [],
+            "columnProjection": {
+              "source": "schema",
+              "overrides": {
+                "a": {
+                  "header": "A",
+                  "width": "120px"
+                },
+                "b": {
+                  "visible": false
+                }
+              }
+            }
+          }
+        },
+        "reason": "equal-pin"
+      }
+    },
+    {
+      "id": "reset-width",
+      "baseline": {
+        "kind": "praxis.table.editor",
+        "version": 1,
+        "bindings": {
+          "resourcePath": "/fixture/purchase-orders"
+        },
+        "config": {
+          "columns": [],
+          "columnProjection": {
+            "source": "schema",
+            "overrides": {
+              "a": {
+                "header": "A",
+                "width": "120px"
+              },
+              "b": {
+                "visible": false
+              }
+            }
+          }
+        }
+      },
+      "expectedPatch": {
+        "columns": [],
+        "columnProjection": {
+          "source": "schema",
+          "overrides": {
+            "a": {
+              "header": "A",
+              "width": null
+            },
+            "b": {
+              "visible": false
+            }
+          }
+        }
+      },
+      "command": {
+        "commandRef": "00000000-0000-4000-8000-000000000002",
+        "target": {
+          "componentType": "praxis-table",
+          "componentId": "purchase-orders"
+        },
+        "authoringDocument": {
+          "kind": "praxis.table.editor",
+          "version": 1,
+          "bindings": {
+            "resourcePath": "/fixture/purchase-orders"
+          },
+          "config": {
+            "columns": [],
+            "columnProjection": {
+              "source": "schema",
+              "overrides": {
+                "a": {
+                  "header": "A"
+                },
+                "b": {
+                  "visible": false
+                }
+              }
+            }
+          }
+        },
+        "reason": "reset-width"
+      }
+    },
+    {
+      "id": "edit-width",
+      "baseline": {
+        "kind": "praxis.table.editor",
+        "version": 1,
+        "bindings": {
+          "resourcePath": "/fixture/purchase-orders"
+        },
+        "config": {
+          "columns": [],
+          "columnProjection": {
+            "source": "schema",
+            "overrides": {
+              "a": {
+                "header": "A",
+                "width": "120px"
+              },
+              "b": {
+                "visible": false
+              }
+            }
+          }
+        }
+      },
+      "expectedPatch": {
+        "columns": [],
+        "columnProjection": {
+          "source": "schema",
+          "overrides": {
+            "a": {
+              "header": "A",
+              "width": "240px"
+            },
+            "b": {
+              "visible": false
+            }
+          }
+        }
+      },
+      "command": {
+        "commandRef": "00000000-0000-4000-8000-000000000003",
+        "target": {
+          "componentType": "praxis-table",
+          "componentId": "purchase-orders"
+        },
+        "authoringDocument": {
+          "kind": "praxis.table.editor",
+          "version": 1,
+          "bindings": {
+            "resourcePath": "/fixture/purchase-orders"
+          },
+          "config": {
+            "columns": [],
+            "columnProjection": {
+              "source": "schema",
+              "overrides": {
+                "a": {
+                  "header": "A",
+                  "width": "240px"
+                },
+                "b": {
+                  "visible": false
+                }
+              }
+            }
+          }
+        },
+        "reason": "edit-width"
+      }
+    },
+    {
+      "id": "ordered-selection",
+      "baseline": {
+        "kind": "praxis.table.editor",
+        "version": 1,
+        "bindings": {
+          "resourcePath": "/fixture/purchase-orders"
+        },
+        "config": {
+          "columns": [],
+          "columnProjection": {
+            "source": "schema",
+            "overrides": {
+              "a": {
+                "header": "A",
+                "width": "120px"
+              },
+              "b": {
+                "visible": false
+              }
+            }
+          }
+        }
+      },
+      "expectedPatch": {
+        "columns": [],
+        "columnProjection": {
+          "source": "schema",
+          "include": [
+            "b",
+            "a"
+          ],
+          "order": [
+            "a",
+            "b"
+          ],
+          "overrides": {
+            "a": {
+              "header": "A",
+              "width": null
+            },
+            "b": null
+          }
+        }
+      },
+      "command": {
+        "commandRef": "00000000-0000-4000-8000-000000000004",
+        "target": {
+          "componentType": "praxis-table",
+          "componentId": "purchase-orders"
+        },
+        "authoringDocument": {
+          "kind": "praxis.table.editor",
+          "version": 1,
+          "bindings": {
+            "resourcePath": "/fixture/purchase-orders"
+          },
+          "config": {
+            "columns": [],
+            "columnProjection": {
+              "source": "schema",
+              "include": [
+                "b",
+                "a"
+              ],
+              "order": [
+                "a",
+                "b"
+              ],
+              "overrides": {
+                "a": {
+                  "header": "A"
+                }
+              }
+            }
+          }
+        },
+        "reason": "ordered-selection"
+      }
+    }
+  ]
+}

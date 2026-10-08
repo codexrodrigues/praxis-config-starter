@@ -1,0 +1,412 @@
+{
+  "schemaVersion": "praxis.form-native-revision-conformance/v1",
+  "evidenceClass": "finite-generated-test-fixtures",
+  "producer": "projects/praxis-dynamic-form/src/lib/dynamic-form-authoring-revision.ts",
+  "cases": [
+    {
+      "id": "equal-pin",
+      "baseline": {
+        "kind": "praxis.dynamic-form.editor",
+        "version": 1,
+        "bindings": {
+          "mode": "view",
+          "emptyState": null
+        },
+        "config": {
+          "editorialContext": {
+            "title": "Fixture"
+          },
+          "fieldMetadata": [
+            {
+              "name": "email"
+            }
+          ],
+          "sections": []
+        }
+      },
+      "expectedPatch": {
+        "editorialContext": {
+          "title": "Fixture"
+        },
+        "fieldMetadata": [
+          {
+            "name": "email"
+          }
+        ],
+        "sections": []
+      },
+      "command": {
+        "commandRef": "00000000-0000-4000-8000-000000000001",
+        "reason": "equal-pin",
+        "target": {
+          "componentType": "praxis-dynamic-form",
+          "componentId": "test-form"
+        },
+        "authoringDocument": {
+          "kind": "praxis.dynamic-form.editor",
+          "version": 1,
+          "bindings": {
+            "mode": "view",
+            "emptyState": null
+          },
+          "config": {
+            "editorialContext": {
+              "title": "Fixture"
+            },
+            "fieldMetadata": [
+              {
+                "name": "email"
+              }
+            ],
+            "sections": []
+          }
+        }
+      }
+    },
+    {
+      "id": "known-reset",
+      "baseline": {
+        "kind": "praxis.dynamic-form.editor",
+        "version": 1,
+        "bindings": {
+          "mode": "view",
+          "emptyState": null
+        },
+        "config": {
+          "editorialContext": {
+            "title": "Fixture"
+          },
+          "fieldMetadata": [
+            {
+              "name": "email"
+            }
+          ],
+          "sections": []
+        }
+      },
+      "expectedPatch": {
+        "editorialContext": {
+          "title": null
+        },
+        "fieldMetadata": [
+          {
+            "name": "email"
+          }
+        ],
+        "sections": []
+      },
+      "command": {
+        "commandRef": "00000000-0000-4000-8000-000000000002",
+        "reason": "known-reset",
+        "target": {
+          "componentType": "praxis-dynamic-form",
+          "componentId": "test-form"
+        },
+        "authoringDocument": {
+          "kind": "praxis.dynamic-form.editor",
+          "version": 1,
+          "bindings": {
+            "mode": "view",
+            "emptyState": null
+          },
+          "config": {
+            "editorialContext": {},
+            "fieldMetadata": [
+              {
+                "name": "email"
+              }
+            ],
+            "sections": []
+          }
+        }
+      }
+    },
+    {
+      "id": "array-null-inheritance",
+      "baseline": {
+        "kind": "praxis.dynamic-form.editor",
+        "version": 1,
+        "bindings": {
+          "mode": "view",
+          "emptyState": null
+        },
+        "config": {
+          "editorialContext": {
+            "title": "Fixture"
+          },
+          "fieldMetadata": [
+            {
+              "name": "email"
+            }
+          ],
+          "sections": []
+        }
+      },
+      "expectedPatch": {
+        "editorialContext": {
+          "title": "Fixture"
+        },
+        "fieldMetadata": [
+          {
+            "name": "email"
+          }
+        ],
+        "sections": [
+          {
+            "id": "s",
+            "rows": [
+              {
+                "id": "r",
+                "columns": [
+                  {
+                    "id": "c",
+                    "span": null,
+                    "fields": [
+                      "email"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "command": {
+        "commandRef": "00000000-0000-4000-8000-000000000003",
+        "reason": "array-null-inheritance",
+        "target": {
+          "componentType": "praxis-dynamic-form",
+          "componentId": "test-form"
+        },
+        "authoringDocument": {
+          "kind": "praxis.dynamic-form.editor",
+          "version": 1,
+          "bindings": {
+            "mode": "view",
+            "emptyState": null
+          },
+          "config": {
+            "editorialContext": {
+              "title": "Fixture"
+            },
+            "fieldMetadata": [
+              {
+                "name": "email"
+              }
+            ],
+            "sections": [
+              {
+                "id": "s",
+                "rows": [
+                  {
+                    "id": "r",
+                    "columns": [
+                      {
+                        "id": "c",
+                        "span": null,
+                        "fields": [
+                          "email"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "nested-object-reset",
+      "baseline": {
+        "kind": "praxis.dynamic-form.editor",
+        "version": 1,
+        "bindings": {
+          "mode": "view",
+          "emptyState": null
+        },
+        "config": {
+          "editorialContext": {
+            "title": "Fixture",
+            "fixture": {
+              "retained": true,
+              "removed": "old"
+            }
+          },
+          "fieldMetadata": [
+            {
+              "name": "email"
+            }
+          ],
+          "sections": []
+        }
+      },
+      "expectedPatch": {
+        "editorialContext": {
+          "title": "Fixture",
+          "fixture": {
+            "retained": true,
+            "removed": null
+          }
+        },
+        "fieldMetadata": [
+          {
+            "name": "email"
+          }
+        ],
+        "sections": []
+      },
+      "command": {
+        "commandRef": "00000000-0000-4000-8000-000000000004",
+        "reason": "nested-object-reset",
+        "target": {
+          "componentType": "praxis-dynamic-form",
+          "componentId": "test-form"
+        },
+        "authoringDocument": {
+          "kind": "praxis.dynamic-form.editor",
+          "version": 1,
+          "bindings": {
+            "mode": "view",
+            "emptyState": null
+          },
+          "config": {
+            "editorialContext": {
+              "title": "Fixture",
+              "fixture": {
+                "retained": true
+              }
+            },
+            "fieldMetadata": [
+              {
+                "name": "email"
+              }
+            ],
+            "sections": []
+          }
+        }
+      }
+    },
+    {
+      "id": "scalar-to-object",
+      "baseline": {
+        "kind": "praxis.dynamic-form.editor",
+        "version": 1,
+        "bindings": {
+          "mode": "view",
+          "emptyState": null
+        },
+        "config": {
+          "editorialContext": {
+            "title": "Fixture",
+            "fixture": "old-fixture"
+          },
+          "fieldMetadata": [
+            {
+              "name": "email"
+            }
+          ],
+          "sections": []
+        }
+      },
+      "expectedPatch": {
+        "editorialContext": {
+          "title": "Fixture",
+          "fixture": {}
+        },
+        "fieldMetadata": [
+          {
+            "name": "email"
+          }
+        ],
+        "sections": []
+      },
+      "command": {
+        "commandRef": "00000000-0000-4000-8000-000000000005",
+        "reason": "scalar-to-object",
+        "target": {
+          "componentType": "praxis-dynamic-form",
+          "componentId": "test-form"
+        },
+        "authoringDocument": {
+          "kind": "praxis.dynamic-form.editor",
+          "version": 1,
+          "bindings": {
+            "mode": "view",
+            "emptyState": null
+          },
+          "config": {
+            "editorialContext": {
+              "title": "Fixture",
+              "fixture": {}
+            },
+            "fieldMetadata": [
+              {
+                "name": "email"
+              }
+            ],
+            "sections": []
+          }
+        }
+      }
+    },
+    {
+      "id": "empty-arrays",
+      "baseline": {
+        "kind": "praxis.dynamic-form.editor",
+        "version": 1,
+        "bindings": {
+          "mode": "view",
+          "emptyState": null
+        },
+        "config": {
+          "editorialContext": {
+            "title": "Fixture"
+          },
+          "fieldMetadata": [
+            {
+              "name": "email"
+            }
+          ],
+          "sections": []
+        }
+      },
+      "expectedPatch": {
+        "editorialContext": {
+          "title": "Fixture"
+        },
+        "fieldMetadata": [],
+        "sections": []
+      },
+      "command": {
+        "commandRef": "00000000-0000-4000-8000-000000000006",
+        "reason": "empty-arrays",
+        "target": {
+          "componentType": "praxis-dynamic-form",
+          "componentId": "test-form"
+        },
+        "authoringDocument": {
+          "kind": "praxis.dynamic-form.editor",
+          "version": 1,
+          "bindings": {
+            "mode": "view",
+            "emptyState": null
+          },
+          "config": {
+            "editorialContext": {
+              "title": "Fixture"
+            },
+            "fieldMetadata": [],
+            "sections": []
+          }
+        }
+      }
+    }
+  ],
+  "sourceHashes": {
+    "producer": "1702d134c356933a718bb6a26ad1539e6cab85855aae1dbb6b4dd82be0b2aadd",
+    "validator": "0be23fa29df4744a3dfbca9c7a443959bb7f69457daf6718e66be98519a23835",
+    "fixtures": "1caca708914bfab298ff82148d7a474ceac8c6e113b69f7ffa65620ef888e8cd"
+  }
+}

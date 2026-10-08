@@ -8,6 +8,25 @@
 
 `praxis-config-starter` is the canonical configuration boundary for Praxis Platform Spring Boot hosts.
 
+The [UI layout workspace foundation](docs/ui-layout-workspace-foundation.md)
+documents the native baseline/working codec and lifecycle integration. The
+official auto-configuration requires host-owned authority and dependencies;
+governed B0/C0/B1 rebase remains pending.
+
+The [lifecycle validation context](docs/ai/contracts/ui-layout-validation-attempt.md)
+propagates one server-owned monotonic budget through validation, nested evidence
+reads and actual beforeCommit. Host budget policy is mandatory, with no operational
+default. Enforcement is cooperative; executor cancellation and effective database
+transaction timeouts remain pending.
+
+The [historical evidence Java service](docs/ui-layout-historical-evidence.md)
+recovers pinned B0/C0 from an exact frozen release with separate operation and
+content admission. It has no historical HTTP endpoint and does not perform rebase.
+
+The [evolution readiness Java service](docs/ui-layout-evolution-readiness.md)
+compares historical/current composition and contract descriptors, requiring separate current
+evidence access. It reports missing intent provenance and fencing; application remains disabled.
+
 It owns persistence and runtime semantics for:
 
 - `ui_user_config`: tenant, user, environment, version, ETag, executable JSON configuration state,
@@ -505,8 +524,9 @@ vector similarity score or decide user intent. Queries without lexical evidence 
 | `POST /api/praxis/config/domain-rules/snapshots/rollout-policies/{policyId}/activate` | Select an approved policy with `RULE_SNAPSHOT_OPERATOR` and strong policy-head `If-Match`; open rollouts block the transition. |
 | `GET /api/praxis/config/domain-rules/snapshots/rollout-policies/timeline?ruleSetKey=...` | Read the safe append-only policy lifecycle without policy payload duplication. |
 | `/api/praxis/config/domain-knowledge/**` | Govern domain knowledge change sets and evidence lifecycle. |
-| `GET /api/praxis/runtime/context` | Return a safe, host-neutral enterprise runtime context projection. Private auth and authorization internals remain host-owned. |
-| `PUT /api/praxis/runtime/context` | Request a host-authorized context switch. The response returns the effective context and safe propagation headers; the default provider never switches to a different tenant without a host-owned provider. |
+| `GET /api/praxis/runtime/context` | Return selection state and opaque selection version; only `ready` carries the host-confirmed effective context and context version. Private authorization internals remain host-owned. |
+| `GET /api/praxis/runtime/context/choices` | Discover bounded host-authorized choices through opaque choice references and a session/query-bound cursor. |
+| `PUT /api/praxis/runtime/context` | Submit `choiceRef` and `expectedSelectionVersion`; return the same canonical context projection after host-authorized selection. Default providers fail closed when host authority is unavailable. |
 | `GET /api/praxis/runtime/tenants` | Return host-provided accessible tenant/company choices for corporate shells. The default provider exposes only the active tenant and never private entitlement internals. |
 | `GET /api/praxis/runtime/navigation` | Return host-provided navigation nodes for corporate shells, with optional canonical Praxis refs such as `resourceKey`, `surfaceRef`, `actionRef`, `moduleKey`, and `capabilityRef`. The default provider returns an empty safe tree. |
 | `GET /api/praxis/runtime/security-events` | Return host-provided safe runtime/security signals for corporate shells. The default provider returns an empty safe list and never exposes raw roles, policies, tokens, prompts, SQL or private audit internals. |
@@ -616,3 +636,24 @@ Apache License 2.0. See [LICENSE](LICENSE).
 ## Política de CI e publicação
 
 Validação local durante desenvolvimento; Actions apenas no fechamento necessário de versões. Consulte [ACTIONS-RELEASE-POLICY.md](ACTIONS-RELEASE-POLICY.md) para gatilhos, gates e recuperação.
+
+P3.2h.5b strengthens Table native revision admission with authored presence and exact
+B0/patch/C0 document reproduction. See [workspace boundary](docs/ui-layout-authoring-workspace.md).
+Host authorization/schema validators remain mandatory; this does not implement upgrade/apply.
+
+P3.2h.5c.1 adds consultative historical native Table document-relation diagnosis.
+A reproduced relation does not attest source provenance, schema compatibility or
+apply authority. See [readiness boundary](docs/ui-layout-evolution-readiness.md).
+
+The internal metadata capture value/codec validates exact UTF-8 content, binding,
+assembly input integrity and current read access. See
+[internal capture boundary](docs/ai/contracts/ui-layout-metadata-capture-internal.md).
+
+Append-only storage uses V66/V67/V68, preserving historical observations without backfill.
+See [storage boundary and PostgreSQL gates](docs/ai/contracts/ui-layout-metadata-capture-storage-internal.md).
+
+The canonical draft writer composes correlated capture and stored replay in the Config transaction.
+The beta Java SPI requires host admission, Config JDBC and full DocumentAssembly inputs for
+SchemaProjection; incomplete historical operation captures are denied, never reconstructed.
+See [metadata writer contract](docs/ai/contracts/ui-layout-baseline-metadata-writer.md).
+Operational PostgreSQL/producer/Table-delivery proof remains pending.

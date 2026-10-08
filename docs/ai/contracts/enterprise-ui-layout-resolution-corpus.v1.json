@@ -1,0 +1,119 @@
+{
+  "schemaVersion": "praxis.enterprise-ui-layout-resolution-corpus/v1",
+  "contractStatus": "design-gate",
+  "audienceFactsSource": "host-private-provider",
+  "conventions": {
+    "requestTarget": "A request componentId overrides the corpus target componentId; otherwise the corpus target is used.",
+    "candidateTarget": "A candidate componentId overrides the corpus target componentId; otherwise the corpus target is used.",
+    "provenance": "All applied revisions remain ordered in layers, including equal-value writes that do not conflict."
+  },
+  "target": {
+    "componentType": "praxis-table",
+    "componentId": "table-config:rk=corporate-workbench|ct=praxis-table|id=orders|ik=main"
+  },
+  "cases": [
+    {
+      "id": "tenant-baseline",
+      "audience": {"tenant": "tenant-a", "environment": "lab", "user": "user-a", "groups": []},
+      "candidates": [
+        {"revision": "rev-tenant", "layer": "TENANT", "priority": 0, "selector": {"tenant": "tenant-a"}, "patch": {"density": "compact"}}
+      ],
+      "expect": {"status": "RESOLVED", "document": {"density": "compact"}, "layers": ["rev-tenant"]}
+    },
+    {
+      "id": "organization-sector-profile-user-precedence",
+      "audience": {"tenant": "tenant-a", "environment": "lab", "organization": "org-a", "sector": "payroll", "profile": "manager", "user": "user-a", "groups": []},
+      "candidates": [
+        {"revision": "rev-user", "layer": "USER", "priority": 0, "selector": {"tenant": "tenant-a", "user": "user-a"}, "patch": {"density": "comfortable"}},
+        {"revision": "rev-sector", "layer": "SECTOR", "priority": 0, "selector": {"tenant": "tenant-a", "organization": "org-a", "sector": "payroll"}, "patch": {"density": "compact", "header": {"sticky": true}}},
+        {"revision": "rev-profile", "layer": "PROFILE", "priority": 0, "selector": {"tenant": "tenant-a", "profile": "manager"}, "patch": {"header": {"sticky": false}}},
+        {"revision": "rev-organization", "layer": "ORGANIZATION", "priority": 0, "selector": {"tenant": "tenant-a", "organization": "org-a"}, "patch": {"density": "standard"}}
+      ],
+      "expect": {"status": "RESOLVED", "document": {"density": "comfortable", "header": {"sticky": false}}, "layers": ["rev-organization", "rev-sector", "rev-profile", "rev-user"]}
+    },
+    {
+      "id": "group-is-private-and-matches-exactly",
+      "audience": {"tenant": "tenant-a", "environment": "lab", "user": "user-a", "groups": ["operations", "reviewers"]},
+      "candidates": [
+        {"revision": "rev-reviewers", "layer": "GROUP", "priority": 0, "selector": {"tenant": "tenant-a", "group": "reviewers"}, "patch": {"columns": ["reference", "status"]}},
+        {"revision": "rev-near-name", "layer": "GROUP", "priority": 1, "selector": {"tenant": "tenant-a", "group": "review"}, "patch": {"density": "compact"}}
+      ],
+      "expect": {"status": "RESOLVED", "document": {"columns": ["reference", "status"]}, "layers": ["rev-reviewers"], "responseMustOmit": ["groups", "reviewers", "operations"]}
+    },
+    {
+      "id": "tenant-isolation",
+      "audience": {"tenant": "tenant-b", "environment": "lab", "user": "user-a", "groups": []},
+      "candidates": [
+        {"revision": "rev-other-tenant", "layer": "TENANT", "priority": 0, "selector": {"tenant": "tenant-a"}, "patch": {"density": "compact"}}
+      ],
+      "expect": {"status": "NOT_FOUND", "layers": []}
+    },
+    {
+      "id": "sector-requires-owning-organization",
+      "audience": {"tenant": "tenant-a", "environment": "lab", "organization": "org-b", "sector": "payroll", "user": "user-a", "groups": []},
+      "candidates": [
+        {"revision": "rev-cross-org", "layer": "SECTOR", "priority": 0, "selector": {"tenant": "tenant-a", "organization": "org-a", "sector": "payroll"}, "patch": {"density": "compact"}}
+      ],
+      "expect": {"status": "NOT_FOUND", "layers": []}
+    },
+    {
+      "id": "same-priority-conflict",
+      "audience": {"tenant": "tenant-a", "environment": "lab", "user": "user-a", "groups": ["operations", "reviewers"]},
+      "candidates": [
+        {"revision": "rev-group-a", "layer": "GROUP", "priority": 10, "selector": {"tenant": "tenant-a", "group": "operations"}, "patch": {"density": "compact"}},
+        {"revision": "rev-group-b", "layer": "GROUP", "priority": 10, "selector": {"tenant": "tenant-a", "group": "reviewers"}, "patch": {"density": "comfortable"}}
+      ],
+      "expect": {"status": "LAYOUT_RESOLUTION_AMBIGUOUS", "conflictPath": "/density"}
+    },
+    {
+      "id": "same-value-write-is-not-conflict",
+      "audience": {"tenant": "tenant-a", "environment": "lab", "user": "user-a", "groups": ["operations", "reviewers"]},
+      "candidates": [
+        {"revision": "rev-group-a", "layer": "GROUP", "priority": 10, "selector": {"tenant": "tenant-a", "group": "operations"}, "patch": {"density": "compact"}},
+        {"revision": "rev-group-b", "layer": "GROUP", "priority": 10, "selector": {"tenant": "tenant-a", "group": "reviewers"}, "patch": {"density": "compact"}}
+      ],
+      "expect": {"status": "RESOLVED", "document": {"density": "compact"}, "layers": ["rev-group-a", "rev-group-b"]}
+    },
+    {
+      "id": "arrays-replace-atomically",
+      "audience": {"tenant": "tenant-a", "environment": "lab", "profile": "manager", "user": "user-a", "groups": []},
+      "candidates": [
+        {"revision": "rev-tenant", "layer": "TENANT", "priority": 0, "selector": {"tenant": "tenant-a"}, "patch": {"columns": ["reference", "status"]}},
+        {"revision": "rev-profile", "layer": "PROFILE", "priority": 0, "selector": {"tenant": "tenant-a", "profile": "manager"}, "patch": {"columns": ["reference"]}}
+      ],
+      "expect": {"status": "RESOLVED", "document": {"columns": ["reference"]}, "layers": ["rev-tenant", "rev-profile"]}
+    },
+    {
+      "id": "protected-path-rejected",
+      "audience": {"tenant": "tenant-a", "environment": "lab", "profile": "manager", "user": "user-a", "groups": []},
+      "candidates": [
+        {"revision": "rev-escalation", "layer": "PROFILE", "priority": 0, "selector": {"tenant": "tenant-a", "profile": "manager"}, "patch": {"capabilities": ["orders.delete"]}}
+      ],
+      "authorablePaths": ["/density", "/header", "/columns"],
+      "expect": {"status": "PROTECTED_PRESENTATION_INVARIANT", "conflictPath": "/capabilities"}
+    },
+    {
+      "id": "stale-context-fails-before-candidates",
+      "audience": {"tenant": "tenant-a", "environment": "lab", "user": "user-a", "groups": [], "currentContextVersion": "context-2"},
+      "request": {"expectedContextVersion": "context-1"},
+      "candidates": [],
+      "expect": {"status": "CONTEXT_STALE", "candidateSourceCalls": 0}
+    },
+    {
+      "id": "missing-authoritative-audience-fails-closed",
+      "audienceProvider": "unavailable",
+      "request": {"expectedContextVersion": "context-1"},
+      "candidates": [],
+      "expect": {"status": "AUDIENCE_SOURCE_UNAVAILABLE", "candidateSourceCalls": 0}
+    },
+    {
+      "id": "route-and-instance-remain-exact-target-identity",
+      "audience": {"tenant": "tenant-a", "environment": "lab", "user": "user-a", "groups": []},
+      "request": {"componentId": "table-config:rk=corporate-workbench|ct=praxis-table|id=orders|ik=comparison"},
+      "candidates": [
+        {"revision": "rev-main", "componentId": "table-config:rk=corporate-workbench|ct=praxis-table|id=orders|ik=main", "layer": "TENANT", "priority": 0, "selector": {"tenant": "tenant-a"}, "patch": {"density": "compact"}}
+      ],
+      "expect": {"status": "NOT_FOUND", "layers": []}
+    }
+  ]
+}
