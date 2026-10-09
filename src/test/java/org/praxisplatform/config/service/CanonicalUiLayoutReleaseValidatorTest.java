@@ -7,11 +7,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.domain.UiLayoutRelease;
 import org.praxisplatform.config.domain.UiLayoutReleaseMember;
 import org.praxisplatform.config.dto.UiLayoutTarget;
 
+@Tag("unit")
 class CanonicalUiLayoutReleaseValidatorTest {
 
     private final CanonicalUiLayoutReleaseValidator validator = new CanonicalUiLayoutReleaseValidator();

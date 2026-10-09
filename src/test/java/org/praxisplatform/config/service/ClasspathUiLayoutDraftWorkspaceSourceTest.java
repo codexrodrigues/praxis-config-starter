@@ -10,9 +10,11 @@ import static org.mockito.Mockito.verify;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.UiLayoutTarget;
 
+@Tag("unit")
 class ClasspathUiLayoutDraftWorkspaceSourceTest {
 
     private final UiLayoutLifecycleAdmission operations = mock(UiLayoutLifecycleAdmission.class);
