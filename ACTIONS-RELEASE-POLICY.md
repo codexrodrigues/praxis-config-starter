@@ -7,6 +7,6 @@ Antes de push, tag ou dispatch, confira os gatilhos reais de `.github/workflows/
 
 ## Fluxo deste repositório
 
-`release.yml` é iniciado por dispatch em main com `create_tag=true`. Persiste POM/tag atomicamente e a tag `v*` publica após conferir ancestralidade e versão. Uma única sessão Maven executa `clean verify` com `release,ci-smoke-unit` (unit/smoke, sem integration/external/e2e), assina e só depois publica. Não há build automático de main ou PR.
+`release.yml` é iniciado por dispatch em main com `create_tag=true`. Persiste POM/tag atomicamente e a tag `v*` publica após conferir ancestralidade e versão. Uma única sessão Maven executa `clean verify` com `release,ci-smoke-unit` (unit/smoke, sem integration/external/e2e) e assina. O job constrói e valida o ZIP versionado, preserva o artifact antes de um único upload pela API oficial e registra o deployment ID para reconciliação. Não há goal Maven de upload na etapa offline. Não há build automático de main ou PR.
 
 Os gates manuais de migração e authoring continuam disponíveis quando necessários ao contrato do corte. Prefira os equivalentes locais; gates pagos exigem a aprovação já definida no environment e não devem ser repetidos por falhas de exportação de evidência. O monitor operacional semanal permanece separado. Consulte RELEASING.md.

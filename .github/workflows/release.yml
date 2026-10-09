@@ -242,11 +242,11 @@ jobs:
     permissions:
       contents: write
     env:
-      CENTRAL_TOKEN_USER: ${{ secrets.CENTRAL_TOKEN_USER }}
-      CENTRAL_TOKEN_PASS: ${{ secrets.CENTRAL_TOKEN_PASS }}
       MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
       GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
     steps:
+      - name: Record bounded release start
+        run: echo "PRAXIS_RELEASE_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -263,9 +263,6 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-          server-id: central
-          server-username: CENTRAL_TOKEN_USER
-          server-password: CENTRAL_TOKEN_PASS
       - name: Import GPG private key (sanitize + import)
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -325,8 +322,35 @@ jobs:
             echo "::error::Tagged pom.xml version '$POM_VERSION' does not match tag version '$TAG_VERSION'."
             exit 1
           fi
-      - name: Build, test, sign and publish the tagged release
+      - name: Offline release packaging contract tests
+        run: python3 -m unittest discover -s tools/release -p 'test_*.py' -v
+      - name: Build, test and sign the tagged release
         run: |
-          mvn -B -P release,ci-smoke-unit -Dgpg.skip=false -Dgpg.keyname="${GPG_KEY_ID}" -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" -DautoPublish=true -DwaitUntil=PUBLISHED -DwaitMaxTime=7200 -T 1C \
-            clean verify org.sonatype.central:central-publishing-maven-plugin:publish
+          mvn -B -P release,ci-smoke-unit -Dgpg.skip=false -Dgpg.keyname="${GPG_KEY_ID}" -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" -T 1C clean verify
+      - name: Construct versioned bundle and validate its signed contents
+        env:
+          RELEASE_VERSION: ${{ steps.ver.outputs.resolved }}
+        run: |
+          python3 tools/release/central_bundle.py build --bundle target/central-publication/central-bundle.zip --receipt target/central-publication/builder.json --group io.github.codexrodrigues --artifact praxis-config-starter --version "$RELEASE_VERSION" --signer "$GPG_KEY_ID"
+          python3 tools/release/central_bundle.py validate --bundle target/central-publication/central-bundle.zip --receipt target/central-publication/validation.json --group io.github.codexrodrigues --artifact praxis-config-starter --version "$RELEASE_VERSION" --signer "$GPG_KEY_ID"
+      - name: Preserve validated bundle before upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: central-validated-bundle-${{ github.run_id }}
+          path: target/central-publication/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload the exact validated bundle once and reconcile publication
+        env:
+          CENTRAL_TOKEN_USER: ${{ secrets.CENTRAL_TOKEN_USER }}
+          CENTRAL_TOKEN_PASS: ${{ secrets.CENTRAL_TOKEN_PASS }}
+        run: python3 tools/release/publish_central.py --bundle target/central-publication/central-bundle.zip --validation target/central-publication/validation.json --record target/central-publication/deployment.json
+      - name: Preserve publication custody on success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: central-publication-custody-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/central-publication/
+          if-no-files-found: ignore
+          retention-days: 14
     timeout-minutes: 45
