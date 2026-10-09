@@ -53,7 +53,7 @@ class UiLayoutLifecycleService {
   private final UiLayoutReleaseEventRepository events;
   private final UiLayoutRevisionAllocationLock revisionAllocationLock;
   private final CanonicalJsonHashService hashes;
-  private final ObjectMapper objectMapper;
+  private final UiLayoutDraftWorkspaceCodec workspaceCodec;
   private final UiLayoutLifecyclePolicy policy;
   private final UiLayoutReleaseValidator validator;
   private final Clock clock;
@@ -69,7 +69,8 @@ class UiLayoutLifecycleService {
     this.definitions = definitions; this.revisions = revisions; this.assignments = assignments;
     this.drafts = drafts; this.releases = releases; this.members = members; this.reviews = reviews; this.approvals = approvals;
     this.heads = heads; this.events = events; this.revisionAllocationLock = revisionAllocationLock;
-    this.hashes = hashes; this.objectMapper = objectMapper;
+    this.hashes = hashes;
+    this.workspaceCodec = new UiLayoutDraftWorkspaceCodec(objectMapper, hashes);
     this.policy = policy == null ? UiLayoutLifecyclePolicy.denyAll() : policy;
     this.validator = validator == null ? UiLayoutReleaseValidator.denyAll() : validator;
     this.clock = clock == null ? Clock.systemUTC() : clock;
@@ -81,7 +82,7 @@ class UiLayoutLifecycleService {
     Instant now = Instant.now(clock);
     return drafts.save(UiLayoutDraft.builder().id(UUID.randomUUID()).tenantId(scope.tenantId())
         .environment(scope.environment()).rootComponentType(scope.rootTarget().componentType())
-        .rootComponentId(scope.rootTarget().componentId()).draftDocument(requireJsonObject(document, "draftDocument"))
+        .rootComponentId(scope.rootTarget().componentId()).draftDocument(requireWorkspaceObject(document, "draftDocument"))
         .draftEtag(UUID.randomUUID()).state("DRAFT").createdBy(require(actor, "actor"))
         .creationIdempotencyKey(require(creationIdempotencyKey, "creationIdempotencyKey"))
         .createdAt(now).updatedAt(now).rowVersion(0L).build());
@@ -91,7 +92,7 @@ class UiLayoutLifecycleService {
   UiLayoutDraft updateDraftWorkspace(Scope scope, UUID draftId, UUID ifMatch, String document, String actor) {
     requirePolicy(UiLayoutLifecycleOperation.EDIT_DRAFT, scope, actor);
     UiLayoutDraft draft = editableDraft(scope, draftId, ifMatch);
-    draft.setDraftDocument(requireJsonObject(document, "draftDocument"));
+    draft.setDraftDocument(requireWorkspaceObject(document, "draftDocument"));
     draft.setDraftEtag(UUID.randomUUID());
     draft.setUpdatedAt(Instant.now(clock));
     return drafts.save(draft);
@@ -149,7 +150,7 @@ class UiLayoutLifecycleService {
   public UiLayoutRelease createRelease(ReleaseCommand command, String actor) {
     requirePolicy(UiLayoutLifecycleOperation.SUBMIT_RELEASE, command.scope(), actor);
     UiLayoutDraft draft = editableDraft(command.scope(), command.draftId(), command.ifMatch());
-    String releasedDraftDocument = requireJsonObject(command.releasedDraftDocument(), "releasedDraftDocument");
+    String releasedDraftDocument = requireWorkspaceObject(command.releasedDraftDocument(), "releasedDraftDocument");
     if (command.members() == null || command.members().isEmpty()) fail(UiLayoutLifecycleException.Code.INVALID_RELEASE, "A release requires at least one exact target member.");
     List<MemberCommand> ordered = command.members().stream().sorted(Comparator.comparingInt(MemberCommand::memberOrder)).toList();
     for (int index = 0; index < ordered.size(); index++) if (ordered.get(index).memberOrder() != index) fail(UiLayoutLifecycleException.Code.INVALID_RELEASE, "Release member order must be contiguous from zero.");
@@ -293,8 +294,36 @@ class UiLayoutLifecycleService {
     revisionAllocationLock.lock(scope.tenantId(), scope.environment(), target);
   }
   private void requireMatch(UUID expected, UUID current) { if (expected == null || !expected.equals(current)) fail(UiLayoutLifecycleException.Code.PRECONDITION_FAILED, "The supplied strong ETag does not match the current representation."); }
-  private String requireJsonObject(String json, String name) { try { JsonNode node = objectMapper.readTree(require(json, name)); if (node == null || !node.isObject()) fail(UiLayoutLifecycleException.Code.INVALID_RELEASE, name + " must be a JSON object."); return objectMapper.writeValueAsString(node); } catch (UiLayoutLifecycleException exception) { throw exception; } catch (Exception exception) { throw failure(UiLayoutLifecycleException.Code.INVALID_RELEASE, name + " must be valid JSON."); } }
-  private String hashExact(String json) { try { return hashes.sha256Exact(objectMapper.readTree(json)); } catch (Exception exception) { throw failure(UiLayoutLifecycleException.Code.INVALID_RELEASE, "Cannot hash layout revision."); } }
+  private String requireWorkspaceObject(String json, String name) {
+    try {
+      // The aggregate contains multiple baseline/working documents; it is not a revision.
+      // Reuse the workspace codec's closed envelope parser and existing per-target budgets.
+      JsonNode document = workspaceCodec.readEnvelopeObject(require(json, name));
+      hashes.sha256Exact(document);
+      return workspaceCodec.writeEnvelopeObject(document);
+    } catch (Exception exception) {
+      throw failure(UiLayoutLifecycleException.Code.INVALID_RELEASE, name + " must be an identity-preserving JSON object.");
+    }
+  }
+
+  private String requireJsonObject(String json, String name) {
+    try {
+      JsonNode document = UiLayoutRevisionJsonInput.readDocument(require(json, name), () -> {});
+      // Validate identity before storing any canonical document, not after a host
+      // parser/serializer has already discarded nulls or numeric precision.
+      hashes.sha256Exact(document);
+      return UiLayoutRevisionJsonInput.writeDocument(document, () -> {});
+    } catch (Exception exception) {
+      throw failure(UiLayoutLifecycleException.Code.INVALID_RELEASE, name + " must be an identity-preserving JSON object.");
+    }
+  }
+
+  private String hashExact(String json) {
+    try { return hashes.sha256Exact(UiLayoutRevisionJsonInput.readDocument(json, () -> {})); }
+    catch (Exception exception) {
+      throw failure(UiLayoutLifecycleException.Code.INVALID_RELEASE, "Cannot hash layout revision.");
+    }
+  }
   private static String require(String value, String name) { if (value == null || value.isBlank()) throw failure(UiLayoutLifecycleException.Code.INVALID_RELEASE, name + " is required."); return value.trim(); }
   private static void fail(UiLayoutLifecycleException.Code code, String message) { throw failure(code, message); }
   private static UiLayoutLifecycleException failure(UiLayoutLifecycleException.Code code, String message) { return new UiLayoutLifecycleException(code, message); }

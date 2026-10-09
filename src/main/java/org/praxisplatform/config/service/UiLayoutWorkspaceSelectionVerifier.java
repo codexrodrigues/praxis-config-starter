@@ -88,12 +88,10 @@ class UiLayoutWorkspaceSelectionVerifier {
       if (value == null || value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > UiLayoutDraftWorkspaceCodec.MAX_DOCUMENT_BYTES) {
         throw invalid("Persisted patch is unavailable or too large.");
       }
-      JsonNode result = mapper.copy().enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
-          .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(value);
+      JsonNode result = UiLayoutRevisionJsonInput.readDocument(value, () -> {});
       if (result == null || !result.isObject()) throw invalid("Persisted patch is malformed.");
       return result;
-    } catch (UiLayoutLifecycleException exception) { throw exception; }
-    catch (Exception exception) { throw invalid("Persisted patch is malformed."); }
+    } catch (Exception exception) { throw invalid("Persisted patch is malformed."); }
   }
 
   private JsonNode parseObject(String value) {

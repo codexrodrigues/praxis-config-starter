@@ -28,7 +28,6 @@ public class JpaUiLayoutCompositionReleaseReader implements UiLayoutCompositionR
   private final UiLayoutAssignmentRevisionRepository assignments;
   private final UiLayoutRevisionRepository revisions;
   private final UiLayoutDefinitionRepository definitions;
-  private final ObjectMapper objectMapper;
   private final CanonicalJsonHashService hashes;
 
   public JpaUiLayoutCompositionReleaseReader(UiLayoutReleaseHeadRepository heads, UiLayoutReleaseRepository releases,
@@ -36,7 +35,7 @@ public class JpaUiLayoutCompositionReleaseReader implements UiLayoutCompositionR
       UiLayoutRevisionRepository revisions, UiLayoutDefinitionRepository definitions, ObjectMapper objectMapper,
       CanonicalJsonHashService hashes) {
     this.heads = heads; this.releases = releases; this.members = members; this.assignments = assignments;
-    this.revisions = revisions; this.definitions = definitions; this.objectMapper = objectMapper; this.hashes = hashes;
+    this.revisions = revisions; this.definitions = definitions; this.hashes = hashes;
   }
 
   @Override
@@ -112,7 +111,7 @@ public class JpaUiLayoutCompositionReleaseReader implements UiLayoutCompositionR
   }
 
   private JsonNode parse(String value, String name) {
-    try { return objectMapper.readTree(value); }
+    try { return UiLayoutRevisionJsonInput.readDocument(value, () -> {}); }
     catch (Exception exception) { throw unavailable("A pinned " + name + " document is unreadable."); }
   }
 

@@ -3,9 +3,8 @@ name: Domain Catalog PostgreSQL Migration
   workflow_dispatch:
     inputs:
       checkout_ref:
-        description: Branch, tag or commit containing the migration proof to execute.
+        description: Immutable 40-character commit SHA containing both source and this workflow.
         required: true
-        default: main
         type: string
 permissions:
   contents: read
@@ -22,31 +21,230 @@ jobs:
           POSTGRES_PASSWORD: praxis
         ports:
           - 5432:5432
-        options: --health-cmd "pg_isready -U praxis -d praxis_config_migration_test" --health-interval 5s --health-timeout
-          5s --health-retries 12
+        options: --health-cmd "pg_isready -U praxis -d praxis_config_migration_test" --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
-      - name: Checkout pull request
-        if: github.event_name == 'pull_request'
-        uses: actions/checkout@v5
-      - name: Checkout requested ref
-        if: github.event_name == 'workflow_dispatch'
+      - name: Check out immutable candidate
         uses: actions/checkout@v5
         with:
           ref: ${{ inputs.checkout_ref }}
+      - name: Verify workflow and source provenance
+        env:
+          REQUESTED_SHA: ${{ inputs.checkout_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          RUN_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
+          test "$WORKFLOW_SHA" = "$REQUESTED_SHA"
+          test "$RUN_SHA" = "$REQUESTED_SHA"
+          mkdir -p target/pg-gate-evidence
+          printf 'source=%s\nworkflow=%s\nworkflowRef=%s\nrun=%s\n' "$REQUESTED_SHA" "$WORKFLOW_SHA" "$WORKFLOW_REF" "$RUN_SHA" > target/pg-gate-evidence/provenance.txt
+          git rev-parse HEAD^{tree} > target/pg-gate-evidence/source-tree.txt
+          git ls-files -z | xargs -0 sha256sum > target/pg-gate-evidence/source-sha256.txt
+          sha256sum .github/workflows/domain-catalog-postgres-migration.yml > target/pg-gate-evidence/workflow-sha256.txt
+          echo "PRAXIS_UI_LAYOUT_PG_SCHEMA=b1a_it_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+          echo 'PRAXIS_UI_LAYOUT_PG_USER=praxis' >> "$GITHUB_ENV"
+          echo 'PRAXIS_UI_LAYOUT_PG_PASSWORD=praxis' >> "$GITHUB_ENV"
       - name: Set up Java 21 (Temurin)
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Run PostgreSQL migration and template recovery proofs
+      - name: Run existing PostgreSQL migration and template recovery proofs
         env:
           POSTGRES_TEST_EPHEMERAL: 'true'
           POSTGRES_TEST_URL: jdbc:postgresql://localhost:5432/praxis_config_migration_test
           POSTGRES_TEST_USER: praxis
           POSTGRES_TEST_PASSWORD: praxis
-        run: mvn -B "-Dtest=DomainCatalogScopePostgresMigrationTest,AiRegistryTemplatePostgresTest" test
-    timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          mkdir -p target/pg-gate-evidence/catalog-template
+          date -u +%FT%TZ > target/pg-gate-evidence/catalog-template/started-at.txt
+          set +e
+          mvn -B "-Dtest=DomainCatalogScopePostgresMigrationTest,AiRegistryTemplatePostgresTest" test 2>&1 | tee target/pg-gate-evidence/catalog-template.log
+          results=("${PIPESTATUS[@]}")
+          set -e
+          printf 'maven=%s\ntee=%s\n' "${results[0]}" "${results[1]}" > target/pg-gate-evidence/catalog-template/actual-exits.txt
+          date -u +%FT%TZ > target/pg-gate-evidence/catalog-template/finished-at.txt
+          shopt -s nullglob
+          reports=(target/surefire-reports/TEST-*.xml)
+          if (( ${#reports[@]} )); then
+            cp "${reports[@]}" target/pg-gate-evidence/catalog-template/
+            rm "${reports[@]}"
+          fi
+          test "${results[0]}" -eq 0
+          test "${results[1]}" -eq 0
+          test "${#reports[@]}" -gt 0
+      - name: Allocate exclusive empty UI-layout database
+        env:
+          PG_SERVICE_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          [[ "$PRAXIS_UI_LAYOUT_PG_SCHEMA" =~ ^b1a_it_[0-9]+_[0-9]+$ ]]
+          docker exec "$PG_SERVICE_ID" psql -X -v ON_ERROR_STOP=1 -U praxis -d postgres -c "CREATE DATABASE praxis_config_ui_layout_test WITH OWNER praxis TEMPLATE template0 ENCODING 'UTF8'"
+          docker exec -i "$PG_SERVICE_ID" psql -X -v ON_ERROR_STOP=1 -U praxis -d praxis_config_ui_layout_test <<'SQL' | tee target/pg-gate-evidence/allocation.txt
+          DO $$ BEGIN
+            IF current_database() <> 'praxis_config_ui_layout_test' OR current_user <> 'praxis'
+              OR current_setting('server_encoding') <> 'UTF8'
+              OR EXISTS (SELECT 1 FROM pg_extension WHERE extname IN ('vector','pgcrypto'))
+              OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%')
+            THEN RAISE EXCEPTION 'Exclusive empty database admission failed'; END IF;
+          END $$;
+          SELECT current_database(), current_user, current_setting('server_encoding');
+          SQL
+          printf 'PRAXIS_UI_LAYOUT_PG_JDBC_URL=jdbc:postgresql://localhost:5432/praxis_config_ui_layout_test?currentSchema=%s\n' "$PRAXIS_UI_LAYOUT_PG_SCHEMA" >> "$GITHUB_ENV"
+      - name: Prepare lifecycle schema through canonical Flyway
+        run: |
+          set -euo pipefail
+          mkdir -p target/pg-gate-evidence/lifecycle
+          date -u +%FT%TZ > target/pg-gate-evidence/lifecycle/started-at.txt
+          set +e
+          mvn -B "-Dtest=UiLayoutLifecyclePostgresIT" "-Dpraxis.ui-layout.pg.it=true" test 2>&1 | tee target/pg-gate-evidence/lifecycle.log
+          results=("${PIPESTATUS[@]}")
+          set -e
+          printf 'maven=%s\ntee=%s\n' "${results[0]}" "${results[1]}" > target/pg-gate-evidence/lifecycle/actual-exits.txt
+          date -u +%FT%TZ > target/pg-gate-evidence/lifecycle/finished-at.txt
+          shopt -s nullglob
+          reports=(target/surefire-reports/TEST-*.xml)
+          if (( ${#reports[@]} )); then
+            cp "${reports[@]}" target/pg-gate-evidence/lifecycle/
+            rm "${reports[@]}"
+          fi
+          test "${results[0]}" -eq 0
+          test "${results[1]}" -eq 0
+          test "${#reports[@]}" -gt 0
+      - name: Admit existing schema and record immutable reader baseline
+        id: admission
+        env:
+          PG_SERVICE_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          docker exec -i "$PG_SERVICE_ID" psql -X -v ON_ERROR_STOP=1 -v schema_name="$PRAXIS_UI_LAYOUT_PG_SCHEMA" -U praxis -d praxis_config_ui_layout_test <<'SQL' | tee target/pg-gate-evidence/admission.txt
+          SELECT set_config('search_path', :'schema_name', false);
+          SELECT set_config('praxis.gate.schema', :'schema_name', false);
+          DO $$ DECLARE s text; BEGIN
+            s := current_setting('praxis.gate.schema');
+            IF current_database() <> 'praxis_config_ui_layout_test' OR current_user <> 'praxis'
+              OR current_setting('server_encoding') <> 'UTF8'
+              OR current_schema() <> s OR current_schemas(false) <> ARRAY[s]::name[]
+              OR (SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname=s) IS DISTINCT FROM 'praxis'
+              OR (SELECT count(*) FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname IN ('vector','pgcrypto') AND n.nspname=s) <> 2
+              OR NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE t.typname='vector' AND n.nspname=s)
+              OR NOT EXISTS (SELECT 1 FROM pg_opclass o JOIN pg_namespace n ON n.oid=o.opcnamespace WHERE o.opcname='vector_l2_ops' AND n.nspname=s)
+              OR (SELECT count(*) FROM flyway_schema_history WHERE version IN ('65','68') AND success) <> 2
+              OR NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname=s AND indexname='uq_ui_layout_draft_creation_idempotency')
+            THEN RAISE EXCEPTION 'Existing UI-layout schema admission failed'; END IF;
+          END $$;
+          SELECT current_database(), current_user, current_schema(), current_schemas(false), current_setting('server_encoding');
+          SELECT e.extname,n.nspname,pg_get_userbyid(e.extowner) FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname IN ('vector','pgcrypto') ORDER BY 1;
+          SELECT version,script,checksum,success FROM flyway_schema_history ORDER BY installed_rank;
+          SQL
+          docker exec -i "$PG_SERVICE_ID" psql -X -At -v ON_ERROR_STOP=1 -v schema_name="$PRAXIS_UI_LAYOUT_PG_SCHEMA" -U praxis -d praxis_config_ui_layout_test <<'SQL' > target/pg-gate-evidence/catalog-before.txt
+          SELECT set_config('search_path', :'schema_name', false);
+          SELECT 'history',row_to_json(h)::text FROM flyway_schema_history h ORDER BY installed_rank;
+          SELECT 'relation',c.oid,c.relname,c.relkind,pg_get_userbyid(c.relowner),coalesce(pg_get_expr(c.relpartbound,c.oid),'') FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=:'schema_name' ORDER BY c.oid;
+          SELECT 'acl',c.oid,coalesce(c.relacl::text,'') FROM pg_class c WHERE c.relnamespace=to_regnamespace(:'schema_name') ORDER BY c.oid;
+          SELECT 'column',a.attrelid,a.attnum,a.attname,a.atttypid,a.atttypmod,a.attnotnull,a.attidentity,a.attgenerated,coalesce(pg_get_expr(d.adbin,d.adrelid),'') FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE c.relnamespace=to_regnamespace(:'schema_name') AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attrelid,a.attnum;
+          SELECT 'index',i.indexrelid,pg_get_indexdef(i.indexrelid),i.indisvalid,i.indisready FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid WHERE c.relnamespace=to_regnamespace(:'schema_name') ORDER BY i.indexrelid;
+          SELECT 'constraint',conname,pg_get_constraintdef(oid) FROM pg_constraint WHERE connamespace=to_regnamespace(:'schema_name') ORDER BY oid;
+          SELECT 'trigger',t.oid,pg_get_triggerdef(t.oid),t.tgenabled FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace=to_regnamespace(:'schema_name') ORDER BY t.oid;
+          SELECT 'function',p.oid,p.proname,pg_get_function_identity_arguments(p.oid),p.prosrc FROM pg_proc p WHERE p.pronamespace=to_regnamespace(:'schema_name') ORDER BY p.oid;
+          SELECT 'extension',e.extname,e.extversion,e.extnamespace,e.extowner FROM pg_extension e ORDER BY e.extname;
+          SQL
+      - name: Verify metadata and creation readers on admitted existing schema
+        id: readers
+        run: |
+          set -euo pipefail
+          mkdir -p target/pg-gate-evidence/readers
+          date -u +%FT%TZ > target/pg-gate-evidence/readers/started-at.txt
+          set +e
+          mvn -B "-Dtest=UiLayoutMetadataCapturePostgresIT,UiLayoutDraftCreationLookupPostgresIT" "-Dpraxis.ui-layout.pg.it=true" test 2>&1 | tee target/pg-gate-evidence/readers.log
+          results=("${PIPESTATUS[@]}")
+          set -e
+          printf 'maven=%s\ntee=%s\n' "${results[0]}" "${results[1]}" > target/pg-gate-evidence/readers/actual-exits.txt
+          date -u +%FT%TZ > target/pg-gate-evidence/readers/finished-at.txt
+          shopt -s nullglob
+          reports=(target/surefire-reports/TEST-*.xml)
+          if (( ${#reports[@]} )); then
+            cp "${reports[@]}" target/pg-gate-evidence/readers/
+            rm "${reports[@]}"
+          fi
+          test "${results[0]}" -eq 0
+          test "${results[1]}" -eq 0
+          test "${#reports[@]}" -gt 0
+      - name: Prove readers preserved schema and migration history
+        if: ${{ always() && steps.admission.outcome == 'success' && (steps.readers.outcome == 'success' || steps.readers.outcome == 'failure') }}
+        env:
+          PG_SERVICE_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          if ! test -f target/pg-gate-evidence/readers/started-at.txt; then
+            printf 'capture=not-run\nreason=readers-not-started\n' > target/pg-gate-evidence/post-reader-exits.txt
+            exit 1
+          fi
+          set +e
+          docker exec -i "$PG_SERVICE_ID" psql -X -At -v ON_ERROR_STOP=1 -v schema_name="$PRAXIS_UI_LAYOUT_PG_SCHEMA" -U praxis -d praxis_config_ui_layout_test <<'SQL' > target/pg-gate-evidence/catalog-after.txt
+          SELECT set_config('search_path', :'schema_name', false);
+          SELECT 'history',row_to_json(h)::text FROM flyway_schema_history h ORDER BY installed_rank;
+          SELECT 'relation',c.oid,c.relname,c.relkind,pg_get_userbyid(c.relowner),coalesce(pg_get_expr(c.relpartbound,c.oid),'') FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=:'schema_name' ORDER BY c.oid;
+          SELECT 'acl',c.oid,coalesce(c.relacl::text,'') FROM pg_class c WHERE c.relnamespace=to_regnamespace(:'schema_name') ORDER BY c.oid;
+          SELECT 'column',a.attrelid,a.attnum,a.attname,a.atttypid,a.atttypmod,a.attnotnull,a.attidentity,a.attgenerated,coalesce(pg_get_expr(d.adbin,d.adrelid),'') FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE c.relnamespace=to_regnamespace(:'schema_name') AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attrelid,a.attnum;
+          SELECT 'index',i.indexrelid,pg_get_indexdef(i.indexrelid),i.indisvalid,i.indisready FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid WHERE c.relnamespace=to_regnamespace(:'schema_name') ORDER BY i.indexrelid;
+          SELECT 'constraint',conname,pg_get_constraintdef(oid) FROM pg_constraint WHERE connamespace=to_regnamespace(:'schema_name') ORDER BY oid;
+          SELECT 'trigger',t.oid,pg_get_triggerdef(t.oid),t.tgenabled FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace=to_regnamespace(:'schema_name') ORDER BY t.oid;
+          SELECT 'function',p.oid,p.proname,pg_get_function_identity_arguments(p.oid),p.prosrc FROM pg_proc p WHERE p.pronamespace=to_regnamespace(:'schema_name') ORDER BY p.oid;
+          SELECT 'extension',e.extname,e.extversion,e.extnamespace,e.extowner FROM pg_extension e ORDER BY e.extname;
+          SQL
+          capture_exit=$?
+          cmp target/pg-gate-evidence/catalog-before.txt target/pg-gate-evidence/catalog-after.txt > target/pg-gate-evidence/catalog-comparison.txt 2>&1
+          comparison_exit=$?
+          python3 - <<'PY' > target/pg-gate-evidence/xml-validation.txt 2>&1
+          import pathlib,xml.etree.ElementTree as ET
+          expected={'catalog-template':{'org.praxisplatform.config.repository.DomainCatalogScopePostgresMigrationTest','org.praxisplatform.config.repository.AiRegistryTemplatePostgresTest'},'lifecycle':{'org.praxisplatform.config.service.UiLayoutLifecyclePostgresIT'},'readers':{'org.praxisplatform.config.service.UiLayoutMetadataCapturePostgresIT','org.praxisplatform.config.service.UiLayoutDraftCreationLookupPostgresIT'}}
+          for phase,names in expected.items():
+              receipt=dict(line.split('=',1) for line in pathlib.Path('target/pg-gate-evidence',phase,'actual-exits.txt').read_text().splitlines())
+              assert receipt=={'maven':'0','tee':'0'},(phase,receipt)
+              roots=[ET.parse(f).getroot() for f in pathlib.Path('target/pg-gate-evidence',phase).glob('TEST-*.xml')]
+              assert {r.get('name') for r in roots}==names,phase
+              assert all(int(r.get('tests','0'))>0 and all(int(r.get(k,'0'))==0 for k in ('failures','errors','skipped')) for r in roots),phase
+          PY
+          xml_exit=$?
+          set -e
+          printf 'capture=%s\ncomparison=%s\nxmlValidation=%s\n' "$capture_exit" "$comparison_exit" "$xml_exit" > target/pg-gate-evidence/post-reader-exits.txt
+          sha256sum target/pg-gate-evidence/catalog-*.txt > target/pg-gate-evidence/catalog-sha256.txt
+          test "$capture_exit" -eq 0
+          test "$comparison_exit" -eq 0
+          test "$xml_exit" -eq 0
+      - name: Preserve failure diagnostics and native PostgreSQL log
+        if: always()
+        env:
+          PG_SERVICE_ID: ${{ job.services.postgres.id }}
+          ADMISSION_OUTCOME: ${{ steps.admission.outcome }}
+          READERS_OUTCOME: ${{ steps.readers.outcome }}
+        run: |
+          set -euo pipefail
+          mkdir -p target/pg-gate-evidence/remaining-reports
+          printf 'admission=%s\nreaders=%s\n' "$ADMISSION_OUTCOME" "$READERS_OUTCOME" > target/pg-gate-evidence/phase-outcomes.txt
+          if ! test -f target/pg-gate-evidence/post-reader-exits.txt; then
+            printf 'capture=not-run\nadmission=%s\nreaders=%s\n' "$ADMISSION_OUTCOME" "$READERS_OUTCOME" > target/pg-gate-evidence/post-reader-exits.txt
+          fi
+          if test -d target/surefire-reports; then
+            cp -a target/surefire-reports/. target/pg-gate-evidence/remaining-reports/
+          fi
+          docker logs "$PG_SERVICE_ID" > target/pg-gate-evidence/postgres-service.log 2>&1
+          git ls-files -z | xargs -0 sha256sum > target/pg-gate-evidence/source-after-sha256.txt
+          cmp target/pg-gate-evidence/source-sha256.txt target/pg-gate-evidence/source-after-sha256.txt
+      - name: Preserve per-phase PostgreSQL evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-ui-layout-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/pg-gate-evidence/
+          if-no-files-found: error
+    timeout-minutes: 30
 concurrency:
   group: domain-catalog-migration-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false

@@ -20,6 +20,7 @@ public class UiLayoutDraftWorkspaceCodec {
     // Closed JSON/UUID envelope: application serializers must not rewrite pinned native documents or identities.
     this.mapper = new ObjectMapper().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+        .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
         .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION.mappedFeature());
     this.hashes = hashes;
   }
@@ -42,6 +43,18 @@ public class UiLayoutDraftWorkspaceCodec {
           new UiLayoutDraftWorkspaceDocument.WorkingDocument(hash, baseline), null, null));
     }
     return new UiLayoutDraftWorkspaceDocument(UiLayoutDraftWorkspaceDocument.SCHEMA_VERSION, states, null);
+  }
+
+  /** Storage envelope syntax only; per-target budgets remain in validate/fromSeed. */
+  JsonNode readEnvelopeObject(String json) throws Exception {
+    JsonNode document = mapper.readTree(json);
+    if (document == null || !document.isObject()) throw invalid("Workspace envelope must be a JSON object.");
+    return document;
+  }
+
+  String writeEnvelopeObject(JsonNode document) throws Exception {
+    if (document == null || !document.isObject()) throw invalid("Workspace envelope must be a JSON object.");
+    return mapper.writeValueAsString(document);
   }
 
   public String encode(UiLayoutDraftWorkspaceDocument document) {
