@@ -7,7 +7,7 @@ para o contrato canônico de snapshots do `praxis-rules-engine`.
 
 ## O que esta automatizado
 - Validacao local durante desenvolvimento; sem build remoto em commits/PRs.
-- Gate `ci-smoke-unit` na tag, na mesma sessao Maven que assina e publica; nao repete `clean verify`.
+- Gate `ci-smoke-unit` na tag, na sessão Maven que assina; depois o mesmo job valida e envia o ZIP sem repetir `clean verify`.
 - Criacao automatica de tag por `workflow_dispatch` (job `Create release tag`), com:
   - versao explicita (`version`), ou
   - calculo automatico por semver (`bump`: patch/minor/major/prerelease + `preid`).
@@ -202,3 +202,45 @@ secrets e pode aplicar Flyway V63 nesse banco. Neste corte de publicação da
 biblioteca, sem migração/deploy do host, ele não é disparado. As provas PostgreSQL
 efêmeras locais substituem apenas esse preflight para o contrato operacional;
 não contam como execução do workflow nem como prova de infraestrutura remota.
+
+
+## Bundle de publicação e reconciliação
+
+O fluxo oficial da tag executa os contratos Python offline e uma única sessão
+`mvn -B -P release,ci-smoke-unit ... clean verify`, incluindo as assinaturas GPG.
+Não executa `mvn deploy`, `central-publishing:publish` ou um suposto dry-run com
+`skipPublishing`. A construção explícita seleciona somente o JAR principal,
+sources, javadoc, o POM real `.flattened-pom.xml` e suas quatro assinaturas em
+`target/`. Não copia um repositório Maven inteiro ou metadata auxiliar.
+
+`tools/release/central_bundle.py` constrói o ZIP determinístico e uma segunda
+operação lê o arquivo completo para validar GAV do POM e do JAR principal,
+assinaturas pelo signer configurado, checksums e o conjunto exato de entradas.
+Paths duplicados, traversal, links, coordenadas extras ou bytes corrompidos
+impedem o upload. Os testes locais usam um verificador de assinatura de fixture:
+provam a seleção e os controles, não criptografia OpenPGP. A verificação real
+`gpg --verify` é obrigatória no job oficial antes do upload.
+
+O artifact `central-validated-bundle-RUN_ID` preserva ZIP e inventários sanitizados
+antes do envio. `tools/release/publish_central.py` envia uma única vez exatamente
+os bytes cujo SHA-256 foi validado, pela [API oficial Sonatype](https://central.sonatype.org/publish/publish-portal-api/).
+Credenciais existem somente no passo de upload; não aparecem nos argumentos ou
+recibos. O UUID retornado é gravado e sincronizado imediatamente em
+`deployment.json`, antes das consultas de status. O artifact de custódia também
+é preservado em falhas. Não inclui chaves GPG ou settings com credenciais.
+
+Upload com resposta incerta não é repetido. Falha de status ou espera esgotada
+preserva o ID para o workflow oficial de inspeção. Reexecução do workflow não
+autoriza um segundo upload: o publicador rejeita `GITHUB_RUN_ATTEMPT != 1`.
+Investigue a tentativa existente antes de preparar outra versão imutável.
+O job mantém seu limite de 45 minutos. A publicação usa somente o tempo
+restante desde o primeiro passo, reservando 180 segundos para preservar os
+artifacts finais. Com menos de 120 segundos disponíveis, não inicia upload.
+Consultas ocorrem a cada 15 segundos; cada chamada tem timeout de até 60 segundos,
+limitado ao orçamento restante. `PUBLISHED` deve informar a coordenada esperada;
+a adoção ainda exige resolver POM/JAR no Central e validar o host sem override.
+
+A rc.160 passou 3.417 testes, mas o Central rejeitou seu bundle após upload.
+O ID `af251a99-4c00-427c-b7c1-0752c13cbec1` e a tag são preservados. Como o ZIP
+original não foi retido, não se afirma o nome do arquivo auxiliar causador.
+Este novo gate permanece candidato até revisão independente e publicação real.
