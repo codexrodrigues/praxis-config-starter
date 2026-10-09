@@ -33,7 +33,8 @@ final class UiLayoutMetadataCaptureCodec {
     // This closed JSON boundary must not inherit host serializers or newer Jackson feature flags.
     var strict = new ObjectMapper()
         .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION.mappedFeature())
-        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+        .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
     for (var feature : JsonReadFeature.values()) strict.getFactory().disable(feature.mappedFeature());
     strict.getFactory().setStreamReadConstraints(StreamReadConstraints.builder()
         .maxNestingDepth(MAX_NESTING_DEPTH).maxStringLength(MAX_BODY_BYTES).maxNumberLength(256).build());
@@ -124,7 +125,9 @@ final class UiLayoutMetadataCaptureCodec {
     assemblyHash(reproduction);
     if (source instanceof UiLayoutBaselineMetadataSeed.NativeDocumentSource) {
       // Neither canonical hash nor host-configured sorted serialization establishes input order.
-      if (!sameOrderedInput(strictMapper.readTree(raw), baseline)) {
+      JsonNode input = strictMapper.readTree(raw);
+      hashes.sha256Exact(input); // Admit preserved raw numbers before comparing to materialized values.
+      if (!sameOrderedInput(input, baseline)) {
         throw new IllegalArgumentException();
       }
     }
@@ -135,7 +138,7 @@ final class UiLayoutMetadataCaptureCodec {
         ? digest(validateRaw(projection.assembly().inputText())) : null;
   }
 
-  private static boolean sameOrderedInput(JsonNode input, JsonNode baseline) {
+  private boolean sameOrderedInput(JsonNode input, JsonNode baseline) {
     if (input.getNodeType() != baseline.getNodeType()) return false;
     if (input.isObject()) {
       if (input.size() != baseline.size()) return false;
@@ -155,6 +158,10 @@ final class UiLayoutMetadataCaptureCodec {
       }
       return true;
     }
+    // Native input order is evidence; a numeric node implementation is not.
+    // Exact hashing first rejects arbitrary-precision loss. Materialized Float/Double
+    // values then compare using the existing canonical token, including subnormals.
+    if (input.isNumber()) return hashes.sha256Exact(input).equals(hashes.sha256Exact(baseline));
     return input.equals(baseline);
   }
 

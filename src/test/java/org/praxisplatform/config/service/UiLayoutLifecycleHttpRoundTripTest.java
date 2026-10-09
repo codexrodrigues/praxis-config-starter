@@ -71,6 +71,88 @@ class UiLayoutLifecycleHttpRoundTripTest {
   private final UiLayoutTarget root = new UiLayoutTarget(ROOT_TYPE, ROOT_ID);
   private final UiLayoutTarget child = new UiLayoutTarget("praxis-table", "purchase-orders");
   private final Principal publisher = () -> "publisher";
+  private boolean omitCandidateTitle;
+
+  @Test
+  void corporateMapperCannotEraseNullPatchThroughRevisionFreezePublishAndPinnedRead() throws Exception {
+    mapper.configure(com.fasterxml.jackson.databind.cfg.JsonNodeFeature.READ_NULL_PROPERTIES, false)
+        .configure(com.fasterxml.jackson.databind.cfg.JsonNodeFeature.WRITE_NULL_PROPERTIES, false);
+    omitCandidateTitle = true; // Removal of an original title must be a null in the compiled merge patch.
+    Fixture fixture = new Fixture();
+    MockMvc http = fixture.http();
+    ApprovedRelease release = createApprovedRelease(http, "corporate-null");
+    http.perform(post("/api/praxis/config/ui-layouts/release-head/publish")
+            .principal(publisher).param("rootComponentType", ROOT_TYPE).param("rootComponentId", ROOT_ID)
+            .header("X-Praxis-Context-Version", CONTEXT).header(HttpHeaders.IF_NONE_MATCH, "*")
+            .contentType("application/json").content(headBody(release.releaseRef(), "publish null patch")))
+        .andExpect(status().isOk());
+    assertThat(fixture.revisionRows).hasSize(2);
+    var hashes = new CanonicalJsonHashService(mapper);
+    fixture.revisionRows.values().forEach(revision -> {
+      var patch = UiLayoutRevisionJsonInput.readDocument(revision.getPatchDocument(), () -> {});
+      assertThat(patch.has("title")).isTrue();
+      assertThat(patch.path("title").isNull()).isTrue();
+      var omitted = (com.fasterxml.jackson.databind.node.ObjectNode) patch.deepCopy();
+      omitted.remove("title");
+      assertThat(revision.getContentHash()).isEqualTo(hashes.sha256Exact(patch))
+          .isNotEqualTo(hashes.sha256Exact(omitted));
+    });
+    var reader = new JpaUiLayoutCompositionReleaseReader(fixture.heads, fixture.releases,
+        fixture.members, fixture.assignments, fixture.revisions, fixture.definitions, mapper, hashes);
+    var snapshot = reader.read("tenant-a", "lab", root);
+    assertThat(snapshot.releaseRef()).isEqualTo(release.releaseRef());
+    assertThat(snapshot.contributions()).hasSize(2).allSatisfy(contribution -> {
+      assertThat(contribution.candidate().patch().has("title")).isTrue();
+      assertThat(contribution.candidate().patch().path("title").isNull()).isTrue();
+    });
+    assertThat(mapper.readTree("{\"title\":null}").has("title")).isFalse();
+  }
+
+  @Test
+  void malformedPersistedPatchDuringPublicationRemainsHistoricalConflictWithoutHeadWrites() throws Exception {
+    String deep = "{}";
+    for (int index = 0; index < 70; index++) deep = "{\"nested\":" + deep + "}";
+    for (String corrupted : new String[] {"{\"x\":1,\"x\":2}", "{} {}", deep,
+        "{\"x\":\"" + "x".repeat(UiLayoutDraftWorkspaceCodec.MAX_DOCUMENT_BYTES) + "\"}"}) {
+      Fixture fixture = new Fixture();
+      MockMvc http = fixture.http();
+      ApprovedRelease release = createApprovedRelease(http, "corrupted-" + UUID.randomUUID());
+      fixture.revisionRows.values().iterator().next().setPatchDocument(corrupted);
+      int before = fixture.mutations.get();
+      http.perform(post("/api/praxis/config/ui-layouts/release-head/publish")
+              .principal(publisher).param("rootComponentType", ROOT_TYPE).param("rootComponentId", ROOT_ID)
+              .header("X-Praxis-Context-Version", CONTEXT).header(HttpHeaders.IF_NONE_MATCH, "*")
+              .contentType("application/json").content(headBody(release.releaseRef(), "reject corrupted persisted patch")))
+          .andExpect(status().isConflict())
+          .andExpect(jsonPath("$.code").value("INVALID_STATE"))
+          .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"));
+      assertThat(fixture.headRows).isEmpty();
+      assertThat(fixture.mutations.get()).isEqualTo(before);
+    }
+  }
+
+  @Test
+  void preciseAdjacentIntegerAndDecimalAreRejectedBeforeHttpRevisionPersistence() throws Exception {
+    for (String token : new String[] {"9007199254740993", "-9007199254740993", "0.10000000000000001", "1e-400"}) {
+      Fixture fixture = new Fixture();
+      MockMvc http = fixture.http();
+      var created = createFixtureDraft(http, "precision-" + token);
+      var candidate = nativeDocument(root);
+      ((com.fasterxml.jackson.databind.node.ObjectNode) candidate.path("config"))
+          .set("width", UiLayoutRevisionJsonInput.readDocument("{\"n\":" + token + "}", () -> {}).path("n"));
+      String body = "{\"commandRef\":\"" + UUID.randomUUID() + "\",\"target\":" + target(root)
+          + ",\"authoringDocument\":" + candidate + ",\"reason\":\"precision regression\"}";
+      int before = fixture.mutations.get();
+      http.perform(post("/api/praxis/config/ui-layouts/drafts/{id}/revisions", json(created).path("draft").path("draftRef").asText())
+              .principal(publisher).param("rootComponentType", ROOT_TYPE).param("rootComponentId", ROOT_ID)
+              .header("X-Praxis-Context-Version", CONTEXT).header(HttpHeaders.IF_MATCH, requiredEtag(created))
+              .contentType("application/json").content(body))
+          .andExpect(status().isUnprocessableEntity())
+          .andExpect(jsonPath("$.code").value("INVALID_RELEASE"));
+      assertThat(fixture.revisionRows).isEmpty();
+      assertThat(fixture.mutations.get()).isEqualTo(before);
+    }
+  }
 
   @Test void rejectsClientPatchBeforeAnyRevisionMutation() throws Exception {
     var fixture = new Fixture(); var http = fixture.http();
@@ -569,6 +651,7 @@ class UiLayoutLifecycleHttpRoundTripTest {
     UUID commandRef = UUID.randomUUID();
     var candidate = nativeDocument(target);
     ((com.fasterxml.jackson.databind.node.ObjectNode) candidate.path("config")).put("title", marker);
+    if (omitCandidateTitle) ((com.fasterxml.jackson.databind.node.ObjectNode) candidate.path("config")).remove("title");
     String body = "{\"commandRef\":\"" + commandRef + "\",\"target\":" + target(target)
         + ",\"authoringDocument\":" + candidate + ",\"reason\":\"author " + marker + "\"}";
     MvcResult result = http.perform(post("/api/praxis/config/ui-layouts/drafts/{draftId}/revisions", draftRef)

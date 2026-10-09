@@ -27,6 +27,48 @@ class UiLayoutMetadataCaptureCodecTest {
   private final UiLayoutAuthoringDocumentDescriptor descriptor =
       new UiLayoutAuthoringDocumentDescriptor("praxis.table.editor", "urn:table", "1");
 
+  @Test
+  void nativeCaptureRefusesPreciseTextThatWouldCollapseToTheMaterializedBaseline() {
+    var document = mapper.createObjectNode().put("kind", "praxis.table.editor").put("precision", 0.1);
+    var expected = new UiLayoutMetadataCapture.Binding(draft,
+        new UiLayoutMetadataCapture.Scope("tenant", "lab", root, root), "source:b0", descriptor,
+        hashes.sha256Exact(document));
+    var metadata = UiLayoutMetadataTestFixtures.nativeMetadata(document, "actor", "unit", "ctx");
+    assertThat(codec.seal(UUID.randomUUID(), expected, document, metadata.source(), metadata.reproduction(),
+        metadata.observation(), metadata.rawInputText())).isNotNull();
+    String different = metadata.rawInputText().replace("0.1", "0.10000000000000001");
+    assertThat(different).isNotEqualTo(metadata.rawInputText());
+    assertThatThrownBy(() -> codec.seal(UUID.randomUUID(), expected, document, metadata.source(),
+        metadata.reproduction(), metadata.observation(), different))
+        .isInstanceOfSatisfying(UiLayoutLifecycleException.class,
+            failure -> assertThat(failure.getCode()).isEqualTo(UiLayoutLifecycleException.Code.VALIDATION_FAILED));
+  }
+
+  @Test
+  void nativeSubnormalCaptureUsesCanonicalTokenAndRejectsLossDuringSealAndRead() throws Exception {
+    var document = mapper.createObjectNode().put("kind", "praxis.table.editor").put("precision", Double.MIN_VALUE);
+    var expected = new UiLayoutMetadataCapture.Binding(draft,
+        new UiLayoutMetadataCapture.Scope("tenant", "lab", root, root), "source:b0", descriptor,
+        hashes.sha256Exact(document));
+    var metadata = UiLayoutMetadataTestFixtures.nativeMetadata(document, "actor", "unit", "ctx");
+    String prefix = "{\"kind\":\"praxis.table.editor\",\"precision\":";
+    String faithful = prefix + "5e-324}";
+    var stored = codec.seal(UUID.randomUUID(), expected, document, metadata.source(), metadata.reproduction(),
+        metadata.observation(), faithful);
+    assertThat(codec.verifyAndRead(invocation(), expected, stored, (current, capture) -> {})).isEqualTo(stored);
+    for (String token : new String[] {"4.9e-324", "1e-400"}) {
+      String raw = prefix + token + "}";
+      assertFailure(() -> codec.seal(UUID.randomUUID(), expected, document, metadata.source(),
+          metadata.reproduction(), metadata.observation(), raw), UiLayoutLifecycleException.Code.VALIDATION_FAILED);
+      String digest = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+          .digest(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+      // A coherent raw digest alone cannot authorize a legacy capture with lossy numeric input.
+      var legacy = copy(stored, document, raw, digest);
+      assertFailure(() -> codec.verifyAndRead(invocation(), expected, legacy, (current, capture) -> {}),
+          UiLayoutLifecycleException.Code.INVALID_STATE);
+    }
+  }
+
   private JsonNode baseline() { return mapper.createObjectNode().put("kind", "praxis.table.editor").put("version", 1); }
   private UiLayoutMetadataCapture.Binding binding() { return binding(draft, "tenant", "lab", root, root, "source:b0", descriptor); }
   private UiLayoutMetadataCapture.Binding binding(UUID draftRef, String tenant, String environment,

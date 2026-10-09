@@ -51,6 +51,17 @@ public class CanonicalJsonHashService {
         if (preserveNulls && (node.isPojo() || node.isBinary() || node.isMissingNode())) {
             throw new IllegalArgumentException("Exact canonical JSON requires JSON values.");
         }
+        // Exact arbitrary-precision input must retain its decimal value under the
+        // existing browser-compatible token. Materialized float/double nodes already
+        // carry binary64/binary32 semantics; legacy hashing keeps its old behavior.
+        if (preserveNulls && node.isNumber()
+                && !(node instanceof com.fasterxml.jackson.databind.node.DoubleNode)
+                && !(node instanceof com.fasterxml.jackson.databind.node.FloatNode)) {
+            String token = writeCanonicalNumber(node.doubleValue());
+            if (new BigDecimal(token).compareTo(node.decimalValue()) != 0) {
+                throw new IllegalArgumentException("Exact canonical JSON numeric identity would be lost.");
+            }
+        }
         if (node.isObject()) {
             ObjectNode result = objectMapper.createObjectNode();
             var names = new ArrayList<String>();

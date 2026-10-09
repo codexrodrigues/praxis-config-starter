@@ -59,6 +59,22 @@ class UiLayoutDraftWorkspaceCodecTest {
         .extracting(error -> ((UiLayoutLifecycleException) error).getCode())
         .isEqualTo(UiLayoutLifecycleException.Code.INVALID_STATE);
   }
+  @Test
+  void historicalWorkspaceCannotRoundPreciseTextBackIntoAnEarlierAcceptedHash() throws Exception {
+    var document = mapper.readTree("{\"kind\":\"praxis.dynamic-form.editor\",\"version\":1,\"precision\":0.1}");
+    var seed = new UiLayoutDraftWorkspaceSeed(List.of(new UiLayoutDraftWorkspaceSeed.TargetSeed(root,
+        new UiLayoutAuthoringDocumentDescriptor("praxis.dynamic-form.editor", "urn:form", "1"),
+        new UiLayoutPatchDocumentDescriptor("urn:form-patch", "patch/v1"), "host:form:b0", document,
+        UiLayoutMetadataTestFixtures.metadata())));
+    var accepted = codec.fromSeed(new UiLayoutLifecycleInvocation("author", "tenant", "unit", "lab", "ctx", registration), seed);
+    String encoded = codec.encode(accepted);
+    assertThat(codec.decodeHistorical(encoded).targets().getFirst().baseline().document().path("precision").decimalValue())
+        .isEqualByComparingTo("0.1");
+    String altered = encoded.replace("0.1", "0.10000000000000001");
+    assertThat(altered).isNotEqualTo(encoded);
+    assertThatThrownBy(() -> codec.decodeHistorical(altered)).isInstanceOf(UiLayoutLifecycleException.class);
+  }
+
   private UiLayoutDraftWorkspaceDocument formWorkspace() throws Exception {
     var nativeDocument = mapper.readTree("{\"kind\":\"praxis.dynamic-form.editor\",\"version\":1,\"config\":{\"fieldMetadata\":[{\"name\":\"email\",\"placeholder\":\"Email B0\"}]},\"bindings\":{\"emptyState\":null}}");
     var seed = new UiLayoutDraftWorkspaceSeed(List.of(new UiLayoutDraftWorkspaceSeed.TargetSeed(root,
