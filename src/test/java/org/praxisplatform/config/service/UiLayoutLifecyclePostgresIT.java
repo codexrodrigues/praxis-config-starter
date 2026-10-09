@@ -64,10 +64,10 @@ class UiLayoutLifecyclePostgresIT {
   }
 
   @Test
-  void v63LifecycleTablesArePresentInTheDedicatedSchema() throws Exception {
-    assertThat(regclass("ui_layout_release")).isEqualTo(schema + ".ui_layout_release");
-    assertThat(regclass("ui_layout_release_approval")).isEqualTo(schema + ".ui_layout_release_approval");
-    assertThat(regclass("ui_layout_release_event")).isEqualTo(schema + ".ui_layout_release_event");
+  void v64LifecycleTablesArePresentInTheDedicatedSchema() throws Exception {
+    assertDedicatedTable("ui_layout_release");
+    assertDedicatedTable("ui_layout_release_approval");
+    assertDedicatedTable("ui_layout_release_event");
   }
 
   @Test
@@ -86,13 +86,22 @@ class UiLayoutLifecyclePostgresIT {
     second.get(5, TimeUnit.SECONDS);
   }
 
-  private static String regclass(String table) throws Exception {
+  private static void assertDedicatedTable(String table) throws Exception {
+    // regclass display omits a visible namespace; prove catalog identity instead.
     try (Connection connection = connection();
-        PreparedStatement statement = connection.prepareStatement("select to_regclass(?)")) {
+        PreparedStatement statement = connection.prepareStatement("""
+            select n.nspname, c.relname, c.relkind
+            from pg_catalog.pg_class c
+            join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+            where c.oid = pg_catalog.to_regclass(?)
+            """)) {
       statement.setString(1, schema + "." + table);
       try (ResultSet result = statement.executeQuery()) {
-        result.next();
-        return result.getString(1);
+        assertThat(result.next()).as("Dedicated table %s.%s exists", schema, table).isTrue();
+        assertThat(result.getString(1)).isEqualTo(schema);
+        assertThat(result.getString(2)).isEqualTo(table);
+        assertThat(result.getString(3)).isEqualTo("r");
+        assertThat(result.next()).as("Relation OID resolves exactly one catalog identity").isFalse();
       }
     }
   }
