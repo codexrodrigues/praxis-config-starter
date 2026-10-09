@@ -244,3 +244,15 @@ A rc.160 passou 3.417 testes, mas o Central rejeitou seu bundle após upload.
 O ID `af251a99-4c00-427c-b7c1-0752c13cbec1` e a tag são preservados. Como o ZIP
 original não foi retido, não se afirma o nome do arquivo auxiliar causador.
 Este novo gate permanece candidato até revisão independente e publicação real.
+
+### Limite total da operação HTTP
+
+O publicador exige o guard POSIX no main thread do seu próprio processo Python,
+além do socket timeout. O timer limita toda a operação open/read a60s ou ao saldo
+menor, e rechecagem após retorno impede aceitar uma resposta tardia. O handler é
+restaurado ao finalizar ou falhar; timer preexistente e execução fora do main
+thread são recusados, sem substituir controle alheio. O workflow oficial Ubuntu
+é o ambiente de publicação; testes offline de bloqueio usam somente o próprio
+processo, sem rede ou sinais para bancos. Mantêm-se45min de job e180s de reserva,
+GAV Config, upload único, bytes validados e custódia do deployment. Fixtures não
+comprovam assinatura real, publicação ou adoção do host.

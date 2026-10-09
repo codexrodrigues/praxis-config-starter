@@ -4,6 +4,8 @@ import io
 import json
 import pathlib
 import stat
+import signal
+import time
 import tempfile
 import unittest
 import uuid
@@ -247,6 +249,44 @@ class PublisherTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.publish(wrong)
         self.assertEqual("STATUS_UNKNOWN_RECONCILE_EXISTING_ID", json.loads(self.record.read_text())["state"])
+
+
+class OperationDeadlineTests(unittest.TestCase):
+    def test_actual_blocking_operation_times_out_and_restores_handler(self):
+        handler = signal.getsignal(signal.SIGALRM)
+        timer = signal.getitimer(signal.ITIMER_REAL)
+        self.assertEqual((0.0, 0.0), timer)
+        with self.assertRaises(TimeoutError):
+            publisher.bounded_call(time.monotonic() + 0.02, lambda: time.sleep(0.2))
+        self.assertEqual(handler, signal.getsignal(signal.SIGALRM))
+        self.assertEqual(timer, signal.getitimer(signal.ITIMER_REAL))
+
+    def test_return_after_deadline_rejected_even_if_operation_returns(self):
+        handler = signal.getsignal(signal.SIGALRM)
+        with mock.patch.object(publisher.time, "monotonic", side_effect=[0, 2]), self.assertRaises(TimeoutError):
+            publisher.bounded_call(1, lambda: b"late")
+        self.assertEqual(handler, signal.getsignal(signal.SIGALRM))
+        self.assertEqual((0.0, 0.0), signal.getitimer(signal.ITIMER_REAL))
+
+    def test_existing_timer_is_not_replaced(self):
+        handler = signal.getsignal(signal.SIGALRM)
+        signal.setitimer(signal.ITIMER_REAL, 5)
+        try:
+            with self.assertRaises(RuntimeError):
+                publisher.bounded_call(time.monotonic() + 10, lambda: b"not called")
+            self.assertGreater(signal.getitimer(signal.ITIMER_REAL)[0], 0)
+            self.assertEqual(handler, signal.getsignal(signal.SIGALRM))
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+
+    def test_exception_restores_process_signal_state(self):
+        handler = signal.getsignal(signal.SIGALRM)
+        def fail():
+            raise ValueError("fixture")
+        with self.assertRaises(ValueError):
+            publisher.bounded_call(time.monotonic() + 10, fail)
+        self.assertEqual(handler, signal.getsignal(signal.SIGALRM))
+        self.assertEqual((0.0, 0.0), signal.getitimer(signal.ITIMER_REAL))
 
 
 if __name__ == "__main__":
