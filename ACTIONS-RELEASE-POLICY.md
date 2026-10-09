@@ -10,3 +10,8 @@ Antes de push, tag ou dispatch, confira os gatilhos reais de `.github/workflows/
 `release.yml` é iniciado por dispatch em main com `create_tag=true`. Persiste POM/tag atomicamente e a tag `v*` publica após conferir ancestralidade e versão. Uma única sessão Maven executa `clean verify` com `release,ci-smoke-unit` (unit/smoke, sem integration/external/e2e) e assina. O job constrói e valida o ZIP versionado, preserva o artifact antes de um único upload pela API oficial e registra o deployment ID para reconciliação. Não há goal Maven de upload na etapa offline. Não há build automático de main ou PR.
 
 Os gates manuais de migração e authoring continuam disponíveis quando necessários ao contrato do corte. Prefira os equivalentes locais; gates pagos exigem a aprovação já definida no environment e não devem ser repetidos por falhas de exportação de evidência. O monitor operacional semanal permanece separado. Consulte RELEASING.md.
+
+O limite completo de open/read é guardado pelo timer POSIX do próprio Python e
+checado após o retorno; socket timeout isolado não garante esse teto. Preservar
+45min de job/180s de custódia, sem ampliar janelas ou repetir upload. Consultar os
+testes focais de tools/release e os testes Java de convenção ao alterar a rota.

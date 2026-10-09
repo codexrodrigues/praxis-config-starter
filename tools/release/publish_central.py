@@ -6,7 +6,9 @@ import json
 import math
 import os
 import pathlib
+import signal
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -15,6 +17,34 @@ import uuid
 
 BASE = "https://central.sonatype.com/api/v1/publisher/"
 STATES = {"PENDING", "VALIDATING", "VALIDATED", "PUBLISHING", "PUBLISHED", "FAILED"}
+
+
+def bounded_call(deadline, operation):
+    """Guard the entire open/read call in the official POSIX main thread."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Shared release deadline exhausted")
+    if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "setitimer"):
+        raise RuntimeError("Publication requires a POSIX main-thread deadline guard")
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
+    if previous_timer != (0.0, 0.0):
+        raise RuntimeError("An existing process timer cannot be replaced")
+    previous_handler = signal.getsignal(signal.SIGALRM)
+
+    def expire(signum, frame):
+        raise TimeoutError("Release HTTP operation budget exhausted")
+
+    try:
+        signal.signal(signal.SIGALRM, expire)
+        signal.setitimer(signal.ITIMER_REAL, min(60, remaining))
+        result = operation()
+        if time.monotonic() >= deadline:
+            raise TimeoutError("Shared release deadline crossed during HTTP operation")
+        return result
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
 
 
 def remaining_budget(started_at, now):
@@ -128,8 +158,10 @@ def main():
         available = deadline - time.monotonic()
         if available <= 0:
             raise TimeoutError("Release publication budget exhausted")
-        with opener.open(request, timeout=min(60, available)) as response:
-            return response.read(1_000_000)
+        def read():
+            with opener.open(request, timeout=min(60, available)) as response:
+                return response.read(1_000_000)
+        return bounded_call(deadline, read)
 
     try:
         publish(data, checked, args.record, token, transport, timeout=max(0, deadline - time.monotonic()))
