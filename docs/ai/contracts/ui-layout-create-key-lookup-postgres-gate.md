@@ -1,5 +1,11 @@
 # LK14 — visibility of a draft creation association
 
+## Evidência vigente — 09/10/2026
+
+A prova oficial PostgreSQL [run 37945298988](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/37945298988) passou no commit `a5ae827bf74c285464161c2a1e3abffa3f228aae`, com PostgreSQL 16.15: cinco classes/XML e 23 testes, zero falhas/erros/skips. São dois testes de catálogo/template, dois de lifecycle, 17 de captura metadata e dois de lookup de criação. O workflow atestou fonte/workflow/run, aplicou 66 migrações até V68 em schema exclusivo e comprovou igualdade dos campos de catálogo/histórico capturados antes e depois dos readers. As provas foram revisadas independentemente. A primeira execução 37943855875 permanece falha histórica: uma asserção dependia da apresentação textual de regclass; o teste corrigido verifica OID, namespace, nome e tipo da tabela diretamente.
+
+Este resultado não certifica full verify do Config, browser, HTTP do Quickstart, publicação/Central ou least privilege no Neon. A janela usa owner no container descartável; a remoção do mesmo container e da rede está comprovada; o log não retém o shutdown nativo final do postmaster. Os checkpoints anteriores sobre propostas não executadas são históricos e não substituem esta evidência.
+
 `UiLayoutDraftCreationLookupPostgresIT` has two opt-in cases: an independent JPA/service lookup must not observe an uncommitted insert, must recover its identity after commit, and must remain NOT_FOUND after rollback. This proves association visibility only, not the complete capture/producer transaction or production authentication.
 
 Requires an existing exclusive `b1a_it_*` schema, migrated through V68 with V65/V68 success and the creation-key unique index present, UTF8, and explicit window admission. Uses the existing `PRAXIS_UI_LAYOUT_PG_JDBC_URL`, `PRAXIS_UI_LAYOUT_PG_USER`, `PRAXIS_UI_LAYOUT_PG_PASSWORD`, `PRAXIS_UI_LAYOUT_PG_SCHEMA` variables. Do not log credentials or create a schema/container/DB.

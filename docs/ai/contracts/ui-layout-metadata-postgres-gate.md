@@ -1,5 +1,11 @@
 # Gate focal PostgreSQL de metadata/assembly
 
+## Evidência vigente — 09/10/2026
+
+A prova oficial PostgreSQL [run 37945298988](https://github.com/codexrodrigues/praxis-config-starter/actions/runs/37945298988) passou no commit `a5ae827bf74c285464161c2a1e3abffa3f228aae`, com PostgreSQL 16.15: cinco classes/XML e 23 testes, zero falhas/erros/skips. São dois testes de catálogo/template, dois de lifecycle, 17 de captura metadata e dois de lookup de criação. O workflow atestou fonte/workflow/run, aplicou 66 migrações até V68 em schema exclusivo e comprovou igualdade dos campos de catálogo/histórico capturados antes e depois dos readers. As provas foram revisadas independentemente. A primeira execução 37943855875 permanece falha histórica: uma asserção dependia da apresentação textual de regclass; o teste corrigido verifica OID, namespace, nome e tipo da tabela diretamente.
+
+Este resultado não certifica full verify do Config, browser, HTTP do Quickstart, publicação/Central ou least privilege no Neon. A janela usa owner no container descartável; a remoção do mesmo container e da rede está comprovada; o log não retém o shutdown nativo final do postmaster. Os checkpoints anteriores sobre propostas não executadas são históricos e não substituem esta evidência.
+
 `UiLayoutMetadataCapturePostgresIT` usa o opt-in e as variáveis já existentes de `UiLayoutLifecyclePostgresIT`. A classe exige um schema `b1a_it_*` **existente, exclusivo para testes e previamente migrado até V68**. Ela não executa Flyway, não cria banco/schema e não faz clean. As fixtures usam UUIDs novos e transações locais com rollback em AfterEach; lock timeout é 2s e statement timeout 5s. Preflight confere schema, UTF8 e sucesso de V68 antes de inserir.
 
 Configuração: `PRAXIS_UI_LAYOUT_PG_JDBC_URL`, `PRAXIS_UI_LAYOUT_PG_USER`, `PRAXIS_UI_LAYOUT_PG_PASSWORD`, `PRAXIS_UI_LAYOUT_PG_SCHEMA`. Não registrar valores ou credenciais em relatórios. Configurar essas variáveis não substitui a autorização da janela/alocação exclusiva. A preparação via lifecycle aplica migrations automaticamente; em uma janela somente de leitura/validação, não combiná-la por reflexo com este gate. O workflow oficial abaixo separa explicitamente preparação e leitura.
