@@ -169,12 +169,16 @@ mvn -q \
 This writes the reviewable Java report to
 `target/ui-composition-golden/java-report.json`.
 
-The Java execution receipt includes `AiRegistryTemplateService`, even though the golden
-runner mocks its repository boundary. Changes to that service require regenerating
+The Java execution receipt pins eleven source/class closures, including
+`CanonicalJsonHashService` and `AiRegistryTemplateService` (whose repository boundary
+is mocked by the golden runner). Changes to any source in that closure require regenerating
 `compilerReceipts.java` from the report's `compilerIdentity.sourceReceipt`. Review the
 source blob, class hashes and closure hash changes; preserve the corpus cases and their
 expected projections. Rerun the gate above, including the deliberate-divergence tests,
-before publication. Updating only the template unit tests does not validate this derived receipt.
+before publication. Updating only the affected service unit tests does not validate this derived receipt.
+The `ci-smoke-unit` release profile also requires every JUnit `*Test.java` class to
+carry its classification tag; a successful explicit `-Dtest` run does not satisfy
+`CiSmokeUnitConventionTest` or substitute the official release gate.
 
 
 After the Angular implementation is committed and its worktree is clean, generate the official

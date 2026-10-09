@@ -76,9 +76,9 @@
         {
           "id": "canonical-json-hash-service",
           "sourcePath": "src/main/java/org/praxisplatform/config/service/CanonicalJsonHashService.java",
-          "sourceGitBlob": "f3f57675f3b67613d4150cbcebff48dcdd39b99a",
+          "sourceGitBlob": "6fc2bc4a67939493719ec6c29b071cbc38fa11f0",
           "artifacts": [
-            { "path": "target/classes/org/praxisplatform/config/service/CanonicalJsonHashService.class", "sha256": "67f0b37564c0a1a207eb961f7817977c422a0fa6b6fcb4125eb37e42d44dc5da" }
+            { "path": "target/classes/org/praxisplatform/config/service/CanonicalJsonHashService.class", "sha256": "a3b6bd30a6dacdc427b884e503d06be51d4aa553f01be202f385bde157392c02" }
           ]
         },
         {
@@ -182,7 +182,7 @@
         "org.praxisplatform.config.dto.AiRegistryTemplateRevision -> org.praxisplatform.config.dto.AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder",
         "org.praxisplatform.config.dto.AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder -> org.praxisplatform.config.dto.AiRegistryTemplateRevision"
       ],
-      "closureSha256": "4c6a06ab845ce921cd4acabb1d82b8eb790c4e14ebb73158f49ec7dfcdad563b"
+      "closureSha256": "14ddcb2a40d892d58b2485724ee9bcc5a41471aec4676a49106433789387c79f"
     }
   },
   "targetProfiles": {

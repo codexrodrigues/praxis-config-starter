@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.swagger.v3.core.converter.AnnotatedType;
 import io.swagger.v3.core.converter.ModelConverters;
 import io.swagger.v3.oas.annotations.media.Schema;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.UiLayoutRevisionCommandRequest;
 import org.praxisplatform.config.dto.UiLayoutTarget;
@@ -12,6 +13,7 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
+@Tag("unit")
 class ConfigOpenApiAutoConfigurationTest {
     private final ApplicationContextRunner context = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(ConfigOpenApiAutoConfiguration.class));
