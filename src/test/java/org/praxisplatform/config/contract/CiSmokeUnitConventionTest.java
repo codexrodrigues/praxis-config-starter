@@ -46,8 +46,25 @@ class CiSmokeUnitConventionTest {
         assertThat(workflow).contains("workflow_dispatch:", "tags:", "- v*");
         assertThat(workflow).contains("mvn -B -P release,ci-smoke-unit");
         assertThat(workflow).doesNotContain("-DskipTests", "-Dmaven.test.skip=true");
-        assertThat(workflow).contains("clean verify org.sonatype.central:central-publishing-maven-plugin:publish");
+        assertThat(workflow).contains("mvn -B -P release,ci-smoke-unit -Dgpg.skip=false");
+        assertThat(workflow).doesNotContain("central-publishing-maven-plugin:publish");
         assertThat(workflow.split("clean verify", -1)).hasSize(2);
+        String build = "clean verify";
+        String construct = "python3 tools/release/central_bundle.py build";
+        String validate = "python3 tools/release/central_bundle.py validate";
+        String preserve = "name: Preserve validated bundle before upload";
+        String upload = "run: python3 tools/release/publish_central.py";
+        assertThat(workflow).contains(construct, validate, preserve, upload);
+        assertThat(workflow.indexOf(build)).isLessThan(workflow.indexOf(construct));
+        assertThat(workflow.indexOf(construct)).isLessThan(workflow.indexOf(validate));
+        assertThat(workflow.indexOf(validate)).isLessThan(workflow.indexOf(preserve));
+        assertThat(workflow.indexOf(preserve)).isLessThan(workflow.indexOf(upload));
+        assertThat(workflow.split(upload, -1)).hasSize(2);
+        assertThat(workflow.split("CENTRAL_TOKEN_USER:", -1)).hasSize(2);
+        assertThat(workflow.split("CENTRAL_TOKEN_PASS:", -1)).hasSize(2);
+        assertThat(workflow).doesNotContain("server-username: CENTRAL_TOKEN_USER", "server-password: CENTRAL_TOKEN_PASS");
+        assertThat(workflow).contains("PRAXIS_RELEASE_STARTED_AT=$(date +%s)", "timeout-minutes: 45");
+        assertThat(workflow).contains("name: Preserve publication custody on success or failure", "if: always()", "central-publication-custody-${{ github.run_id }}-${{ github.run_attempt }}");
     }
 
     @Test
