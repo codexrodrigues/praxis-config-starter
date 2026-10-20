@@ -66,6 +66,7 @@ Regras Locais Obrigatorias
 - Para authoring/SSE, manter cobertura de `start`, `probe`, stream, evento terminal, replay e cancelamento quando o escopo tocar essa superficie.
 - Para authoring executavel, manifests e validators devem ser tratados como contrato publico, nao como hints documentais.
 - Se a tarefa revelar drift entre docs, workflow e comportamento real, atualize `README.md`, `RELEASING.md` ou `docs/ai/**` no mesmo ciclo.
+- Mantenha o topo do `README.md` focado em proposta de valor, escopo canônico e fronteiras da plataforma; notas granulares de SPIs internos ou status de pacotes incrementais devem ficar em seções dedicadas no final do `README.md` ou em `docs/**`.
 
 Release e Gate de Authoring
 - Antes de criar tag/publicar no Maven Central, o gate recomendado e `Agentic Authoring HTTP Smoke`.

@@ -8,25 +8,6 @@
 
 `praxis-config-starter` is the canonical configuration boundary for Praxis Platform Spring Boot hosts.
 
-The [UI layout workspace foundation](docs/ui-layout-workspace-foundation.md)
-documents the native baseline/working codec and lifecycle integration. The
-official auto-configuration requires host-owned authority and dependencies;
-governed B0/C0/B1 rebase remains pending.
-
-The [lifecycle validation context](docs/ai/contracts/ui-layout-validation-attempt.md)
-propagates one server-owned monotonic budget through validation, nested evidence
-reads and actual beforeCommit. Host budget policy is mandatory, with no operational
-default. Enforcement is cooperative; executor cancellation and effective database
-transaction timeouts remain pending.
-
-The [historical evidence Java service](docs/ui-layout-historical-evidence.md)
-recovers pinned B0/C0 from an exact frozen release with separate operation and
-content admission. It has no historical HTTP endpoint and does not perform rebase.
-
-The [evolution readiness Java service](docs/ui-layout-evolution-readiness.md)
-compares historical/current composition and contract descriptors, requiring separate current
-evidence access. It reports missing intent provenance and fencing; application remains disabled.
-
 It owns persistence and runtime semantics for:
 
 - `ui_user_config`: tenant, user, environment, version, ETag, executable JSON configuration state,
@@ -633,9 +614,26 @@ releitura atestada e os gates canônicos do ciclo de vida.
 
 Apache License 2.0. See [LICENSE](LICENSE).
 
-## Política de CI e publicação
+## UI Layout Workspace & Evolution Foundation
 
-Validação local durante desenvolvimento; Actions apenas no fechamento necessário de versões. Consulte [ACTIONS-RELEASE-POLICY.md](ACTIONS-RELEASE-POLICY.md) para gatilhos, gates e recuperação.
+The [UI layout workspace foundation](docs/ui-layout-workspace-foundation.md)
+documents the native baseline/working codec and lifecycle integration. The
+official auto-configuration requires host-owned authority and dependencies;
+governed B0/C0/B1 rebase remains pending.
+
+The [lifecycle validation context](docs/ai/contracts/ui-layout-validation-attempt.md)
+propagates one server-owned monotonic budget through validation, nested evidence
+reads and actual beforeCommit. Host budget policy is mandatory, with no operational
+default. Enforcement is cooperative; executor cancellation and effective database
+transaction timeouts remain pending.
+
+The [historical evidence Java service](docs/ui-layout-historical-evidence.md)
+recovers pinned B0/C0 from an exact frozen release with separate operation and
+content admission. It has no historical HTTP endpoint and does not perform rebase.
+
+The [evolution readiness Java service](docs/ui-layout-evolution-readiness.md)
+compares historical/current composition and contract descriptors, requiring separate current
+evidence access. It reports missing intent provenance and fencing; application remains disabled.
 
 P3.2h.5b strengthens Table native revision admission with authored presence and exact
 B0/patch/C0 document reproduction. See [workspace boundary](docs/ui-layout-authoring-workspace.md).
@@ -657,3 +655,7 @@ The beta Java SPI requires host admission, Config JDBC and full DocumentAssembly
 SchemaProjection; incomplete historical operation captures are denied, never reconstructed.
 See [metadata writer contract](docs/ai/contracts/ui-layout-baseline-metadata-writer.md).
 Operational PostgreSQL/producer/Table-delivery proof remains pending.
+
+## Política de CI e publicação
+
+Validação local durante desenvolvimento; Actions apenas no fechamento necessário de versões. Consulte [ACTIONS-RELEASE-POLICY.md](ACTIONS-RELEASE-POLICY.md) para gatilhos, gates e recuperação.
