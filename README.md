@@ -25,10 +25,6 @@ It also does not render UI. Runtime rendering belongs to
 The public Praxis UI site, examples, and documentation are available at
 [praxisui.dev](https://praxisui.dev/).
 
-[![Praxis CRUD Studio — Governed Zero-Deploy Persistence Demo](https://raw.githubusercontent.com/codexrodrigues/praxis-metadata-starter/main/docs/assets/crud-studio-zero-deploy-demo.gif)](https://raw.githubusercontent.com/codexrodrigues/praxis-metadata-starter/main/docs/assets/crud-studio-zero-deploy-demo.mp4)
-
-- **[Watch Full HD Video (1080p MP4) — Zero-Deploy CRUD Studio Authoring & Persistence](https://raw.githubusercontent.com/codexrodrigues/praxis-metadata-starter/main/docs/assets/crud-studio-zero-deploy-demo.mp4)** · **[Dynamic Page Studio (MP4)](https://praxisui.dev/media/dynamic-page-studio-real-use.mp4)**
-
 ## Source Of Truth Boundaries
 
 | Concern | Canonical owner |
