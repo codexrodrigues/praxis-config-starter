@@ -1553,8 +1553,9 @@ class AgenticAuthoringTurnStreamServiceTest {
         UUID threadId = UUID.randomUUID();
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         AgenticAuthoringTurnStreamRequest request = request();
-        CountDownLatch intentStarted = new CountDownLatch(1);
-        CountDownLatch releaseIntent = new CountDownLatch(1);
+        CountDownLatch processingStarted = new CountDownLatch(1);
+        CountDownLatch releaseProcessing = new CountDownLatch(1);
+        AgenticAuthoringTurnEngine turnEngine = org.mockito.Mockito.mock(AgenticAuthoringTurnEngine.class);
         AtomicLong seq = new AtomicLong();
         AtomicReference<AiTurnEventEnvelope> lastEvent = new AtomicReference<>();
 
@@ -1580,38 +1581,44 @@ class AgenticAuthoringTurnStreamServiceTest {
                     return event;
                 });
         when(streamAccessTokenService.resolveAuthMode()).thenReturn("cookie");
-        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+        // This test owns stream delivery, not engine capability/registry warmup.
+        when(turnEngine.execute(any(), eq(principalContext), any(), eq("http://localhost")))
                 .thenAnswer(invocation -> {
-                    intentStarted.countDown();
-                    releaseIntent.await(5, TimeUnit.SECONDS);
-                    return validIntent();
+                    AgenticAuthoringTurnEventSink sink = invocation.getArgument(2, AgenticAuthoringTurnEventSink.class);
+                    sink.append("status", Map.of("phase", "intent.resolve"));
+                    processingStarted.countDown();
+                    releaseProcessing.await();
+                    return AgenticAuthoringTurnEngine.AgenticAuthoringTurnOutcome.noop(
+                            new AgenticAuthoringTurnEngine.AgenticAuthoringTurnState("component_authoring", null, null));
                 });
 
-        AgenticAuthoringTurnStreamService service = service();
+        AgenticAuthoringTurnStreamService service = service(turnEngine);
         ReflectionTestUtils.setField(service, "processingPollSeconds", 1L);
-        AgenticAuthoringTurnStreamService.StartResult startResult =
-                service.start(request, "http://localhost", principalContext);
-        org.assertj.core.api.Assertions.assertThat(intentStarted.await(2, TimeUnit.SECONDS)).isTrue();
-        UUID streamId = startResult.response().getStreamId();
-        when(turnEventService.replay(streamId, null, principalContext))
-                .thenReturn(new AiTurnEventService.ReplayResult(
-                        new AiTurnEventService.StreamOwnership(
-                                streamId,
-                                threadId,
-                                startResult.response().getTurnId(),
-                                "tenant",
-                                "user",
-                                "local",
-                                Instant.now().plusSeconds(60)),
-                        List.of(lastEvent.get()),
-                        0));
+        try {
+            AgenticAuthoringTurnStreamService.StartResult startResult =
+                    service.start(request, "http://localhost", principalContext);
+            org.assertj.core.api.Assertions.assertThat(processingStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            UUID streamId = startResult.response().getStreamId();
+            when(turnEventService.replay(streamId, null, principalContext))
+                    .thenReturn(new AiTurnEventService.ReplayResult(
+                            new AiTurnEventService.StreamOwnership(
+                                    streamId,
+                                    threadId,
+                                    startResult.response().getTurnId(),
+                                    "tenant",
+                                    "user",
+                                    "local",
+                                    Instant.now().plusSeconds(60)),
+                            List.of(lastEvent.get()),
+                            0));
 
-        service.connect(streamId, null, principalContext);
-        Thread.sleep(1300L);
-        releaseIntent.countDown();
-        service.shutdown();
-
-        verify(turnEventService, never()).replayFromSeq(eq(streamId), anyLong(), eq(principalContext));
+            service.connect(streamId, null, principalContext);
+            Thread.sleep(1300L);
+            verify(turnEventService, never()).replayFromSeq(eq(streamId), anyLong(), eq(principalContext));
+        } finally {
+            releaseProcessing.countDown();
+            service.shutdown();
+        }
     }
 
     @Test
