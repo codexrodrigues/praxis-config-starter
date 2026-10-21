@@ -92,6 +92,8 @@ class DomainRuleSnapshotHeadRepositoryConcurrencyTest {
     @Autowired DomainRuleSnapshotRepository snapshotRepository;
     @Autowired DomainRuleSnapshotEventRepository eventRepository;
     @Autowired PlatformTransactionManager transactionManager;
+    @Autowired javax.sql.DataSource dataSource;
+    @Autowired org.springframework.data.jpa.repository.JpaContext jpaContext;
 
     @BeforeEach
     void clearSnapshotControlPlane() {
@@ -300,7 +302,7 @@ class DomainRuleSnapshotHeadRepositoryConcurrencyTest {
                 mock(DomainRuleDefinitionApprovalRepository.class),
                 new DomainRuleDefinitionFingerprint(OBJECT_MAPPER),
                 OBJECT_MAPPER,
-                DomainRuleImplementationCatalog.denyAll());
+                DomainRuleImplementationCatalog.denyAll(),  org.praxisplatform.config.service.DomainRuleSnapshotActivationGate.unavailable(),  null,  new org.praxisplatform.config.service.JdbcDomainRuleSnapshotScopeLock(new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(dataSource)), new org.praxisplatform.config.service.DomainRuleEntityRefresh(jpaContext));
     }
 
     private static String quote(UUID etag) {

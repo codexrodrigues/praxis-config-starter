@@ -26,6 +26,8 @@ import org.praxisplatform.config.service.DomainRuleSnapshotActivationGate;
 import org.praxisplatform.config.service.DomainRuleExecutionObservationService;
 import org.praxisplatform.config.service.DomainRuleHostStatusService;
 import org.praxisplatform.config.service.DomainRuleRolloutService;
+import org.praxisplatform.config.service.DomainRuleSnapshotScopeLock;
+import org.praxisplatform.config.service.JdbcDomainRuleSnapshotScopeLock;
 import org.praxisplatform.config.service.DomainRuleRolloutPolicyService;
 import org.praxisplatform.config.service.DomainRuleSnapshotHeadReaderAdapter;
 import org.praxisplatform.config.service.DomainRuleDefinitionFingerprint;
@@ -74,6 +76,14 @@ public class DomainRuleSnapshotAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  DomainRuleSnapshotScopeLock domainRuleSnapshotScopeLock(
+      @org.springframework.beans.factory.annotation.Qualifier("configNamedParameterJdbcTemplate")
+      org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate jdbc) {
+    return new JdbcDomainRuleSnapshotScopeLock(jdbc);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   DomainRuleSnapshotService domainRuleSnapshotService(
       DomainRuleDefinitionRepository definitionRepository,
       DomainRuleDefinitionApprovalRepository definitionApprovalRepository,
@@ -85,7 +95,7 @@ public class DomainRuleSnapshotAutoConfiguration {
       DomainRuleDefinitionFingerprint definitionFingerprint,
       DomainRuleImplementationCatalog implementationCatalog,
       ObjectProvider<DomainRuleSnapshotActivationGate> activationGate,
-      ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGate) {
+      ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGate, DomainRuleSnapshotScopeLock scopeLock, org.praxisplatform.config.service.DomainRuleEntityRefresh entityRefresh) {
     return new DomainRuleSnapshotService(
         definitionRepository,
         snapshotRepository,
@@ -96,8 +106,8 @@ public class DomainRuleSnapshotAutoConfiguration {
         definitionFingerprint,
         objectMapper,
         implementationCatalog,
-        activationGate.getIfAvailable(DomainRuleSnapshotActivationGate::allowAll),
-        evidenceGate);
+        activationGate.getIfAvailable(DomainRuleSnapshotActivationGate::unavailable),
+        evidenceGate, scopeLock, entityRefresh);
   }
 
   @Bean
@@ -177,9 +187,9 @@ public class DomainRuleSnapshotAutoConfiguration {
       DomainRuleRolloutPolicyHeadRepository policyHeads,
       DomainRuleRolloutPolicyEventRepository policyEvents,
       DomainRuleSnapshotHeadRepository snapshotHeads,
-      DomainRuleSnapshotRolloutRepository rollouts) {
+      DomainRuleSnapshotRolloutRepository rollouts, DomainRuleSnapshotScopeLock scopeLock, org.praxisplatform.config.service.DomainRuleEntityRefresh entityRefresh) {
     return new DomainRuleRolloutPolicyService(
-        policies, policyHeads, policyEvents, snapshotHeads, rollouts, Clock.systemUTC());
+        policies, policyHeads, policyEvents, snapshotHeads, rollouts, Clock.systemUTC(), scopeLock, entityRefresh);
   }
 
   @Bean
@@ -200,9 +210,9 @@ public class DomainRuleSnapshotAutoConfiguration {
       DomainRuleSnapshotRolloutRepository rollouts, DomainRuleCandidateProbeRepository probes,
       DomainRuleSnapshotRolloutEventRepository events, DomainRuleSnapshotRepository snapshots,
       DomainRuleSnapshotHeadRepository heads, DomainRuleRolloutPolicyService policyService,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper, DomainRuleImplementationCatalog implementationCatalog, DomainRuleSnapshotScopeLock scopeLock, org.praxisplatform.config.service.DomainRuleEntityRefresh entityRefresh) {
     return new DomainRuleRolloutService(policies, rollouts, probes, events, snapshots, heads,
-        policyService, objectMapper, Clock.systemUTC());
+        policyService, objectMapper, Clock.systemUTC(), implementationCatalog, scopeLock, entityRefresh);
   }
 
   @Bean

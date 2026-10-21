@@ -21,7 +21,7 @@ public record DomainRuleSnapshotVersionResponse(
     String publishedAtUtc,
     @Schema(description = "Whether this immutable version is currently selected by the scoped mutable head.", requiredMode = Schema.RequiredMode.REQUIRED)
     boolean active,
-    @Schema(description = "Safe verification state: READY, REPUBLICATION_REQUIRED or INVALID.", allowableValues = {"READY", "REPUBLICATION_REQUIRED", "INVALID"}, requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "Safe verification state: READY after current runtime/catalog admission; RUNTIME_INCOMPATIBLE for intact evidence with a different engine/dialect/corpus tuple; REPUBLICATION_REQUIRED for intact pre-manifest evidence; INVALID for integrity or current admission failure.", allowableValues = {"READY", "RUNTIME_INCOMPATIBLE", "REPUBLICATION_REQUIRED", "INVALID"}, requiredMode = Schema.RequiredMode.REQUIRED)
     String governanceState,
-    @Schema(description = "Server-derived operation available for this version relative to the current head.", allowableValues = {"ACTIVE", "ACTIVATE", "ROLLBACK", "UNAVAILABLE"}, requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "Server-derived operation available relative to the current head. Every non-READY version is UNAVAILABLE. A READY version without a head offers CREATE_ROLLOUT for governed bootstrap, never direct activation.", allowableValues = {"ACTIVE", "ACTIVATE", "ROLLBACK", "CREATE_ROLLOUT", "UNAVAILABLE"}, requiredMode = Schema.RequiredMode.REQUIRED)
     String availableAction) {}

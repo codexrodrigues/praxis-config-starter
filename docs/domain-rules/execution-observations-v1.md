@@ -23,7 +23,9 @@ an unavailable control plane must not block evaluation or effects.
 - is idempotent by `observationId`; exact retries are counted as duplicates and conflicting reuse is
   rejected;
 - validates the immutable snapshot hash and proves that `activationRevision` selected that snapshot
-  in the same governed scope;
+  in the same governed scope; publication alone never establishes this evidence. New PUBLISHED
+  events have no activationRevision/headEtag; only actual selection events (including preserved
+  historical publish-and-select events) can witness an execution identity;
 - returns only `acceptedCount` and `duplicateCount`.
 
 Each observation contains only:

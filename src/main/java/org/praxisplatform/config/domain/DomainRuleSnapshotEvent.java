@@ -39,10 +39,10 @@ public class DomainRuleSnapshotEvent {
   @Column(name = "to_snapshot_id", nullable = false)
   private UUID toSnapshotId;
 
-  @Column(name = "activation_revision", nullable = false)
+  @Column(name = "activation_revision")
   private Long activationRevision;
 
-  @Column(name = "head_etag", nullable = false)
+  @Column(name = "head_etag")
   private UUID headEtag;
 
   @Column(nullable = false, length = 255)

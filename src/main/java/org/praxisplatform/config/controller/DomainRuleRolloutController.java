@@ -20,12 +20,15 @@ public class DomainRuleRolloutController {
   private final DomainRuleGovernancePrincipalResolver principals;
 
   @PostMapping
+  @io.swagger.v3.oas.annotations.Operation(summary = "Prepare a governed immutable candidate rollout",
+      description = "Uses strong If-Match for an existing head or If-None-Match:* for verified absence. Bootstrap requires an active maker-checker REQUIRED policy with positive quorum; publication and preload never select a head.")
   public ResponseEntity<DomainRuleRolloutResponse> create(@RequestBody DomainRuleRolloutCreateRequest body,
       @RequestHeader(value="If-Match", required=false) String ifMatch,
+      @RequestHeader(value="If-None-Match", required=false) String ifNoneMatch,
       @RequestHeader(value="X-Tenant-ID", required=false) String tenant,
       @RequestHeader(value="X-Env", required=false) String env, HttpServletRequest request) {
     var principal = principals.resolve(request, tenant, env, "RULE_SNAPSHOT_OPERATOR");
-    return ResponseEntity.status(201).body(service.create(body, principal, ifMatch));
+    return ResponseEntity.status(201).body(service.create(body, principal, ifMatch, ifNoneMatch));
   }
 
   @GetMapping

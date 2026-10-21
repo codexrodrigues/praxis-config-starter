@@ -95,28 +95,29 @@ public class DomainRuleSnapshotController {
   }
 
   @PostMapping
-  @Operation(summary = "Publish and activate an immutable RuleSet snapshot",
-      description = "Compiles approved governed definitions and atomically advances the scoped RuleSet head. Initial creation uses If-None-Match; later changes use the current strong If-Match validator.")
+  @Operation(summary = "Publish an immutable RuleSet snapshot without activating it",
+      description = "Compiles approved definitions and persists immutable content plus a publication event. Never changes a head. Requires If-None-Match:* when the head is absent or its strong If-Match when present. Activation is explicit and governed separately.")
   @ApiResponses({
-    @ApiResponse(responseCode = "201", description = "Snapshot persisted and selected as the active head"),
+    @ApiResponse(responseCode = "201", description = "Immutable snapshot published; the active head is unchanged"),
     @ApiResponse(responseCode = "400", description = "Invalid RuleSet, provenance or approval evidence"),
+    @ApiResponse(responseCode = "409", description = "Immutable RuleSet version or publication revision already exists"),
     @ApiResponse(responseCode = "412", description = "The supplied head precondition is stale"),
     @ApiResponse(responseCode = "428", description = "The required creation or mutation precondition is absent")
   })
-  public ResponseEntity<DomainRuleSnapshotActivationResponse> publish(
+  public ResponseEntity<DomainRuleSnapshotStoredResponse> publish(
       @RequestBody DomainRuleSnapshotPublicationRequest request,
       @Parameter(description = "Governed tenant scope; snapshot provenance and head identity never cross this boundary.", required = true)
       @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
       @Parameter(description = "Governed deployment environment within the tenant scope.", required = true)
       @RequestHeader(value = "X-Env", required = false) String environment,
-      @Parameter(description = "Strong current-head ETag required after the first publication.")
+      @Parameter(description = "Strong current-head ETag when a scoped head exists.")
       @RequestHeader(value = "If-Match", required = false) String ifMatch,
-      @Parameter(description = "Must be * when creating the first scoped RuleSet head.")
+      @Parameter(description = "Must be * while the scoped RuleSet head is absent.")
       @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch,
       HttpServletRequest servletRequest) {
     DomainRuleGovernancePrincipal principal = principalResolver.resolve(
         servletRequest, tenantId, environment, "RULE_SNAPSHOT_PUBLISHER");
-    DomainRuleSnapshotActivationResponse response =
+    DomainRuleSnapshotStoredResponse response =
         snapshotService.publish(
             request,
             principal.tenantId(),
@@ -125,7 +126,7 @@ public class DomainRuleSnapshotController {
             ifNoneMatch,
             principal.actorRef());
     return ResponseEntity.status(HttpStatus.CREATED)
-        .eTag(quoted(response.headEtag()))
+        .eTag(quoted(response.snapshotContentHash()))
         .cacheControl(CacheControl.noCache())
         .body(response);
   }
@@ -169,10 +170,9 @@ public class DomainRuleSnapshotController {
 
   @GetMapping("/head/status")
   @Operation(summary = "Inspect the operational state of a RuleSet head",
-      description = "Returns only safe head metadata and the current concurrency ETag. It never returns snapshot content that failed governed verification.")
+      description = "Returns safe head metadata and the concurrency head ETag. Readiness is re-evaluated against the current runtime/catalog on every request. Always returns 200 with no-store because a stable head ETag does not identify the readiness projection.")
   @ApiResponses({
     @ApiResponse(responseCode = "200", description = "Head metadata and recovery classification"),
-    @ApiResponse(responseCode = "304", description = "The caller already has this head state"),
     @ApiResponse(responseCode = "403", description = "Principal is absent or lacks RULE_SNAPSHOT_READER"),
     @ApiResponse(responseCode = "404", description = "No scoped RuleSet head exists")
   })
@@ -180,6 +180,7 @@ public class DomainRuleSnapshotController {
       @RequestParam String ruleSetKey,
       @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
       @RequestHeader(value = "X-Env", required = false) String environment,
+      @Parameter(description = "Ignored for this live readiness projection; the head validator remains available for mutation preconditions.")
       @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch,
       HttpServletRequest servletRequest) {
     DomainRuleGovernancePrincipal principal = principalResolver.resolve(
@@ -189,21 +190,15 @@ public class DomainRuleSnapshotController {
         .orElseThrow(() -> new DomainRuleSnapshotControlPlaneException(
             HttpStatus.NOT_FOUND, "RuleSet head was not found"));
     String headEtag = response.headEtag();
-    if (matchesWeak(ifNoneMatch, headEtag)) {
-      return ResponseEntity.status(HttpStatus.NOT_MODIFIED)
-          .eTag(quoted(headEtag))
-          .cacheControl(CacheControl.noCache())
-          .build();
-    }
     return ResponseEntity.ok()
         .eTag(quoted(headEtag))
-        .cacheControl(CacheControl.noCache())
+        .cacheControl(CacheControl.noStore())
         .body(response);
   }
 
   @GetMapping("/{snapshotKey}")
   @Operation(summary = "Read one immutable RuleSet snapshot",
-      description = "Returns previously published content without consulting or changing the active head. The canonical content hash is the immutable representation ETag.")
+      description = "Returns historically verified published content without consulting or changing the active head or compiling with the current runtime/catalog. Intact incompatible snapshots remain readable; pre-manifest or corrupt content is refused. Retrieval never grants execution or activation. The canonical content hash is the immutable representation ETag.")
   @ApiResponses({
     @ApiResponse(responseCode = "200", description = "Immutable snapshot content"),
     @ApiResponse(responseCode = "304", description = "The caller already has this immutable representation"),
@@ -295,20 +290,21 @@ public class DomainRuleSnapshotController {
   }
 
   @PostMapping("/{snapshotKey}/activate")
-  @Operation(summary = "Activate a newer published snapshot",
-      description = "Moves the mutable head forward to newer verified immutable content, rotates the head ETag and appends an activation event. Older content must use the rollback operation.")
+  @Operation(summary = "Activate a published snapshot or bootstrap its head",
+      description = "Selects verified immutable content and issues a new head ETag. Existing heads require strong If-Match; first activation requires If-None-Match:* and a ready rollout under a governed REQUIRED policy with positive quorum. Older content uses rollback.")
   @ApiResponses({
-    @ApiResponse(responseCode = "200", description = "Newer published snapshot selected and a new head identity issued"),
-    @ApiResponse(responseCode = "404", description = "The target snapshot or RuleSet head does not exist"),
-    @ApiResponse(responseCode = "409", description = "The target is active, older than the head or outside its validity interval"),
+    @ApiResponse(responseCode = "200", description = "Published snapshot selected and a new or rotated head identity issued"),
+    @ApiResponse(responseCode = "404", description = "The target snapshot does not exist in the governed scope"),
+    @ApiResponse(responseCode = "409", description = "Target or governed rollout/quorum does not permit selection"),
     @ApiResponse(responseCode = "412", description = "The supplied head ETag is stale"),
-    @ApiResponse(responseCode = "428", description = "If-Match was not supplied")
+    @ApiResponse(responseCode = "428", description = "Required head creation or mutation precondition was not supplied")
   })
   public ResponseEntity<DomainRuleSnapshotActivationResponse> activate(
       @PathVariable String snapshotKey,
       @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
       @RequestHeader(value = "X-Env", required = false) String environment,
       @RequestHeader(value = "If-Match", required = false) String ifMatch,
+      @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch,
       @RequestHeader(value = "X-Rule-Rollout-ID", required = false) UUID rolloutId,
       HttpServletRequest servletRequest) {
     DomainRuleGovernancePrincipal principal = principalResolver.resolve(
@@ -319,6 +315,7 @@ public class DomainRuleSnapshotController {
         principal.tenantId(),
         principal.environment(),
         ifMatch,
+        ifNoneMatch,
         rolloutId);
     return ResponseEntity.ok()
         .eTag(quoted(response.headEtag()))

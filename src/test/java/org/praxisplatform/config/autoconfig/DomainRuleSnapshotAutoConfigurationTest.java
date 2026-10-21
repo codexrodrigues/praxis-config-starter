@@ -39,6 +39,8 @@ class DomainRuleSnapshotAutoConfigurationTest {
   private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
       .withConfiguration(AutoConfigurations.of(DomainRuleSnapshotAutoConfiguration.class))
       .withBean(ObjectMapper.class, ObjectMapper::new)
+      .withBean(org.praxisplatform.config.service.DomainRuleSnapshotScopeLock.class,
+          () -> mock(org.praxisplatform.config.service.DomainRuleSnapshotScopeLock.class))
       // Production JPA supplies the owning persistence context used by lifecycle refresh.
       .withBean(org.springframework.data.jpa.repository.JpaContext.class,
           () -> mock(org.springframework.data.jpa.repository.JpaContext.class))

@@ -485,11 +485,12 @@ vector similarity score or decide user intent. Queries without lexical evidence 
 | `/api/praxis/config/ai-context/**` | Build AI context from component metadata, runtime state, templates, and schema hints. |
 | `/api/praxis/config/ai/patch` | Generate structured configuration patches from governed AI context. |
 | `/api/praxis/config/ai/authoring/**` | Validate, compile, preview, apply, stream, replay, and cancel agentic authoring turns. |
-| `/api/praxis/config/domain-rules/**` | Govern shared business rules and semantic decisions, including immutable RuleSet snapshots, conditional head publication, forward activation and rollback-by-selection. |
-| `GET /api/praxis/config/domain-rules/snapshots` | List a bounded safe version catalog for one scoped RuleSet, without exposing executable content. |
-| `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/activate` | Move the scoped head to a newer verified publication with strong `If-Match`; `REQUIRED` rollout policy also requires a ready `X-Rule-Rollout-ID`. |
+| `/api/praxis/config/domain-rules/**` | Govern shared business rules and semantic decisions, including immutable publication without head selection, conditional explicit activation/bootstrap and rollback-by-selection. |
+| `GET /api/praxis/config/domain-rules/snapshots` | List scoped versions with current admission state, including `RUNTIME_INCOMPATIBLE`; every non-`READY` version is `UNAVAILABLE`. |
+| `POST /api/praxis/config/domain-rules/snapshots` | Publish immutable approved content only; response ETag is its content hash. No head is created or changed. |
+| `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/activate` | Select newer content with strong `If-Match`; bootstrap uses `If-None-Match: *` with a ready rollout under a governed REQUIRED policy. |
 | `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/rollback` | Move the scoped head to an older verified publication with strong `If-Match`. |
-| `GET /api/praxis/config/domain-rules/snapshots/head/status` | Expose safe readiness and the concurrency ETag for a scoped RuleSet head, including governed recovery of preserved pre-manifest beta snapshots without returning unverified content. |
+| `GET /api/praxis/config/domain-rules/snapshots/head/status` | Re-evaluate current readiness with `200`/`no-store` and preserve the head ETag for CAS; expose recovery states without snapshot content. |
 | `POST /api/praxis/config/domain-rules/snapshots/execution-observations` | Ingest a bounded idempotent batch of redacted evidence from an authenticated runtime host. |
 | `GET /api/praxis/config/domain-rules/snapshots/{snapshotKey}/execution-summary` | Read safe outcome/host-count/time aggregates without facts, payloads or individual host identities. |
 | `POST /api/praxis/config/domain-rules/snapshots/host-status` | Replace the authenticated host's latest redacted heartbeat without accepting scope or host identity in the body. |

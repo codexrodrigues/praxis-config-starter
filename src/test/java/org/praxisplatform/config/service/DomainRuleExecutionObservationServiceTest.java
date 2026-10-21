@@ -78,6 +78,27 @@ class DomainRuleExecutionObservationServiceTest {
   }
 
   @Test
+  void publicationWithoutSelectionCannotAuthorizeExecutionButARealActivationCan() {
+    var publication = org.praxisplatform.config.domain.DomainRuleSnapshotEvent.builder()
+        .eventType("PUBLISHED").toSnapshotId(snapshot.getId()).activationRevision(null).headEtag(null).build();
+    var activation = org.praxisplatform.config.domain.DomainRuleSnapshotEvent.builder()
+        .eventType("ACTIVATED").toSnapshotId(snapshot.getId()).activationRevision(9L).headEtag(UUID.randomUUID()).build();
+    var events = new java.util.ArrayList<org.praxisplatform.config.domain.DomainRuleSnapshotEvent>();
+    events.add(publication);
+    when(eventRepository.existsByTenantIdAndEnvironmentAndToSnapshotIdAndActivationRevision(
+        "tenant-a", "prod", snapshot.getId(), 9L)).thenAnswer(call -> events.stream()
+            .anyMatch(event -> snapshot.getId().equals(event.getToSnapshotId())
+                && Long.valueOf(9L).equals(event.getActivationRevision()) && event.getHeadEtag() != null));
+    assertThatThrownBy(() -> service.ingest(batch(observation(UUID.randomUUID())), PRINCIPAL))
+        .isInstanceOf(ConfigurationIngestionException.class).hasMessageContaining("does not select");
+    events.add(activation);
+    when(observationRepository.insertIfAbsent(
+        any(), anyString(), anyString(), anyString(), any(), anyString(), anyString(), anyInt(),
+        anyLong(), anyString(), anyLong(), any(), anyString(), any())).thenReturn(1);
+    assertThat(service.ingest(batch(observation(UUID.randomUUID())), PRINCIPAL).acceptedCount()).isEqualTo(1);
+  }
+
+  @Test
   void treatsAnExactRetryAsDuplicateAndRejectsConflictingReuse() {
     UUID id = UUID.randomUUID();
     DomainRuleExecutionObservationRequest request = observation(id);
